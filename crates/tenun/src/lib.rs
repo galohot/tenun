@@ -7,6 +7,7 @@ mod export;
 mod fsbrowse;
 mod guard;
 pub mod sample;
+pub mod settings;
 
 use axum::Router;
 use std::net::{IpAddr, SocketAddr};
@@ -56,6 +57,8 @@ pub struct AppState {
     /// This server's own URL, for "Open in browser".
     pub url: Mutex<String>,
     pub secrets: Secrets,
+    /// Where this computer's settings are kept.
+    pub settings_path: PathBuf,
     pub cloud_base: String,
     pub schedule: Mutex<cloud::Schedule>,
 }
@@ -114,6 +117,7 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
         picker: opts.picker.clone(),
         url: Mutex::new(String::new()),
         secrets: Secrets::new(Secrets::default_path()),
+        settings_path: settings::Settings::default_path(),
         cloud_base: cloud::base_url(),
         schedule: Mutex::new(cloud::Schedule::default()),
     });

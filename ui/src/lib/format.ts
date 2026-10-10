@@ -73,6 +73,8 @@ const aggWords: Record<Agg, string> = {
   max: 'Highest',
   count: 'Count of',
   count_distinct: 'Unique',
+  stdev: 'Spread of',
+  variance: 'Variance of',
 };
 
 export const aggNames: Record<Agg, string> = {
@@ -82,6 +84,8 @@ export const aggNames: Record<Agg, string> = {
   max: 'Maximum',
   count: 'Count',
   count_distinct: 'Count unique',
+  stdev: 'Standard deviation',
+  variance: 'Variance',
 };
 
 const singular = (s: string) => s.replace(/ies$/i, 'y').replace(/(ss)$/i, '$1').replace(/s$/i, '');
@@ -127,4 +131,13 @@ export function tileTitle(t: Tile, tables: Named[]): string {
   const by = t.dims[0] && t.type !== 'kpi' ? ` by ${dimLabel(t.dims[0], tables)}` : '';
   const split = t.dims[1] && (t.type === 'bar' || t.type === 'line' || t.type === 'area') ? ` and ${dimLabel(t.dims[1], tables)}` : '';
   return m + by + split;
+}
+
+/** When data was loaded, for the "Updated" stamp: "10:32" today, "Oct 9, 10:32" on other days. */
+export function stampLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (d.toDateString() === new Date().toDateString()) return time;
+  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${time}`;
 }

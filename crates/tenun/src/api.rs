@@ -1,5 +1,6 @@
 //! JSON routes under `/api`, the event socket, and the embedded UI files.
 
+use crate::settings::Settings;
 use crate::{AppState, VERSION, cloud, export, fsbrowse, sample};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
@@ -68,6 +69,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/layout", put(put_layout))
         .route("/query", post(query))
         .route("/fs", get(fs))
+        .route("/settings", get(get_settings).put(put_settings))
         .route("/viewer", get(viewer))
         .route("/tile", post(tile))
         .route("/cloud", get(cloud_status))
@@ -108,6 +110,16 @@ async fn open_browser(State(s): S) -> R<Json<Value>> {
     let url = s.url.lock().unwrap().clone();
     webbrowser::open(&url)?;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// This computer's settings. Read from disk each time, so every window agrees.
+async fn get_settings(State(s): S) -> Json<Settings> {
+    Json(Settings::load(&s.settings_path))
+}
+
+async fn put_settings(State(s): S, Json(b): Json<Settings>) -> R<Json<Settings>> {
+    b.save(&s.settings_path)?;
+    Ok(Json(b))
 }
 
 async fn workspace(State(s): S) -> R<Json<Value>> {

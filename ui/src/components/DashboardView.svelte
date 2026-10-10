@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { api, type Cell, type Tile, type TileType } from '../lib/api';
   import { app, go } from '../lib/state.svelte';
-  import { cell, dimLabel } from '../lib/format';
+  import { cell, dimLabel, stampLabel } from '../lib/format';
   import { COLS, compact, defaultSize, newId, place, type DashFilter } from '../lib/tiles';
   import { key } from '../lib/chart';
   import Icon from './Icon.svelte';
@@ -49,11 +49,122 @@
     return () => clearInterval(h);
   });
 
-  function update(mut: (tiles: Tile[]) => Tile[]) {
+  // Undo and redo. One step is the tiles and the title as they were before a change. The history
+  // lives as long as this view, so it starts fresh when you open another dashboard.
+  interface Step {
+    title: string;
+    tiles: Tile[];
+  }
+  const MAX_STEPS = 50;
+  /** Edits with the same key close together (typing a title) make one step. */
+  const BURST_MS = 1200;
+  const past: Step[] = [];
+  const future: Step[] = [];
+  let burst = { key: '', at: 0 };
+  let historyTick = $state(0);
+  const canUndo = $derived((void historyTick, past.length > 0));
+  const canRedo = $derived((void historyTick, future.length > 0));
+
+  function snap(): Step {
+    return { title: dash!.title, tiles: $state.snapshot(dash!.tiles) as Tile[] };
+  }
+
+  /** Call before a change. */
+  function record(burstKey = '') {
+    const now = Date.now();
+    if (burstKey && burst.key === burstKey && now - burst.at < BURST_MS) {
+      burst.at = now;
+      return;
+    }
+    burst = { key: burstKey, at: now };
+    past.push(snap());
+    if (past.length > MAX_STEPS) past.shift();
+    future.length = 0;
+    historyTick++;
+  }
+
+  function restore(step: Step) {
+    dash!.title = step.title;
+    dash!.tiles = step.tiles;
+    burst = { key: '', at: 0 };
+    if (selectedTile && !step.tiles.some((t) => t.id === selectedTile)) selectedTile = null;
+    filters = filters.filter((f) => step.tiles.some((t) => t.id === f.fromTile));
+    app.saveDashboards();
+    historyTick++;
+  }
+
+  function undo() {
+    const step = past.pop();
+    if (!dash || !step) return;
+    future.push(snap());
+    restore(step);
+  }
+
+  function redo() {
+    const step = future.pop();
+    if (!dash || !step) return;
+    past.push(snap());
+    restore(step);
+  }
+
+  function update(mut: (tiles: Tile[]) => Tile[], burstKey = '') {
     if (!dash) return;
+    record(burstKey);
     dash.tiles = mut(dash.tiles);
     app.saveDashboards();
   }
+
+  /** A change from the Inspector. Typing in the title box is one step, not one per key. */
+  function change(nt: Tile) {
+    const old = dash?.tiles.find((x) => x.id === nt.id);
+    const keys = old ? (Object.keys({ ...old, ...nt }) as (keyof Tile)[]).filter((k) => JSON.stringify(old[k]) !== JSON.stringify(nt[k])) : [];
+    update((ts) => ts.map((x) => (x.id === nt.id ? nt : x)), keys.length === 1 && keys[0] === 'title' ? `title:${nt.id}` : '');
+  }
+
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      if (filters.length) filters = [];
+      else selectedTile = null;
+      return;
+    }
+    const el = e.target as HTMLElement | null;
+    if (el && (['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) || el.isContentEditable)) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      undo();
+    } else if ((k === 'z' && e.shiftKey) || (k === 'y' && e.ctrlKey)) {
+      e.preventDefault();
+      redo();
+    }
+  }
+
+  // The sources this dashboard reads, for the freshness stamp and the failed-refresh banner.
+  const usedSources = $derived.by(() => {
+    const ids = new Set<string>();
+    for (const t of dash?.tiles ?? []) {
+      for (const ref of [...t.measures, ...t.dims, ...(t.repeat ? [t.repeat] : [])]) {
+        // A source that failed to load has no tables left, so fall back to the id prefix.
+        ids.add(app.table(ref.table)?.source_id ?? ref.table.split('/')[0]);
+      }
+    }
+    return app.snap!.workspace.sources.filter((s) => ids.has(s.id));
+  });
+  const loadedAt = $derived(app.snap!.loaded_at ?? {});
+  const newestLoad = $derived(
+    usedSources.map((s) => loadedAt[s.id]).filter(Boolean).sort().at(-1) ?? null,
+  );
+  const stampTitle = $derived(
+    usedSources
+      .map((s) => {
+        const at = loadedAt[s.id] ? stampLabel(loadedAt[s.id]) : '';
+        if (app.snap!.errors[s.id]) return `${s.name}: could not be read${at ? ` (last loaded ${at})` : ''}`;
+        return `${s.name}: ${at || 'not loaded'}`;
+      })
+      .join('\n'),
+  );
+  const failed = $derived(usedSources.filter((s) => app.snap!.errors[s.id]));
 
   function addTile(type: TileType) {
     addMenu = false;
@@ -171,7 +282,7 @@
   const sel = $derived(dash?.tiles.find((t) => t.id === selectedTile));
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && (filters.length ? (filters = []) : (selectedTile = null))} />
+<svelte:window onkeydown={onKeydown} />
 
 {#if dash && publishing}
   <PublishSheet {dash} onclose={() => (publishing = false)} />
@@ -186,7 +297,11 @@
         value={dash.title}
         autofocus
         onblur={(e) => {
-          dash.title = e.currentTarget.value.trim() || dash.title;
+          const next = e.currentTarget.value.trim() || dash.title;
+          if (next !== dash.title) {
+            record();
+            dash.title = next;
+          }
           editingTitle = false;
           app.saveDashboards();
         }}
@@ -207,6 +322,9 @@
       {/if}
     </div>
     <span class="spacer"></span>
+    {#if newestLoad}
+      <span class="stamp" title={stampTitle}>Updated {stampLabel(newestLoad)}</span>
+    {/if}
     {#if hasLive}
       <label class="refresh" title="How often database data is refreshed">
         <Icon name="clock" size={14} />
@@ -223,6 +341,8 @@
         </select>
       </label>
     {/if}
+    <button class="btn plain icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo} onclick={undo}><Icon name="undo" /></button>
+    <button class="btn plain icon" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!canRedo} onclick={redo}><Icon name="redo" /></button>
     <button class="btn plain icon" title="Refresh now" onclick={() => tick++}><Icon name="refresh" /></button>
     <button
       class="btn"
@@ -250,6 +370,16 @@
     </div>
     <button class="btn plain icon" title="Delete dashboard" onclick={removeDashboard}><Icon name="trash" /></button>
   </header>
+
+  {#each failed as src (src.id)}
+    <div class="banner" role="alert">
+      <Icon name="warning" size={14} />
+      <span>
+        {src.name} could not be read: {app.snap!.errors[src.id].replace(/\.$/, '')}.
+        Tiles that use it show an error until it is fixed.
+      </span>
+    </div>
+  {/each}
 
   <div class="body">
     <div class="scroll" onpointerdown={(e) => e.target === e.currentTarget && (selectedTile = null)} role="presentation">
@@ -306,7 +436,7 @@
       <Inspector
         tile={sel}
         onclose={() => (selectedTile = null)}
-        onchange={(nt) => update((ts) => ts.map((x) => (x.id === nt.id ? nt : x)))}
+        onchange={change}
         onremove={() => {
           filters = filters.filter((f) => f.fromTile !== sel.id);
           update((ts) => compact(ts.filter((x) => x.id !== sel.id)));
@@ -366,6 +496,18 @@
   .chip button:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
   .small { height: 24px; font-size: 12px; }
   .spacer { flex: 1; }
+  .stamp { font-size: 12px; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    font-size: 12px;
+    background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+    border-bottom: 1px solid var(--sep);
+    flex: none;
+  }
+  .banner :global(svg) { color: var(--danger); }
   .btn.live :global(svg) { color: var(--success); }
   .btn.warn :global(svg) { color: var(--danger); }
   .refresh { display: flex; align-items: center; gap: 4px; color: var(--text-2); }

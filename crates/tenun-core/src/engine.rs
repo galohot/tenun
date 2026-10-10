@@ -28,6 +28,8 @@ struct State {
     catalog: Catalog,
     /// Source id → the last load error, shown next to the source.
     errors: BTreeMap<String, String>,
+    /// Source id → when it last loaded without error (ISO 8601, UTC).
+    loaded_at: BTreeMap<String, String>,
     dirty: bool,
 }
 
@@ -38,6 +40,9 @@ pub struct Snapshot {
     pub path: Option<String>,
     pub tables: Vec<Table>,
     pub errors: BTreeMap<String, String>,
+    /// Source id → when it last loaded without error (ISO 8601, UTC). Kept
+    /// out of the source itself so it never reaches the `.tenun` file.
+    pub loaded_at: BTreeMap<String, String>,
     pub dirty: bool,
 }
 
@@ -113,6 +118,7 @@ impl Engine {
             path: s.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
             tables: s.catalog.tables.clone(),
             errors: s.errors.clone(),
+            loaded_at: s.loaded_at.clone(),
             dirty: s.dirty,
         }
     }
@@ -281,6 +287,7 @@ impl Engine {
                 .retain(|r| !r.from.table.starts_with(&prefix) && !r.to.table.starts_with(&prefix));
             s.catalog.tables.retain(|t| t.source_id != id);
             s.errors.remove(id);
+            s.loaded_at.remove(id);
         }
         self.persist();
     }
@@ -309,6 +316,7 @@ impl Engine {
         match result {
             Ok(tables) => {
                 s.errors.remove(id);
+                s.loaded_at.insert(id.to_string(), now_iso());
                 let ids = tables.iter().map(|t| t.id.clone()).collect();
                 s.catalog.tables.extend(tables);
                 let names: BTreeMap<String, String> =
@@ -619,6 +627,15 @@ fn schema_of(id: &str) -> String {
 
 fn attach_name(id: &str) -> String {
     format!("src_{id}")
+}
+
+fn now_iso() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    chrono::DateTime::from_timestamp(now.as_secs() as i64, 0)
+        .map(|t| t.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+        .unwrap_or_default()
 }
 
 fn drop_source(db: &Connection, id: &str) {

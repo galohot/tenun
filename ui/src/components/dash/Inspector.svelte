@@ -2,6 +2,7 @@
   import type { Agg, Grain, Tile, TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { aggNames, tileTitle } from '../../lib/format';
+  import { advancedLocked } from '../../lib/tiers';
   import { defaultDim, defaultMeasure, dtypeOf, reachableFrom } from '../../lib/tiles';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
@@ -61,6 +62,15 @@
     <h3>Tile</h3>
     <button class="btn plain icon" aria-label="Close panel" onclick={onclose}><Icon name="x" /></button>
   </header>
+
+  {#if advancedLocked(tile)}
+    <!-- V3-D2: the tile still draws; only editing its Advanced parts waits for the switch. -->
+    <div class="notice" role="note">
+      <Icon name="info" size={14} />
+      <p>This tile uses Advanced features. Turn them on in Settings to edit them.</p>
+      <button class="btn small" onclick={() => (app.settingsOpen = true)}>Open Settings</button>
+    </div>
+  {/if}
 
   <div class="sec">
     <div class="types" role="radiogroup" aria-label="Tile type">
@@ -192,6 +202,19 @@
     overflow: auto;
   }
   header { display: flex; align-items: center; justify-content: space-between; }
+  .notice {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 8px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--selected);
+    color: var(--text);
+    font-size: 12px;
+  }
+  .notice :global(svg) { color: var(--accent-text); margin-top: 1px; }
+  .notice p { margin: 0; line-height: 1.4; }
+  .notice .btn { grid-column: 2; justify-self: start; height: 24px; font-size: 12px; }
   .sec { display: flex; flex-direction: column; gap: 6px; }
   .types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .types button {

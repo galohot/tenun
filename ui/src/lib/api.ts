@@ -38,7 +38,8 @@ export interface Source {
   database?: string;
 }
 
-export type Agg = 'sum' | 'avg' | 'min' | 'max' | 'count' | 'count_distinct';
+/** `stdev` and `variance` are Advanced (see tiers.ts). */
+export type Agg = 'sum' | 'avg' | 'min' | 'max' | 'count' | 'count_distinct' | 'stdev' | 'variance';
 export type Grain = 'year' | 'quarter' | 'month' | 'week' | 'day';
 
 export interface Measure {
@@ -103,7 +104,20 @@ export interface KpiInfo {
 }
 
 /** `donut` is the old name of `share`; tiles saved with it render as `share`. */
-export type TileType = 'kpi' | 'bar' | 'line' | 'area' | 'share' | 'donut' | 'table';
+export type TileType =
+  | 'kpi' | 'bar' | 'line' | 'area' | 'share' | 'donut' | 'table'
+  // Simple types added in v3.
+  | 'scatter' | 'histogram' | 'waterfall' | 'pivot' | 'text' | 'image' | 'filter'
+  // Advanced types. They always render; only editing them needs the Advanced switch (V3-D2).
+  | 'heatmap' | 'funnel' | 'box' | 'bullet' | 'compare' | 'sankey' | 'calendar' | 'cohort' | 'gantt';
+
+/** A reference line on a chart. `band` (value to `to`) is Advanced. */
+export interface TileLine {
+  kind: 'target' | 'average' | 'median' | 'min' | 'max' | 'trend' | 'band';
+  value?: number;
+  to?: number;
+  label?: string;
+}
 
 export interface Tile {
   id: string;
@@ -120,6 +134,21 @@ export interface Tile {
   horizontal?: boolean;
   /** Number tiles: which direction of change is good. Default up. */
   better?: 'up' | 'down';
+  /** `manual` is Advanced. */
+  sort?: { by: 'value' | 'label' | 'manual'; desc?: boolean; order?: string[] };
+  lines?: TileLine[];
+  /** Small multiples (Advanced). */
+  repeat?: Dim;
+  /** Several measures: `panels` and `indexed` are Advanced. */
+  layout?: 'together' | 'panels' | 'indexed';
+  /** Bars plus a line, index-aligned with measures (Advanced). */
+  mix?: ('bar' | 'line')[];
+}
+
+/** Settings of this computer (not of the workspace). */
+export interface Settings {
+  /** Show the editing controls for Advanced features. */
+  advanced: boolean;
 }
 
 export interface PublishSettings {
@@ -167,6 +196,8 @@ export interface Snapshot {
   path: string | null;
   tables: Table[];
   errors: Record<string, string>;
+  /** Source id → when it last loaded without error (ISO 8601, UTC). */
+  loaded_at?: Record<string, string>;
   dirty: boolean;
 }
 
@@ -214,6 +245,8 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export const api = {
   health: () => call<Health>('GET', '/health'),
+  settings: () => call<Settings>('GET', '/settings'),
+  saveSettings: (s: Settings) => call<Settings>('PUT', '/settings', s),
   workspace: () => call<Snapshot>('GET', '/workspace'),
   newWorkspace: () => call<Snapshot>('POST', '/workspace/new'),
   open: (path: string) => call<Snapshot>('POST', '/workspace/open', { path }),

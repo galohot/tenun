@@ -136,15 +136,20 @@
   </div>
 
   <div class="foot">
-    <div class="seg" role="radiogroup" aria-label="Appearance">
-      {#each themes as t}
-        <button
-          role="radio"
-          aria-checked={app.themePref === t.id}
-          class:on={app.themePref === t.id}
-          title={t.label}
-          onclick={() => app.setTheme(t.id)}><Icon name={t.icon} size={14} /></button>
-      {/each}
+    <div class="theme-row">
+      <div class="seg" role="radiogroup" aria-label="Appearance">
+        {#each themes as t}
+          <button
+            role="radio"
+            aria-checked={app.themePref === t.id}
+            class:on={app.themePref === t.id}
+            title={t.label}
+            onclick={() => app.setTheme(t.id)}><Icon name={t.icon} size={14} /></button>
+        {/each}
+      </div>
+      <button class="btn plain icon gear" title="Settings" aria-label="Settings" onclick={() => (app.settingsOpen = true)}>
+        <Icon name="settings" size={16} />
+      </button>
     </div>
     {#if app.health?.native}
       <button class="btn plain small-text" title="Open this workspace in your web browser" onclick={() => api.openBrowser()}>
@@ -270,5 +275,8 @@
     color: var(--text-2);
   }
   .seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
+  .theme-row { display: flex; align-items: center; gap: 6px; }
+  .gear { width: 26px; height: 26px; color: var(--text-2); }
+  .gear:hover { color: var(--text); }
   .small-text { font-size: 12px; height: 24px; padding: 0 6px; color: var(--text-2); }
 </style>

@@ -7,6 +7,7 @@
   import ModelView from './components/ModelView.svelte';
   import DashboardView from './components/DashboardView.svelte';
   import AddSource from './components/AddSource.svelte';
+  import SettingsSheet from './components/SettingsSheet.svelte';
   import Toasts from './components/Toasts.svelte';
 
   onMount(() => {
@@ -39,6 +40,9 @@
   </div>
   {#if app.addOpen}
     <AddSource onclose={() => (app.addOpen = false)} />
+  {/if}
+  {#if app.settingsOpen}
+    <SettingsSheet onclose={() => (app.settingsOpen = false)} />
   {/if}
 {:else}
   <div class="boot">Starting Tenun…</div>

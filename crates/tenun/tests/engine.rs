@@ -46,6 +46,25 @@ fn total_by(e: &Engine, table: &str, column: &str) -> Vec<(serde_json::Value, f6
 }
 
 #[test]
+fn each_source_has_a_load_time() {
+    let (e, dir) = engine("loaded-at");
+    let snap = e.snapshot();
+    for id in ["s1", "s2", "s3"] {
+        let t = snap.loaded_at.get(id).expect("load time");
+        assert!(t.ends_with('Z') && t.len() == 20, "{t}");
+    }
+    // A source that cannot be read keeps its last good time and gains an error.
+    std::fs::rename(dir.join("stores.csv"), dir.join("stores.moved")).unwrap();
+    e.load("s2");
+    let snap = e.snapshot();
+    assert!(snap.errors.contains_key("s2"));
+    assert!(snap.loaded_at.contains_key("s2"));
+    // Removing a source drops its time.
+    e.remove_source("s2");
+    assert!(!e.snapshot().loaded_at.contains_key("s2"));
+}
+
+#[test]
 fn loads_three_kinds_of_source() {
     let (e, _) = engine("load");
     let snap = e.snapshot();

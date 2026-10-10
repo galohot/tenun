@@ -1,6 +1,6 @@
 // App-wide state: the workspace snapshot, the route, the theme, live events.
 
-import { api, type CloudStatus, type Dashboard, type Health, type Snapshot, type Table } from './api';
+import { api, type CloudStatus, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
 
 export type Route =
   | { view: 'home' }
@@ -50,6 +50,9 @@ class App {
   /** Set while waiting for the browser approval of a tenun.cloud connection. */
   connecting = $state<{ code: string; url: string } | null>(null);
   busy = $state<string | null>(null);
+  /** This computer's settings; null until they load. */
+  settings = $state<Settings | null>(null);
+  settingsOpen = $state(false);
 
   theme = $derived<'light' | 'dark'>(
     this.themePref === 'system' ? (this.systemDark ? 'dark' : 'light') : this.themePref,
@@ -72,9 +75,26 @@ class App {
     localStorage.setItem('tenun-theme', p);
   }
 
+  /** Saves a change to this computer's settings; the switch moves at once. */
+  async saveSettings(patch: Partial<Settings>) {
+    const prev = this.settings ?? { advanced: false };
+    this.settings = { ...prev, ...patch };
+    try {
+      this.settings = await api.saveSettings(this.settings);
+    } catch (e) {
+      this.settings = prev;
+      this.error(e);
+    }
+  }
+
   async init() {
     try {
-      [this.health, this.snap, this.cloud] = await Promise.all([api.health(), api.workspace(), api.cloud().catch(() => null)]);
+      [this.health, this.snap, this.cloud, this.settings] = await Promise.all([
+        api.health(),
+        api.workspace(),
+        api.cloud().catch(() => null),
+        api.settings().catch(() => ({ advanced: false })),
+      ]);
     } catch (e) {
       this.error(e);
     }
