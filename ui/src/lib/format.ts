@@ -1,81 +1,112 @@
 // Human formatting for numbers, dates and field names.
 
-import { format as d3format } from 'd3-format';
-import { utcFormat } from 'd3-time-format';
 import { MAX_CHART_MEASURES } from './tiles';
-import { isPart, type Agg, type Cell, type Dim, type DType, type Grain, type Measure, type Table, type Tile } from './api';
+import { isPart, type Agg, type Cell, type Dim, type DType, type Grain, type Measure, type NumFormat, type Table, type Tile } from './api';
+import * as L from './locale';
+import type { Locale } from './locale';
+import { localeState } from './localeState.svelte';
 
-const compactFmt = d3format('.3~s');
-const groupFmt = d3format(',.2~f');
-const intFmt = d3format(',d');
+export type { Locale } from './locale';
 
-/** 1,284 · 12.9K · 4.2M · 1.3B (G is shown as B). */
-export function compact(n: number): string {
-  if (!isFinite(n)) return '–';
-  const a = Math.abs(n);
-  if (a < 10_000) return a >= 100 || Number.isInteger(n) ? intFmt(Math.round(n)) : groupFmt(n);
-  return compactFmt(n).replace('G', 'B').replace('k', 'K');
+/** The number and date format of the open workspace. The viewer sets it from the snapshot. */
+export function setLocale(l: Locale | null | undefined): void {
+  localeState.value = l === 'id' ? 'id' : 'en';
 }
 
-export function full(n: number): string {
-  if (!isFinite(n)) return '–';
-  return Number.isInteger(n) ? intFmt(n) : groupFmt(n);
+export const getLocale = (): Locale => localeState.value;
+
+/**
+ * The short form of a number: 1,284 · 12.9K · 4.2M · 1.3B in English, 1.284 · 12,9 rb · 4,2 jt · 1,3 M
+ * in Indonesian. A format can add a currency or decimals, or ask for every digit (`compact: false`).
+ */
+export function compact(n: number, f?: NumFormat | null, loc: Locale = getLocale()): string {
+  return L.shortNumber(n, loc, f);
 }
 
-function parseDate(s: string): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(s);
-  if (!m) return null;
-  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] ?? 0), +(m[5] ?? 0), +(m[6] ?? 0)));
+/** Grouped digits, up to 2 decimals. A format can add a currency or fix the decimals. */
+export function full(n: number, f?: NumFormat | null, loc: Locale = getLocale()): string {
+  return L.longNumber(n, loc, f);
 }
 
-const fmtYear = utcFormat('%Y');
-const fmtMonth = utcFormat('%b %Y');
-const fmtDay = utcFormat('%b %-d, %Y');
-const fmtTime = utcFormat('%b %-d, %Y %H:%M');
+/** For tooltips: the full number, and in Indonesian its unit word: "1.234.567 (1,2 jt)". */
+export function tip(n: number, f?: NumFormat | null, loc: Locale = getLocale()): string {
+  return L.tipNumber(n, loc, f);
+}
 
-export function formatDate(v: string, grain?: Grain | null, dtype?: DType): string {
-  const d = parseDate(v);
-  if (!d) return v;
-  switch (grain) {
-    case 'year':
-      return fmtYear(d);
-    case 'quarter':
-      return `Q${Math.floor(d.getUTCMonth() / 3) + 1} ${d.getUTCFullYear()}`;
-    case 'month':
-      return fmtMonth(d);
-    case 'week':
-      return `Week of ${fmtDay(d)}`;
-    case 'day':
-      return fmtDay(d);
-  }
-  return dtype === 'datetime' ? fmtTime(d) : fmtDay(d);
+/**
+ * The formats of one value, bound to a locale. A chart builds this once, so a change of
+ * locale makes it build again. A table, a pivot and a tooltip default to the full number.
+ */
+export function numberFormatter(f?: NumFormat | null, loc: Locale = getLocale()) {
+  return {
+    short: (n: number) => L.shortNumber(n, loc, f),
+    long: (n: number) => L.longNumber(n, loc, f),
+    tip: (n: number) => L.tipNumber(n, loc, f),
+  };
+}
+
+/** A share of a whole, 0–1, as a percentage with a locale decimal mark: "4,2%". */
+export function pctShare(x: number, loc: Locale = getLocale()): string {
+  if (x >= 0.995) return '100%';
+  if (x < 0.001) return `<${L.fixedNumber(0.1, 1, loc)}%`;
+  return `${L.fixedNumber(x * 100, x < 0.1 ? 1 : 0, loc)}%`;
+}
+
+/** A relative change, 0.042 → "4,2%" (no sign). */
+export function pctChange(delta: number, loc: Locale = getLocale()): string {
+  return `${L.fixedNumber(Math.abs(delta * 100), Math.abs(delta) < 0.1 ? 1 : 0, loc)}%`;
+}
+
+/** A file size: "512 B" · "48 KB" · "1,5 MB". */
+export function fileSize(b: number, loc: Locale = getLocale()): string {
+  if (b < 1024) return `${b} B`;
+  if (b < 1048576) return `${L.fixedNumber(b / 1024, 0, loc)} KB`;
+  return `${L.fixedNumber(b / 1048576, 1, loc)} MB`;
+}
+
+export function formatDate(v: string, grain?: Grain | null, dtype?: DType, loc: Locale = getLocale()): string {
+  return L.formatDate(v, loc, grain, dtype);
 }
 
 /** The key the engine gives the "Other" group of a top N (the first column of its row). */
 export const OTHER_KEY = '\u0000other';
 
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const WEEKDAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/** Month of year 1–12 → Jan…Dec · weekday 1–7 (Monday = 1) → Mon…Sun · hour 0–23 → "09:00". Names follow the locale. */
+export function partName(n: number, grain: Grain, loc: Locale = getLocale()): string {
+  return L.partName(n, grain, loc);
+}
 
-/** Month of year 1–12 → Jan…Dec · weekday 1–7 (Monday = 1) → Mon…Sun · hour 0–23 → "09:00". */
-export function partName(n: number, grain: Grain): string {
-  const i = Math.round(n);
-  switch (grain) {
-    case 'month_of_year':
-      return MONTH_NAMES[i - 1] ?? String(n);
-    case 'weekday':
-      return WEEKDAY_NAMES[i - 1] ?? String(n);
-    default:
-      return `${String(i).padStart(2, '0')}:00`;
-  }
+/** "September 2026" · "Q3 2026" · "Minggu 7 Sep 2026": the name of a period that starts on `start`. */
+export function periodName(start: Date, grain: Grain, loc: Locale = getLocale()): string {
+  return L.periodName(start, grain, loc);
+}
+
+/** "Oct 14" or "14 Okt". */
+export function dayMonth(d: Date, loc: Locale = getLocale()): string {
+  return L.dayMonth(d, loc);
+}
+
+const tag = (loc: Locale) => (loc === 'id' ? 'id-ID' : 'en-US');
+
+/** A date and time in the style of the locale, from an ISO time or a Date. */
+export function dateTimeMedium(when: string | Date, loc: Locale = getLocale()): string {
+  return new Date(when).toLocaleString(tag(loc), { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+export function dateMedium(when: string | Date, loc: Locale = getLocale()): string {
+  return new Date(when).toLocaleDateString(tag(loc), { dateStyle: 'medium' });
+}
+
+export function timeShort(when: string | Date, loc: Locale = getLocale()): string {
+  return new Date(when).toLocaleTimeString(tag(loc), { hour: 'numeric', minute: '2-digit' });
 }
 
 /** Formats one result cell for display. */
-export function cell(v: Cell, dtype: DType, grain?: Grain | null, short = false): string {
+export function cell(v: Cell, dtype: DType, grain?: Grain | null, short = false, f?: NumFormat | null): string {
   if (v === null || v === undefined) return '(blank)';
   if (v === OTHER_KEY) return 'Other';
   if (grain && isPart(grain) && typeof v === 'number') return partName(v, grain);
-  if (dtype === 'number' && typeof v === 'number') return short ? compact(v) : full(v);
+  if (dtype === 'number' && typeof v === 'number') return short ? compact(v, f) : full(v, f);
   if ((dtype === 'date' || dtype === 'datetime') && typeof v === 'string') return formatDate(v, grain, dtype);
   if (typeof v === 'boolean') return v ? 'Yes' : 'No';
   return String(v);
@@ -161,11 +192,12 @@ export function tileTitle(t: Tile, tables: Named[]): string {
   return m + by + split;
 }
 
-/** When data was loaded, for the "Updated" stamp: "10:32" today, "Oct 9, 10:32" on other days. */
-export function stampLabel(iso: string): string {
+/** When data was loaded, for the "Updated" stamp: "10:32" today, "Oct 9, 10:32" or "9 Okt, 10:32" on other days. */
+export function stampLabel(iso: string, loc: Locale = getLocale()): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   if (d.toDateString() === new Date().toDateString()) return time;
-  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${time}`;
+  const day = L.MONTHS_SHORT[loc][d.getMonth()];
+  return `${loc === 'id' ? `${d.getDate()} ${day}` : `${day} ${d.getDate()}`}, ${time}`;
 }

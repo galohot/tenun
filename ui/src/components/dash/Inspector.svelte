@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DATE_PARTS, type Agg, type Grain, type Tile, type TileType } from '../../lib/api';
+  import { DATE_PARTS, type Agg, type Grain, type NumFormat, type Tile, type TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { aggNames, tileTitle } from '../../lib/format';
   import { advancedLocked } from '../../lib/tiers';
@@ -33,6 +33,25 @@
     { id: 'label-asc', label: 'A → Z', sort: { by: 'label', desc: false } },
     { id: 'label-desc', label: 'Z → A', sort: { by: 'label', desc: true } },
   ];
+
+  // How a value is written. Each value has its own (V3-D9). Unset fields keep the defaults.
+  const CURRENCIES = ['IDR', 'USD', 'EUR', 'SGD', 'MZN'];
+  const DECIMALS = [0, 1, 2, 3, 4];
+  const tableLike = $derived(tile.type === 'table' || tile.type === 'pivot');
+
+  function setFormat(i: number, patch: Partial<NumFormat>) {
+    const formats = tile.measures.map((_, j) => tile.formats?.[j] ?? null);
+    const next: NumFormat = { ...(formats[i] ?? {}), ...patch };
+    for (const k of Object.keys(next) as (keyof NumFormat)[]) if (next[k] === undefined) delete next[k];
+    formats[i] = Object.keys(next).length ? next : null;
+    set({ formats: formats.some(Boolean) ? formats : undefined });
+  }
+
+  /** Removes a value and its format together, so the two lists stay in step. */
+  function removeMeasure(i: number) {
+    const formats = (tile.formats ?? []).filter((_, j) => j !== i);
+    set({ measures: tile.measures.filter((_, j) => j !== i), formats: formats.some(Boolean) ? formats : undefined });
+  }
 
   const m = $derived(tile.measures[0]);
   const rels = $derived(app.snap!.workspace.relationships);
@@ -103,6 +122,35 @@
   const dimTypes = $derived(tile.dims.map((d) => dtypeOf(app.tables, d.table, d.column)));
 </script>
 
+{#snippet formatRow(i: number)}
+  {@const f = tile.formats?.[i] ?? null}
+  <div class="fmt" role="group" aria-label="Format of this value">
+    <span class="label">Format</span>
+    <div class="pair">
+      <select
+        class="field"
+        aria-label="Currency"
+        value={f?.currency ?? ''}
+        onchange={(e) => setFormat(i, { currency: e.currentTarget.value || undefined })}>
+        <option value="">No currency</option>
+        {#each CURRENCIES as c}<option value={c}>{c}</option>{/each}
+      </select>
+      <select
+        class="field"
+        aria-label="Decimals"
+        value={f?.decimals === undefined ? 'auto' : String(f.decimals)}
+        onchange={(e) => setFormat(i, { decimals: e.currentTarget.value === 'auto' ? undefined : Number(e.currentTarget.value) })}>
+        <option value="auto">Auto decimals</option>
+        {#each DECIMALS as d}<option value={String(d)}>{d} {d === 1 ? 'decimal' : 'decimals'}</option>{/each}
+      </select>
+    </div>
+    <label class="check">
+      <input type="checkbox" checked={f?.compact ?? !tableLike} onchange={(e) => setFormat(i, { compact: e.currentTarget.checked })} />
+      Short ({app.locale === 'id' ? '1,2 jt' : '1.2M'})
+    </label>
+  </div>
+{/snippet}
+
 <aside class="insp">
   <header>
     <h3>Tile</h3>
@@ -159,6 +207,7 @@
       <select class="field" value={m.agg} onchange={(e) => set({ measures: [{ ...m, agg: e.currentTarget.value as Agg }, ...tile.measures.slice(1)] })}>
         {#each aggs as a}<option value={a}>{aggNames[a]}</option>{/each}
       </select>
+      {@render formatRow(0)}
     {/if}
     {#if manyValues}
       {#each tile.measures.slice(1) as extra, k}
@@ -172,7 +221,8 @@
             ms[k + 1] = defaultMeasure(app.tables, t, c);
             set({ measures: ms });
           }}
-          onclear={() => set({ measures: tile.measures.filter((_, j) => j !== k + 1) })} />
+          onclear={() => removeMeasure(k + 1)} />
+        {@render formatRow(k + 1)}
       {/each}
       {#if m && tile.measures.length < maxValues}
         <FieldPicker
@@ -360,6 +410,10 @@
   }
   .grains.parts button { text-transform: none; }
   .grains button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
+  .fmt { display: flex; flex-direction: column; gap: 4px; }
+  .fmt .label { font-size: 11px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .pair select.field { min-width: 0; }
   .hint { margin: -8px 0 0; font-size: 11px; color: var(--text-2); }
   .foot { margin-top: auto; padding-top: 8px; }
 </style>

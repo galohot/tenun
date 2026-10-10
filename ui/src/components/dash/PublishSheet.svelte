@@ -4,6 +4,7 @@
   // results travel (V2-D1).
   import { untrack } from 'svelte';
   import { api, type Dashboard, type PublishSettings } from '../../lib/api';
+  import { dateTimeMedium } from '../../lib/format';
   import { app } from '../../lib/state.svelte';
   import Icon from '../Icon.svelte';
   import Modal from '../Modal.svelte';
@@ -87,7 +88,7 @@
     const s = (Date.now() - Date.parse(iso)) / 1000;
     if (s < 90) return 'just now';
     if (s < 5400) return `${Math.round(s / 60)} minutes ago`;
-    return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    return dateTimeMedium(iso);
   };
 
   const everyText: Record<PublishSettings['every'], string> = {

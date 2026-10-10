@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tenun_core::Engine;
 use tenun_core::secrets::Secrets;
+use tenun_core::workspace::Locale;
 
 fn engine() -> Engine {
     // One folder per call: the tests run in parallel and must not share files.
@@ -120,6 +121,37 @@ fn number_tile_compares_the_same_days() {
     assert_eq!(kpi["versus"], "Sep 1–14");
     assert_eq!(kpi["partial"], true);
     assert_eq!(snap["base"]["t5"]["partial"]["until"], "2026-10-14");
+}
+
+#[test]
+fn number_tile_names_its_periods_in_the_workspace_language() {
+    let e = engine();
+    // The sample file has no locale: it reads as English.
+    let snap = tenun_core::snapshot::build(&e, "d1", &[]).unwrap();
+    assert_eq!(snap["locale"], "en");
+
+    e.set_locale(Locale::Id);
+    let snap = tenun_core::snapshot::build(&e, "d1", &[]).unwrap();
+    assert_eq!(snap["locale"], "id");
+    let kpi = &snap["base"]["t1"]["kpi"];
+    assert_eq!(kpi["period"], "1–14 Okt 2026");
+    assert_eq!(kpi["versus"], "1–14 Sep");
+    // The numbers do not change with the language.
+    let en = engine();
+    let en_snap = tenun_core::snapshot::build(&en, "d1", &[]).unwrap();
+    assert_eq!(kpi["value"], en_snap["base"]["t1"]["kpi"]["value"]);
+}
+
+#[test]
+fn the_locale_is_saved_with_the_workspace() {
+    let e = engine();
+    let path = e.workspace_path().unwrap();
+    e.set_locale(Locale::Id);
+    // The change autosaves to the file, so a reopened workspace reads the same way.
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved["locale"], "id");
+    e.open(&path).unwrap();
+    assert_eq!(e.locale(), Locale::Id);
 }
 
 #[test]

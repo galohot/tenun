@@ -3,6 +3,7 @@
   // comes from the Tenun server, so paths are real paths on that computer.
   import { onMount } from 'svelte';
   import { api, type FsListing } from '../lib/api';
+  import { fileSize } from '../lib/format';
   import { app } from '../lib/state.svelte';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
@@ -60,7 +61,6 @@
     }
   }
 
-  const size = (b: number) => (b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`);
   const title = $derived(mode === 'files' ? 'Choose data files' : mode === 'open' ? 'Open a workspace' : 'Save workspace');
 </script>
 
@@ -94,7 +94,7 @@
           onclick={() => (e.dir ? (mode === 'save' ? load(e.path) : load(e.path)) : mode !== 'save' && toggle(e.path))}>
           <Icon name={e.dir ? 'folder' : e.name.match(/\.(sqlite3?|db|duckdb)$/) ? 'database' : 'sheet'} size={15} />
           <span class="n">{e.name}</span>
-          {#if !e.dir}<span class="sz">{size(e.size)}</span>{/if}
+          {#if !e.dir}<span class="sz">{fileSize(e.size)}</span>{/if}
         </button>
       {:else}
         <p class="none">

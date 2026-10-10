@@ -2,7 +2,7 @@
   import { api, type Cell, type Column } from '../lib/api';
   import { typeIcon } from '../lib/ui';
   import { app, go } from '../lib/state.svelte';
-  import { cell } from '../lib/format';
+  import { cell, full } from '../lib/format';
   import Icon from './Icon.svelte';
 
   let { tableId }: { tableId?: string } = $props();
@@ -81,7 +81,7 @@
             <button class="tbl" class:on={table?.id === t.id} onclick={() => go({ view: 'data', table: t.id })}>
               <Icon name="table" size={14} />
               <span class="tname">{t.name}</span>
-              <span class="rows">{t.rows === null ? 'live' : t.rows.toLocaleString()}</span>
+              <span class="rows">{t.rows === null ? 'live' : full(t.rows)}</span>
             </button>
           {/each}
         </section>
@@ -95,7 +95,7 @@
             <h1>{table.label}</h1>
             <p class="muted">
               {kindLabel[sourceOf?.kind ?? ''] ?? ''} · {sourceOf?.name}
-              · {table.rows === null ? 'queried live' : `${table.rows.toLocaleString()} rows`}
+              · {table.rows === null ? 'queried live' : `${full(table.rows)} rows`}
               · {table.columns.length} columns
             </p>
           </div>
@@ -130,7 +130,7 @@
               </tbody>
             </table>
             {#if table.rows !== null && table.rows > preview.rows.length}
-              <p class="muted pad small">Showing the first {preview.rows.length} of {table.rows.toLocaleString()} rows.</p>
+              <p class="muted pad small">Showing the first {preview.rows.length} of {full(table.rows)} rows.</p>
             {/if}
           {/if}
         </div>

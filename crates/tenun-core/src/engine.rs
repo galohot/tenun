@@ -6,7 +6,7 @@ use crate::query::{self, Param, SemanticQuery};
 use crate::secrets::Secrets;
 use crate::suggest::{self, Suggestion};
 use crate::workspace::{
-    DbConn, FieldRef, Relationship, Source, SourceKind, Workspace, resolve_path, store_path,
+    DbConn, FieldRef, Locale, Relationship, Source, SourceKind, Workspace, resolve_path, store_path,
 };
 use duckdb::Connection;
 use duckdb::types::Value;
@@ -150,8 +150,29 @@ impl Engine {
         Ok(())
     }
 
+    /// A new workspace reads numbers and dates in the language of the computer.
     pub fn new_workspace(&self) {
-        self.replace(Workspace::default(), None);
+        self.new_workspace_in(Locale::from_env());
+    }
+
+    pub fn new_workspace_in(&self, locale: Locale) {
+        self.replace(
+            Workspace {
+                locale: Some(locale),
+                ..Workspace::default()
+            },
+            None,
+        );
+    }
+
+    /// The number and date format of the open workspace; English when it has none.
+    pub fn locale(&self) -> Locale {
+        self.state.read().unwrap().ws.locale.unwrap_or_default()
+    }
+
+    pub fn set_locale(&self, locale: Locale) {
+        self.state.write().unwrap().ws.locale = Some(locale);
+        self.persist();
     }
 
     /// Replaces the workspace (used by open, new and "open sample").

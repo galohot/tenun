@@ -49,6 +49,9 @@
     });
     return [...sorted, ...res.rows.filter(isOther)];
   });
+  // The format of a value column: the columns are the groups, then the values.
+  const groups = $derived(res.columns.filter((c) => c.role === 'dimension').length);
+  const formatOf = (i: number) => (res.columns[i]?.role === 'measure' ? (tile.formats?.[i - groups] ?? null) : null);
   const note = $derived(isChart ? sizeNote(res) : null);
   const selKeys = $derived(new Set((selected ?? []).map((v) => String(v))));
 </script>
@@ -81,7 +84,7 @@
             class:other={!!res.other && r[0] === OTHER_KEY}
             onclick={() => tile.dims.length && onpick?.(r[0])}>
             {#each r as v, i}
-              <td class:num={res.columns[i].dtype === 'number'}>{cell(v, res.columns[i].dtype, tile.dims[i]?.grain)}</td>
+              <td class:num={res.columns[i].dtype === 'number'}>{cell(v, res.columns[i].dtype, tile.dims[i]?.grain, false, formatOf(i))}</td>
             {/each}
           </tr>
         {/each}

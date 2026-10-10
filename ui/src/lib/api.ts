@@ -118,6 +118,18 @@ export type TileType =
   // Advanced types. They always render; only editing them needs the Advanced switch (V3-D2).
   | 'heatmap' | 'funnel' | 'box' | 'bullet' | 'compare' | 'sankey' | 'calendar' | 'cohort' | 'gantt';
 
+/** How one value is written. Index-aligned with `Tile.measures`; every field is optional. */
+export interface NumFormat {
+  /** 0–4. Unset: the number as it is, up to 2 decimals. */
+  decimals?: number;
+  /** IDR, USD, EUR, SGD or MZN. */
+  currency?: string;
+  /** Short (1,2 jt) or full. Unset: short on charts and number tiles, full in tables. */
+  compact?: boolean;
+  /** Multiply by 100 and add %. */
+  percent?: boolean;
+}
+
 /** A reference line on a chart. `band` (value to `to`) is Advanced. */
 export interface TileLine {
   kind: 'target' | 'average' | 'median' | 'min' | 'max' | 'trend' | 'band';
@@ -146,6 +158,8 @@ export interface Tile {
   /** Keep the biggest N groups; the rest become one "Other" bar. `other` defaults to true. */
   top?: { n: number; other?: boolean };
   lines?: TileLine[];
+  /** How each value is written, index-aligned with `measures`. */
+  formats?: (NumFormat | null)[];
   /** Small multiples (Advanced). */
   repeat?: Dim;
   /** Several measures: `panels` and `indexed` are Advanced. */
@@ -198,6 +212,8 @@ export interface Workspace {
   relationships: Relationship[];
   dashboards: Dashboard[];
   layout: { model?: Record<string, { x: number; y: number }> } | null;
+  /** How numbers and dates read. A file without it reads as English. */
+  locale?: 'id' | 'en';
 }
 
 export interface Snapshot {
@@ -257,7 +273,8 @@ export const api = {
   settings: () => call<Settings>('GET', '/settings'),
   saveSettings: (s: Settings) => call<Settings>('PUT', '/settings', s),
   workspace: () => call<Snapshot>('GET', '/workspace'),
-  newWorkspace: () => call<Snapshot>('POST', '/workspace/new'),
+  newWorkspace: () => call<Snapshot>('POST', '/workspace/new', { lang: navigator.language }),
+  setLocale: (locale: 'id' | 'en') => call<Snapshot>('PUT', '/workspace/locale', { locale }),
   open: (path: string) => call<Snapshot>('POST', '/workspace/open', { path }),
   save: (path?: string) => call<Snapshot>('POST', '/workspace/save', { path: path ?? null }),
   rename: (name: string) => call<Snapshot>('POST', '/workspace/rename', { name }),

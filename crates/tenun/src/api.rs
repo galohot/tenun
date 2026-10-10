@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tenun_core::engine::AddSource;
 use tenun_core::query::SemanticQuery;
 use tenun_core::snapshot::{self, DashFilter, Tile, run_tile};
-use tenun_core::workspace::FieldRef;
+use tenun_core::workspace::{FieldRef, Locale};
 
 type S = State<Arc<AppState>>;
 
@@ -57,6 +57,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/workspace/open", post(ws_open))
         .route("/workspace/save", post(ws_save))
         .route("/workspace/rename", post(ws_rename))
+        .route("/workspace/locale", put(ws_locale))
         .route("/sample", post(open_sample))
         .route("/sources", post(add_source))
         .route("/sources/{id}", delete(remove_source))
@@ -135,10 +136,21 @@ fn changed(st: &AppState) -> anyhow::Result<Value> {
     Ok(serde_json::to_value(st.engine.snapshot())?)
 }
 
-async fn ws_new(State(s): S) -> R<Json<Value>> {
+#[derive(Deserialize, Default)]
+struct NewBody {
+    /// The language of the browser ("id-ID"). Without it the computer's language is used.
+    #[serde(default)]
+    lang: Option<String>,
+}
+
+async fn ws_new(State(s): S, body: Option<Json<NewBody>>) -> R<Json<Value>> {
+    let lang = body.and_then(|Json(b)| b.lang);
     Ok(Json(
-        blocking(&s, |st| {
-            st.engine.new_workspace();
+        blocking(&s, move |st| {
+            match lang {
+                Some(l) => st.engine.new_workspace_in(Locale::guess(&l)),
+                None => st.engine.new_workspace(),
+            }
             changed(st)
         })
         .await?,
@@ -191,6 +203,24 @@ async fn ws_rename(State(s): S, Json(b): Json<NameBody>) -> R<Json<Value>> {
     Ok(Json(
         blocking(&s, move |st| {
             st.engine.rename(b.name);
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct LocaleBody {
+    locale: Locale,
+}
+
+/// Changes how the open workspace reads numbers and dates. Tiles ask again, so the
+/// period names the engine writes follow it.
+async fn ws_locale(State(s): S, Json(b): Json<LocaleBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            st.engine.set_locale(b.locale);
+            st.emit(json!({ "type": "workspace-changed" }));
             Ok(serde_json::to_value(st.engine.snapshot())?)
         })
         .await?,

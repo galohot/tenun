@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { app } from './lib/state.svelte';
+  import { setLocale } from './lib/format';
   import Sidebar from './components/Sidebar.svelte';
   import Welcome from './components/Welcome.svelte';
   import DataView from './components/DataView.svelte';
@@ -16,6 +17,11 @@
 
   $effect(() => {
     document.documentElement.dataset.theme = app.theme;
+  });
+
+  // Numbers and dates follow the open workspace.
+  $effect(() => {
+    setLocale(app.locale);
   });
 
   const hasData = $derived((app.snap?.workspace.sources.length ?? 0) > 0);

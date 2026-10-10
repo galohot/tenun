@@ -41,6 +41,8 @@
   $effect(() => {
     void tick;
     void app.dataVersion;
+    // The engine writes period names such as "Oct 1–14", so they follow the locale.
+    void app.locale;
     const key = qKey;
     if (!q) {
       res = null;

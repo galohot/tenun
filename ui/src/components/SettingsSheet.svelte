@@ -23,12 +23,18 @@
           onchange={(e) => app.saveSettings({ advanced: e.currentTarget.checked })} />
       </label>
     {/if}
-    <!-- SLOT: "Number and date format". Build 03 puts its control here. -->
-    {#if !SHOW_ADVANCED_SWITCH}
-      <p class="muted none">There is nothing to change here yet.</p>
-    {/if}
+    <label class="row stack">
+      <span class="text">
+        <span class="name">Number and date format</span>
+        <span class="muted hint">How numbers and dates read in this workspace. Exported and published dashboards use it too. The app stays in English.</span>
+      </span>
+      <select class="field format" value={app.locale} onchange={(e) => app.setLocale(e.currentTarget.value as 'id' | 'en')}>
+        <option value="id">Indonesia (1.234,5 · Rp 1,2 jt)</option>
+        <option value="en">English (1,234.5 · $1.2M)</option>
+      </select>
+    </label>
   </div>
-  <p class="muted note">These settings belong to this computer. They are not saved in your workspace file.</p>
+  <p class="muted note">The number and date format is saved in your workspace file. The other settings belong to this computer.</p>
 </Modal>
 
 <style>
@@ -37,7 +43,8 @@
   .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .name { font-weight: 600; }
   .hint { font-size: 12px; line-height: 1.4; }
-  .none { margin: 0; }
+  .row.stack { flex-direction: column; gap: 8px; }
+  .format { width: 100%; height: 30px; }
   .note { margin: 14px 0 0; font-size: 12px; }
   .switch {
     appearance: none;

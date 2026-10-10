@@ -1,5 +1,6 @@
 // App-wide state: the workspace snapshot, the route, the theme, live events.
 
+import { guessLocale } from './locale';
 import { api, type CloudStatus, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
 
 export type Route =
@@ -60,6 +61,8 @@ class App {
 
   tables = $derived<Table[]>(this.snap?.tables ?? []);
   dashboards = $derived<Dashboard[]>(this.snap?.workspace.dashboards ?? []);
+  /** How numbers and dates read in the open workspace. A file without it reads as English. */
+  locale = $derived<'id' | 'en'>(this.snap?.workspace.locale === 'id' ? 'id' : 'en');
 
   #toastId = 0;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -95,10 +98,29 @@ class App {
         api.cloud().catch(() => null),
         api.settings().catch(() => ({ advanced: false })),
       ]);
+      await this.matchBrowserLanguage();
     } catch (e) {
       this.error(e);
     }
     this.listen();
+  }
+
+  /**
+   * An empty workspace that nobody has saved reads in the language of the browser, so a
+   * computer set to Indonesian starts in Indonesian. A workspace with content is left alone.
+   */
+  async matchBrowserLanguage() {
+    const w = this.snap?.workspace;
+    if (!w || this.snap?.path !== null || w.sources.length || w.dashboards.length) return;
+    if (guessLocale(navigator.language) === 'id' && w.locale !== 'id') {
+      this.snap = await api.newWorkspace();
+    }
+  }
+
+  /** Changes how the open workspace reads numbers and dates. */
+  async setLocale(locale: 'id' | 'en') {
+    if (locale === this.locale) return;
+    await this.run(null, () => api.setLocale(locale));
   }
 
   table(id: string): Table | undefined {

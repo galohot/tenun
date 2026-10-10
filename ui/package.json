@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build && vite build --mode viewer",
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
-    "test": "node --test tests/contrast.test.js",
+    "test": "node --experimental-strip-types --test tests/contrast.test.js tests/locale.test.js",
     "build:viewer": "vite build --mode viewer"
   },
   "devDependencies": {

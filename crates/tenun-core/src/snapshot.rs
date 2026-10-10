@@ -7,6 +7,7 @@
 use crate::engine::{Engine, QueryResult};
 use crate::query::{Agg, Dimension, Filter, FilterOp, Grain, Measure, SemanticQuery, Sort};
 use crate::shape;
+use crate::workspace::Locale;
 use chrono::{Datelike, Duration, Months, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -249,6 +250,7 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
         (None, None) => anyhow::bail!("the tile has no fields yet"),
     };
     let fs = own_excluded(tile, filters);
+    let loc = engine.locale();
     let ask = |dims: Vec<Dimension>, filters: Vec<Filter>, limit: Option<u32>| {
         engine.query(&SemanticQuery {
             measures: vec![m.clone()],
@@ -337,8 +339,8 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
         let prev = first_num(&ask(vec![], wfs, None)?);
         (
             prev,
-            span(start, max_day, true),
-            span(prev_start, prev_end, false),
+            span(start, max_day, true, loc),
+            span(prev_start, prev_end, false, loc),
         )
     } else {
         let prev = rows
@@ -347,15 +349,15 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
             .and_then(|(_, v)| *v);
         (
             prev,
-            period_name(start, g, false),
-            period_name(prev_start, g, false),
+            period_name(start, g, false, loc),
+            period_name(prev_start, g, false, loc),
         )
     };
     let bars = rows[rows.len().saturating_sub(12)..]
         .iter()
         .map(|(k, v)| Bar {
             label: parse_day(k)
-                .map(|d| period_name(d, g, false))
+                .map(|d| period_name(d, g, false, loc))
                 .unwrap_or_else(|| k.clone()),
             value: *v,
         })
@@ -406,55 +408,116 @@ pub fn add_grain(d: NaiveDate, g: Grain, n: i32) -> NaiveDate {
     }
 }
 
-const MONTHS: [&str; 12] = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
+const MONTHS: [[&str; 12]; 2] = [
+    [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ],
+    [
+        "Januari",
+        "Februari",
+        "Maret",
+        "April",
+        "Mei",
+        "Juni",
+        "Juli",
+        "Agustus",
+        "September",
+        "Oktober",
+        "November",
+        "Desember",
+    ],
 ];
 
-fn short(m: u32) -> &'static str {
-    &MONTHS[(m - 1) as usize][..3]
-}
+const SHORT_MONTHS: [[&str; 12]; 2] = [
+    [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ],
+    [
+        "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des",
+    ],
+];
 
-/// "September 2026", "Q3 2026", "2026", "Week of Sep 7, 2026", "Sep 7, 2026".
-pub fn period_name(d: NaiveDate, g: Grain, short_form: bool) -> String {
-    let (y, m, day) = (d.year(), d.month(), d.day());
-    match g {
-        Grain::Year => y.to_string(),
-        Grain::Quarter => format!("Q{} {y}", (m - 1) / 3 + 1),
-        Grain::Month if short_form => short(m).to_string(),
-        Grain::Month => format!("{} {y}", MONTHS[(m - 1) as usize]),
-        Grain::Week if short_form => format!("{} {day}", short(m)),
-        Grain::Week => format!("Week of {} {day}, {y}", short(m)),
-        Grain::Day => format!("{} {day}, {y}", short(m)),
-        Grain::MonthOfYear | Grain::Weekday | Grain::Hour => short(m).to_string(),
+fn table(loc: Locale) -> usize {
+    match loc {
+        Locale::En => 0,
+        Locale::Id => 1,
     }
 }
 
-/// "Oct 1–14" (same month) or "Sep 28 – Oct 4".
-fn span(a: NaiveDate, b: NaiveDate, with_year: bool) -> String {
-    let left = format!("{} {}", short(a.month()), a.day());
+fn short(m: u32, loc: Locale) -> &'static str {
+    SHORT_MONTHS[table(loc)][(m - 1) as usize]
+}
+
+/// A day and month in the order the locale reads them: "Oct 14" or "14 Okt".
+fn day_month(m: u32, day: u32, loc: Locale) -> String {
+    match loc {
+        Locale::En => format!("{} {day}", short(m, loc)),
+        Locale::Id => format!("{day} {}", short(m, loc)),
+    }
+}
+
+/// English: "September 2026", "Q3 2026", "2026", "Week of Sep 7, 2026", "Sep 7, 2026".
+/// Indonesian: "September 2026", "Q3 2026", "2026", "Minggu 7 Sep 2026", "7 Sep 2026".
+pub fn period_name(d: NaiveDate, g: Grain, short_form: bool, loc: Locale) -> String {
+    let (y, m, day) = (d.year(), d.month(), d.day());
+    let full_date = match loc {
+        Locale::En => format!("{} {day}, {y}", short(m, loc)),
+        Locale::Id => format!("{day} {} {y}", short(m, loc)),
+    };
+    match g {
+        Grain::Year => y.to_string(),
+        Grain::Quarter => format!("Q{} {y}", (m - 1) / 3 + 1),
+        Grain::Month if short_form => short(m, loc).to_string(),
+        Grain::Month => format!("{} {y}", MONTHS[table(loc)][(m - 1) as usize]),
+        Grain::Week if short_form => day_month(m, day, loc),
+        Grain::Week => match loc {
+            Locale::En => format!("Week of {full_date}"),
+            Locale::Id => format!("Minggu {full_date}"),
+        },
+        Grain::Day => full_date,
+        Grain::MonthOfYear | Grain::Weekday | Grain::Hour => short(m, loc).to_string(),
+    }
+}
+
+/// English "Oct 1–14" (same month) or "Sep 28 – Oct 4"; Indonesian "1–14 Okt" or "28 Sep – 4 Okt".
+fn span(a: NaiveDate, b: NaiveDate, with_year: bool, loc: Locale) -> String {
     let same = a.month() == b.month();
-    let right = if same {
-        b.day().to_string()
-    } else {
-        format!("{} {}", short(b.month()), b.day())
+    let sep = if same { "–" } else { " – " };
+    let year = match (with_year, loc) {
+        (false, _) => String::new(),
+        (true, Locale::En) => format!(", {}", b.year()),
+        (true, Locale::Id) => format!(" {}", b.year()),
     };
-    let year = if with_year {
-        format!(", {}", b.year())
-    } else {
-        String::new()
-    };
-    format!("{left}{}{right}{year}", if same { "–" } else { " – " })
+    match loc {
+        Locale::En => {
+            let left = day_month(a.month(), a.day(), loc);
+            let right = if same {
+                b.day().to_string()
+            } else {
+                day_month(b.month(), b.day(), loc)
+            };
+            format!("{left}{sep}{right}{year}")
+        }
+        Locale::Id => {
+            let left = if same {
+                a.day().to_string()
+            } else {
+                day_month(a.month(), a.day(), loc)
+            };
+            format!("{left}{sep}{}{year}", day_month(b.month(), b.day(), loc))
+        }
+    }
 }
 
 // ---- snapshots ---------------------------------------------------------------
@@ -570,6 +633,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         "version": 2,
         "title": dash.get("title").cloned().unwrap_or(json!("Dashboard")),
         "workspace": engine.workspace_name(),
+        "locale": engine.locale(),
         "generated": chrono_now(),
         "tables": tables,
         "tiles": raw_kept,
@@ -592,6 +656,9 @@ fn chrono_now() -> String {
 mod tests {
     use super::*;
 
+    const EN: Locale = Locale::En;
+    const ID: Locale = Locale::Id;
+
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
     }
@@ -599,24 +666,61 @@ mod tests {
     #[test]
     fn names_and_spans() {
         assert_eq!(
-            period_name(d("2026-09-01"), Grain::Month, false),
+            period_name(d("2026-09-01"), Grain::Month, false, EN),
             "September 2026"
         );
         assert_eq!(
-            period_name(d("2026-07-01"), Grain::Quarter, false),
+            period_name(d("2026-07-01"), Grain::Quarter, false, EN),
             "Q3 2026"
         );
         assert_eq!(
-            period_name(d("2026-09-07"), Grain::Week, false),
+            period_name(d("2026-09-07"), Grain::Week, false, EN),
             "Week of Sep 7, 2026"
         );
         assert_eq!(
-            span(d("2026-10-01"), d("2026-10-14"), true),
+            span(d("2026-10-01"), d("2026-10-14"), true, EN),
             "Oct 1–14, 2026"
         );
         assert_eq!(
-            span(d("2026-09-28"), d("2026-10-04"), false),
+            span(d("2026-09-28"), d("2026-10-04"), false, EN),
             "Sep 28 – Oct 4"
+        );
+    }
+
+    #[test]
+    fn indonesian_names_and_spans() {
+        assert_eq!(
+            period_name(d("2026-09-01"), Grain::Month, false, ID),
+            "September 2026"
+        );
+        assert_eq!(
+            period_name(d("2026-10-01"), Grain::Month, false, ID),
+            "Oktober 2026"
+        );
+        assert_eq!(period_name(d("2026-08-01"), Grain::Month, true, ID), "Agu");
+        assert_eq!(
+            period_name(d("2026-07-01"), Grain::Quarter, false, ID),
+            "Q3 2026"
+        );
+        assert_eq!(
+            period_name(d("2026-09-07"), Grain::Week, false, ID),
+            "Minggu 7 Sep 2026"
+        );
+        assert_eq!(
+            period_name(d("2026-10-14"), Grain::Day, false, ID),
+            "14 Okt 2026"
+        );
+        assert_eq!(
+            span(d("2026-10-01"), d("2026-10-14"), true, ID),
+            "1–14 Okt 2026"
+        );
+        assert_eq!(
+            span(d("2026-09-28"), d("2026-10-04"), false, ID),
+            "28 Sep – 4 Okt"
+        );
+        assert_eq!(
+            span(d("2026-09-28"), d("2026-10-04"), true, ID),
+            "28 Sep – 4 Okt 2026"
         );
     }
 

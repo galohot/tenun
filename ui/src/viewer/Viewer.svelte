@@ -5,7 +5,7 @@
   import type { Cell, Tile } from '../lib/api';
   import type { ExportPayload } from '../lib/export';
   import { key, readColors, type Colors } from '../lib/chart';
-  import { cell, dimLabel, OTHER_KEY, tileTitle } from '../lib/format';
+  import { cell, dateMedium, dateTimeMedium, dimLabel, OTHER_KEY, tileTitle, timeShort } from '../lib/format';
   import TileBody from '../components/dash/TileBody.svelte';
   import { partialNote } from '../lib/run';
 
@@ -70,7 +70,7 @@
     return `${name.charAt(0).toUpperCase() + name.slice(1)}: ${cell(v, dtype, d.grain)}`;
   }
 
-  const when = $derived(new Date(data.generated).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }));
+  const when = $derived(dateTimeMedium(data.generated));
 
   // Freshness: a published dashboard says how old it is, and says so loudly when an update is late.
   let clock = $state(Date.now());
@@ -86,8 +86,8 @@
     if (s < 5400) return `${Math.round(s / 60)} minutes ago`;
     const d = new Date(updatedAt);
     const today = new Date(clock).toDateString() === d.toDateString();
-    const t = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-    return today ? `at ${t} today` : `${d.toLocaleDateString(undefined, { dateStyle: 'medium' })} ${t}`;
+    const t = timeShort(d);
+    return today ? `at ${t} today` : `${dateMedium(d)} ${t}`;
   });
   // Late = more than twice the schedule (daily schedules get two extra hours of slack).
   const late = $derived(
@@ -120,7 +120,7 @@
 
   {#if late}
     <div class="late" role="status">
-      This dashboard has not updated since {new Date(updatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}.
+      This dashboard has not updated since {dateTimeMedium(new Date(updatedAt))}.
       It should update every {hosted!.every! >= 1440 ? 'day' : hosted!.every! >= 120 ? `${Math.round(hosted!.every! / 60)} hours` : 'hour'}.
       The numbers below may be out of date.
     </div>

@@ -7,7 +7,7 @@
 
 import type { EChartsCoreOption } from 'echarts/core';
 import { isPart, type Cell, type QueryResult, type Tile } from './api';
-import { cell, compact, full, measureLabel, OTHER_KEY, type Named } from './format';
+import { cell, getLocale, measureLabel, numberFormatter, OTHER_KEY, type Named } from './format';
 
 export interface Colors {
   surface: string;
@@ -160,6 +160,11 @@ export function buildOption({ res, tile, colors: c, selected, width, height, tab
   const dim0 = res.columns[0];
   const grain = tile.dims[0]?.grain;
   const isSel = (v: Cell) => !selected || selected.some((s) => key(s) === key(v));
+  // Reading the locale here makes the chart build again when it changes. Each value
+  // has its own format; split series all show the first value.
+  const loc = getLocale();
+  const perValue = bySeriesPerMeasure(res);
+  const fmtOf = (si: number) => numberFormatter(tile.formats?.[perValue ? si : 0], loc);
   // The engine's "Other" (a top N): a real group that can be clicked, drawn muted.
   const isOther = (v: Cell | undefined) => !!res.other && v === OTHER_KEY;
   const partialKey = res.partial?.key;
@@ -179,7 +184,7 @@ export function buildOption({ res, tile, colors: c, selected, width, height, tab
   const valueAxis = {
     type: 'value' as const,
     ...axisCommon(c),
-    axisLabel: { ...axisCommon(c).axisLabel, formatter: (v: number) => compact(v) },
+    axisLabel: { ...axisCommon(c).axisLabel, formatter: (v: number) => fmtOf(0).short(v) },
     splitNumber: 4,
   };
   const catAxis = {
@@ -208,6 +213,8 @@ export function buildOption({ res, tile, colors: c, selected, width, height, tab
   const built = series.map((s, si) => {
     const color = s.name === OTHER ? c.text2 : c.series[si % c.series.length];
     const top = si === series.length - 1;
+    const fmt = fmtOf(si);
+    const tooltip = { valueFormatter: (v: number | null) => (v === null ? '–' : fmt.tip(v)) };
     const data = s.values.map((v, ci) => ({
       value: v,
       itemStyle: isOther(categories[ci])
@@ -235,8 +242,9 @@ export function buildOption({ res, tile, colors: c, selected, width, height, tab
           position: horizontal ? 'right' : 'top',
           color: c.text2,
           fontSize: 11,
-          formatter: (p: { value: number }) => compact(p.value),
+          formatter: (p: { value: number }) => fmt.short(p.value),
         },
+        tooltip,
         emphasis: { focus: 'none' },
         data,
       }];
@@ -247,7 +255,7 @@ export function buildOption({ res, tile, colors: c, selected, width, height, tab
       show: categories.length > 2 && (!multi || nameEnds),
       color: c.text2,
       fontSize: 11,
-      formatter: multi ? () => s.name : (p: { value: number }) => compact(p.value),
+      formatter: multi ? () => s.name : (p: { value: number }) => fmt.short(p.value),
     };
     // An unfinished last period: the line stops one point early and a dashed
     // copy draws the final segment, so a half month never reads as a drop.
@@ -265,6 +273,7 @@ export function buildOption({ res, tile, colors: c, selected, width, height, tab
       areaStyle: tile.type === 'area' ? { color, opacity: multi ? 0.14 : 0.1 } : undefined,
       emphasis: { focus: 'none', scale: false },
       connectNulls: false,
+      tooltip,
       data: unfinished ? [...s.values.slice(0, -1), null] : s.values,
       endLabel: unfinished ? { show: false } : endLabel,
     };
@@ -315,7 +324,7 @@ export function buildOption({ res, tile, colors: c, selected, width, height, tab
         lineStyle: { color: c.text2, width: 1 },
         shadowStyle: { color: c.grid, opacity: 0.5 },
       },
-      valueFormatter: (v: number | null) => (v === null ? '–' : full(v)),
+      valueFormatter: (v: number | null) => (v === null ? '–' : fmtOf(0).tip(v)),
     },
     xAxis: horizontal ? quietValue : { ...catAxis, axisLabel: { ...catAxis.axisLabel, rotate: !temporal && longest > 10 && categories.length > 6 ? 30 : 0 } },
     yAxis: horizontal ? catAxis : quietValue,

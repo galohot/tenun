@@ -3,10 +3,11 @@
   // shows where the period sits among the last twelve.
   import type { KpiInfo, Tile } from '../../lib/api';
   import type { Colors } from '../../lib/chart';
-  import { compact, full } from '../../lib/format';
+  import { compact, pctChange, tip } from '../../lib/format';
 
   let { kpi, tile, colors }: { kpi: KpiInfo; tile: Tile; colors: Colors } = $props();
 
+  const fmt = $derived(tile.formats?.[0] ?? null);
   let w = $state(300);
   let h = $state(120);
 
@@ -19,7 +20,7 @@
     const up = kpi.delta > 0;
     return up === ((tile.better ?? 'up') === 'up') ? 'good' : 'bad';
   });
-  const pct = $derived(kpi.delta === null ? '' : `${Math.abs(kpi.delta * 100).toFixed(Math.abs(kpi.delta) < 0.1 ? 1 : 0)}%`);
+  const pct = $derived(kpi.delta === null ? '' : pctChange(kpi.delta));
 
   // Column chart geometry, in a 0..100 × 0..40 box.
   const bars = $derived.by(() => {
@@ -41,8 +42,8 @@
 
 <div class="kpi" class:with-bars={showBars} bind:clientWidth={w} bind:clientHeight={h}>
   <div class="text">
-    <div class="value" style:font-size="{size}px" title={kpi.value === null ? '' : full(kpi.value)}>
-      {kpi.value === null ? '–' : compact(kpi.value)}
+    <div class="value" style:font-size="{size}px" title={kpi.value === null ? '' : tip(kpi.value, fmt)}>
+      {kpi.value === null ? '–' : compact(kpi.value, fmt)}
     </div>
     <div class="period">{kpi.period}{kpi.partial ? ' · so far' : ''}</div>
     {#if kpi.versus}
@@ -69,7 +70,7 @@
           height={b.h}
           fill={b.last || (b.prev && kpi.versus) ? colors.series[0] : colors.grid}
           opacity={b.last ? 1 : b.prev && kpi.versus ? 0.35 : 1}>
-          <title>{b.label}: {b.value === null ? '–' : full(b.value)}</title>
+          <title>{b.label}: {b.value === null ? '–' : tip(b.value, fmt)}</title>
         </rect>
       {/each}
     </svg>

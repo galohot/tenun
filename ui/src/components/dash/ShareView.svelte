@@ -3,7 +3,7 @@
   // shares as a ranked list. Colours follow the category, never its rank.
   import type { Cell, QueryResult, Tile } from '../../lib/api';
   import { key, type Colors } from '../../lib/chart';
-  import { cell, compact, full, OTHER_KEY } from '../../lib/format';
+  import { cell, compact, full, OTHER_KEY, pctShare as pct, tip } from '../../lib/format';
 
   let {
     res,
@@ -13,6 +13,7 @@
     onpick,
   }: { res: QueryResult; tile: Tile; colors: Colors; selected: Cell[] | null; onpick?: (v: Cell) => void } = $props();
 
+  const fmt = $derived(tile.formats?.[0] ?? null);
   let h = $state(240);
 
   const items = $derived.by(() => {
@@ -52,7 +53,6 @@
   const rowH = $derived(Math.max(34, Math.min(48, (h - 64) / Math.max(items.list.length, 1))));
 
   const isSel = (v: Cell, folded: boolean) => !selected || (!folded && selected.some((s) => key(s) === key(v)));
-  const pct = (x: number) => (x >= 0.995 ? '100%' : x < 0.001 ? '<0.1%' : `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`);
 </script>
 
 <div class="share" bind:clientHeight={h}>
@@ -72,17 +72,17 @@
           style:height="{rowH}px"
           disabled={it.folded || !onpick}
           onclick={() => onpick?.(it.raw)}
-          title="{it.label}: {full(it.value)}">
+          title="{it.label}: {tip(it.value, fmt)}">
           <i style:background={it.color}></i>
           <span class="name">{it.label}</span>
           <span class="pct">{pct(it.share)}</span>
-          <span class="val">{compact(it.value)}</span>
+          <span class="val">{compact(it.value, fmt)}</span>
           <span class="track"><span style:width="{(it.share / items.top) * 100}%" style:background={it.color}></span></span>
         </button>
       </li>
     {/each}
   </ol>
-  <div class="total"><span>Total</span><span>{full(items.total)}</span></div>
+  <div class="total"><span>Total</span><span>{full(items.total, fmt)}</span></div>
 </div>
 
 <style>

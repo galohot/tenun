@@ -8,6 +8,45 @@ use std::path::{Path, PathBuf};
 
 pub const FILE_VERSION: u32 = 1;
 
+/// How numbers and dates read in this workspace. Only numbers and dates change;
+/// the app itself stays in English. A file without a locale reads as English.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Locale {
+    Id,
+    #[default]
+    En,
+}
+
+impl Locale {
+    /// `id` for a language tag that starts with "id" ("id", "id-ID", "id_ID.UTF-8"), else `en`.
+    pub fn guess(lang: &str) -> Self {
+        if lang.trim().to_ascii_lowercase().starts_with("id") {
+            Locale::Id
+        } else {
+            Locale::En
+        }
+    }
+
+    /// The language of the operating system, read from the usual environment variables.
+    pub fn from_env() -> Self {
+        for key in ["LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"] {
+            if let Ok(v) = std::env::var(key)
+                && !v.is_empty()
+            {
+                return Self::guess(&v);
+            }
+        }
+        Locale::En
+    }
+}
+
+/// A locale the file names but this version does not know reads as "not set".
+fn lenient_locale<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Locale>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(v.and_then(|v| serde_json::from_value(v).ok()))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Workspace {
     pub version: u32,
@@ -22,6 +61,13 @@ pub struct Workspace {
     /// Model-view node positions and other UI state worth keeping.
     #[serde(default)]
     pub layout: serde_json::Value,
+    /// Number and date format. Not written until it is set (V3-D11).
+    #[serde(
+        default,
+        deserialize_with = "lenient_locale",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub locale: Option<Locale>,
 }
 
 impl Default for Workspace {
@@ -33,6 +79,7 @@ impl Default for Workspace {
             relationships: Vec::new(),
             dashboards: Vec::new(),
             layout: serde_json::Value::Null,
+            locale: None,
         }
     }
 }
@@ -217,6 +264,33 @@ mod tests {
         assert!(!json.to_lowercase().contains("password"));
         let back: Workspace = serde_json::from_str(&json).unwrap();
         assert_eq!(ws, back);
+    }
+
+    #[test]
+    fn locale_is_optional_and_kept() {
+        // An old file has none, reads as English and is written back without one.
+        let old: Workspace = serde_json::from_str(r#"{"version":1,"name":"x"}"#).unwrap();
+        assert_eq!(old.locale, None);
+        assert!(!serde_json::to_string(&old).unwrap().contains("locale"));
+        let ws: Workspace =
+            serde_json::from_str(r#"{"version":1,"name":"x","locale":"id"}"#).unwrap();
+        assert_eq!(ws.locale, Some(Locale::Id));
+        let back: Workspace = serde_json::from_str(&serde_json::to_string(&ws).unwrap()).unwrap();
+        assert_eq!(back.locale, Some(Locale::Id));
+        // A value this version does not know is ignored, not an error.
+        let odd: Workspace =
+            serde_json::from_str(r#"{"version":1,"name":"x","locale":"fr"}"#).unwrap();
+        assert_eq!(odd.locale, None);
+    }
+
+    #[test]
+    fn language_tags_pick_a_locale() {
+        assert_eq!(Locale::guess("id"), Locale::Id);
+        assert_eq!(Locale::guess("id-ID"), Locale::Id);
+        assert_eq!(Locale::guess("id_ID.UTF-8"), Locale::Id);
+        assert_eq!(Locale::guess("en-US"), Locale::En);
+        assert_eq!(Locale::guess("C"), Locale::En);
+        assert_eq!(Locale::guess(""), Locale::En);
     }
 
     #[test]

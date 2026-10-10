@@ -8,6 +8,8 @@ export interface ExportPayload {
   version?: number;
   title: string;
   workspace: string;
+  /** How the author's numbers and dates read. Older files have none and read as English. */
+  locale?: 'id' | 'en';
   generated: string;
   tables: Pick<Table, 'id' | 'name' | 'label' | 'columns'>[];
   tiles: Dashboard['tiles'];
