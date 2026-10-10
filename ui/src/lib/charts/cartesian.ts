@@ -123,9 +123,8 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         name: s.name,
         stack: stacked ? 'total' : undefined,
         z: 3,
-        // With a comparison, the grey bar behind is the wide one and this bar sits inside it.
+        // With a comparison, the grey bar behind is the wide one and this bar sits inside it (centred on its own axis).
         barMaxWidth: hasCompare ? 12 : 24,
-        barGap: hasCompare ? '-100%' : undefined,
         barCategoryGap: '30%',
         itemStyle: {
           color,
@@ -205,8 +204,9 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
             type: 'bar',
             name: compareName,
             z: 2,
+            // Its own (hidden) category axis, so ECharts centres it on the tick, as it does the bar in front.
+            [horizontal ? 'yAxisIndex' : 'xAxisIndex']: 1,
             barMaxWidth: 22,
-            barGap: '-100%',
             barCategoryGap: '30%',
             itemStyle: { color: c.text2, opacity: 0.32, borderRadius: radius },
             emphasis: { focus: 'none' },
@@ -230,24 +230,34 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     );
   }
 
-  /** Both values and the change between them, for a chart with a comparison. */
-  const compareTip = (ps: { marker: string; seriesName: string; value: unknown; axisValueLabel: string }[]) => {
+  /**
+   * Both values and the change between them, for a chart with a comparison. The grey bars sit on their
+   * own axis, so the tooltip does not list them: the earlier value is read by position here.
+   */
+  const compareTip = (all: { marker: string; seriesName: string; value: unknown; dataIndex: number; axisValueLabel: string }[]) => {
     const num = (v: unknown) => (typeof v === 'number' ? v : null);
     const fmt = fmtOf(0);
-    const now = num(ps.find((p) => p.seriesName !== compareName)?.value);
-    const before = num(ps.find((p) => p.seriesName === compareName)?.value);
+    // The value first and the comparison last, as the legend names them.
+    const ps = all.filter((p) => p.seriesName !== compareName);
+    const now = num(ps[0]?.value);
+    const before = earlierValues && ps[0] ? earlierValues[ps[0].dataIndex] : null;
     // A relative change of a share or a rank would read oddly, so those show the two values only.
     const change =
       now !== null && before !== null && before !== 0 && !unitOf(0)
         ? `<br/>Change <b>${now > before ? '+' : now < before ? '−' : ''}${pctChange((now - before) / Math.abs(before))}</b>`
         : '';
+    const dot = `<span style="display:inline-block;margin-right:4px;border-radius:10px;width:10px;height:10px;background-color:${c.text2}"></span>`;
     return (
-      `${esc(ps[0]?.axisValueLabel ?? '')}<br/>` +
+      `${esc(all[0]?.axisValueLabel ?? '')}<br/>` +
       ps.map((p) => `${p.marker} ${esc(p.seriesName)} <b>${num(p.value) === null ? '–' : esc(fmt.tip(num(p.value) as number))}</b>`).join('<br/>') +
+      `<br/>${dot} ${esc(compareName)} <b>${before === null ? '–' : esc(fmt.tip(before))}</b>` +
       change
     );
   };
 
+  // The category axis, and a hidden twin of it for the grey comparison bars.
+  const withBehind = <T extends object>(axis: T) =>
+    hasCompare && tile.type === 'bar' ? [axis, { ...axis, show: false, axisPointer: { show: false } }] : axis;
   const longest = Math.max(0, ...categories.map((x) => label(x).length));
   const quietValue = labelled ? { ...valueAxis, axisLabel: { show: false }, splitLine: { show: false } } : valueAxis;
   const option = {
@@ -298,8 +308,8 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
           ? { formatter: compareTip }
           : { valueFormatter: (v: number | null) => (v === null ? '–' : fmtOf(0).tip(v)) }),
     },
-    xAxis: horizontal ? quietValue : { ...catAxis, axisLabel: { ...catAxis.axisLabel, rotate: !temporal && longest > 10 && categories.length > 6 ? 30 : 0 } },
-    yAxis: horizontal ? catAxis : quietValue,
+    xAxis: horizontal ? quietValue : withBehind({ ...catAxis, axisLabel: { ...catAxis.axisLabel, rotate: !temporal && longest > 10 && categories.length > 6 ? 30 : 0 } }),
+    yAxis: horizontal ? withBehind(catAxis) : quietValue,
     series: built,
   };
   return { option, categories: categories.map((v) => (v === FOLDED && !res.other ? undefined : v)), note: sizeNote(res) };

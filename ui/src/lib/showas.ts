@@ -10,6 +10,9 @@ export type Dim0Kind = 'date' | 'part' | 'other' | 'none';
 /** The tile types that can show a value another way. A number tile has its own comparison. */
 export const SHOW_AS_TYPES: readonly string[] = ['bar', 'line', 'area', 'table', 'pivot'];
 
+/** The ways that read the points in time order. The engine ignores them unless the first field is a date or a date part. */
+const ORDERED: readonly ShowAs[] = ['running', 'moving_3', 'moving_7', 'moving_12', 'change', 'pct_change'];
+
 /** The choices in the Inspector. */
 export const SHOW_AS_LABELS: Record<ShowAs, string> = {
   value: 'Value',
@@ -63,7 +66,7 @@ export function showAsOptions(tile: Pick<Tile, 'type' | 'dims' | 'measures' | 'c
   if (!SHOW_AS_TYPES.includes(tile.type) || !groupCount(tile)) return [];
   const out: ShowAs[] = ['value', 'pct_total'];
   if (groupCount(tile) > 1) out.push('pct_group');
-  if (dim0 === 'date' || dim0 === 'part') out.push('running', 'moving_3', 'moving_7', 'moving_12', 'change', 'pct_change');
+  if (dim0 === 'date' || dim0 === 'part') out.push(...ORDERED);
   out.push('rank');
   if (dim0 === 'date') out.push('ytd');
   return out;
@@ -81,6 +84,7 @@ export function effectiveShowAs(
   const how = tile.showAs?.[i];
   if (!how || how === 'value' || !SHOW_AS_TYPES.includes(tile.type) || !groupCount(tile)) return null;
   if (how === 'ytd' && dim0 !== 'date') return null;
+  if (ORDERED.includes(how) && dim0 !== 'date' && dim0 !== 'part') return null;
   if (how === 'pct_group' && groupCount(tile) < 2) return 'pct_total';
   return how;
 }

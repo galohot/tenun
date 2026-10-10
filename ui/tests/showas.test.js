@@ -51,6 +51,14 @@ test('what the engine really does: year to date needs a date, a group share need
   assert.equal(effectiveShowAs({ ...group, showAs: ['value'] }, 0, 'other'), null);
 });
 
+test('what the engine really does: the ways that read in order need a date or a date part', () => {
+  const run = { type: 'bar', dims: [dim], measures: [sum], showAs: ['running'] };
+  assert.equal(effectiveShowAs(run, 0, 'other'), null);
+  assert.equal(effectiveShowAs(run, 0, 'date'), 'running');
+  assert.equal(effectiveShowAs(run, 0, 'part'), 'running');
+  assert.equal(effectiveShowAs({ ...run, showAs: ['rank'] }, 0, 'other'), 'rank');
+});
+
 test('the kind of the first group-by field', () => {
   assert.equal(dim0Kind('date', 'month'), 'date');
   assert.equal(dim0Kind('datetime', 'weekday'), 'part');

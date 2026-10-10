@@ -123,7 +123,7 @@
             class:other={!!res.other && r[0] === OTHER_KEY}
             onclick={() => tile.dims.length && onpick?.(r[0])}>
             {#each r as v, i}
-              <td class:num={res.columns[i].dtype === 'number'}>{cell(v, res.columns[i].dtype, tile.dims[i]?.grain, false, formatOf(i), res.columns[i].unit)}</td>
+              <td class:num={res.columns[i].dtype === 'number'}>{v === null && res.columns[i].role === 'measure' ? '–' : cell(v, res.columns[i].dtype, tile.dims[i]?.grain, false, formatOf(i), res.columns[i].unit)}</td>
             {/each}
           </tr>
         {/each}

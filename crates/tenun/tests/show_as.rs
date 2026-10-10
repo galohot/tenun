@@ -258,6 +258,50 @@ fn year_to_date_starts_over_in_january() {
 }
 
 #[test]
+fn ordered_ways_follow_time_whatever_the_sort() {
+    let e = engine("sorted-running");
+    for sort in [
+        json!({ "by": "label", "desc": true }),
+        json!({ "by": "value", "desc": false }),
+    ] {
+        let t = tile(
+            "bar",
+            amount("sum"),
+            month(),
+            json!({ "showAs": ["running"], "sort": sort }),
+        );
+        let r = run(&e, &t);
+        // Each month keeps its own running total, wherever its row is.
+        near(value_of(&r, "2025-01-01"), 10.0);
+        near(value_of(&r, "2025-02-01"), 60.0);
+        near(value_of(&r, "2026-03-01"), 450.0);
+    }
+    let t = tile(
+        "bar",
+        amount("sum"),
+        month(),
+        json!({ "showAs": ["change"], "sort": { "by": "label", "desc": true } }),
+    );
+    let r = run(&e, &t);
+    near(value_of(&r, "2025-02-01"), 40.0);
+    assert_eq!(value_of(&r, "2025-01-01"), None);
+}
+
+#[test]
+fn ordered_ways_need_a_date_first() {
+    let e = engine("plain-running");
+    for how in ["running", "moving_3", "change", "pct_change"] {
+        let r = run(&e, &tile("bar", amount("sum"), cat(), show(how)));
+        assert_eq!(r.columns[1].name, "amount", "{how}");
+        near(value_of(&r, "Tea"), 220.0);
+    }
+    // A date part is a place in a cycle, so it reads in order.
+    let part = json!([{ "table": "o/orders", "column": "date", "grain": "month_of_year" }]);
+    let r = run(&e, &tile("bar", amount("sum"), part, show("running")));
+    assert_eq!(r.columns[1].name, "amount (running total)");
+}
+
+#[test]
 fn moving_average_waits_for_a_full_window() {
     let e = engine("moving");
     let r = run(&e, &tile("line", amount("sum"), month(), show("moving_3")));

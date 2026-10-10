@@ -444,6 +444,20 @@ impl ShowAs {
         }
     }
 
+    /// The ways that read the points in time order.
+    fn needs_order(self) -> bool {
+        matches!(
+            self,
+            ShowAs::Running
+                | ShowAs::Moving3
+                | ShowAs::Moving7
+                | ShowAs::Moving12
+                | ShowAs::Change
+                | ShowAs::PctChange
+                | ShowAs::Ytd
+        )
+    }
+
     /// The window of a moving average.
     fn window(self) -> Option<usize> {
         match self {
@@ -461,9 +475,10 @@ fn year_of(v: &Value) -> Option<i32> {
 }
 
 /// Shows each value the way `tile.showAs` asks. It runs on the rows the tile shows (after the gaps
-/// are filled and the top N is cut, "Other" included). Rows keep the order the engine gave: the
-/// first group-by column in order (time ascending for dates), and with a split, each group of the
-/// other columns is its own sequence. A null stays null. The column name gains its words ("amount
+/// are filled and the top N is cut, "Other" included). Rows keep the order they are in. A way that
+/// reads in order (running, moving, change, year to date) goes through the points by the first
+/// group-by column ascending, whatever the sort of the tile, and writes each result back to its
+/// own row. With a split, each group of the other columns is its own sequence. A null stays null. The column name gains its words ("amount
 /// (% of total)") and a share or a rank gets a `unit`. Number tiles and charts that do not read in
 /// order (scatter, waterfall, share) are left alone.
 pub fn show_as(tile: &Tile, q: &SemanticQuery, engine: &Engine, res: &mut QueryResult) {
@@ -477,7 +492,9 @@ pub fn show_as(tile: &Tile, q: &SemanticQuery, engine: &Engine, res: &mut QueryR
     let (Some(d0), nd) = (q.dimensions.first(), q.dimensions.len()) else {
         return;
     };
-    let dated = matches!(classify(engine, d0), Dim0::Period(_) | Dim0::Time);
+    let first = classify(engine, d0);
+    let dated = matches!(first, Dim0::Period(_) | Dim0::Time);
+    let ordered = dated || matches!(first, Dim0::Part(_));
     for j in 0..q.measures.len() {
         let Some(how) = list.get(j).copied().flatten() else {
             continue;
@@ -485,8 +502,9 @@ pub fn show_as(tile: &Tile, q: &SemanticQuery, engine: &Engine, res: &mut QueryR
         if matches!(how, ShowAs::Value | ShowAs::Unknown) {
             continue;
         }
-        // Year to date needs a date to read the year from.
-        if how == ShowAs::Ytd && !dated {
+        // Year to date needs a date to read the year from. The other ways that read in order
+        // need a date or a date part first, or the order is only the order of the rows.
+        if (how == ShowAs::Ytd && !dated) || (how.needs_order() && !ordered) {
             continue;
         }
         let col = nd + j;
@@ -522,7 +540,11 @@ fn shape_column(rows: &mut [Vec<Value>], nd: usize, col: usize, how: ShowAs) {
             let mut out = vec![None; vals.len()];
             let groups = ids.iter().copied().max().map_or(0, |m| m + 1);
             for g in 0..groups {
-                let at: Vec<usize> = (0..vals.len()).filter(|&i| ids[i] == g).collect();
+                let mut at: Vec<usize> = (0..vals.len()).filter(|&i| ids[i] == g).collect();
+                if how.needs_order() {
+                    // Time order, not the order the tile shows (a stable sort keeps ties).
+                    at.sort_by(|&a, &b| cmp_key(&rows[a][0], &rows[b][0]));
+                }
                 let v: Vec<Option<f64>> = at.iter().map(|&i| vals[i]).collect();
                 let years: Vec<Option<i32>> = at.iter().map(|&i| year_of(&rows[i][0])).collect();
                 for (k, x) in sequence(how, &v, &years).into_iter().enumerate() {
@@ -537,6 +559,14 @@ fn shape_column(rows: &mut [Vec<Value>], nd: usize, col: usize, how: ShowAs) {
             Some(x) if x.is_finite() => json!(x),
             _ => Value::Null,
         };
+    }
+}
+
+/// Orders the first-column values of a time chart: dates (ISO text) and date parts (numbers).
+fn cmp_key(a: &Value, b: &Value) -> std::cmp::Ordering {
+    match (a.as_f64(), b.as_f64()) {
+        (Some(x), Some(y)) => x.total_cmp(&y),
+        _ => a.as_str().cmp(&b.as_str()),
     }
 }
 

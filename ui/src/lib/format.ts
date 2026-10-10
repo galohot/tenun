@@ -185,15 +185,19 @@ export function measureLabel(m: Measure, tables: Named[], how?: ShowAs | null): 
   return how && how !== 'value' ? `${base} (${SHOW_AS_WORDS[how]})` : base;
 }
 
-/** What a ratio divides by, in words: "order" for a count of rows, else the name of the value. */
-function perWord(p: NonNullable<Measure['per']>, tables: Named[]): string {
+/**
+ * What a ratio divides by, in words: "order" for a count of rows, else the name of the value. A count
+ * of rows of another table counts the joined rows of the first table, so it reads "row" (V3-D36).
+ */
+function perWord(p: NonNullable<Measure['per']>, top: string, tables: Named[]): string {
+  if (p.column === null && p.table !== top) return 'row';
   if (p.column === null) return singular((tables.find((x) => x.id === p.table)?.label ?? 'row').toLowerCase());
   return plainLabel({ table: p.table, column: p.column, agg: p.agg }, tables).toLowerCase();
 }
 
 function ratioLabel(m: Measure, tables: Named[]): string {
   const top = plainLabel(m, tables);
-  return m.per ? `${top} per ${perWord(m.per, tables)}` : top;
+  return m.per ? `${top} per ${perWord(m.per, m.table, tables)}` : top;
 }
 
 function plainLabel(m: Measure, tables: Named[]): string {
