@@ -59,7 +59,12 @@
   function toggle(v: Cell) {
     if (onpick) return onpick(v);
     if (single) return save({ values: isOn(v) ? [] : [v] });
-    save({ values: isOn(v) ? chosen.filter((c) => keyOf(c) !== keyOf(v)) : [...chosen, v] });
+    // Every box reads as ticked when nothing is picked, so unticking one keeps all the others.
+    if (all && !capped) return save({ values: options.map((o) => o.value).filter((c) => keyOf(c) !== keyOf(v)) });
+    const next = isOn(v) ? chosen.filter((c) => keyOf(c) !== keyOf(v)) : [...chosen, v];
+    // Ticking the last one back is the same as no filter.
+    if (!capped && options.every((o) => next.some((c) => keyOf(c) === keyOf(o.value)))) return clear();
+    save({ values: next });
   }
 
   const summary = $derived(
@@ -126,7 +131,7 @@
     </label>
     {#each shown as o (keyOf(o.value))}
       <label class="opt">
-        <input type={single ? 'radio' : 'checkbox'} checked={isOn(o.value)} disabled={!editable && !onpick} onchange={() => toggle(o.value)} />
+        <input type={single ? 'radio' : 'checkbox'} checked={isOn(o.value) || (all && !single)} disabled={!editable && !onpick} onchange={() => toggle(o.value)} />
         <span class="lab" class:blank={o.value === null || o.value === ''}>{o.value === '' ? '(blank)' : cell(o.value, dtype, null)}</span>
         <span class="n">{o.count ? o.count.toLocaleString() : '–'}</span>
       </label>
@@ -252,7 +257,7 @@
   .none { margin: 0; padding: 6px 0; color: var(--text-2); font-size: 12px; }
   .list, .range, .dates { height: 100%; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
   /* The tile's own buttons float over its top right corner. */
-  .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none; min-height: 22px; padding-right: 30px; }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none; min-height: 22px; padding-right: 60px; }
   .name { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); }
   .link { border: 0; background: none; padding: 0; font-size: 12px; color: var(--accent-text); cursor: pointer; }
   .link:hover { text-decoration: underline; }
