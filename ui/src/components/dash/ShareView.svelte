@@ -11,7 +11,15 @@
     colors,
     selected,
     onpick,
-  }: { res: QueryResult; tile: Tile; colors: Colors; selected: Cell[] | null; onpick?: (v: Cell) => void } = $props();
+    oncontext,
+  }: {
+    res: QueryResult;
+    tile: Tile;
+    colors: Colors;
+    selected: Cell[] | null;
+    onpick?: (v: Cell) => void;
+    oncontext?: (v: Cell, e: MouseEvent) => void;
+  } = $props();
 
   const fmt = $derived(tile.formats?.[0] ?? null);
   let h = $state(240);
@@ -72,6 +80,11 @@
           style:height="{rowH}px"
           disabled={it.folded || !onpick}
           onclick={() => onpick?.(it.raw)}
+          oncontextmenu={(e) => {
+            if (!oncontext || it.folded) return;
+            e.preventDefault();
+            oncontext(it.raw, e);
+          }}
           title="{it.label}: {tip(it.value, fmt)}">
           <i style:background={it.color}></i>
           <span class="name">{it.label}</span>

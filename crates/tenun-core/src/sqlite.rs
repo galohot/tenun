@@ -2,7 +2,7 @@
 //! needed and the file works offline. Each table is copied into memory, like an
 //! Excel sheet, and copied again when the file changes.
 
-use crate::excel::{Cell, Sheet, build_sheet};
+use crate::excel::{Cell, Sheet, build_sheet_with};
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
@@ -59,7 +59,7 @@ pub fn read_database(path: &Path) -> anyhow::Result<Vec<Sheet>> {
             }
             grid.push(r);
         }
-        let mut sheet = match build_sheet(&name, grid) {
+        let mut sheet = match build_sheet_with(&name, grid, None, false) {
             Some(s) => s,
             None => continue,
         };

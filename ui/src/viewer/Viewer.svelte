@@ -6,9 +6,13 @@
   import type { ExportPayload } from '../lib/export';
   import { key, readColors, type Colors } from '../lib/chart';
   import { cell, dateMedium, dateTimeMedium, dimLabel, OTHER_KEY, tileTitle, timeShort } from '../lib/format';
+  import Icon from '../components/Icon.svelte';
+  import FocusSheet from '../components/dash/FocusSheet.svelte';
   import TileBody from '../components/dash/TileBody.svelte';
+  import { filterText } from '../lib/filterText';
   import { partialNote } from '../lib/run';
   import { EMPTY_RESULT, isStatic } from '../lib/tiles';
+  import { phoneLayout, PHONE_MAX, readingOrder } from '../lib/layout';
 
   let {
     data,
@@ -24,8 +28,12 @@
   let dark = $state(matchMedia('(prefers-color-scheme: dark)').matches);
   let colors = $state<Colors | null>(null);
   let width = $state(1000);
+  /** The window's width: below 700 px the dashboard is one column. */
+  let screen = $state(innerWidth);
   /** `col` is a click on a pivot column header. */
   let pick = $state<{ tile: string; value: Cell; col?: boolean; stage?: number } | null>(null);
+  /** The tile shown large. */
+  let focusId = $state<string | null>(null);
   /** How the engine names the export's stored result for a click on a pivot column header, or on a Sankey node of a stage. */
   const COL_PREFIX = '\u0001col:';
   const STAGE_PREFIX = '\u0002stage:';
@@ -40,32 +48,32 @@
     requestAnimationFrame(() => (colors = readColors()));
   });
 
-  const narrow = $derived(width < 720);
+  const narrow = $derived(screen < PHONE_MAX);
   const colW = $derived((width - GAP * 11) / 12);
 
-  const layout = $derived.by(() => {
-    if (!narrow) return data.tiles.map((t) => ({ t, x: t.x * (colW + GAP), y: t.y * (ROW + GAP), w: t.w * colW + (t.w - 1) * GAP, h: t.h * ROW + (t.h - 1) * GAP }));
-    let y = 0;
-    return [...data.tiles]
-      .sort((a, b) => a.y - b.y || a.x - b.x)
-      .map((t) => {
-        const rows =
-          t.type === 'kpi'
-            ? 2
-            : t.type === 'text'
-              ? Math.max(1, t.h)
-              : t.type === 'calendar'
-                ? 3
-                : ['pivot', 'heatmap', 'funnel', 'sankey', 'cohort', 'gantt', 'compare'].includes(t.type)
-                  ? 5
-                  : 4;
-        const h = rows * ROW;
-        const r = { t, x: 0, y, w: width, h };
-        y += h + GAP;
-        return r;
-      });
-  });
+  // In reading order, so Tab goes through the tiles the way a person reads them.
+  const layout = $derived(
+    narrow
+      ? phoneLayout(data.tiles, width, ROW, GAP)
+      : readingOrder(data.tiles).map((t) => ({ t, x: t.x * (colW + GAP), y: t.y * (ROW + GAP), w: t.w * colW + (t.w - 1) * GAP, h: t.h * ROW + (t.h - 1) * GAP })),
+  );
   const height = $derived(Math.max(0, ...layout.map((l) => l.y + l.h)));
+
+  /** Arrow keys go to the next or the previous tile in reading order. Enter opens the tile large. */
+  function onkey(e: KeyboardEvent, t: Tile) {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (resultFor(t).res && !isStatic(t) && t.type !== 'filter') focusId = t.id;
+      return;
+    }
+    const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const order = readingOrder(data.tiles);
+    const next = order[order.findIndex((x) => x.id === t.id) + step];
+    if (next) document.querySelector<HTMLElement>(`[data-tile="${CSS.escape(next.id)}"]`)?.focus();
+  }
 
   function resultFor(t: Tile) {
     if (!pick || pick.tile === t.id) return { res: data.base[t.id], offline: false };
@@ -131,6 +139,8 @@
   );
 </script>
 
+<svelte:window bind:innerWidth={screen} />
+
 <div class="page">
   <header>
     <div>
@@ -142,6 +152,9 @@
       {/if}
     </div>
     <div class="chips">
+      {#each data.saved ?? [] as f}
+        <span class="chip static" title="Saved with the dashboard"><Icon name="pin" size={12} /> {filterText(f, data.tables)}</span>
+      {/each}
       {#each data.filters as f}
         <span class="chip static">{label(f.fromTile, f.op === 'not_in' ? OTHER_KEY : f.values[0], isColFilter(f), stageOf(f))}</span>
       {/each}
@@ -166,17 +179,32 @@
     {#if colors}
       {#each layout as l (l.t.id)}
         {@const r = resultFor(l.t)}
-        <article class="tile" style:transform="translate({l.x}px, {l.y}px)" style:width="{l.w}px" style:height="{l.h}px">
-          {#if (data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables)) !== ''}
-            <h3>{data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables)}</h3>
+        {@const name = data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables)}
+        <!-- A tile is a stop for the keyboard: arrows go to the next and the previous tile, Enter opens it large. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+        <article
+          class="tile"
+          tabindex="0"
+          data-tile={l.t.id}
+          aria-label={name || 'Tile'}
+          onkeydown={(e) => onkey(e, l.t)}
+          style:transform="translate({l.x}px, {l.y}px)"
+          style:width="{l.w}px"
+          style:height="{l.h}px">
+          {#if name !== ''}
+            <h3>{name}</h3>
           {/if}
-          <div class="body" class:bare={isStatic(l.t) && !l.t.title}>
+          {#if r.res && !isStatic(l.t) && l.t.type !== 'filter'}
+            <button class="expand" title="Open large" aria-label="Open large" onclick={() => (focusId = l.t.id)}><Icon name="expand" size={14} /></button>
+          {/if}
+          <div class="body" class:bare={(isStatic(l.t) || l.t.type === 'filter') && !l.t.title}>
             {#if r.res || isStatic(l.t)}
               <TileBody
                 tile={l.t}
                 res={r.res ?? EMPTY_RESULT}
                 {colors}
                 tables={data.tables}
+                title={name}
                 selected={pick?.tile === l.t.id && !pick.col ? [pick.value] : null}
                 selectedCol={pick?.tile === l.t.id && pick.col ? [pick.value] : null}
                 selectedStage={pick?.tile === l.t.id && !pick.col ? (pick.stage ?? null) : null}
@@ -187,11 +215,25 @@
           {#if r.res && l.t.type !== 'kpi' && partialNote(r.res, l.t.dims[0]?.grain)}
             <p class="note">{partialNote(r.res, l.t.dims[0]?.grain)}</p>
           {/if}
-          {#if r.offline && !isStatic(l.t)}<p class="note">Not filtered in this file</p>{/if}
+          {#if r.offline && !isStatic(l.t) && l.t.type !== 'filter'}<p class="note">Not filtered in this file</p>{/if}
         </article>
       {/each}
     {/if}
   </div>
+
+  {#if focusId && colors}
+    {@const ft = data.tiles.find((t) => t.id === focusId)}
+    {@const fr = ft ? resultFor(ft).res : undefined}
+    {#if ft && fr}
+      <FocusSheet
+        tile={ft}
+        res={fr}
+        {colors}
+        title={data.titles?.[ft.id] ?? tileTitle(ft, data.tables)}
+        tables={data.tables}
+        onclose={() => (focusId = null)} />
+    {/if}
+  {/if}
 
   <footer>
     {#if hosted}
@@ -205,6 +247,12 @@
 <style>
   :global(body) { background: var(--window); }
   .page { max-width: 1440px; margin: 0 auto; padding: 24px; }
+  @media (max-width: 699px) {
+    .page { padding: 12px; }
+    h1 { font-size: 19px; }
+    /* There is no pointer to hover with: the button to open a tile large stays in view. */
+    .expand { opacity: 1; }
+  }
   header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
   h1 { font-size: 22px; }
   header p { margin: 4px 0 0; color: var(--text-2); font-size: 12px; }
@@ -221,7 +269,7 @@
     font-size: 12px;
     font-weight: 500;
   }
-  .chip.static { padding-right: 10px; background: var(--inset); color: var(--text-2); }
+  .chip.static { display: inline-flex; gap: 5px; padding-right: 10px; background: var(--inset); color: var(--text-2); }
   .chip button { border: 0; background: none; color: inherit; font-size: 15px; line-height: 1; padding: 0 6px; cursor: pointer; }
   .grid { position: relative; }
   .tile {
@@ -236,6 +284,26 @@
     overflow: hidden;
   }
   h3 { padding: 10px 14px 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .expand {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text-2);
+    opacity: 0;
+    cursor: pointer;
+  }
+  .tile:hover .expand, .tile:focus-within .expand, .expand:focus-visible { opacity: 1; }
+  .tile:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
+  .expand:hover { color: var(--text); background: var(--hover); }
   .body { flex: 1; min-height: 0; padding: 6px 14px 10px; }
   .body.bare { padding-top: 12px; }
   .note { margin: 0; padding: 0 14px 8px; font-size: 11px; color: var(--text-2); }

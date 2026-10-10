@@ -14,7 +14,7 @@
     onpick,
     onclose,
   }: {
-    mode: 'files' | 'open' | 'save';
+    mode: 'files' | 'folder' | 'open' | 'save';
     suggestedName?: string;
     onpick: (paths: string[]) => void;
     onclose: () => void;
@@ -43,7 +43,13 @@
   }
 
   const visible = $derived(
-    (listing?.entries ?? []).filter((e) => e.dir || (mode === 'files' ? e.supported && !e.name.endsWith('.tenun') : e.name.endsWith('.tenun'))),
+    (listing?.entries ?? []).filter(
+      (e) => e.dir || (mode !== 'folder' && (mode === 'files' ? e.supported && !e.name.endsWith('.tenun') : e.name.endsWith('.tenun'))),
+    ),
+  );
+  /** Folder mode: the CSV and Excel files in the folder that is open. */
+  const dataFiles = $derived(
+    (listing?.entries ?? []).filter((e) => !e.dir && /\.(csv|tsv|txt|xlsx|xlsm|xlsb|xls|ods)$/i.test(e.name)).length,
   );
 
   function toggle(path: string) {
@@ -56,12 +62,14 @@
       const sep = listing!.path.includes('\\') ? '\\' : '/';
       const n = name.trim() || 'Untitled';
       onpick([`${listing!.path.replace(/[\\/]$/, '')}${sep}${n.endsWith('.tenun') ? n : n + '.tenun'}`]);
+    } else if (mode === 'folder') {
+      if (listing) onpick([listing.path]);
     } else if (chosen.length) {
       onpick(chosen);
     }
   }
 
-  const title = $derived(mode === 'files' ? 'Choose data files' : mode === 'open' ? 'Open a workspace' : 'Save workspace');
+  const title = $derived(mode === 'files' ? 'Choose data files' : mode === 'folder' ? 'Choose a folder' : mode === 'open' ? 'Open a workspace' : 'Save workspace');
 </script>
 
 <Modal {title} {onclose} width={640}>
@@ -98,7 +106,9 @@
         </button>
       {:else}
         <p class="none">
-          {mode === 'files'
+          {mode === 'folder'
+            ? 'There are no folders inside this one.'
+            : mode === 'files'
             ? 'No Excel, CSV, Parquet, SQLite or DuckDB files here.'
             : mode === 'open'
               ? 'No .tenun files here.'
@@ -114,11 +124,17 @@
         <input class="field" bind:value={name} onkeydown={(e) => e.key === 'Enter' && confirm()} />
       </label>
     {:else}
-      <span class="hint">{mode === 'files' ? 'Click to select one or more files.' : ''}</span>
+      <span class="hint">
+        {mode === 'files'
+          ? 'Click to select one or more files.'
+          : mode === 'folder'
+            ? `Open the folder, then press Use this folder. It holds ${dataFiles} CSV or Excel ${dataFiles === 1 ? 'file' : 'files'}.`
+            : ''}
+      </span>
     {/if}
     <button class="btn" onclick={onclose}>Cancel</button>
-    <button class="btn primary" disabled={mode !== 'save' && !chosen.length} onclick={confirm}>
-      {mode === 'files' ? (chosen.length > 1 ? `Add ${chosen.length} files` : 'Add') : mode === 'open' ? 'Open' : 'Save'}
+    <button class="btn primary" disabled={mode === 'folder' ? !listing : mode !== 'save' && !chosen.length} onclick={confirm}>
+      {mode === 'files' ? (chosen.length > 1 ? `Add ${chosen.length} files` : 'Add') : mode === 'folder' ? 'Use this folder' : mode === 'open' ? 'Open' : 'Save'}
     </button>
   {/snippet}
 </Modal>

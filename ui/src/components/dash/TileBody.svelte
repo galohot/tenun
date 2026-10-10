@@ -1,9 +1,10 @@
 <script lang="ts">
   // Draws one tile from its result. Used by the app and by exported files.
-  import type { Cell, QueryResult, Tile } from '../../lib/api';
+  import type { Cell, QueryResult, Tile, TileFilter } from '../../lib/api';
   import { buildOption, CHART_TYPES, type Colors } from '../../lib/chart';
   import { barScale, barSpan, barStyle, goodBad } from '../../lib/cells';
-  import { cell, columnHeads, full, OTHER_KEY, resultDim0, type Named } from '../../lib/format';
+  import { cell, columnHeads, full, numberFormatter, OTHER_KEY, resultDim0, type Named } from '../../lib/format';
+  import { chartSummary } from '../../lib/summary';
   import { sparkKey, sparkPath, SPARK_H, SPARK_W } from '../../lib/charts/spark';
   import { effectiveShowAs } from '../../lib/showas';
   import { isRepeated } from '../../lib/tiles';
@@ -11,6 +12,7 @@
   import CalendarView from './CalendarView.svelte';
   import ChartView from './ChartView.svelte';
   import CohortView from './CohortView.svelte';
+  import FilterView from './FilterView.svelte';
   import FunnelView from './FunnelView.svelte';
   import HeatmapView from './HeatmapView.svelte';
   import ImageView from './ImageView.svelte';
@@ -29,8 +31,11 @@
     selectedStage = null,
     editing = false,
     tables = [],
+    title = '',
     onpick,
     onpickcol,
+    oncontext,
+    onfilter,
     onwidths,
     onlayout,
   }: {
@@ -46,9 +51,15 @@
     editing?: boolean;
     /** For naming the values of a chart with several. */
     tables?: Named[];
+    /** The tile's name, for the sentence a screen reader gets for a chart. */
+    title?: string;
     onpick?: (value: Cell, stage?: number) => void;
     /** Pivot: a click on a column header. */
     onpickcol?: (value: Cell) => void;
+    /** A right-click on a mark: the value under the pointer. */
+    oncontext?: (value: Cell, e: MouseEvent) => void;
+    /** Filter tile, in the app: the selection changed. */
+    onfilter?: (f: TileFilter) => void;
     /** Table: the column widths after a drag on a heading, or undefined after a double click (back to automatic). */
     onwidths?: (widths: number[] | undefined) => void;
     /** Advanced: the note about values of very different sizes offers separate panels. Not set: the note has no link. */
@@ -209,6 +220,15 @@
     live = null;
   });
   const note = $derived(built?.note ?? null);
+  // What a screen reader gets for a chart, made from the data it shows.
+  const summary = $derived(
+    built
+      ? chartSummary(tile, res, title, {
+          label: (v, i) => cell(v, res.columns[i]?.dtype ?? 'text', tile.dims[i]?.grain),
+          value: (v, i) => numberFormatter(tile.formats?.[i - groups] ?? null, undefined, res.columns[i]?.unit).short(v),
+        })
+      : '',
+  );
   const selKeys = $derived(new Set((selected ?? []).map((v) => String(v))));
 </script>
 
@@ -216,6 +236,8 @@
   <TextView text={tile.text ?? ''} {editing} />
 {:else if tile.type === 'image'}
   <ImageView image={tile.image} {editing} />
+{:else if tile.type === 'filter'}
+  <FilterView {tile} {res} {tables} {selected} onchange={onfilter} {onpick} />
 {:else if tile.type === 'kpi' && res.kpi}
   <KpiView kpi={res.kpi} {tile} {colors} />
 {:else if unfinished}
@@ -223,9 +245,9 @@
 {:else if res.rows.length === 0}
   <div class="none">No data for this selection.</div>
 {:else if tile.type === 'share' || tile.type === 'donut'}
-  <ShareView {res} {tile} {colors} {selected} {onpick} />
+  <ShareView {res} {tile} {colors} {selected} {onpick} {oncontext} />
 {:else if tile.type === 'pivot'}
-  <PivotView {res} {tile} {tables} {selected} {selectedCol} {onpick} {onpickcol} />
+  <PivotView {res} {tile} {tables} {selected} {selectedCol} {onpick} {onpickcol} {oncontext} />
 {:else if tile.type === 'heatmap'}
   <HeatmapView {res} {tile} {colors} {tables} {selected} {selectedCol} {onpick} {onpickcol} />
 {:else if tile.type === 'funnel'}
@@ -272,7 +294,12 @@
               class:dim={selected !== null && !selKeys.has(String(r[0]))}
               class:pick={!!onpick && tile.dims.length > 0}
               class:other={!!res.other && r[0] === OTHER_KEY}
-              onclick={() => tile.dims.length && onpick?.(r[0])}>
+              onclick={() => tile.dims.length && onpick?.(r[0])}
+              oncontextmenu={(e) => {
+                if (!oncontext || !tile.dims.length) return;
+                e.preventDefault();
+                oncontext(r[0], e);
+              }}>
               {#each r as v, i}
                 {@const verdict = verdictOf(v, i)}
                 <td
@@ -316,13 +343,28 @@
   </div>
 {:else if built}
   <div class="chart">
-    <div class="plot" class:scroll={!!built.rows}>
+    <div class="plot" class:scroll={!!built.rows} role="img" aria-label={summary}>
      <div class="inner" style:height={built.rows ? `max(100%, ${built.rows * ROW_PX + 44}px)` : '100%'}>
       <ChartView
         option={built.option}
         horizontal={built.horizontal ?? (!!tile.horizontal && tile.type === 'bar')}
         grids={built.grids}
         onresize={(w, h) => ((width = w), (height = h))}
+        oncontext={oncontext
+          ? (hit, e) => {
+              const v =
+                hit.kind === 'index'
+                  ? built.categories[hit.index]
+                  : hit.kind === 'item'
+                    ? built.pick?.by === 'item'
+                      ? built.pick.value(hit.series, hit.index)
+                      : undefined
+                    : built.pick?.by === 'x'
+                      ? built.pick.value(hit.x)
+                      : undefined;
+              if (v !== undefined) oncontext(v, e);
+            }
+          : undefined}
         onpick={onpick && !built.pick
           ? (i) => {
               const v = built.categories[i];

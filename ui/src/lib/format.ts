@@ -3,6 +3,7 @@
 import { MAX_CHART_MEASURES } from './tiles';
 import { isPart, type Agg, type Cell, type Column, type Dim, type DType, type Grain, type Measure, type NumFormat, type QueryResult, type ShowAs, type Table, type Tile, type Unit } from './api';
 import { dim0Kind, effectiveShowAs, SHOW_AS_WORDS, type Dim0Kind } from './showas';
+import { labelOf } from './prep';
 import * as L from './locale';
 import type { Locale } from './locale';
 import { localeState } from './localeState.svelte';
@@ -138,6 +139,16 @@ export function pretty(name: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/** The name of a field: the label the user gave it, else the prettified column name. */
+export function fieldLabel(tables: Named[] | undefined, table: string, column: string): string {
+  return labelOf(tables, table, column) ?? pretty(column);
+}
+
+/** A field inside a sentence: the user's label as typed, else the column name in lower case. */
+export function fieldWord(tables: Named[] | undefined, table: string, column: string): string {
+  return labelOf(tables, table, column) ?? pretty(column).toLowerCase();
+}
+
 const aggWords: Record<Agg, string> = {
   sum: 'Total',
   avg: 'Average',
@@ -203,12 +214,12 @@ function ratioLabel(m: Measure, tables: Named[]): string {
 function plainLabel(m: Measure, tables: Named[]): string {
   const t = tables.find((x) => x.id === m.table);
   if (m.column === null) return `Number of ${(t?.label ?? 'rows').toLowerCase()}`;
-  const base = idBase(m.column);
+  const base = labelOf(tables, m.table, m.column) ? null : idBase(m.column);
   if (base && (m.agg === 'count_distinct' || m.agg === 'count')) {
     return m.agg === 'count_distinct' ? `Unique ${base}s` : `Number of ${base}s`;
   }
-  if (m.agg === 'sum') return pretty(m.column);
-  return `${aggWords[m.agg]} ${pretty(m.column).toLowerCase()}`;
+  if (m.agg === 'sum') return fieldLabel(tables, m.table, m.column);
+  return `${aggWords[m.agg]} ${fieldWord(tables, m.table, m.column)}`;
 }
 
 /**
@@ -222,9 +233,15 @@ export function columnHeads(
   tables: Named[],
 ): string[] {
   const kind = resultDim0(res, tile);
+  // The fields behind the group-by columns: a pivot lists its rows, then its column field.
+  const fields = tile.type === 'pivot' ? [...tile.dims, ...(tile.cols ? [tile.cols] : [])] : tile.dims;
   let j = 0;
+  let d = 0;
   return res.columns.map((c) => {
-    if (c.role !== 'measure') return pretty(c.name);
+    if (c.role !== 'measure') {
+      const f = fields[d++];
+      return f ? fieldLabel(tables, f.table, f.column) : pretty(c.name);
+    }
     const i = j++;
     const m = tile.measures[i];
     return m ? measureLabel(m, tables, effectiveShowAs(tile, i, kind)) : pretty(c.name);
@@ -247,7 +264,7 @@ export function dimLabel(d: Dim, tables: Named[] = []): string {
     const t = tables.find((x) => x.id === d.table);
     if (t) return singular(t.name.split('.').pop()!).toLowerCase();
   }
-  return pretty(d.column).toLowerCase();
+  return fieldWord(tables, d.table, d.column);
 }
 
 export function tileTitle(t: Tile, tables: Named[]): string {
@@ -260,7 +277,7 @@ export function tileTitle(t: Tile, tables: Named[]): string {
   // A note or a picture needs no title.
   if (t.type === 'text' || t.type === 'image' || t.type === 'filter') return '';
   if (!t.measures.length && !t.dims.length) return 'New tile';
-  let m = t.measures[0] ? label(t.measures[0], 0) : pretty(t.dims[0].column);
+  let m = t.measures[0] ? label(t.measures[0], 0) : fieldLabel(tables, t.dims[0].table, t.dims[0].column);
   // Several values: "Sales and cost by month".
   if ((t.type === 'bar' || t.type === 'line' || t.type === 'area') && t.measures.length > 1) {
     const names = t.measures.slice(0, MAX_CHART_MEASURES).map((x, i) => (i ? label(x, i).toLowerCase() : label(x, i)));
@@ -280,7 +297,7 @@ export function tileTitle(t: Tile, tables: Named[]): string {
     return col ? `Spread of ${col}${t.dims[0] ? ` by ${dimLabel(t.dims[0], tables)}` : ''}` : m;
   }
   // "Distribution of amount": a histogram bins one column, whatever the way it is added up.
-  if (t.type === 'histogram') return t.measures[0]?.column ? `Distribution of ${pretty(t.measures[0].column).toLowerCase()}` : m;
+  if (t.type === 'histogram') return t.measures[0]?.column ? `Distribution of ${fieldWord(tables, t.measures[0].table, t.measures[0].column)}` : m;
   // "Actual against target by region": a bullet chart reads a value and its target.
   if (t.type === 'bullet') {
     const by = t.dims[0] ? ` by ${dimLabel(t.dims[0], tables)}` : '';
@@ -296,7 +313,7 @@ export function tileTitle(t: Tile, tables: Named[]): string {
   if (t.type === 'calendar') return `${m} by day`;
   // "Cohorts of customer by month".
   if (t.type === 'cohort') {
-    const who = t.measures[0]?.column ? pretty(t.measures[0].column).toLowerCase() : 'entity';
+    const who = t.measures[0]?.column ? fieldWord(tables, t.measures[0].table, t.measures[0].column) : 'entity';
     return `Cohorts of ${who}${t.dims[0] ? ` by ${dimLabel(t.dims[0], tables)}` : ''}`;
   }
   // "Timeline by task".

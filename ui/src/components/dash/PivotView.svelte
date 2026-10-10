@@ -15,6 +15,7 @@
     selectedCol,
     onpick,
     onpickcol,
+    oncontext,
   }: {
     res: QueryResult;
     tile: Tile;
@@ -26,6 +27,8 @@
     selectedCol: Cell[] | null;
     onpick?: (v: Cell) => void;
     onpickcol?: (v: Cell) => void;
+    /** A right-click on a row: the value of its first field. */
+    oncontext?: (v: Cell, e: MouseEvent) => void;
   } = $props();
 
   const m = $derived(pivotModel(res, tile));
@@ -185,7 +188,14 @@
           {/each}
         {:else}
         {#each m.rows as r, ri}
-          <tr class:dim={!rowSel(r.raw)} class:pick={!!onpick}>
+          <tr
+            class:dim={!rowSel(r.raw)}
+            class:pick={!!onpick}
+            oncontextmenu={(e) => {
+              if (!oncontext || m.nRows === 0) return;
+              e.preventDefault();
+              oncontext(r.raw[0], e);
+            }}>
             {#each r.raw as v, i}
               <th class="rowhead" class:first={i === 0} scope="row">
                 {#if shownRow(ri, i)}

@@ -6,6 +6,7 @@
 
 use crate::advanced;
 use crate::engine::{Engine, QueryResult};
+use crate::filters::{self, TileFilter};
 use crate::query::{Agg, Dimension, Filter, FilterOp, Grain, Measure, SemanticQuery, Sort};
 use crate::shape;
 use crate::workspace::Locale;
@@ -60,11 +61,15 @@ pub struct Tile {
     /// Pivot: groups of the row fields open and close, with a subtotal for each group.
     #[serde(default)]
     pub expand: Option<bool>,
+    /// Filter tile: its style and what it has selected.
+    #[serde(default)]
+    pub filter: Option<TileFilter>,
 }
 
 /// Tiles that show something the user typed or picked, not a query: they have no result.
+/// (A filter tile has one: the values it offers.)
 pub fn is_static(kind: &str) -> bool {
-    matches!(kind, "text" | "image" | "filter")
+    matches!(kind, "text" | "image")
 }
 
 /// Histogram options. No width means the engine picks one.
@@ -108,6 +113,8 @@ pub struct TopN {
 pub struct DashFilter {
     #[serde(flatten)]
     pub filter: Filter,
+    /// The tile the filter came from, which it does not filter. A filter the dashboard saves
+    /// ("Keep only", "Exclude") names no tile, so it filters them all.
     #[serde(rename = "fromTile")]
     pub from_tile: String,
 }
@@ -174,7 +181,10 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
     if is_static(kind) || (tile.measures.is_empty() && tile.dims.is_empty()) {
         return None;
     }
-    let one = matches!(kind, "kpi" | "share" | "donut" | "funnel" | "box");
+    let one = matches!(
+        kind,
+        "kpi" | "share" | "donut" | "funnel" | "box" | "filter"
+    );
     // A compare chart with one value reads two periods of its second field.
     let periods = kind == "compare" && tile.measures.len() < 2;
     // Small multiples: the group, then the field that makes one chart for each of its values.
@@ -333,6 +343,9 @@ pub fn run_tile(
     }
     if tile.kind == "cohort" {
         return advanced::cohort(engine, tile, &own_excluded(tile, filters));
+    }
+    if tile.kind == "filter" {
+        return filters::options(engine, tile, &own_excluded(tile, filters));
     }
     let mut q =
         tile_query(tile, filters).ok_or_else(|| anyhow::anyhow!("the tile has no fields yet"))?;
@@ -744,22 +757,48 @@ pub fn js_key(v: &Value) -> String {
     }
 }
 
-/// Builds the complete snapshot of a dashboard with the given cross-filters.
+/// Builds the complete snapshot of a dashboard with the given cross-filters (the marks picked
+/// by clicking). The dashboard's own filters join them: the ones it saves, the selection of each
+/// filter tile, and its one grain for every time tile.
 pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> anyhow::Result<Value> {
     let dash = engine
         .dashboard(dashboard_id)
         .ok_or_else(|| anyhow::anyhow!("no dashboard {dashboard_id}"))?;
+    let grain = filters::dashboard_grain(&dash);
     let raw_tiles: Vec<Value> = dash
         .get("tiles")
         .and_then(|t| t.as_array())
         .cloned()
         .unwrap_or_default();
+    let mut all_tiles = Vec::new();
+    let mut all_raw = Vec::new();
+    for mut raw in raw_tiles {
+        if let Some(g) = grain {
+            filters::apply_grain(&mut raw, g);
+        }
+        all_tiles.push(serde_json::from_value::<Tile>(raw.clone())?);
+        all_raw.push(raw);
+    }
+    // The dashboard's own filters come from its saved JSON, so a cross-filter the caller sends for
+    // the same source is dropped: it would count twice.
+    let own = filters::dashboard_filters(engine, &dash, &all_tiles);
+    let own_sources: HashSet<&str> = own.iter().map(|f| f.from_tile.as_str()).collect();
+    let clicked: Vec<DashFilter> = filters
+        .iter()
+        .filter(|f| !own_sources.contains(f.from_tile.as_str()))
+        .cloned()
+        .collect();
+    // The saved filters as they are written in the dashboard, with the words a chip says ("Other").
+    let saved = filters::saved_filters(&dash);
+    let filters: Vec<DashFilter> = own.into_iter().chain(clicked.iter().cloned()).collect();
+    let filters = filters.as_slice();
+
     let mut tiles = Vec::new();
     let mut raw_kept = Vec::new();
-    for raw in raw_tiles {
-        let t: Tile = serde_json::from_value(raw.clone())?;
-        // A text or image tile has no result, but the export and the viewer draw it.
-        if is_static(&t.kind) || tile_query(&t, filters).is_some() {
+    for (t, raw) in all_tiles.into_iter().zip(all_raw) {
+        // A text or image tile has no result, but the export and the viewer draw it. So does a
+        // filter tile, which offers the values of its field.
+        if is_static(&t.kind) || t.kind == "filter" || tile_query(&t, filters).is_some() {
             tiles.push(t);
             raw_kept.push(raw);
         }
@@ -781,6 +820,15 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         let Some(res) = base.get(&src.id) else {
             continue;
         };
+        // Only a list of values can be clicked offline; a range or a span of dates cannot.
+        if src.kind == "filter"
+            && !matches!(
+                src.filter.as_ref().map(|f| f.style.as_str()),
+                None | Some("list") | Some("dropdown")
+            )
+        {
+            continue;
+        }
         // What a click on each mark filters by: a group of the first dimension, or for a
         // histogram the range of the bin.
         let mut groups: Vec<Vec<(Value, Filter)>> = vec![];
@@ -860,6 +908,8 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                         (Some(keys), true) => (FilterOp::NotIn, keys.clone()),
                         _ => (FilterOp::In, vec![v.clone()]),
                     };
+                    // The blank value stands for empty text too, as in the filter tile.
+                    let values = filters::with_empty_text(engine, &d.table, &d.column, values);
                     (
                         v,
                         Filter {
@@ -928,7 +978,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                 let mut per_tile = BTreeMap::new();
                 for t in tiles
                     .iter()
-                    .filter(|t| t.id != src.id && !is_static(&t.kind))
+                    .filter(|t| t.id != src.id && !is_static(&t.kind) && t.kind != "filter")
                 {
                     per_tile.insert(t.id.clone(), run_tile(engine, t, &fs)?);
                 }
@@ -955,7 +1005,16 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         .tables
         .iter()
         .filter(|t| used.contains(t.id.as_str()))
-        .map(|t| json!({ "id": t.id, "name": t.name, "label": t.label, "columns": t.columns }))
+        .map(|t| {
+            // The viewer needs the names, types and the column overrides, not the data checks.
+            let mut columns = json!(t.columns);
+            for c in columns.as_array_mut().into_iter().flatten() {
+                for k in ["blank", "mixed", "failed"] {
+                    c.as_object_mut().map(|o| o.remove(k));
+                }
+            }
+            json!({ "id": t.id, "name": t.name, "label": t.label, "columns": columns })
+        })
         .collect();
     Ok(json!({
         "version": 2,
@@ -967,7 +1026,9 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         "tiles": raw_kept,
         "base": base,
         "cross": cross,
-        "filters": filters,
+        "filters": clicked,
+        "saved": saved,
+        "grain": grain,
     }))
 }
 

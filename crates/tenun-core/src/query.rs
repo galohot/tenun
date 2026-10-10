@@ -7,6 +7,7 @@
 
 use crate::catalog::{Catalog, DType, Table, ident};
 use crate::workspace::Relationship;
+use chrono::{Datelike, Duration, Months, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 
@@ -138,6 +139,87 @@ pub enum FilterOp {
     Lte,
     /// `[lo, hi]`, with lo ≤ x < hi.
     Range,
+    /// The text contains the value, whatever the case. `%` and `_` in the value are plain characters.
+    Contains,
+    /// The text starts with the value, whatever the case.
+    StartsWith,
+    /// No value: empty, or `NULL`.
+    Blank,
+    /// The opposite of `Blank`.
+    NotBlank,
+    /// `[preset]` for a date column: `last_7_days`, `last_30_days`, `this_month`, `last_month`,
+    /// `this_quarter`, `last_quarter`, `ytd`, `last_12_months`. The engine resolves it against
+    /// today's date into a half-open range (see `relative_range`).
+    Relative,
+}
+
+/// The presets a `Relative` filter understands.
+pub const RELATIVE_PRESETS: [&str; 8] = [
+    "last_7_days",
+    "last_30_days",
+    "this_month",
+    "last_month",
+    "this_quarter",
+    "last_quarter",
+    "ytd",
+    "last_12_months",
+];
+
+/// The date this computer shows right now.
+pub fn local_today() -> NaiveDate {
+    chrono::Local::now().date_naive()
+}
+
+/// A relative preset as a half-open range of days: `lo ≤ day < hi`. The last day counted is
+/// today, so "last 7 days" is today and the six days before. "This month", "this quarter" and
+/// "year to date" run from their start to today. A date-time column keeps its whole last day,
+/// because the range ends at the start of the next one.
+pub fn relative_range(preset: &str, today: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
+    let tomorrow = today + Duration::days(1);
+    let month = today.with_day(1)?;
+    let quarter = month.with_month0(today.month0() / 3 * 3)?;
+    Some(match preset {
+        "last_7_days" => (today - Duration::days(6), tomorrow),
+        "last_30_days" => (today - Duration::days(29), tomorrow),
+        "this_month" => (month, tomorrow),
+        "last_month" => (month.checked_sub_months(Months::new(1))?, month),
+        "this_quarter" => (quarter, tomorrow),
+        "last_quarter" => (quarter.checked_sub_months(Months::new(3))?, quarter),
+        "ytd" => (today.with_month(1)?.with_day(1)?, tomorrow),
+        "last_12_months" => (tomorrow.checked_sub_months(Months::new(12))?, tomorrow),
+        _ => return None,
+    })
+}
+
+/// A `Relative` filter written as the `Range` it stands for today. Other filters are unchanged.
+pub fn resolve_relative(f: &Filter, today: NaiveDate) -> Filter {
+    let range = (f.op == FilterOp::Relative)
+        .then(|| f.values.first().and_then(|v| v.as_str()))
+        .flatten()
+        .and_then(|p| relative_range(p, today));
+    match range {
+        Some((lo, hi)) => Filter {
+            op: FilterOp::Range,
+            values: vec![
+                serde_json::json!(lo.format("%Y-%m-%d").to_string()),
+                serde_json::json!(hi.format("%Y-%m-%d").to_string()),
+            ],
+            ..f.clone()
+        },
+        None => f.clone(),
+    }
+}
+
+/// The value of a `LIKE` pattern with `\`, `%` and `_` made plain characters.
+fn like_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -198,6 +280,8 @@ pub enum QueryError {
     BadAgg(String, &'static str),
     #[error("A filter value does not match the column type.")]
     BadValue,
+    #[error("A date filter needs a date column. {0} is not one.")]
+    NotADate(String),
 }
 
 const DEFAULT_LIMIT: u32 = 1000;
@@ -240,6 +324,16 @@ pub fn scope<'a>(
     q: &SemanticQuery,
     catalog: &'a Catalog,
     rels: &[Relationship],
+) -> Result<Scope<'a>, QueryError> {
+    scope_on(q, catalog, rels, local_today())
+}
+
+/// Like `scope`, with the day that relative date filters count from.
+pub fn scope_on<'a>(
+    q: &SemanticQuery,
+    catalog: &'a Catalog,
+    rels: &[Relationship],
+    today: NaiveDate,
 ) -> Result<Scope<'a>, QueryError> {
     let base_id = q
         .measures
@@ -290,7 +384,7 @@ pub fn scope<'a>(
             continue;
         }
         let (expr, dtype) = dim_expr(catalog, &joins, &f.table, &f.column, f.grain)?;
-        wheres.push(filter_sql(&expr, dtype, f, &mut params)?);
+        wheres.push(filter_sql(&expr, dtype, f, today, &mut params)?);
     }
 
     let mut sql = format!(" FROM {} AS t0", base.sql_ref);
@@ -332,7 +426,17 @@ pub fn compile(
     catalog: &Catalog,
     rels: &[Relationship],
 ) -> Result<Compiled, QueryError> {
-    let scope = scope(q, catalog, rels)?;
+    compile_on(q, catalog, rels, local_today())
+}
+
+/// Like `compile`, with the day that relative date filters count from.
+pub fn compile_on(
+    q: &SemanticQuery,
+    catalog: &Catalog,
+    rels: &[Relationship],
+    today: NaiveDate,
+) -> Result<Compiled, QueryError> {
+    let scope = scope_on(q, catalog, rels, today)?;
 
     let mut select = Vec::new();
     let mut columns = Vec::new();
@@ -658,8 +762,61 @@ fn filter_sql(
     expr: &str,
     dtype: DType,
     f: &Filter,
+    today: NaiveDate,
     params: &mut Vec<Param>,
 ) -> Result<String, QueryError> {
+    // These ops read their value as text, whatever the column holds.
+    match f.op {
+        FilterOp::Contains | FilterOp::StartsWith => {
+            let text = match f.values.first() {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(serde_json::Value::Number(n)) => n.to_string(),
+                _ => return Err(QueryError::BadValue),
+            };
+            let esc = like_escape(&text);
+            params.push(Param::Text(if f.op == FilterOp::Contains {
+                format!("%{esc}%")
+            } else {
+                format!("{esc}%")
+            }));
+            let text_expr = if dtype == DType::Text {
+                expr.to_string()
+            } else {
+                format!("CAST({expr} AS VARCHAR)")
+            };
+            return Ok(format!("{text_expr} ILIKE ? ESCAPE '\\'"));
+        }
+        FilterOp::Blank | FilterOp::NotBlank => {
+            // Text is blank when it is empty too. Other types are blank when they are NULL.
+            let blank = if dtype == DType::Text {
+                format!("({expr} IS NULL OR {expr} = '')")
+            } else {
+                format!("{expr} IS NULL")
+            };
+            return Ok(if f.op == FilterOp::Blank {
+                blank
+            } else {
+                format!("NOT {blank}")
+            });
+        }
+        FilterOp::Relative => {
+            if !dtype.is_temporal() {
+                return Err(QueryError::NotADate(f.column.clone()));
+            }
+            let (lo, hi) = f
+                .values
+                .first()
+                .and_then(|v| v.as_str())
+                .and_then(|p| relative_range(p, today))
+                .ok_or(QueryError::BadValue)?;
+            // The ends are day starts, so a date-time on the last day is inside: its text sorts
+            // before the start of the next day.
+            params.push(Param::Text(lo.format("%Y-%m-%d").to_string()));
+            params.push(Param::Text(hi.format("%Y-%m-%d").to_string()));
+            return Ok(format!("({expr} >= ? AND {expr} < ?)"));
+        }
+        _ => {}
+    }
     let vals: Vec<Param> = f
         .values
         .iter()
@@ -703,6 +860,11 @@ fn filter_sql(
             params.extend(non_null);
             Ok(format!("({expr} >= ? AND {expr} < ?)"))
         }
+        FilterOp::Contains
+        | FilterOp::StartsWith
+        | FilterOp::Blank
+        | FilterOp::NotBlank
+        | FilterOp::Relative => unreachable!("handled above"),
         FilterOp::Gte | FilterOp::Lte => {
             let v = non_null.into_iter().next().ok_or(QueryError::BadValue)?;
             params.push(v);
@@ -730,13 +892,12 @@ mod tests {
             sql_ref: format!("\"s_{src}\".\"{name}\""),
             columns: cols
                 .iter()
-                .map(|(n, d)| Column {
-                    name: n.to_string(),
-                    dtype: *d,
-                    raw_type: String::new(),
-                })
+                .map(|(n, d)| Column::new(n.to_string(), *d, String::new()))
                 .collect(),
             rows: None,
+            notes: vec![],
+            header_row: None,
+            prep: false,
         }
     }
 
@@ -1075,5 +1236,185 @@ mod tests {
         };
         let c = compile(&q, &cat, &rels).unwrap();
         assert!(c.sql.starts_with("SELECT DISTINCT"));
+    }
+
+    fn where_of(
+        op: FilterOp,
+        table: &str,
+        column: &str,
+        values: Vec<serde_json::Value>,
+    ) -> Compiled {
+        let (cat, rels) = fixture();
+        let q = SemanticQuery {
+            measures: vec![sum_amount()],
+            filters: vec![Filter {
+                table: table.into(),
+                column: column.into(),
+                grain: None,
+                op,
+                values,
+            }],
+            ..Default::default()
+        };
+        compile_on(
+            &q,
+            &cat,
+            &rels,
+            NaiveDate::from_ymd_opt(2026, 10, 14).unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn contains_is_an_escaped_ilike_parameter() {
+        let c = where_of(
+            FilterOp::Contains,
+            "s2/stores",
+            "city",
+            vec!["50%_a\\b".into()],
+        );
+        assert!(
+            c.sql
+                .contains("CAST(t1.\"city\" AS VARCHAR) ILIKE ? ESCAPE '\\'")
+        );
+        assert_eq!(c.params, vec![Param::Text("%50\\%\\_a\\\\b%".into())]);
+        let c = where_of(
+            FilterOp::StartsWith,
+            "s1/orders",
+            "customer",
+            vec!["Ab".into()],
+        );
+        assert_eq!(c.params, vec![Param::Text("Ab%".into())]);
+    }
+
+    #[test]
+    fn blank_means_null_or_empty_text_and_null_otherwise() {
+        let c = where_of(FilterOp::Blank, "s1/orders", "customer", vec![]);
+        assert!(c.sql.contains(
+            "(CAST(t0.\"customer\" AS VARCHAR) IS NULL OR CAST(t0.\"customer\" AS VARCHAR) = '')"
+        ));
+        let c = where_of(FilterOp::NotBlank, "s1/orders", "customer", vec![]);
+        assert!(
+            c.sql
+                .contains("NOT (CAST(t0.\"customer\" AS VARCHAR) IS NULL OR ")
+        );
+        let c = where_of(FilterOp::Blank, "s1/orders", "amount", vec![]);
+        assert!(
+            c.sql
+                .contains("WHERE CAST(t0.\"amount\" AS DOUBLE) IS NULL")
+        );
+        assert!(!c.sql.contains("= ''"));
+        assert!(c.params.is_empty());
+    }
+
+    #[test]
+    fn relative_becomes_a_half_open_range_of_days() {
+        let c = where_of(
+            FilterOp::Relative,
+            "s1/orders",
+            "date",
+            vec!["last_7_days".into()],
+        );
+        assert!(c.sql.contains(
+            "(strftime(t0.\"date\", '%Y-%m-%d') >= ? AND strftime(t0.\"date\", '%Y-%m-%d') < ?)"
+        ));
+        assert_eq!(
+            c.params,
+            vec![
+                Param::Text("2026-10-08".into()),
+                Param::Text("2026-10-15".into())
+            ]
+        );
+    }
+
+    fn d(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn presets_resolve_against_today() {
+        let r = |p: &str, today: &str| {
+            let (lo, hi) = relative_range(p, d(today)).unwrap();
+            (lo.to_string(), hi.to_string())
+        };
+        let pair = |a: &str, b: &str| (a.to_string(), b.to_string());
+        assert_eq!(
+            r("last_7_days", "2026-10-10"),
+            pair("2026-10-04", "2026-10-11")
+        );
+        assert_eq!(
+            r("last_30_days", "2026-10-10"),
+            pair("2026-09-11", "2026-10-11")
+        );
+        assert_eq!(
+            r("this_month", "2026-10-10"),
+            pair("2026-10-01", "2026-10-11")
+        );
+        assert_eq!(
+            r("last_month", "2026-10-10"),
+            pair("2026-09-01", "2026-10-01")
+        );
+        assert_eq!(
+            r("this_quarter", "2026-10-10"),
+            pair("2026-10-01", "2026-10-11")
+        );
+        assert_eq!(
+            r("last_quarter", "2026-10-10"),
+            pair("2026-07-01", "2026-10-01")
+        );
+        assert_eq!(r("ytd", "2026-10-10"), pair("2026-01-01", "2026-10-11"));
+        assert_eq!(
+            r("last_12_months", "2026-10-10"),
+            pair("2025-10-11", "2026-10-11")
+        );
+        // January looks back into the year before.
+        assert_eq!(
+            r("last_month", "2026-01-15"),
+            pair("2025-12-01", "2026-01-01")
+        );
+        assert_eq!(
+            r("last_quarter", "2026-02-15"),
+            pair("2025-10-01", "2026-01-01")
+        );
+        // The last day of a year, a leap day, and a short month.
+        assert_eq!(
+            r("last_7_days", "2026-12-31"),
+            pair("2026-12-25", "2027-01-01")
+        );
+        assert_eq!(
+            r("last_12_months", "2024-02-29"),
+            pair("2023-03-01", "2024-03-01")
+        );
+        assert_eq!(
+            r("last_month", "2026-03-31"),
+            pair("2026-02-01", "2026-03-01")
+        );
+        assert!(relative_range("next_week", d("2026-10-10")).is_none());
+    }
+
+    #[test]
+    fn a_relative_filter_can_be_written_as_a_range() {
+        let f = Filter {
+            table: "t".into(),
+            column: "c".into(),
+            grain: None,
+            op: FilterOp::Relative,
+            values: vec!["ytd".into()],
+        };
+        let r = resolve_relative(&f, d("2026-10-10"));
+        assert_eq!(r.op, FilterOp::Range);
+        assert_eq!(
+            r.values,
+            vec![
+                serde_json::json!("2026-01-01"),
+                serde_json::json!("2026-10-11")
+            ]
+        );
+        // Other filters are left alone.
+        let g = Filter {
+            op: FilterOp::In,
+            ..f
+        };
+        assert_eq!(resolve_relative(&g, d("2026-10-10")).op, FilterOp::In);
     }
 }

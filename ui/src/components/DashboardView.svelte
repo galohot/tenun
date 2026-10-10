@@ -1,15 +1,22 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
-  import { api, type Bins, type Cell, type QueryResult, type Tile, type TileType } from '../lib/api';
+  import { onMount, tick as nextTick, untrack } from 'svelte';
+  import { api, type Bins, type Cell, type DashFilter, type Filter, type Grain, type QueryResult, type RowsBehind, type Tile, type TileFilter, type TileType } from '../lib/api';
   import { app, go } from '../lib/state.svelte';
-  import { cell, dimLabel, OTHER_KEY, stampLabel } from '../lib/format';
-  import { COLS, compact, defaultSize, minHeight, newId, place, type DashFilter } from '../lib/tiles';
-  import { key } from '../lib/chart';
+  import { cell, dateTimeMedium, stampLabel, tileTitle } from '../lib/format';
+  import { filterText } from '../lib/filterText';
+  import { canExclude, colFilter, hasPeriod, markFilter, newPinId, PERIODS, pinFilter, sameFilter, tileFilters, withGrain } from '../lib/filters';
+  import { COLS, compact, defaultSize, minHeight, newDashboard, newId, place } from '../lib/tiles';
+  import { phoneLayout, readingOrder } from '../lib/layout';
+  import { downloadDashboardPdf, downloadDashboardPng, type DashboardPicture } from '../lib/output';
+  import { readColors } from '../lib/chart';
   import { advancedOn, ganttOffered as hasTwoDates } from '../lib/tiers';
   import Icon, { type IconName } from './Icon.svelte';
   import TileView from './dash/TileView.svelte';
   import Inspector from './dash/Inspector.svelte';
+  import Menu from './dash/Menu.svelte';
   import PublishSheet from './dash/PublishSheet.svelte';
+  import RowsSheet from './dash/RowsSheet.svelte';
+  import FocusSheet from './dash/FocusSheet.svelte';
 
   let { id }: { id: string } = $props();
 
@@ -28,13 +35,50 @@
   /** What each tile shows now. The Inspector's "Also try" previews reuse the selected tile's. */
   let results = $state.raw<Record<string, { res: QueryResult; key: string } | null>>({});
 
+  /** The tile shown large, and the rows being shown behind a tile or one of its marks. */
+  let focusId = $state<string | null>(null);
+  let rowsReq = $state.raw<{ title: string; data: RowsBehind | null; error: string } | null>(null);
+  /** A newer request or a closed sheet makes an older answer stale. */
+  let rowsSeq = 0;
+  /** The chip whose "Keep only / Exclude" menu is open. */
+  let chipMenu = $state<{ id: string; x: number; y: number } | null>(null);
+
   /** The live layout while a drag is in progress; null otherwise. */
   let preview = $state<Tile[] | null>(null);
   let dragging = $state<{ id: string; dx: number; dy: number } | null>(null);
 
   const colW = $derived((width - GAP * (COLS - 1)) / COLS);
-  const tiles = $derived(preview ?? dash?.tiles ?? []);
-  const height = $derived(Math.max(0, ...tiles.map((t) => t.y + t.h)) * (ROW + GAP));
+  // On a phone the tiles stack in one column and nothing can be moved or resized.
+  const phone = $derived(app.phone);
+  const phoneRects = $derived(phone ? new Map(phoneLayout(dash?.tiles ?? [], width, ROW, GAP).map((p) => [p.t.id, p])) : null);
+  // In reading order, so Tab goes through the tiles the way a person reads them.
+  const tiles = $derived(readingOrder(preview ?? dash?.tiles ?? []));
+  const height = $derived(
+    phoneRects ? Math.max(0, ...[...phoneRects.values()].map((p) => p.y + p.h)) : Math.max(0, ...tiles.map((t) => t.y + t.h)) * (ROW + GAP),
+  );
+  // Every filter a tile receives: the ones the dashboard keeps, what the filter tiles select, and the
+  // marks that were clicked. A tile ignores the ones that came from itself.
+  const pins = $derived(dash?.filters ?? []);
+  const selections = $derived(
+    tileFilters(dash?.tiles ?? [], (t, c) => app.table(t)?.columns.find((x) => x.name === c)?.dtype),
+  );
+  const allFilters = $derived<DashFilter[]>([...pins, ...selections, ...filters]);
+
+  // The tile as it is drawn: with the dashboard's grain. The same object is returned while nothing
+  // changed, so a tile only asks again when its question is different.
+  const effCache = new Map<string, { k: string; t: Tile }>();
+  function eff(t: Tile): Tile {
+    const e = withGrain(t, dash?.grain);
+    if (e === t) return t;
+    const k = JSON.stringify(e);
+    const hit = effCache.get(t.id);
+    if (hit?.k === k) return hit.t;
+    effCache.set(t.id, { k, t: e });
+    return e;
+  }
+  const shownOf = (t: Tile): Tile => eff(dash?.tiles.find((x) => x.id === t.id) ?? t);
+  const grainOn = $derived(hasPeriod(dash?.tiles ?? []));
+
   const hasLive = $derived(app.snap!.workspace.sources.some((s) => s.kind === 'postgres' || s.kind === 'mysql'));
 
   onMount(() => {
@@ -57,6 +101,8 @@
   interface Step {
     title: string;
     tiles: Tile[];
+    grain: Grain | null;
+    filters: DashFilter[];
   }
   const MAX_STEPS = 50;
   /** Edits with the same key close together (typing a title) make one step. */
@@ -78,7 +124,12 @@
   });
 
   function snap(): Step {
-    return { title: dash!.title, tiles: $state.snapshot(dash!.tiles) as Tile[] };
+    return {
+      title: dash!.title,
+      tiles: $state.snapshot(dash!.tiles) as Tile[],
+      grain: dash!.grain ?? null,
+      filters: $state.snapshot(dash!.filters ?? []) as DashFilter[],
+    };
   }
 
   /** Call before a change. */
@@ -98,6 +149,8 @@
   function restore(step: Step) {
     dash!.title = step.title;
     dash!.tiles = step.tiles;
+    dash!.grain = step.grain;
+    dash!.filters = step.filters.length ? step.filters : undefined;
     burst = { key: '', at: 0 };
     if (selectedTile && !step.tiles.some((t) => t.id === selectedTile)) selectedTile = null;
     filters = filters.filter((f) => step.tiles.some((t) => t.id === f.fromTile));
@@ -137,6 +190,8 @@
 
   function onKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
+      // A sheet or a menu closes itself first; Esc must not also clear the filters behind it.
+      if (chipMenu || focusId || rowsReq || document.querySelector('[role="dialog"]')) return;
       if (filters.length) filters = [];
       else selectedTile = null;
       return;
@@ -144,7 +199,7 @@
     const el = e.target as HTMLElement | null;
     if (el && (['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) || el.isContentEditable)) return;
     // A sheet is open in front of the dashboard: undo must not change what it hides.
-    if (app.settingsOpen || app.addOpen || publishing) return;
+    if (app.settingsOpen || app.addOpen || publishing || focusId || rowsReq) return;
     if (!(e.ctrlKey || e.metaKey)) return;
     const k = e.key.toLowerCase();
     if (k === 'z' && !e.shiftKey) {
@@ -189,37 +244,86 @@
     addMenu = false;
     const size = defaultSize(type);
     const at = place(dash!.tiles, size.w, size.h);
-    const t: Tile = { id: newId('t'), type, title: '', ...size, ...at, measures: [], dims: [], horizontal: type === 'bar' };
+    const t: Tile = {
+      id: newId('t'),
+      type,
+      title: '',
+      ...size,
+      ...at,
+      measures: [],
+      dims: [],
+      horizontal: type === 'bar',
+      ...(type === 'filter' ? { filter: { style: 'list' as const } } : {}),
+    };
     update((ts) => [...ts, t]);
     selectedTile = t.id;
   }
 
   /** `otherOf` comes with a click on the "Other" group of a top N: everything except those groups. */
   function pick(tile: Tile, value: Cell, otherOf?: Cell[], bins?: Bins, stage?: number) {
-    const mine = filters.find((f) => f.fromTile === tile.id);
-    const others = filters.filter((f) => f.fromTile !== tile.id);
-    // A histogram bin filters its column to the range of the bin. The edges are the engine's own numbers.
-    if (tile.type === 'histogram') {
-      const m = tile.measures[0];
-      if (!m?.column || !bins || typeof value !== 'number') return;
-      const hi = Math.round((value + bins.width) * 1e10) / 1e10;
-      const same = mine?.op === 'range' && mine.values[0] === value && mine.values[1] === hi;
-      filters = same ? others : [...others, { table: m.table, column: m.column, grain: null, op: 'range', values: [value, hi], fromTile: tile.id }];
+    const f = markFilter(tile, value, otherOf, bins, stage);
+    if (!f) return;
+    clicked(tile.id, f);
+  }
+
+  /** A click on a pivot column header: filters by the column field, and a second click clears it. */
+  function pickCol(tile: Tile, value: Cell) {
+    const f = colFilter(tile.cols, value);
+    if (f) clicked(tile.id, f);
+  }
+
+  /** Makes the click a cross-filter, or takes it off when the same mark is clicked again. */
+  function clicked(from: string, f: Omit<DashFilter, 'fromTile'>) {
+    const mine = filters.find((x) => x.fromTile === from);
+    const others = filters.filter((x) => x.fromTile !== from);
+    if (mine && sameFilter(mine, f)) {
+      filters = others;
       return;
     }
-    // A Sankey node is a value of the field of its stage; every other tile filters by its first field.
-    const d = tile.type === 'sankey' && stage !== undefined ? tile.dims[stage] : tile.dims[0];
-    if (!d) return;
-    // A calendar is always read by day.
-    const grain = tile.type === 'calendar' ? 'day' : (d.grain ?? null);
-    const isOther = value === OTHER_KEY && !!otherOf;
-    if (mine && (isOther ? mine.op === 'not_in' : mine.op === 'in' && mine.table === d.table && mine.column === d.column && mine.values.length === 1 && key(mine.values[0]) === key(value))) {
-      filters = others;
-    } else if (isOther) {
-      filters = [...others, { table: d.table, column: d.column, grain, op: 'not_in', values: [...otherOf], fromTile: tile.id }];
-    } else {
-      filters = [...others, { table: d.table, column: d.column, grain, op: 'in', values: [value], fromTile: tile.id }];
-    }
+    filters = [...others, { ...f, fromTile: from }];
+    openChipMenu(from);
+  }
+
+  /** Opens "Keep only / Exclude" under the chip of a click. */
+  async function openChipMenu(id: string) {
+    await nextTick();
+    const el = document.querySelector<HTMLElement>(`[data-chip="${CSS.escape(id)}"]`);
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    chipMenu = { id, x: r.left, y: r.bottom + 4 };
+  }
+
+  /** The click filter becomes one the dashboard keeps: it applies to every tile, the source included. */
+  function keep(from: string, mode: 'keep' | 'exclude') {
+    const f = filters.find((x) => x.fromTile === from);
+    if (!f || !dash) return;
+    const pinned = pinFilter($state.snapshot(f) as DashFilter, mode, newPinId());
+    if (!pinned) return;
+    record();
+    // The same filter twice would only show two chips.
+    if (!(dash.filters ?? []).some((x) => sameFilter(x, pinned))) dash.filters = [...(dash.filters ?? []), pinned];
+    filters = filters.filter((x) => x !== f);
+    app.saveDashboards();
+  }
+
+  function unpin(f: DashFilter) {
+    if (!dash) return;
+    record();
+    const rest = (dash.filters ?? []).filter((x) => x.fromTile !== f.fromTile);
+    dash.filters = rest.length ? rest : undefined;
+    app.saveDashboards();
+  }
+
+  function setGrain(g: Grain | null) {
+    if (!dash || (dash.grain ?? null) === g) return;
+    record();
+    dash.grain = g;
+    app.saveDashboards();
+  }
+
+  /** A filter tile's selection changed. Moving a slider is one step, not one per move. */
+  function setFilter(id: string, f: TileFilter) {
+    update((ts) => ts.map((x) => (x.id === id ? { ...x, filter: f } : x)), `filter:${id}`);
   }
 
   function setResult(id: string, res: QueryResult | null, key: string) {
@@ -228,28 +332,84 @@
     results = { ...results, [id]: res ? { res, key } : null };
   }
 
-  /** A click on a pivot column header: filters by the column field, and a second click clears it. */
-  function pickCol(tile: Tile, value: Cell) {
-    const c = tile.cols;
-    if (!c) return;
-    const mine = filters.find((f) => f.fromTile === tile.id);
-    const others = filters.filter((f) => f.fromTile !== tile.id);
-    const same = mine && mine.table === c.table && mine.column === c.column && mine.op === 'in' && mine.values.length === 1 && key(mine.values[0]) === key(value);
-    filters = same ? others : [...others, { table: c.table, column: c.column, grain: c.grain ?? null, op: 'in', values: [value], fromTile: tile.id }];
+  /** "Show rows" for a tile, or for the mark with this value. */
+  async function showRows(id: string, value?: Cell, otherOf?: Cell[], bins?: Bins) {
+    const real = dash?.tiles.find((x) => x.id === id);
+    if (!real) return;
+    const t = eff(real);
+    let click: Filter | null = null;
+    let mark = '';
+    if (value !== undefined) {
+      const f = markFilter(t, value, otherOf, bins);
+      click = f ? { table: f.table, column: f.column, grain: f.grain, op: f.op, values: f.values } : null;
+      const d = t.dims[0];
+      const dtype = app.table(d?.table ?? '')?.columns.find((c) => c.name === d?.column)?.dtype ?? 'text';
+      mark = f?.label ?? (t.type === 'histogram' ? filterText({ ...f!, fromTile: '' }, app.tables).split(': ')[1] : cell(value, dtype, d?.grain));
+    }
+    const title = [tileTitle(t, app.tables), mark].filter(Boolean).join(' · ');
+    const seq = ++rowsSeq;
+    rowsReq = { title, data: null, error: '' };
+    try {
+      const data = await api.rows($state.snapshot(t) as Tile, $state.snapshot(allFilters), click ? ($state.snapshot(click) as Filter) : null);
+      if (seq === rowsSeq) rowsReq = { title, data, error: '' };
+    } catch (e) {
+      if (seq === rowsSeq) rowsReq = { title, data: null, error: e instanceof Error ? e.message : String(e) };
+    }
   }
 
-  function filterLabel(f: DashFilter): string {
-    const t = app.table(f.table);
-    const dtype = t?.columns.find((c) => c.name === f.column)?.dtype ?? 'text';
-    const name = dimLabel({ table: f.table, column: f.column, grain: f.grain }, app.tables);
-    const shown =
-      f.op === 'not_in' ? 'Other' : f.op === 'range' ? f.values.map((v) => cell(v, dtype, f.grain, true)).join(' to ') : f.values.map((v) => cell(v, dtype, f.grain)).join(', ');
-    return `${name.charAt(0).toUpperCase() + name.slice(1)}: ${shown}`;
+  const focusTile = $derived(focusId ? dash?.tiles.find((t) => t.id === focusId) : undefined);
+
+  function removeTile(id: string) {
+    filters = filters.filter((f) => f.fromTile !== id);
+    update((ts) => compact(ts.filter((x) => x.id !== id)));
+    if (selectedTile === id) selectedTile = null;
+  }
+
+  /** A copy of a tile with a new id, at the first free place of `into`. */
+  function copyOf(t: Tile, into: Tile[], title: string): Tile {
+    const at = place(into, t.w, t.h);
+    return { ...(structuredClone($state.snapshot(t)) as Tile), id: newId('t'), title, ...at };
+  }
+
+  function duplicate(id: string) {
+    const t = dash?.tiles.find((x) => x.id === id);
+    if (!dash || !t) return;
+    const copy = copyOf(t, dash.tiles, t.title ? `${t.title} copy` : '');
+    update((ts) => [...ts, copy]);
+    selectedTile = copy.id;
+  }
+
+  /** Copy a tile to another dashboard (or a new one when `to` is null). */
+  function copyTo(id: string, to: string | null) {
+    const t = dash?.tiles.find((x) => x.id === id);
+    if (!t) return;
+    let target = to ? app.dashboards.find((d) => d.id === to) : undefined;
+    if (!target) {
+      target = newDashboard(app.dashboards.length);
+      app.snap!.workspace.dashboards.push(target);
+      target = app.dashboards.find((d) => d.id === target!.id)!;
+    }
+    target.tiles = [...target.tiles, copyOf(t, target.tiles, t.title)];
+    app.saveDashboards();
+    app.toast(`Copied to ${target.title}`);
+  }
+
+  /** The arrow keys: the tile after (or before) this one in reading order gets the focus. */
+  function navTile(id: string, step: 1 | -1) {
+    const order = readingOrder(dash?.tiles ?? []);
+    const next = order[order.findIndex((t) => t.id === id) + step];
+    if (next) document.querySelector<HTMLElement>(`[data-tile="${CSS.escape(next.id)}"]`)?.focus();
+  }
+
+  /** Enter on a tile: edit it, or open it large when this is a phone or the tile cannot be edited. */
+  function openTile(id: string) {
+    if (!phone) selectedTile = id;
+    else if (results[id]) focusId = id;
   }
 
   // Dragging and resizing work in grid units and compact as you go.
   function startDrag(e: PointerEvent, tile: Tile, mode: 'move' | 'resize') {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || phone) return;
     e.preventDefault();
     const start = { x: e.clientX, y: e.clientY };
     const orig = { ...tile };
@@ -265,7 +425,7 @@
       const next =
         mode === 'move'
           ? { ...orig, x: Math.max(0, Math.min(COLS - orig.w, orig.x + gx)), y: Math.max(0, orig.y + gy) }
-          : { ...orig, w: Math.max(2, Math.min(COLS - orig.x, orig.w + gx)), h: Math.max(minHeight(orig.type), orig.h + gy) };
+          : { ...orig, w: Math.max(2, Math.min(COLS - orig.x, orig.w + gx)), h: Math.max(minHeight(orig), orig.h + gy) };
       preview = compact(base.map((t) => (t.id === tile.id ? next : t)), tile.id);
       dragging = mode === 'move' ? { id: tile.id, dx, dy } : null;
     };
@@ -284,6 +444,8 @@
   }
 
   function px(t: Tile) {
+    const p = phoneRects?.get(t.id);
+    if (p) return { left: p.x, top: p.y, w: p.w, h: p.h };
     return {
       left: t.x * (colW + GAP),
       top: t.y * (ROW + GAP),
@@ -293,6 +455,36 @@
   }
 
   let exporting = $state<string | null>(null);
+  let exportMenu = $state<{ x: number; y: number } | null>(null);
+
+  /** Everything a picture of the dashboard needs: the tiles as they are drawn, with their results. */
+  function picture(theme: 'light' | 'dark'): DashboardPicture {
+    const shown = (dash!.tiles ?? []).map(shownOf);
+    const rs: DashboardPicture['results'] = {};
+    for (const t of shown) rs[t.id] = results[t.id]?.res ?? null;
+    return {
+      title: dash!.title,
+      subtitle: `${app.snap!.workspace.name} · ${dateTimeMedium(new Date())}`,
+      filters: allFilters.map((f) => filterText(f, app.tables)),
+      tiles: shown,
+      results: rs,
+      tables: app.tables,
+      theme,
+    };
+  }
+
+  async function exportPicture(kind: 'png' | 'pdf') {
+    if (!dash || exporting) return;
+    exporting = 'Preparing…';
+    try {
+      if (kind === 'png') await downloadDashboardPng(picture(app.theme));
+      else await downloadDashboardPdf(picture('light'));
+    } catch (e) {
+      app.error(e);
+    } finally {
+      exporting = null;
+    }
+  }
 
   async function exportHtml() {
     if (!dash || exporting) return;
@@ -342,8 +534,8 @@
 {/if}
 
 {#if dash}
-  <header class="toolbar">
-    {#if editingTitle}
+  <header class="toolbar" class:phone>
+    {#if editingTitle && !phone}
       <!-- svelte-ignore a11y_autofocus -->
       <input
         class="field title-input"
@@ -360,13 +552,29 @@
         }}
         onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
     {:else}
-      <button class="title" title="Rename" onclick={() => (editingTitle = true)}>{dash.title}</button>
+      <button class="title" title={phone ? undefined : 'Rename'} disabled={phone} onclick={() => (editingTitle = true)}>{dash.title}</button>
     {/if}
     <div class="chips">
+      {#each pins as f (f.fromTile)}
+        <span class="chip pinned" title="Saved with the dashboard">
+          <Icon name="pin" size={12} />
+          {filterText(f, app.tables)}
+          <button aria-label="Remove saved filter" onclick={() => unpin(f)}><Icon name="x" size={11} /></button>
+        </span>
+      {/each}
       {#each filters as f (f.fromTile)}
-        <span class="chip">
+        <span class="chip" data-chip={f.fromTile}>
           <Icon name="filter" size={12} />
-          {filterLabel(f)}
+          <button
+            class="say"
+            aria-haspopup="menu"
+            title="Keep only or exclude"
+            onclick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              chipMenu = chipMenu?.id === f.fromTile ? null : { id: f.fromTile, x: r.left, y: r.bottom + 4 };
+            }}>
+            {filterText(f, app.tables)}
+          </button>
           <button aria-label="Clear filter" onclick={() => (filters = filters.filter((x) => x !== f))}><Icon name="x" size={11} /></button>
         </span>
       {/each}
@@ -375,6 +583,14 @@
       {/if}
     </div>
     <span class="spacer"></span>
+    {#if grainOn}
+      <div class="seg" role="radiogroup" aria-label="Time grain for every chart over time">
+        <button role="radio" aria-checked={!dash.grain} class:on={!dash.grain} title="Each tile uses its own grain" onclick={() => setGrain(null)}>Auto</button>
+        {#each PERIODS as g}
+          <button role="radio" aria-checked={dash.grain === g} class:on={dash.grain === g} onclick={() => setGrain(g)}>{g}</button>
+        {/each}
+      </div>
+    {/if}
     {#if newestLoad}
       <span class="stamp" title={stampTitle}>Updated {stampLabel(newestLoad)}</span>
     {/if}
@@ -394,9 +610,12 @@
         </select>
       </label>
     {/if}
-    <button class="btn plain icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo} onclick={undo}><Icon name="undo" /></button>
-    <button class="btn plain icon" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!canRedo} onclick={redo}><Icon name="redo" /></button>
-    <button class="btn plain icon" title="Refresh now" onclick={() => tick++}><Icon name="refresh" /></button>
+    {#if !phone}
+      <button class="btn plain icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo} onclick={undo}><Icon name="undo" /></button>
+      <button class="btn plain icon" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!canRedo} onclick={redo}><Icon name="redo" /></button>
+    {/if}
+    <button class="btn plain icon" title="Refresh now" aria-label="Refresh now" onclick={() => tick++}><Icon name="refresh" /></button>
+    {#if !phone}
     <button
       class="btn"
       class:live={!!dash.publish?.url}
@@ -406,14 +625,25 @@
       title={dash.publish?.error ?? (dash.publish?.url ? 'Published on tenun.cloud' : 'Share this dashboard online')}>
       <Icon name={dash.publish?.error ? 'warning' : 'globe'} /> {dash.publish?.url ? 'Published' : 'Publish'}
     </button>
-    <button class="btn" onclick={exportHtml} disabled={!dash.tiles.length || !!exporting} title="Save this dashboard as one HTML file that works offline">
+    {/if}
+    <button
+      class="btn"
+      aria-haspopup="menu"
+      aria-expanded={!!exportMenu}
+      disabled={!dash.tiles.length || !!exporting}
+      title="Save this dashboard as a web page, a picture or a PDF"
+      onclick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        exportMenu = exportMenu ? null : { x: r.right - 200, y: r.bottom + 4 };
+      }}>
       <Icon name="export" /> {exporting ?? 'Export'}
     </button>
+    {#if !phone}
     <div class="add">
       <button class="btn primary" onclick={() => (addMenu = !addMenu)} aria-expanded={addMenu}><Icon name="plus" /> Add tile</button>
       {#if addMenu}
         <div class="menu" role="menu">
-          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['table', 'Table'], ['pivot', 'Pivot table'], ['text', 'Text'], ['image', 'Image'], ...(advanced ? [['heatmap', 'Heat map'], ['funnel', 'Funnel'], ['box', 'Box plot'], ['bullet', 'Bullet chart'], ['compare', 'Compare two values'], ['sankey', 'Sankey'], ['calendar', 'Calendar heat map'], ['cohort', 'Cohort grid'], ...(hasTwoDates(app.tables) ? [['gantt', 'Gantt chart']] : [])] : [])] as [t, label]}
+          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['table', 'Table'], ['pivot', 'Pivot table'], ['filter', 'Filter'], ['text', 'Text'], ['image', 'Image'], ...(advanced ? [['heatmap', 'Heat map'], ['funnel', 'Funnel'], ['box', 'Box plot'], ['bullet', 'Bullet chart'], ['compare', 'Compare two values'], ['sankey', 'Sankey'], ['calendar', 'Calendar heat map'], ['cohort', 'Cohort grid'], ...(hasTwoDates(app.tables) ? [['gantt', 'Gantt chart']] : [])] : [])] as [t, label]}
             <button role="menuitem" onclick={() => addTile(t as TileType)}>
               <Icon name={(t === 'calendar' ? 'calendarheat' : t) as IconName} /> {label}
             </button>
@@ -421,7 +651,8 @@
         </div>
       {/if}
     </div>
-    <button class="btn plain icon" title="Delete dashboard" onclick={removeDashboard}><Icon name="trash" /></button>
+    <button class="btn plain icon" title="Delete dashboard" aria-label="Delete dashboard" onclick={removeDashboard}><Icon name="trash" /></button>
+    {/if}
   </header>
 
   {#each failed as src (src.id)}
@@ -433,6 +664,43 @@
       </span>
     </div>
   {/each}
+
+  {#if exportMenu}
+    <Menu
+      x={exportMenu.x}
+      y={exportMenu.y}
+      items={[
+        { label: 'Web page (HTML)', run: exportHtml },
+        { label: 'Image (PNG)', run: () => exportPicture('png') },
+        { label: 'PDF', run: () => exportPicture('pdf') },
+      ]}
+      onclose={() => (exportMenu = null)} />
+  {/if}
+
+  {#if chipMenu}
+    {@const from = chipMenu?.id ?? ''}
+    {@const f = filters.find((x) => x.fromTile === from)}
+    {#if f}
+      <Menu
+        x={chipMenu?.x ?? 0}
+        y={chipMenu?.y ?? 0}
+        items={[{ label: 'Keep only', run: () => keep(from, 'keep') }, ...(canExclude(f) ? [{ label: 'Exclude', run: () => keep(from, 'exclude') }] : [])]}
+        onclose={() => (chipMenu = null)} />
+    {/if}
+  {/if}
+
+  {#if focusTile && results[focusTile.id]}
+    <FocusSheet
+      tile={eff(focusTile)}
+      res={results[focusTile.id]!.res}
+      colors={readColors()}
+      title={tileTitle(eff(focusTile), app.tables)}
+      tables={app.tables}
+      onclose={() => (focusId = null)} />
+  {/if}
+  {#if rowsReq}
+    <RowsSheet title={rowsReq.title} data={rowsReq.data} error={rowsReq.error} onclose={() => (rowsSeq++, (rowsReq = null))} />
+  {/if}
 
   <div class="body">
     <div class="scroll" onpointerdown={(e) => e.target === e.currentTarget && (selectedTile = null)} role="presentation">
@@ -473,34 +741,41 @@
             style:width="{p.w}px"
             style:height="{p.h}px">
             <TileView
-              tile={dash.tiles.find((x) => x.id === t.id) ?? t}
-              {filters}
+              tile={shownOf(t)}
+              filters={allFilters}
               {tick}
               active={selectedTile === t.id}
-              onpick={(v, otherOf, bins, stage) => pick(t, v, otherOf, bins, stage)}
-              onpickcol={(v) => pickCol(t, v)}
+              onpick={(v, otherOf, bins, stage) => pick(shownOf(t), v, otherOf, bins, stage)}
+              onpickcol={(v) => pickCol(shownOf(t), v)}
               onresult={(r, k) => setResult(t.id, r, k)}
+              onfilter={(f) => setFilter(t.id, f)}
+              onrows={(v, otherOf, bins) => showRows(t.id, v, otherOf, bins)}
+              onfocus={() => (focusId = t.id)}
               onselect={() => (selectedTile = t.id)}
               onwidths={(w) => change({ ...(dash.tiles.find((x) => x.id === t.id) ?? t), widths: w })}
               onlayout={(layout) => change({ ...(dash.tiles.find((x) => x.id === t.id) ?? t), layout })}
+              {phone}
+              dashboards={app.dashboards.filter((d) => d.id !== dash.id).map((d) => ({ id: d.id, title: d.title }))}
+              onduplicate={() => duplicate(t.id)}
+              oncopy={(to) => copyTo(t.id, to)}
+              onremove={() => removeTile(t.id)}
+              onnav={(step) => navTile(t.id, step)}
+              onopen={() => openTile(t.id)}
               ondragstart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'move')}
               onresizestart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'resize')} />
           </div>
         {/each}
       </div>
     </div>
-    {#if sel}
+    {#if sel && !phone}
       <Inspector
         tile={sel}
         current={results[sel.id] ?? null}
-        {filters}
+        filters={allFilters}
+        dashGrain={dash.grain ?? null}
         onclose={() => (selectedTile = null)}
         onchange={change}
-        onremove={() => {
-          filters = filters.filter((f) => f.fromTile !== sel.id);
-          update((ts) => compact(ts.filter((x) => x.id !== sel.id)));
-          selectedTile = null;
-        }} />
+        onremove={() => removeTile(sel.id)} />
     {/if}
   </div>
 {/if}
@@ -510,12 +785,16 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 52px;
-    padding: 0 12px 0 16px;
+    min-height: 52px;
+    padding: 6px 12px 6px 16px;
     border-bottom: 1px solid var(--sep);
     background: var(--surface);
     flex: none;
   }
+  .toolbar.phone { min-height: 44px; flex-wrap: wrap; padding: 6px 10px; }
+  .toolbar.phone .spacer { display: none; }
+  .toolbar.phone .chips { flex-wrap: wrap; overflow: visible; }
+  .title:disabled { color: var(--text); cursor: default; }
   .title {
     border: 0;
     background: none;
@@ -527,7 +806,7 @@
   }
   .title:hover { background: var(--hover); }
   .title-input { width: 240px; font-size: 15px; font-weight: 600; }
-  .chips { display: flex; gap: 6px; align-items: center; min-width: 0; overflow: hidden; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
   .chip {
     display: inline-flex;
     align-items: center;
@@ -540,6 +819,7 @@
     font-size: 12px;
     font-weight: 500;
     white-space: nowrap;
+    flex: none;
   }
   .chip button {
     width: 18px;
@@ -553,6 +833,21 @@
     padding: 0;
   }
   .chip button:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  .chip button.say { width: auto; height: 22px; padding: 0 3px; border-radius: 4px; font: inherit; }
+  .chip.pinned { background: var(--inset); color: var(--text); padding-left: 9px; }
+  .chip.pinned :global(svg:first-child) { color: var(--text-2); }
+  .seg { display: flex; padding: 2px; border-radius: 8px; background: var(--inset); }
+  .seg button {
+    height: 24px;
+    padding: 0 9px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-2);
+    font-size: 12px;
+    text-transform: capitalize;
+  }
+  .seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
   .small { height: 24px; font-size: 12px; }
   .spacer { flex: 1; }
   .stamp { font-size: 12px; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -602,6 +897,7 @@
   .menu button:hover :global(svg) { color: #fff; }
   .body { flex: 1; min-height: 0; display: flex; }
   .scroll { flex: 1; min-width: 0; overflow: auto; padding: 16px; }
+  @media (max-width: 699px) { .scroll { padding: 10px; } }
   .grid { position: relative; min-height: 100%; }
   .cell {
     position: absolute;

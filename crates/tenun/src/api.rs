@@ -1,7 +1,7 @@
 //! JSON routes under `/api`, the event socket, and the embedded UI files.
 
 use crate::settings::Settings;
-use crate::{AppState, VERSION, cloud, export, fsbrowse, sample};
+use crate::{AppState, VERSION, cloud, export, fsbrowse, sample, xlsx};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, Uri, header};
@@ -14,9 +14,10 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tenun_core::engine::AddSource;
-use tenun_core::query::SemanticQuery;
+use tenun_core::paste;
+use tenun_core::query::{Filter, SemanticQuery};
 use tenun_core::snapshot::{self, DashFilter, Tile, run_tile};
-use tenun_core::workspace::{FieldRef, Locale};
+use tenun_core::workspace::{Every, FieldRef, Locale, TableSetup};
 
 type S = State<Arc<AppState>>;
 
@@ -62,7 +63,14 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/sources", post(add_source))
         .route("/sources/{id}", delete(remove_source))
         .route("/sources/{id}/reload", post(reload_source))
+        .route("/sources/{id}/every", put(source_every))
+        .route("/paste/preview", post(paste_preview))
+        .route("/paste", post(paste_add))
         .route("/tables/preview", get(preview))
+        .route("/tables/setup", put(table_setup))
+        .route("/profile", get(profile))
+        .route("/prep/unpivot", get(unpivot_detect))
+        .route("/prep/unpivot/preview", post(unpivot_preview))
         .route("/relationships", post(add_rel))
         .route("/relationships/{id}", delete(remove_rel))
         .route("/relationships/suggest", get(suggest))
@@ -73,6 +81,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/settings", get(get_settings).put(put_settings))
         .route("/viewer", get(viewer))
         .route("/tile", post(tile))
+        .route("/rows", post(rows))
         .route("/cloud", get(cloud_status))
         .route("/cloud/connect", post(cloud_connect))
         .route("/cloud/disconnect", post(cloud_disconnect))
@@ -81,6 +90,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/snapshot", post(snapshot))
         .route("/export-html", post(export_html))
         .route("/export-file", post(export_file))
+        .route("/export-xlsx", post(export_xlsx))
         .route("/events", get(events))
         .route("/pick", post(pick))
         .route("/image/read", post(read_image))
@@ -284,6 +294,61 @@ async fn reload_source(State(s): S, Path(id): Path<String>) -> R<Json<Value>> {
 }
 
 #[derive(Deserialize)]
+struct EveryBody {
+    every: Every,
+}
+
+/// How often a CSV link is fetched again.
+async fn source_every(
+    State(s): S,
+    Path(id): Path<String>,
+    Json(b): Json<EveryBody>,
+) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            st.engine.set_url_every(&id, b.every)?;
+            st.emit(json!({ "type": "workspace-changed" }));
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct PasteBody {
+    text: String,
+    #[serde(default = "yes")]
+    header: bool,
+    #[serde(default)]
+    name: String,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// The name, the first rows and the number of rows of a pasted table. An error says that the
+/// text is not a table.
+async fn paste_preview(Json(b): Json<PasteBody>) -> R<Json<Value>> {
+    let p = paste::parse(&b.text)
+        .ok_or_else(|| anyhow::anyhow!("There is no table in what you pasted."))?;
+    Ok(Json(serde_json::to_value(paste::preview(&p, b.header, 5))?))
+}
+
+/// Writes a pasted table as a CSV file in the data folder and adds it as a source.
+async fn paste_add(State(s): S, Json(b): Json<PasteBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let id = st.engine.add_pasted(&b.name, &b.text, b.header)?;
+            let mut v = changed(st)?;
+            v["added"] = json!(id);
+            Ok(v)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
 struct PreviewQ {
     id: String,
     limit: Option<u32>,
@@ -295,6 +360,84 @@ async fn preview(State(s): S, Query(q): Query<PreviewQ>) -> R<Json<Value>> {
             Ok(serde_json::to_value(
                 st.engine.preview(&q.id, q.limit.unwrap_or(200))?,
             )?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct SetupBody {
+    table: String,
+    /// How the table is prepared; null clears it.
+    setup: Option<TableSetup>,
+}
+
+/// Sets the header row, the column overrides and the unpivot of one table. The source loads
+/// again when the data changes, and the tiles ask again.
+async fn table_setup(State(s): S, Json(b): Json<SetupBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let table = b.table.clone();
+            if st.engine.set_table_setup(&b.table, b.setup)? {
+                st.emit(json!({ "type": "data-changed", "tables": [table] }));
+            } else {
+                st.emit(json!({ "type": "workspace-changed" }));
+            }
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct ProfileQ {
+    table: String,
+    column: String,
+}
+
+async fn profile(State(s): S, Query(q): Query<ProfileQ>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            Ok(serde_json::to_value(
+                st.engine.profile(&q.table, &q.column)?,
+            )?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct TableQ {
+    table: String,
+}
+
+/// The wide-sheet columns of a table (months across the top), or null.
+async fn unpivot_detect(State(s): S, Query(q): Query<TableQ>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            Ok(serde_json::to_value(st.engine.detect_unpivot(&q.table))?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct UnpivotBody {
+    table: String,
+    keep: Vec<String>,
+    name: String,
+    value: String,
+}
+
+/// Five rows of the table before, and five rows after its columns turn into rows.
+async fn unpivot_preview(State(s): S, Json(b): Json<UnpivotBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let before = st.engine.preview(&b.table, 5)?;
+            let after = st
+                .engine
+                .unpivot_preview(&b.table, b.keep, b.name, b.value, 5)?;
+            Ok(json!({ "before": before, "after": after }))
         })
         .await?,
     ))
@@ -389,6 +532,29 @@ async fn tile(State(s): S, Json(b): Json<TileBody>) -> R<Json<Value>> {
 }
 
 #[derive(Deserialize)]
+struct RowsBody {
+    tile: Value,
+    #[serde(default)]
+    filters: Vec<DashFilter>,
+    /// The filter a click on the mark makes (the same one the cross-filter uses). Without it the
+    /// rows are those of the whole tile.
+    #[serde(default)]
+    click: Option<Filter>,
+}
+
+/// The raw rows behind a tile or one of its marks, at most 500, with the total count.
+async fn rows(State(s): S, Json(b): Json<RowsBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let t: Tile = serde_json::from_value(b.tile)?;
+            let r = tenun_core::filters::rows_behind(&st.engine, &t, &b.filters, b.click)?;
+            Ok(serde_json::to_value(r)?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
 struct SnapBody {
     dashboard: String,
     #[serde(default)]
@@ -419,6 +585,53 @@ async fn export_html(State(s): S, Json(b): Json<SnapBody>) -> R<Response> {
         return Ok(Json(json!({ "ok": true })).into_response());
     }
     Ok(([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response())
+}
+
+#[derive(Deserialize)]
+struct XlsxBody {
+    tile: Value,
+    #[serde(default)]
+    filters: Vec<DashFilter>,
+    /// The column names the app shows. Without them the engine's own names are used.
+    #[serde(default)]
+    headers: Vec<String>,
+    #[serde(default)]
+    title: String,
+    /// Desktop app: write the file here instead of returning it.
+    #[serde(default)]
+    path: Option<String>,
+}
+
+/// The numbers one tile shows, as an Excel file (header row, number formats, dates, total row).
+async fn export_xlsx(State(s): S, Json(b): Json<XlsxBody>) -> R<Response> {
+    let (bytes, path) = blocking(&s, move |st| {
+        let t: Tile = serde_json::from_value(b.tile.clone())?;
+        if snapshot::is_static(&t.kind) || t.kind == "filter" {
+            anyhow::bail!("This tile has no numbers to download.");
+        }
+        let res = run_tile(&st.engine, &t, &b.filters)?;
+        Ok((xlsx::build(&b.tile, &res, &b.headers, &b.title)?, b.path))
+    })
+    .await?;
+    if let Some(p) = path {
+        tokio::task::spawn_blocking(move || {
+            let mut p = PathBuf::from(p);
+            if p.extension().is_none_or(|e| e != "xlsx") {
+                p.set_extension("xlsx");
+            }
+            std::fs::write(p, bytes)
+        })
+        .await??;
+        return Ok(Json(json!({ "ok": true })).into_response());
+    }
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )],
+        bytes,
+    )
+        .into_response())
 }
 
 // ---- tenun.cloud --------------------------------------------------------------

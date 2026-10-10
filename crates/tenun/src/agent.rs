@@ -114,16 +114,19 @@ pub fn run(file: &Path) -> anyhow::Result<()> {
     // Data files that change mark "on change" dashboards as due.
     let (e2, s2) = (engine.clone(), schedule.clone());
     let mut watcher = tenun_core::watch::FileWatcher::new(move |paths| {
-        for (id, p) in e2.watched_files() {
-            if paths.contains(&tenun_core::watch::canonical(&p)) {
-                e2.load(&id);
-                log(&format!("{} changed", p.display()));
-            }
+        for id in e2.sources_for(&paths) {
+            e2.load(&id);
+            log(&format!("source {id} changed"));
         }
         s2.lock().unwrap().mark_changed(&e2);
     })?;
     let files: Vec<_> = engine.watched_files().into_iter().map(|(_, p)| p).collect();
-    watcher.set(&files);
+    let folders: Vec<_> = engine
+        .watched_folders()
+        .into_iter()
+        .map(|(_, p)| p)
+        .collect();
+    watcher.set(&files, &folders);
 
     let scheduled: Vec<String> = engine
         .dashboards()
@@ -143,6 +146,13 @@ pub fn run(file: &Path) -> anyhow::Result<()> {
         scheduled.join(", ")
     ));
     loop {
+        // CSV links are fetched again on their own schedule, and dashboards that publish
+        // "on change" are due when one of them gave new data.
+        let urls = engine.refresh_due_urls();
+        if !urls.is_empty() {
+            log(&format!("fetched {}", urls.join(", ")));
+            schedule.lock().unwrap().mark_changed(&engine);
+        }
         let (ok, failed) = cloud::run_due(&engine, &s, &base, &mut schedule.lock().unwrap());
         for id in ok {
             log(&format!("published {id}"));

@@ -159,11 +159,7 @@ mod tests {
     use super::*;
 
     fn c(n: &str) -> Column {
-        Column {
-            name: n.into(),
-            dtype: DType::Number,
-            raw_type: String::new(),
-        }
+        Column::new(n.into(), DType::Number, String::new())
     }
     fn t(n: &str) -> Table {
         Table {
@@ -174,6 +170,9 @@ mod tests {
             sql_ref: String::new(),
             columns: vec![],
             rows: None,
+            notes: vec![],
+            header_row: None,
+            prep: false,
         }
     }
 

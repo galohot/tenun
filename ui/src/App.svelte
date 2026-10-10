@@ -10,6 +10,7 @@
   import AddSource from './components/AddSource.svelte';
   import SettingsSheet from './components/SettingsSheet.svelte';
   import Toasts from './components/Toasts.svelte';
+  import Icon from './components/Icon.svelte';
 
   onMount(() => {
     app.init();
@@ -24,12 +25,30 @@
     setLocale(app.locale);
   });
 
+  // The drawer closes when a page is picked.
+  $effect(() => {
+    void app.route;
+    app.navOpen = false;
+  });
+
   const hasData = $derived((app.snap?.workspace.sources.length ?? 0) > 0);
 </script>
 
 {#if app.snap}
-  <div class="shell">
-    <Sidebar />
+  <div class="shell" class:phone={app.phone}>
+    {#if app.phone}
+      <header class="phonebar">
+        <button class="btn plain icon" aria-label="Menu" aria-expanded={app.navOpen} onclick={() => (app.navOpen = !app.navOpen)}><Icon name="rows" /></button>
+        <img src="/icon.svg" alt="" width="20" height="20" />
+        <span>{app.snap.workspace.name}</span>
+      </header>
+      {#if app.navOpen}
+        <div class="scrim" role="presentation" onclick={() => (app.navOpen = false)}></div>
+        <div class="drawer"><Sidebar /></div>
+      {/if}
+    {:else}
+      <Sidebar />
+    {/if}
     <main>
       {#if app.route.view === 'data'}
         <DataView tableId={app.route.table} />
@@ -61,6 +80,22 @@
     grid-template-columns: 232px 1fr;
     height: 100%;
   }
+  .shell.phone { display: flex; flex-direction: column; }
+  .phonebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 8px;
+    flex: none;
+    border-bottom: 1px solid var(--sep);
+    background: var(--surface);
+    font-weight: 600;
+  }
+  .phonebar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scrim { position: fixed; inset: 0; z-index: 40; background: rgb(0 0 0 / 35%); }
+  .drawer { position: fixed; top: 0; bottom: 0; left: 0; z-index: 41; width: 260px; max-width: 85vw; display: flex; }
+  .drawer :global(.side) { width: 100%; }
   main {
     min-width: 0;
     height: 100%;
@@ -69,6 +104,7 @@
     display: flex;
     flex-direction: column;
   }
+  .shell.phone main { flex: 1; height: auto; min-height: 0; }
   .boot {
     height: 100%;
     display: grid;

@@ -106,6 +106,8 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       ...axisCommon(c).axisLabel,
       width: horizontal ? 120 : undefined,
       overflow: 'truncate' as const,
+      // A few categories all get their label; hideOverlap still drops any that truly collide.
+      ...(!horizontal && categories.length <= 8 ? { interval: 0 } : {}),
     },
     axisPointer: { type: (hasBar ? 'shadow' : 'line') as 'shadow' | 'line' },
     boundaryGap: hasBar,

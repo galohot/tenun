@@ -1,6 +1,7 @@
 // App-wide state: the workspace snapshot, the route, the theme, live events.
 
 import { guessLocale } from './locale';
+import { PHONE_MAX } from './layout';
 import { api, type CloudStatus, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
 
 export type Route =
@@ -56,6 +57,9 @@ class App {
   /** This computer's settings; null until they load. */
   settings = $state<Settings | null>(null);
   settingsOpen = $state(false);
+  /** A narrow screen (a phone in browser mode): one column, no editing, and the sidebar is a drawer. */
+  phone = $state(matchMedia(`(max-width: ${PHONE_MAX - 1}px)`).matches);
+  navOpen = $state(false);
 
   theme = $derived<'light' | 'dark'>(
     this.themePref === 'system' ? (this.systemDark ? 'dark' : 'light') : this.themePref,
@@ -73,6 +77,7 @@ class App {
   constructor() {
     addEventListener('hashchange', () => (this.route = parseHash()));
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => (this.systemDark = e.matches));
+    matchMedia(`(max-width: ${PHONE_MAX - 1}px)`).addEventListener('change', (e) => (this.phone = e.matches));
   }
 
   setTheme(p: ThemePref) {

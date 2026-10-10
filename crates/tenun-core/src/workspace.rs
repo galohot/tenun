@@ -3,7 +3,9 @@
 //! The file is meant to be shared and committed to git, so it never holds a
 //! password. Database passwords live in the [`crate::secrets`] store.
 
+use crate::catalog::DType;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const FILE_VERSION: u32 = 1;
@@ -68,6 +70,10 @@ pub struct Workspace {
         skip_serializing_if = "Option::is_none"
     )]
     pub locale: Option<Locale>,
+    /// How each table is prepared: header row, column overrides, unpivot. The key is the table id
+    /// (`<source id>/<table name>`). Not written until a table is set up (V3-D11).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tables: BTreeMap<String, TableSetup>,
 }
 
 impl Default for Workspace {
@@ -80,8 +86,101 @@ impl Default for Workspace {
             dashboards: Vec::new(),
             layout: serde_json::Value::Null,
             locale: None,
+            tables: BTreeMap::new(),
         }
     }
+}
+
+/// What the user changed about one table. Everything is optional; an empty setup is dropped.
+/// The raw data is never touched: the changes live in the table's view.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct TableSetup {
+    /// Excel: the row (as numbered in the sheet) that holds the column names. Overrides detection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header_row: Option<u32>,
+    /// By real column name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub columns: BTreeMap<String, ColumnSetup>,
+    /// Applied in order, before the column types.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transforms: Vec<Transform>,
+}
+
+impl TableSetup {
+    pub fn is_empty(&self) -> bool {
+        self.header_row.is_none() && self.columns.is_empty() && self.transforms.is_empty()
+    }
+
+    /// Drops overrides that say nothing, so a cleared menu leaves no trace in the file.
+    pub fn tidy(&mut self) {
+        for c in self.columns.values_mut() {
+            if c.label.as_deref().is_some_and(|s| s.trim().is_empty()) {
+                c.label = None;
+            }
+            if c.description
+                .as_deref()
+                .is_some_and(|s| s.trim().is_empty())
+            {
+                c.description = None;
+            }
+            if c.hidden == Some(false) {
+                c.hidden = None;
+            }
+            if c.dtype.is_none() {
+                c.date_format = None;
+            }
+            if c.date_format == Some(DateFormat::Auto) {
+                c.date_format = None;
+            }
+        }
+        self.columns.retain(|_, c| *c != ColumnSetup::default());
+    }
+
+    /// True when the view of the table (not only its labels) depends on this setup.
+    pub fn changes_view(&self) -> bool {
+        !self.transforms.is_empty() || self.columns.values().any(|c| c.dtype.is_some())
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ColumnSetup {
+    /// The name shown in the app. Queries keep the real name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Read the column as this type. Cells that cannot be read become blank.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dtype: Option<DType>,
+    /// How to read dates written as text. Only used with `dtype` date or datetime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date_format: Option<DateFormat>,
+    /// Out of the field pickers. Still there for relationships.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>,
+    /// A tooltip in the field pickers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DateFormat {
+    Auto,
+    /// 31/12/2026
+    Dmy,
+    /// 12/31/2026
+    Mdy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Transform {
+    /// Columns become rows: the `keep` columns stay, every other column turns into one row per
+    /// value, with its name in `name` and its value in `value`.
+    Unpivot {
+        keep: Vec<String>,
+        name: String,
+        value: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -114,11 +213,56 @@ pub enum SourceKind {
     Duckdb {
         path: String,
     },
+    /// A folder of CSV and Excel files. Files of the same shape stack into one table with a
+    /// `file` column. `pattern` is a list of file name patterns, separated by `;`.
+    Folder {
+        path: String,
+        #[serde(default = "default_pattern")]
+        pattern: String,
+    },
+    /// A CSV file on the web, fetched into a cache file next to the workspace.
+    Url {
+        url: String,
+        #[serde(default)]
+        every: Every,
+    },
     Postgres(DbConn),
     Mysql(DbConn),
 }
 
+/// The file name patterns a new folder source reads.
+pub const DEFAULT_PATTERN: &str = "*.csv;*.xlsx";
+
+fn default_pattern() -> String {
+    DEFAULT_PATTERN.into()
+}
+
+/// How often a CSV link is fetched again.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Every {
+    #[serde(rename = "15min")]
+    Min15,
+    #[default]
+    Hourly,
+    Daily,
+    Manual,
+}
+
+impl Every {
+    /// Seconds between two fetches; `None` for manual.
+    pub fn secs(self) -> Option<u64> {
+        match self {
+            Every::Min15 => Some(15 * 60),
+            Every::Hourly => Some(60 * 60),
+            Every::Daily => Some(24 * 60 * 60),
+            Every::Manual => None,
+        }
+    }
+}
+
 impl SourceKind {
+    /// The path of a single data file. A folder is not a file: see [`SourceKind::folder`].
     pub fn path(&self) -> Option<&str> {
         match self {
             SourceKind::Excel { path }
@@ -126,6 +270,14 @@ impl SourceKind {
             | SourceKind::Parquet { path }
             | SourceKind::Sqlite { path }
             | SourceKind::Duckdb { path } => Some(path),
+            _ => None,
+        }
+    }
+
+    /// The path and name patterns of a folder source.
+    pub fn folder(&self) -> Option<(&str, &str)> {
+        match self {
+            SourceKind::Folder { path, pattern } => Some((path, pattern)),
             _ => None,
         }
     }
@@ -141,6 +293,8 @@ impl SourceKind {
             SourceKind::Parquet { .. } => "parquet",
             SourceKind::Sqlite { .. } => "sqlite",
             SourceKind::Duckdb { .. } => "duckdb",
+            SourceKind::Folder { .. } => "folder",
+            SourceKind::Url { .. } => "url",
             SourceKind::Postgres(_) => "postgres",
             SourceKind::Mysql(_) => "mysql",
         }
@@ -263,6 +417,37 @@ mod tests {
         let json = serde_json::to_string(&ws).unwrap();
         assert!(!json.to_lowercase().contains("password"));
         let back: Workspace = serde_json::from_str(&json).unwrap();
+        assert_eq!(ws, back);
+    }
+
+    #[test]
+    fn folder_and_link_sources_round_trip_with_their_defaults() {
+        let ws: Workspace = serde_json::from_str(
+            r#"{"version":1,"name":"x","sources":[
+                {"id":"s1","name":"sales","kind":"folder","path":"sales"},
+                {"id":"s2","name":"web","kind":"url","url":"https://example.com/a.csv"},
+                {"id":"s3","name":"web","kind":"url","url":"https://example.com/b.csv","every":"15min"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            ws.sources[0].kind.folder(),
+            Some(("sales", DEFAULT_PATTERN))
+        );
+        assert!(matches!(
+            &ws.sources[1].kind,
+            SourceKind::Url {
+                every: Every::Hourly,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &ws.sources[2].kind,
+            SourceKind::Url {
+                every: Every::Min15,
+                ..
+            }
+        ));
+        let back: Workspace = serde_json::from_str(&serde_json::to_string(&ws).unwrap()).unwrap();
         assert_eq!(ws, back);
     }
 

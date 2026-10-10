@@ -20,11 +20,15 @@
   const words = $derived(goal ? targetWords(goal, tile.better ?? 'up') : null);
   const pace = $derived(words?.pace ?? '');
   // With a target there are two more lines of text, so the history waits for a wider tile.
-  const showBars = $derived(kpi.bars.length > 2 && w >= (goal ? 420 : 200));
+  // One row high: the value and the change, nothing else. The rest moves to the tooltip.
+  const mini = $derived(tile.h <= 1);
+  const showBars = $derived(!mini && kpi.bars.length > 2 && w >= (goal ? 420 : 200));
   // In a narrow tile the target line would wrap and push the figure into the title. The chip stays
   // and the words move to its tooltip.
   const narrow = $derived(w < 200);
-  const size = $derived(Math.round(Math.max(26, Math.min(48, Math.min(w / 8.5, h / (goal ? (narrow ? 3 : 3.3) : 2.4))))));
+  const size = $derived(
+    mini ? Math.round(Math.max(16, Math.min(30, h - 6, w / 7))) : Math.round(Math.max(26, Math.min(48, Math.min(w / 8.5, h / (goal ? (narrow ? 3 : 3.3) : 2.4))))),
+  );
   const goalWords = $derived(target === null || !goal ? '' : `Target ${compact(target, fmt)} · ${pctOfTarget(goal.share)} of target${pace ? ` · ${pace}` : ''}`);
 
   // Under half a percent is "about the same", not a trend.
@@ -53,26 +57,29 @@
   });
 </script>
 
-<div class="kpi" class:with-bars={showBars} bind:clientWidth={w} bind:clientHeight={h}>
+<div class="kpi" class:with-bars={showBars} class:mini bind:clientWidth={w} bind:clientHeight={h}>
   <div class="text">
-    <div class="value" style:font-size="{size}px" title={kpi.value === null ? '' : tip(kpi.value, fmt)}>
+    <div
+      class="value"
+      style:font-size="{size}px"
+      title={kpi.value === null ? '' : `${tip(kpi.value, fmt)}${mini ? ` · ${kpi.period}${kpi.partial ? ' · so far' : ''}` : ''}`}>
       {kpi.value === null ? '–' : compact(kpi.value, fmt)}
     </div>
-    <div class="period">{kpi.period}{kpi.partial ? ' · so far' : ''}</div>
+    {#if !mini}<div class="period">{kpi.period}{kpi.partial ? ' · so far' : ''}</div>{/if}
     {#if kpi.versus}
-      <div class="compare">
+      <div class="compare" title={mini ? `vs ${kpi.versus}` : undefined}>
         {#if kpi.delta === null}
-          <span class="muted">Nothing to compare in {kpi.versus}</span>
+          {#if !mini}<span class="muted">Nothing to compare in {kpi.versus}</span>{/if}
         {:else}
           <span class="delta {tone}">
             {tone === 'flat' ? '≈' : kpi.delta > 0 ? '▲' : '▼'}
             {tone === 'flat' ? 'Same' : pct}
           </span>
-          <span class="muted">vs {kpi.versus}</span>
+          {#if !mini}<span class="muted">vs {kpi.versus}</span>{/if}
         {/if}
       </div>
     {/if}
-    {#if goal && target !== null}
+    {#if goal && target !== null && !mini}
       <div class="goal" title={narrow ? `${goalWords}${goal.projected === null ? '' : `. At this pace the period ends near ${tip(goal.projected, fmt)}`}.` : goal.projected === null ? '' : `At this pace the period ends near ${tip(goal.projected, fmt)}.`}>
         <span class="status {goal.onTrack ? 'good' : 'bad'}">
           <Icon name={goal.onTrack ? 'check' : 'warning'} size={12} />
@@ -102,6 +109,9 @@
 <style>
   .kpi { height: 100%; display: flex; align-items: flex-end; gap: 16px; min-height: 0; }
   .text { display: flex; flex-direction: column; min-width: 0; flex: none; max-width: 100%; }
+  .mini { align-items: center; }
+  .mini .text { flex-direction: row; align-items: baseline; gap: 10px; }
+  .mini .value { margin-bottom: 0; }
   .value {
     font-weight: 600;
     letter-spacing: -0.025em;

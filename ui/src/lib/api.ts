@@ -7,6 +7,18 @@ export interface Column {
   name: string;
   dtype: DType;
   raw_type: string;
+  /** The name shown in the app (from the column override). Queries use `name`. */
+  label?: string;
+  /** Left out of the field pickers. Still there for relationships. */
+  hidden?: boolean;
+  /** A tooltip in the field pickers. */
+  description?: string;
+  /** The share of blank cells, 0–1. Not set when nothing is blank or the data is read live. */
+  blank?: number;
+  /** The file had text and numbers (or dates) mixed in this column. */
+  mixed?: boolean;
+  /** After a type override: how many cells could not be read as that type and became blank. */
+  failed?: number;
 }
 
 export interface Table {
@@ -16,6 +28,58 @@ export interface Table {
   label: string;
   columns: Column[];
   rows: number | null;
+  /** What was detected and fixed when the sheet was read: "Header on row 4", "Filled down Region". */
+  notes?: string[];
+  /** Excel: the sheet row that holds the column names. */
+  header_row?: number;
+  /** The data is local, so its columns can be re-typed and turned into rows. */
+  prep?: boolean;
+}
+
+export type DateFormat = 'auto' | 'dmy' | 'mdy';
+
+/** What the user changed about one column of a table. */
+export interface ColumnSetup {
+  label?: string;
+  dtype?: DType;
+  /** How dates written as text are read. Only with `dtype` date or datetime. */
+  date_format?: DateFormat;
+  hidden?: boolean;
+  description?: string;
+}
+
+export type Transform = { kind: 'unpivot'; keep: string[]; name: string; value: string };
+
+/** How one table is prepared. Stored in the workspace by table id. */
+export interface TableSetup {
+  /** Excel: the sheet row that holds the column names. Overrides detection. */
+  header_row?: number;
+  columns?: Record<string, ColumnSetup>;
+  transforms?: Transform[];
+}
+
+/** A wide sheet: months, quarters or years across the top. */
+export interface UnpivotPlan {
+  keep: string[];
+  columns: string[];
+  name: string;
+  value: string;
+  /** Every header has a year, so the new name column reads as a date. */
+  dates: boolean;
+}
+
+export interface Profile {
+  rows: number;
+  /** The share of blank cells, 0–1. */
+  blank: number;
+  distinct: number;
+  min?: Cell;
+  max?: Cell;
+  /** Text and yes/no columns: the 5 most common values. */
+  top?: { value: string; count: number }[];
+  /** Number and date columns: counts in 12 equal bins from min to max. */
+  histogram?: number[];
+  mixed: boolean;
 }
 
 export interface FieldRef {
@@ -29,11 +93,26 @@ export interface Relationship {
   to: FieldRef;
 }
 
+/** How often a CSV link is fetched again. */
+export type UrlEvery = '15min' | 'hourly' | 'daily' | 'manual';
+
+export interface PastePreview {
+  columns: string[];
+  rows: string[][];
+  /** Rows of data, not counting the header. */
+  total: number;
+}
+
 export interface Source {
   id: string;
   name: string;
-  kind: 'excel' | 'csv' | 'parquet' | 'sqlite' | 'duckdb' | 'postgres' | 'mysql';
+  kind: 'excel' | 'csv' | 'parquet' | 'sqlite' | 'duckdb' | 'folder' | 'url' | 'postgres' | 'mysql';
   path?: string;
+  /** Folder: the file name patterns, separated by `;`. */
+  pattern?: string;
+  /** CSV link. */
+  url?: string;
+  every?: UrlEvery;
   host?: string;
   database?: string;
 }
@@ -65,6 +144,16 @@ export interface Filter {
   grain?: Grain | null;
   op: 'in' | 'not_in' | 'between' | 'gte' | 'lte' | 'range' | 'contains' | 'starts_with' | 'blank' | 'not_blank' | 'relative';
   values: (string | number | boolean | null)[];
+}
+
+/**
+ * A filter on a dashboard. `fromTile` is the tile it came from, which it does not filter: a click on
+ * a mark, or a filter tile's selection. A filter the dashboard saves ("Keep only", "Exclude") names
+ * no tile, so it filters them all. `label` is what a chip says when the values alone do not tell.
+ */
+export interface DashFilter extends Filter {
+  fromTile: string;
+  label?: string;
 }
 
 export interface SemanticQuery {
@@ -181,6 +270,21 @@ export type ShowAs =
   | 'value' | 'pct_total' | 'pct_group' | 'running' | 'moving_3' | 'moving_7' | 'moving_12'
   | 'change' | 'pct_change' | 'rank' | 'ytd';
 
+/**
+ * A filter tile: its field is `dims[0]`. `values` (list, dropdown), `range` (range: lowest and highest
+ * number; dates: first and last day, either may be null) and `preset` (dates) hold the selection. A
+ * filter with none of them keeps everything.
+ */
+export interface TileFilter {
+  style: 'list' | 'dropdown' | 'range' | 'dates';
+  /** List and dropdown: pick one value at most. */
+  single?: boolean;
+  values?: Cell[];
+  range?: [Cell, Cell];
+  /** A relative date preset, or `custom` while the two days are being picked. */
+  preset?: string;
+}
+
 /** A picture on a dashboard. */
 export interface TileImage {
   /** A data URL: PNG, JPEG or WebP, at most 1 MB. */
@@ -265,6 +369,8 @@ export interface Tile {
   showAs?: (ShowAs | null)[];
   /** Line, area and bar over time: also draw the same question one year (or one period) earlier. */
   compare?: 'prev_year' | 'prev_period' | null;
+  /** Filter tile: its style and what it has selected. */
+  filter?: TileFilter;
   /** Text tile: a small Markdown subset (see markdown.ts). */
   text?: string;
   /** Image tile. */
@@ -297,6 +403,18 @@ export interface Dashboard {
   refresh: number;
   tiles: Tile[];
   publish?: PublishSettings;
+  /** One grain for every time tile. Not set: each tile keeps its own ("Auto"). */
+  grain?: Grain | null;
+  /** Filters the dashboard keeps ("Keep only", "Exclude"). They apply to every tile. */
+  filters?: DashFilter[];
+}
+
+/** The raw rows behind a tile or one of its marks. */
+export interface RowsBehind {
+  columns: { label: string; dtype: DType }[];
+  rows: Cell[][];
+  /** How many rows match. `rows` holds the first 500. */
+  total: number;
 }
 
 export interface CloudStatus {
@@ -317,6 +435,8 @@ export interface Workspace {
   layout: { model?: Record<string, { x: number; y: number }> } | null;
   /** How numbers and dates read. A file without it reads as English. */
   locale?: 'id' | 'en';
+  /** How each table is prepared, by table id. */
+  tables?: Record<string, TableSetup>;
 }
 
 export interface Snapshot {
@@ -383,12 +503,35 @@ export const api = {
   rename: (name: string) => call<Snapshot>('POST', '/workspace/rename', { name }),
   sample: () => call<Snapshot>('POST', '/sample'),
   addFile: (path: string) => call<Snapshot & { added: string }>('POST', '/sources', { kind: 'file', path }),
+  addFolder: (path: string, pattern?: string) =>
+    call<Snapshot & { added: string }>('POST', '/sources', { kind: 'folder', path, pattern: pattern || null }),
+  addUrl: (url: string, every: UrlEvery, name?: string) =>
+    call<Snapshot & { added: string }>('POST', '/sources', { kind: 'url', url, every, name: name || null }),
+  setUrlEvery: (id: string, every: UrlEvery) =>
+    call<Snapshot>('PUT', `/sources/${encodeURIComponent(id)}/every`, { every }),
+  /** The name, the first rows and the size of a pasted table. Fails when the text is not a table. */
+  pastePreview: (text: string, header: boolean) => call<PastePreview>('POST', '/paste/preview', { text, header }),
+  /** Writes a pasted table as a CSV file in the data folder and adds it as a source. */
+  paste: (name: string, text: string, header: boolean) =>
+    call<Snapshot & { added: string }>('POST', '/paste', { name, text, header }),
   addDatabase: (kind: 'postgres' | 'mysql', conn: Record<string, unknown>) =>
     call<Snapshot & { added: string }>('POST', '/sources', { kind, ...conn }),
   removeSource: (id: string) => call<Snapshot>('DELETE', `/sources/${encodeURIComponent(id)}`),
   reloadSource: (id: string) => call<Snapshot>('POST', `/sources/${encodeURIComponent(id)}/reload`),
   preview: (id: string, limit = 200) =>
     call<{ columns: Column[]; rows: Cell[][] }>('GET', `/tables/preview?id=${encodeURIComponent(id)}&limit=${limit}`),
+  /** Sets how a table is prepared (header row, column overrides, unpivot); null clears it. */
+  setTableSetup: (table: string, setup: TableSetup | null) => call<Snapshot>('PUT', '/tables/setup', { table, setup }),
+  profile: (table: string, column: string) =>
+    call<Profile>('GET', `/profile?table=${encodeURIComponent(table)}&column=${encodeURIComponent(column)}`),
+  /** The columns of a wide sheet that could turn into rows, or null. */
+  unpivotPlan: (table: string) => call<UnpivotPlan | null>('GET', `/prep/unpivot?table=${encodeURIComponent(table)}`),
+  unpivotPreview: (table: string, keep: string[], name: string, value: string) =>
+    call<{ before: { columns: Column[]; rows: Cell[][] }; after: { columns: Column[]; rows: Cell[][] } }>(
+      'POST',
+      '/prep/unpivot/preview',
+      { table, keep, name, value },
+    ),
   addRelationship: (from: FieldRef, to: FieldRef) => call<Snapshot>('POST', '/relationships', { from, to }),
   removeRelationship: (id: string) => call<Snapshot>('DELETE', `/relationships/${encodeURIComponent(id)}`),
   suggest: () => call<Suggestion[]>('GET', '/relationships/suggest'),
@@ -397,7 +540,7 @@ export const api = {
   query: (q: SemanticQuery) => call<QueryResult>('POST', '/query', q),
   fs: (path?: string) => call<FsListing>('GET', `/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   pick: (
-    req: { kind: 'data_files' } | { kind: 'image' } | { kind: 'open_workspace' } | { kind: 'save_workspace' | 'save_html'; name: string },
+    req: { kind: 'data_files' } | { kind: 'folder' } | { kind: 'image' } | { kind: 'open_workspace' } | { kind: 'save_workspace' | 'save_html' | 'save_xlsx'; name: string },
   ) =>
     call<{ paths: string[] }>('POST', '/pick', req),
   /** The picture the native dialog chose, for an image tile. */
@@ -412,6 +555,8 @@ export const api = {
   },
   openBrowser: () => call<{ ok: boolean }>('POST', '/open-browser'),
   tile: (tile: Tile, filters: unknown[]) => call<QueryResult>('POST', '/tile', { tile, filters }),
+  /** The raw rows behind a tile; `click` is the filter a click on the mark makes. */
+  rows: (tile: Tile, filters: unknown[], click: Filter | null) => call<RowsBehind>('POST', '/rows', { tile, filters, click }),
   cloud: () => call<CloudStatus>('GET', '/cloud'),
   cloudConnect: (open: boolean) => call<{ user_code: string; url: string; expires_in: number }>('POST', '/cloud/connect', { open }),
   cloudDisconnect: () => call<{ ok: boolean }>('POST', '/cloud/disconnect', {}),
@@ -420,6 +565,16 @@ export const api = {
   /** Writes the HTML file (desktop app) when `path` is given. */
   exportTo: (dashboard: string, filters: unknown[], path: string) =>
     call<{ ok: boolean }>('POST', '/export-html', { dashboard, filters, path }),
+  /** The Excel file of one tile. With `path` (desktop app) the server writes it there and nothing comes back. */
+  exportXlsx: async (body: { tile: Tile; filters: unknown[]; headers: string[]; title: string }, path?: string): Promise<Uint8Array> => {
+    const res = await fetch('/api/export-xlsx', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Tenun': '1' },
+      body: JSON.stringify({ ...body, path }),
+    });
+    if (!res.ok) throw new ApiError((await res.json().catch(() => null))?.error ?? res.statusText);
+    return path ? new Uint8Array() : new Uint8Array(await res.arrayBuffer());
+  },
   /** Returns the HTML file's text (browser mode). */
   exportHtml: async (dashboard: string, filters: unknown[]): Promise<string> => {
     const res = await fetch('/api/export-html', {

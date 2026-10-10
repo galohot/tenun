@@ -19,7 +19,7 @@
       <li class:linked={data.linked.has(c.name)}>
         <Handle type="source" position={Position.Left} id={`L:${c.name}`} class="h" />
         <Icon name={typeIcon[c.dtype]} size={11} />
-        <span class="c">{c.name}</span>
+        <span class="c" title={c.label ? c.name : undefined}>{c.label ?? c.name}</span>
         <Handle type="source" position={Position.Right} id={`R:${c.name}`} class="h" />
       </li>
     {/each}

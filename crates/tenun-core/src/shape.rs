@@ -844,11 +844,13 @@ pub fn compare(
     let Dim0::Period(g) = classify(engine, d0) else {
         return Ok(());
     };
+    let today = engine.today();
     let filters = q
         .filters
         .iter()
         .map(|f| {
-            let mut f = f.clone();
+            // A relative preset is a range of days for today; it moves back like any other.
+            let mut f = crate::query::resolve_relative(f, today);
             if f.table == d0.table && f.column == d0.column {
                 f.values = f
                     .values
