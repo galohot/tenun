@@ -3,7 +3,11 @@
 pub mod catalog;
 pub mod engine;
 pub mod excel;
+pub mod fetch;
 pub mod filters;
+pub mod folder;
+pub mod paste;
+pub mod prep;
 pub mod query;
 pub mod secrets;
 pub mod shape;

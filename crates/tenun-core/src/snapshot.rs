@@ -853,7 +853,16 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         .tables
         .iter()
         .filter(|t| used.contains(t.id.as_str()))
-        .map(|t| json!({ "id": t.id, "name": t.name, "label": t.label, "columns": t.columns }))
+        .map(|t| {
+            // The viewer needs the names, types and the column overrides, not the data checks.
+            let mut columns = json!(t.columns);
+            for c in columns.as_array_mut().into_iter().flatten() {
+                for k in ["blank", "mixed", "failed"] {
+                    c.as_object_mut().map(|o| o.remove(k));
+                }
+            }
+            json!({ "id": t.id, "name": t.name, "label": t.label, "columns": columns })
+        })
         .collect();
     Ok(json!({
         "version": 2,

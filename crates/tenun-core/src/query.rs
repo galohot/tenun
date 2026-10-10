@@ -892,13 +892,12 @@ mod tests {
             sql_ref: format!("\"s_{src}\".\"{name}\""),
             columns: cols
                 .iter()
-                .map(|(n, d)| Column {
-                    name: n.to_string(),
-                    dtype: *d,
-                    raw_type: String::new(),
-                })
+                .map(|(n, d)| Column::new(n.to_string(), *d, String::new()))
                 .collect(),
             rows: None,
+            notes: vec![],
+            header_row: None,
+            prep: false,
         }
     }
 

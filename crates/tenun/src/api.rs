@@ -14,9 +14,10 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tenun_core::engine::AddSource;
+use tenun_core::paste;
 use tenun_core::query::{Filter, SemanticQuery};
 use tenun_core::snapshot::{self, DashFilter, Tile, run_tile};
-use tenun_core::workspace::{FieldRef, Locale};
+use tenun_core::workspace::{Every, FieldRef, Locale, TableSetup};
 
 type S = State<Arc<AppState>>;
 
@@ -62,7 +63,14 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/sources", post(add_source))
         .route("/sources/{id}", delete(remove_source))
         .route("/sources/{id}/reload", post(reload_source))
+        .route("/sources/{id}/every", put(source_every))
+        .route("/paste/preview", post(paste_preview))
+        .route("/paste", post(paste_add))
         .route("/tables/preview", get(preview))
+        .route("/tables/setup", put(table_setup))
+        .route("/profile", get(profile))
+        .route("/prep/unpivot", get(unpivot_detect))
+        .route("/prep/unpivot/preview", post(unpivot_preview))
         .route("/relationships", post(add_rel))
         .route("/relationships/{id}", delete(remove_rel))
         .route("/relationships/suggest", get(suggest))
@@ -286,6 +294,61 @@ async fn reload_source(State(s): S, Path(id): Path<String>) -> R<Json<Value>> {
 }
 
 #[derive(Deserialize)]
+struct EveryBody {
+    every: Every,
+}
+
+/// How often a CSV link is fetched again.
+async fn source_every(
+    State(s): S,
+    Path(id): Path<String>,
+    Json(b): Json<EveryBody>,
+) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            st.engine.set_url_every(&id, b.every)?;
+            st.emit(json!({ "type": "workspace-changed" }));
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct PasteBody {
+    text: String,
+    #[serde(default = "yes")]
+    header: bool,
+    #[serde(default)]
+    name: String,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// The name, the first rows and the number of rows of a pasted table. An error says that the
+/// text is not a table.
+async fn paste_preview(Json(b): Json<PasteBody>) -> R<Json<Value>> {
+    let p = paste::parse(&b.text)
+        .ok_or_else(|| anyhow::anyhow!("There is no table in what you pasted."))?;
+    Ok(Json(serde_json::to_value(paste::preview(&p, b.header, 5))?))
+}
+
+/// Writes a pasted table as a CSV file in the data folder and adds it as a source.
+async fn paste_add(State(s): S, Json(b): Json<PasteBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let id = st.engine.add_pasted(&b.name, &b.text, b.header)?;
+            let mut v = changed(st)?;
+            v["added"] = json!(id);
+            Ok(v)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
 struct PreviewQ {
     id: String,
     limit: Option<u32>,
@@ -297,6 +360,84 @@ async fn preview(State(s): S, Query(q): Query<PreviewQ>) -> R<Json<Value>> {
             Ok(serde_json::to_value(
                 st.engine.preview(&q.id, q.limit.unwrap_or(200))?,
             )?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct SetupBody {
+    table: String,
+    /// How the table is prepared; null clears it.
+    setup: Option<TableSetup>,
+}
+
+/// Sets the header row, the column overrides and the unpivot of one table. The source loads
+/// again when the data changes, and the tiles ask again.
+async fn table_setup(State(s): S, Json(b): Json<SetupBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let table = b.table.clone();
+            if st.engine.set_table_setup(&b.table, b.setup)? {
+                st.emit(json!({ "type": "data-changed", "tables": [table] }));
+            } else {
+                st.emit(json!({ "type": "workspace-changed" }));
+            }
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct ProfileQ {
+    table: String,
+    column: String,
+}
+
+async fn profile(State(s): S, Query(q): Query<ProfileQ>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            Ok(serde_json::to_value(
+                st.engine.profile(&q.table, &q.column)?,
+            )?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct TableQ {
+    table: String,
+}
+
+/// The wide-sheet columns of a table (months across the top), or null.
+async fn unpivot_detect(State(s): S, Query(q): Query<TableQ>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            Ok(serde_json::to_value(st.engine.detect_unpivot(&q.table))?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct UnpivotBody {
+    table: String,
+    keep: Vec<String>,
+    name: String,
+    value: String,
+}
+
+/// Five rows of the table before, and five rows after its columns turn into rows.
+async fn unpivot_preview(State(s): S, Json(b): Json<UnpivotBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let before = st.engine.preview(&b.table, 5)?;
+            let after = st
+                .engine
+                .unpivot_preview(&b.table, b.keep, b.name, b.value, 5)?;
+            Ok(json!({ "before": before, "after": after }))
         })
         .await?,
     ))

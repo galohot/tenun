@@ -40,6 +40,8 @@ pub struct Options {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PickRequest {
     DataFiles,
+    /// A folder of data files.
+    Folder,
     /// A PNG, JPEG or WebP picture for an image tile.
     Image,
     OpenWorkspace,
@@ -81,7 +83,7 @@ pub struct Running {
 }
 
 impl AppState {
-    /// Points the watcher at the current file sources.
+    /// Points the watcher at the current file and folder sources.
     pub fn rewatch(&self) {
         let files: Vec<PathBuf> = self
             .engine
@@ -89,8 +91,14 @@ impl AppState {
             .into_iter()
             .map(|(_, p)| p)
             .collect();
+        let folders: Vec<PathBuf> = self
+            .engine
+            .watched_folders()
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
         if let Some(w) = self.watcher.lock().unwrap().as_mut() {
-            w.set(&files);
+            w.set(&files, &folders);
         }
     }
 
@@ -138,13 +146,7 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
     let watcher = FileWatcher::new(move |paths| {
         let Some(state) = weak.upgrade() else { return };
         handle.spawn_blocking(move || {
-            let changed: Vec<String> = state
-                .engine
-                .watched_files()
-                .into_iter()
-                .filter(|(_, p)| paths.contains(&tenun_core::watch::canonical(p)))
-                .map(|(id, _)| id)
-                .collect();
+            let changed = state.engine.sources_for(&paths);
             if changed.is_empty() {
                 return;
             }
@@ -152,6 +154,8 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
             for id in &changed {
                 tables.extend(state.engine.load(id));
             }
+            // A folder that was missing may be back, and a new one needs watching too.
+            state.rewatch();
             state.schedule.lock().unwrap().mark_changed(&state.engine);
             state.emit(serde_json::json!({
                 "type": "data-changed", "sources": changed, "tables": tables
@@ -169,6 +173,22 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
             tick.tick().await;
             let st = sched.clone();
             let _ = tokio::task::spawn_blocking(move || {
+                // CSV links whose time has come are fetched again.
+                let urls = st.engine.refresh_due_urls();
+                if !urls.is_empty() {
+                    let tables: Vec<String> = st
+                        .engine
+                        .catalog()
+                        .tables
+                        .iter()
+                        .filter(|t| urls.contains(&t.source_id))
+                        .map(|t| t.id.clone())
+                        .collect();
+                    st.schedule.lock().unwrap().mark_changed(&st.engine);
+                    st.emit(serde_json::json!({
+                        "type": "data-changed", "sources": urls, "tables": tables
+                    }));
+                }
                 let mut schedule = st.schedule.lock().unwrap();
                 let (ok, failed) =
                     cloud::run_due(&st.engine, &st.secrets, &st.cloud_base, &mut schedule);

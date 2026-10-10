@@ -59,6 +59,40 @@ pub struct Column {
     pub dtype: DType,
     /// The database's own type name, shown in previews.
     pub raw_type: String,
+    /// The name shown in the app, from the column override. Queries use `name`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Left out of the field pickers (the column override). Still usable in relationships.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
+    /// A tooltip in the field pickers (the column override).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The share of blank cells, 0 to 1, for local data. Not set when nothing is blank.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blank: Option<f64>,
+    /// The file had text and numbers (or dates) mixed in this column.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub mixed: bool,
+    /// After a type override: how many cells could not be read as that type and became blank.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed: Option<u64>,
+}
+
+impl Column {
+    pub fn new(name: String, dtype: DType, raw_type: String) -> Self {
+        Column {
+            name,
+            dtype,
+            raw_type,
+            label: None,
+            hidden: false,
+            description: None,
+            blank: None,
+            mixed: false,
+            failed: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -75,6 +109,15 @@ pub struct Table {
     pub columns: Vec<Column>,
     /// Known for local data; `None` for live databases (counting can be slow).
     pub rows: Option<i64>,
+    /// What was detected and fixed when the sheet was read: "Header on row 4", "Filled down Region".
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+    /// Excel: the row (as numbered in the sheet) that holds the column names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub header_row: Option<u32>,
+    /// The table can be re-typed and unpivoted: its data is local, so a view can wrap it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub prep: bool,
 }
 
 impl Table {

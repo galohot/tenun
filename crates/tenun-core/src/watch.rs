@@ -4,6 +4,9 @@
 //! original, which drops a watch on the file itself. So we watch each file's
 //! folder and match events by path, then wait for 300 ms of quiet before
 //! reporting, because one save produces several events.
+//!
+//! A folder source is watched as a folder: a file added to it, changed in it or removed from it
+//! is reported by its own path.
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher as _};
 use std::collections::{BTreeSet, HashSet};
@@ -14,7 +17,22 @@ use std::time::Duration;
 pub struct FileWatcher {
     watcher: RecommendedWatcher,
     dirs: HashSet<PathBuf>,
-    files: std::sync::Arc<std::sync::Mutex<HashSet<PathBuf>>>,
+    watched: std::sync::Arc<std::sync::Mutex<Watched>>,
+}
+
+#[derive(Default)]
+struct Watched {
+    files: HashSet<PathBuf>,
+    folders: HashSet<PathBuf>,
+}
+
+impl Watched {
+    /// A path in a watched folder (or the folder itself) counts as watched.
+    fn has(&self, p: &std::path::Path) -> bool {
+        self.files.contains(p)
+            || self.folders.contains(p)
+            || p.parent().is_some_and(|d| self.folders.contains(d))
+    }
 }
 
 const QUIET: Duration = Duration::from_millis(300);
@@ -22,9 +40,9 @@ const QUIET: Duration = Duration::from_millis(300);
 impl FileWatcher {
     /// `on_change` receives the set of watched files that changed.
     pub fn new(on_change: impl Fn(BTreeSet<PathBuf>) + Send + 'static) -> anyhow::Result<Self> {
-        let files = std::sync::Arc::new(std::sync::Mutex::new(HashSet::<PathBuf>::new()));
+        let state = std::sync::Arc::new(std::sync::Mutex::new(Watched::default()));
         let (tx, rx) = mpsc::channel::<PathBuf>();
-        let watched = files.clone();
+        let watched = state.clone();
         let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if let Ok(ev) = res {
                 if ev.kind.is_access() {
@@ -33,7 +51,7 @@ impl FileWatcher {
                 let set = watched.lock().unwrap();
                 for p in ev.paths {
                     let p = canonical(&p);
-                    if set.contains(&p) {
+                    if set.has(&p) {
                         let _ = tx.send(p);
                     }
                 }
@@ -51,16 +69,25 @@ impl FileWatcher {
         Ok(Self {
             watcher,
             dirs: HashSet::new(),
-            files,
+            watched: state,
         })
     }
 
-    /// Replaces the watched set.
-    pub fn set(&mut self, paths: &[PathBuf]) {
+    /// Replaces the watched set: single files, and folders whose files all count.
+    pub fn set(&mut self, paths: &[PathBuf], folders: &[PathBuf]) {
         let wanted: HashSet<PathBuf> = paths.iter().map(|p| canonical(p)).collect();
+        let wanted_folders: HashSet<PathBuf> = folders.iter().map(|p| canonical(p)).collect();
+        // A folder that is missing right now is found again through its parent.
         let dirs: HashSet<PathBuf> = wanted
             .iter()
             .filter_map(|p| p.parent().map(|d| d.to_path_buf()))
+            .chain(wanted_folders.iter().flat_map(|f| {
+                if f.is_dir() {
+                    Some(f.clone())
+                } else {
+                    f.parent().map(|d| d.to_path_buf())
+                }
+            }))
             .collect();
         for d in self.dirs.difference(&dirs) {
             let _ = self.watcher.unwatch(d);
@@ -71,7 +98,10 @@ impl FileWatcher {
             }
         }
         self.dirs = dirs;
-        *self.files.lock().unwrap() = wanted;
+        *self.watched.lock().unwrap() = Watched {
+            files: wanted,
+            folders: wanted_folders,
+        };
     }
 }
 

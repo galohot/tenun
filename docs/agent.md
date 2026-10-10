@@ -24,6 +24,10 @@ In the Tenun app, open each dashboard, choose **Publish**, and set **Keep it upd
 (when the data changes, every hour, or every day). The setting is saved in the `.tenun` file.
 Copy that file and its data files to the always-on computer, or keep them on a shared drive.
 
+The agent also watches the folders of a folder source, and fetches CSV links on the schedule you
+chose for each link. Copy the data folder next to the `.tenun` file too: downloaded links are kept
+in a folder called `<workspace name> data`.
+
 To test: `tenun publish path/to/sales.tenun` publishes every dashboard that has publish settings,
 once, and prints the links.
 
