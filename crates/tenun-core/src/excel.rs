@@ -129,15 +129,6 @@ fn has_value(r: &[Cell]) -> bool {
     r.iter().any(|c| *c != Cell::Null)
 }
 
-/// A cell of a data row. A whole number that reads as a year does not count: a row of years is
-/// the heading of a group of columns.
-fn is_typed(c: &Cell) -> bool {
-    matches!(
-        c,
-        Cell::Int(_) | Cell::Float(_) | Cell::Bool(_) | Cell::Time(_)
-    ) && !is_year(c)
-}
-
 /// A whole number that reads as a year: a header like 2025 over a column of months.
 fn is_year(c: &Cell) -> bool {
     match c {
@@ -174,8 +165,10 @@ fn is_total_word(t: &str) -> bool {
 }
 
 /// Picks the header row. It is the first row that has labels in at least half of the used
-/// columns and is followed by a row of typed data. Without one, the first row with enough
-/// labels, and failing that the first row with any value (the v1 rule).
+/// columns, unless it is a title block: a row with at most half the labels of one of the next
+/// few filled rows. Without a candidate, the first row with any value (the v1 rule). The rows
+/// below are never asked for typed data: a blank or a year-like amount in the first data row
+/// must not move the header.
 fn detect_header(grid: &[Vec<Cell>], first: usize) -> usize {
     let mut used = std::collections::BTreeSet::new();
     for r in &grid[first..] {
@@ -194,13 +187,19 @@ fn detect_header(grid: &[Vec<Cell>], first: usize) -> usize {
     let candidates: Vec<usize> = (first..grid.len())
         .filter(|&i| has_value(&grid[i]) && labels(&grid[i]) >= need)
         .collect();
-    for &i in &candidates {
-        let next = (i + 1..grid.len()).find(|&j| has_value(&grid[j]));
-        if next.is_some_and(|j| grid[j].iter().any(is_typed)) {
-            return i;
-        }
-    }
-    candidates.first().copied().unwrap_or(first)
+    let is_title = |i: usize| {
+        let mine = labels(&grid[i]);
+        (i + 1..grid.len())
+            .filter(|&j| has_value(&grid[j]))
+            .take(4)
+            .any(|j| labels(&grid[j]) >= mine * 2)
+    };
+    candidates
+        .iter()
+        .copied()
+        .find(|&i| !is_title(i))
+        .or_else(|| candidates.first().copied())
+        .unwrap_or(first)
 }
 
 /// The row right above the header when it is a group heading ("2025" over "Jan", "Feb").
@@ -365,7 +364,7 @@ pub fn build_sheet_with(
                 .collect()
         })
         .collect();
-    if tidy && fill_down(&mut cells) {
+    if tidy && fill_down(&mut cells, &names[0]) {
         notes.push(format!("Filled down {}", names[0]));
     }
 
@@ -505,12 +504,28 @@ fn header_names(
 }
 
 /// Fills blank cells of the first column from the cell above, when the column is a grouping
-/// column: text, more than half blank, with a value in the first row.
-fn fill_down(cells: &mut [Vec<Cell>]) -> bool {
+/// column: text, more than half blank, with a value in the first row. The values must also look
+/// like groups. Either one comes back in a later block, or every block spans 2 rows or more and
+/// the header is not the name of a notes column. A column of unique notes is left alone.
+fn fill_down(cells: &mut [Vec<Cell>], name: &str) -> bool {
     let col: Vec<&Cell> = cells.iter().map(|r| &r[0]).collect();
     let blanks = col.iter().filter(|c| ***c == Cell::Null).count();
     let all_text = col.iter().all(|c| matches!(c, Cell::Null | Cell::Text(_)));
     if cells.len() < 2 || !all_text || blanks * 2 <= cells.len() || *col[0] == Cell::Null {
+        return false;
+    }
+    let filled: Vec<String> = col
+        .iter()
+        .filter(|c| ***c != Cell::Null)
+        .map(|c| cell_text(c))
+        .collect();
+    let distinct: std::collections::BTreeSet<&String> = filled.iter().collect();
+    let repeats = distinct.len() < filled.len();
+    let blocks_of_two = col
+        .windows(2)
+        .all(|w| *w[0] == Cell::Null || *w[1] == Cell::Null)
+        && *col[col.len() - 1] == Cell::Null;
+    if !repeats && !(blocks_of_two && !is_notes_name(name)) {
         return false;
     }
     let mut cur = cells[0][0].clone();
@@ -522,6 +537,22 @@ fn fill_down(cells: &mut [Vec<Cell>]) -> bool {
         }
     }
     true
+}
+
+/// Headers of columns that hold free notes, not group names.
+fn is_notes_name(name: &str) -> bool {
+    let n = name.trim().to_lowercase();
+    [
+        "remark",
+        "note",
+        "comment",
+        "memo",
+        "catatan",
+        "keterangan",
+        "descri",
+    ]
+    .iter()
+    .any(|w| n.contains(w))
 }
 
 /// Text and numbers (or dates, or yes/no) in one column.
@@ -805,11 +836,20 @@ mod tests {
             vec![t("South"), t("d"), i(4)],
             vec![n(), t("e"), i(5)],
         ];
-        let s = build_sheet("S", grid).unwrap();
+        let s = build_sheet("S", grid.clone()).unwrap();
         assert_eq!(s.rows[2][0], t("North"));
         assert_eq!(s.rows[3][0], t("South"));
         assert_eq!(s.rows[4][0], t("South"));
         assert_eq!(s.notes, ["Filled down Region"]);
+        // A value that comes back in a later block is a group too, even with a one-row block.
+        let mut again = grid;
+        again[5] = vec![t("North"), t("e"), i(5)];
+        again.push(vec![n(), t("f"), i(6)]);
+        again.push(vec![n(), t("g"), i(7)]);
+        let s = build_sheet("S", again).unwrap();
+        assert_eq!(s.rows[3][0], t("South"));
+        assert_eq!(s.rows[5][0], t("North"));
+        assert_eq!(s.rows[6][0], t("North"));
         let grid = vec![
             vec![t("Discount"), t("Item")],
             vec![i(5), t("a")],
@@ -818,6 +858,50 @@ mod tests {
         ];
         let s = build_sheet("S", grid).unwrap();
         assert_eq!(s.rows[1][0], Cell::Null);
+        assert!(s.notes.is_empty());
+    }
+
+    #[test]
+    fn unique_notes_in_a_mostly_blank_column_are_not_filled_down() {
+        let grid = vec![
+            vec![t("Remark"), t("Item")],
+            vec![t("VIP"), t("a")],
+            vec![n(), t("b")],
+            vec![t("Late"), t("c")],
+            vec![n(), t("d")],
+            vec![n(), t("e")],
+            vec![n(), t("f")],
+        ];
+        let s = build_sheet("Notes", grid).unwrap();
+        assert_eq!(s.rows[1][0], Cell::Null);
+        assert_eq!(s.rows[5][0], Cell::Null);
+        assert!(s.notes.is_empty());
+    }
+
+    #[test]
+    fn a_blank_or_year_like_first_data_row_does_not_move_the_header() {
+        // Score is blank in the first data row.
+        let grid = vec![
+            vec![t("Name"), t("Email"), t("Score")],
+            vec![t("Bob"), t("b@x.com"), n()],
+            vec![t("Ann"), t("a@x.com"), i(7)],
+            vec![t("Cy"), t("c@x.com"), i(9)],
+        ];
+        let s = build_sheet("S", grid).unwrap();
+        assert_eq!(names(&s), ["Name", "Email", "Score"]);
+        assert_eq!(s.rows.len(), 3);
+        assert_eq!(s.header_row, Some(1));
+        assert!(s.notes.is_empty());
+        // Amounts that read as years.
+        let grid = vec![
+            vec![t("Item"), t("Amount")],
+            vec![t("Rent"), i(2000)],
+            vec![t("Food"), i(1500)],
+            vec![t("Fuel"), i(1800)],
+        ];
+        let s = build_sheet("S", grid).unwrap();
+        assert_eq!(names(&s), ["Item", "Amount"]);
+        assert_eq!(s.rows.len(), 3);
         assert!(s.notes.is_empty());
     }
 

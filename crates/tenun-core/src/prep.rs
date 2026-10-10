@@ -323,7 +323,7 @@ pub fn plan_view(base: &str, base_cols: &[ColInfo], setup: &TableSetup) -> Optio
         let inner: Vec<String> = stay_sql.iter().cloned().chain(wide_sql).collect();
         n += 1;
         rel = format!(
-            "(SELECT {} FROM (SELECT {} FROM {rel}) UNPIVOT (\"__value\" FOR \"__name\" IN ({}))) AS \"__t{n}\"",
+            "(SELECT {} FROM (SELECT {} FROM {rel}) UNPIVOT INCLUDE NULLS (\"__value\" FOR \"__name\" IN ({}))) AS \"__t{n}\"",
             select.join(", "),
             inner.join(", "),
             wide_names.join(", ")

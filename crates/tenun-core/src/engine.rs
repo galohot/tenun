@@ -1014,7 +1014,8 @@ impl Engine {
         };
         let reloaded = reload.is_some();
         if let Some(id) = reload {
-            self.load(&id);
+            // A link that is still fresh is read from its copy, not downloaded inside this request.
+            self.load_with(&id, false);
         }
         self.persist();
         Ok(reloaded)

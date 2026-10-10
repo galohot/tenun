@@ -423,7 +423,8 @@
   .tname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rows { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
   .srcline { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 6px 4px 28px; color: var(--text-2); font-size: 11px; }
-  .every { height: 22px; max-width: 170px; border: 0; border-radius: 5px; background: var(--inset); color: var(--text); font-size: 11px; }
+  .every { height: 24px; max-width: 170px; padding: 0 6px; border: 1px solid var(--sep-strong); border-radius: 5px; background: var(--inset); color: var(--text); font-size: 11px; }
+  .every:focus { outline: none; border-color: var(--focus); }
   .err { display: flex; gap: 6px; margin: 4px 6px 6px; color: var(--danger); font-size: 12px; }
   .detail { min-width: 0; display: flex; flex-direction: column; padding: 20px 24px; gap: 12px; overflow: hidden; }
   .head { display: flex; align-items: flex-start; gap: 16px; }
@@ -435,7 +436,8 @@
   .notes li.bad { color: var(--danger); }
   .tools { display: flex; align-items: center; gap: 8px; flex: none; }
   .hdr { display: flex; align-items: center; gap: 6px; }
-  .num-box { width: 64px; height: 28px; padding: 0 8px; }
+  .num-box { width: 64px; height: 28px; padding: 0 8px; border-color: var(--sep-strong); }
+  .num-box:focus { border-color: var(--focus); }
   .prep { position: relative; }
   .pm {
     position: absolute;

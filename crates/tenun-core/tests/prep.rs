@@ -199,8 +199,8 @@ fn months_across_turn_into_rows_and_back() {
     let t = table(&e, "s1/Budget");
     assert_eq!(names(&t), ["Department", "Owner", "Month", "Budget"]);
     assert_eq!(t.column("Month").unwrap().dtype, DType::Date);
-    // 3 departments x 4 months, minus the blank cell.
-    assert_eq!(t.rows, Some(11));
+    // 3 departments x 4 months. The blank cell stays as a blank row.
+    assert_eq!(t.rows, Some(12));
     assert!(e.detect_unpivot("s1/Budget").is_none());
 
     // By month: Jan 160, Feb 180, Mar 130 (the blank is not a zero row), Apr 220.

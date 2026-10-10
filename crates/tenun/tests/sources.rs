@@ -8,10 +8,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime};
 use tenun_core::Engine;
+use tenun_core::catalog::DType;
 use tenun_core::engine::AddSource;
 use tenun_core::query::SemanticQuery;
 use tenun_core::secrets::Secrets;
-use tenun_core::workspace::{Every, SourceKind, Workspace};
+use tenun_core::workspace::{ColumnSetup, Every, SourceKind, TableSetup, Workspace};
 
 fn dir(tag: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("tenun-src-{tag}-{}", std::process::id()));
@@ -322,6 +323,35 @@ fn a_csv_link_loads_and_a_404_is_a_source_error() {
         json!({ "measures": [{ "table": format!("{id}/Cities"), "column": "sales", "agg": "sum" }] }),
     );
     assert_eq!(rows[0][0].as_f64(), Some(25.0));
+}
+
+#[test]
+fn a_retype_on_a_fresh_link_does_not_download_again() {
+    let d = dir("url-retype");
+    let (base, hits) = serve();
+    let e = engine(&d);
+    let id = e
+        .add_source(link(format!("{base}/ok"), Every::Hourly))
+        .unwrap();
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+    let setup = TableSetup {
+        columns: [(
+            "sales".to_string(),
+            ColumnSetup {
+                dtype: Some(DType::Text),
+                ..ColumnSetup::default()
+            },
+        )]
+        .into(),
+        ..TableSetup::default()
+    };
+    assert!(
+        e.set_table_setup(&format!("{id}/Cities"), Some(setup))
+            .unwrap()
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 1, "read from the copy");
+    let t = &e.snapshot().tables[0];
+    assert_eq!(t.column("sales").unwrap().dtype, DType::Text);
 }
 
 #[test]
