@@ -40,7 +40,10 @@ export interface Source {
 
 /** `stdev` and `variance` are Advanced (see tiers.ts). */
 export type Agg = 'sum' | 'avg' | 'min' | 'max' | 'count' | 'count_distinct' | 'stdev' | 'variance';
-export type Grain = 'year' | 'quarter' | 'month' | 'week' | 'day';
+export type Grain = 'year' | 'quarter' | 'month' | 'week' | 'day' | 'month_of_year' | 'weekday' | 'hour';
+/** Date parts come back as numbers: months 1–12, weekdays 1–7 (Monday = 1), hours 0–23. */
+export const DATE_PARTS: readonly Grain[] = ['month_of_year', 'weekday', 'hour'];
+export const isPart = (g: Grain | null | undefined): boolean => !!g && DATE_PARTS.includes(g);
 
 export interface Measure {
   table: string;
@@ -58,7 +61,7 @@ export interface Filter {
   table: string;
   column: string;
   grain?: Grain | null;
-  op: 'in' | 'not_in' | 'between' | 'gte' | 'lte';
+  op: 'in' | 'not_in' | 'between' | 'gte' | 'lte' | 'range' | 'contains' | 'starts_with' | 'blank' | 'not_blank' | 'relative';
   values: (string | number | boolean | null)[];
 }
 
@@ -87,6 +90,10 @@ export interface QueryResult {
   kpi?: KpiInfo;
   /** Time charts: the last period is not over yet (data runs to `until`). */
   partial?: { key: string; until: string };
+  /** The last group is "Other" (key `\u0000other`): everything outside the top N. */
+  other?: boolean;
+  /** The groups that are not in "Other", for a `not_in` filter. */
+  otherOf?: Cell[];
 }
 
 export interface KpiInfo {
@@ -136,6 +143,8 @@ export interface Tile {
   better?: 'up' | 'down';
   /** `manual` is Advanced. */
   sort?: { by: 'value' | 'label' | 'manual'; desc?: boolean; order?: string[] };
+  /** Keep the biggest N groups; the rest become one "Other" bar. `other` defaults to true. */
+  top?: { n: number; other?: boolean };
   lines?: TileLine[];
   /** Small multiples (Advanced). */
   repeat?: Dim;

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { api, type Cell, type Tile, type TileType } from '../lib/api';
   import { app, go } from '../lib/state.svelte';
-  import { cell, dimLabel, stampLabel } from '../lib/format';
+  import { cell, dimLabel, OTHER_KEY, stampLabel } from '../lib/format';
   import { COLS, compact, defaultSize, newId, place, type DashFilter } from '../lib/tiles';
   import { key } from '../lib/chart';
   import Icon from './Icon.svelte';
@@ -175,13 +175,17 @@
     selectedTile = t.id;
   }
 
-  function pick(tile: Tile, value: Cell) {
+  /** `otherOf` comes with a click on the "Other" group of a top N: everything except those groups. */
+  function pick(tile: Tile, value: Cell, otherOf?: Cell[]) {
     const d = tile.dims[0];
     if (!d) return;
     const mine = filters.find((f) => f.fromTile === tile.id);
     const others = filters.filter((f) => f.fromTile !== tile.id);
-    if (mine && mine.values.length === 1 && key(mine.values[0]) === key(value)) {
+    const isOther = value === OTHER_KEY && !!otherOf;
+    if (mine && (isOther ? mine.op === 'not_in' : mine.op === 'in' && mine.values.length === 1 && key(mine.values[0]) === key(value))) {
       filters = others;
+    } else if (isOther) {
+      filters = [...others, { table: d.table, column: d.column, grain: d.grain ?? null, op: 'not_in', values: [...otherOf], fromTile: tile.id }];
     } else {
       filters = [...others, { table: d.table, column: d.column, grain: d.grain ?? null, op: 'in', values: [value], fromTile: tile.id }];
     }
@@ -191,7 +195,8 @@
     const t = app.table(f.table);
     const dtype = t?.columns.find((c) => c.name === f.column)?.dtype ?? 'text';
     const name = dimLabel({ table: f.table, column: f.column, grain: f.grain }, app.tables);
-    return `${name.charAt(0).toUpperCase() + name.slice(1)}: ${f.values.map((v) => cell(v, dtype, f.grain)).join(', ')}`;
+    const shown = f.op === 'not_in' ? 'Other' : f.values.map((v) => cell(v, dtype, f.grain)).join(', ');
+    return `${name.charAt(0).toUpperCase() + name.slice(1)}: ${shown}`;
   }
 
   // Dragging and resizing work in grid units and compact as you go.
@@ -424,7 +429,7 @@
               {filters}
               {tick}
               active={selectedTile === t.id}
-              onpick={(v) => pick(t, v)}
+              onpick={(v, otherOf) => pick(t, v, otherOf)}
               onselect={() => (selectedTile = t.id)}
               ondragstart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'move')}
               onresizestart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'resize')} />

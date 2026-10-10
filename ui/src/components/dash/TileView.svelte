@@ -3,7 +3,7 @@
   import { partialNote, runTile } from '../../lib/run';
   import { app } from '../../lib/state.svelte';
   import { readColors, type Colors } from '../../lib/chart';
-  import { tileTitle } from '../../lib/format';
+  import { OTHER_KEY, tileTitle } from '../../lib/format';
   import { appliedFilters, tileQuery, type DashFilter } from '../../lib/tiles';
   import Icon from '../Icon.svelte';
   import TileBody from './TileBody.svelte';
@@ -22,7 +22,7 @@
     filters: DashFilter[];
     tick: number;
     active: boolean;
-    onpick: (value: Cell) => void;
+    onpick: (value: Cell, otherOf?: Cell[]) => void;
     onselect: () => void;
     ondragstart: (e: PointerEvent) => void;
     onresizestart: (e: PointerEvent) => void;
@@ -34,8 +34,8 @@
   let colors = $state<Colors>(readColors());
 
   const q = $derived(tileQuery(tile, filters));
-  // The type and the comparison setting change what a number tile fetches.
-  const qKey = $derived(JSON.stringify([q, tile.type === 'kpi' ? tile.dims : null]));
+  // The type, the comparison setting and the top N change what the server sends back.
+  const qKey = $derived(JSON.stringify([q, tile.type, tile.type === 'kpi' ? tile.dims : null, tile.top ?? null]));
 
   // Re-query when the question, the filters or the data change.
   $effect(() => {
@@ -70,7 +70,11 @@
   const ignored = $derived(
     res ? res.ignored_filters.map((i) => appliedFilters(tile, filters)[i]).filter(Boolean) : [],
   );
-  const selected = $derived(filters.find((f) => f.fromTile === tile.id)?.values ?? null);
+  // A click on "Other" is a not_in filter; the tile shows it as the Other group being picked.
+  const selected = $derived.by(() => {
+    const f = filters.find((x) => x.fromTile === tile.id);
+    return f ? (f.op === 'not_in' ? [OTHER_KEY] : f.values) : null;
+  });
   const note = $derived(res && tile.type !== 'kpi' ? partialNote(res, tile.dims[0]?.grain) : null);
   const title = $derived(tileTitle(tile, app.tables));
   const canPick = $derived(tile.type !== 'kpi' && tile.dims.length > 0);
@@ -93,7 +97,7 @@
     {:else if error}
       <p class="error"><Icon name="warning" size={14} /> {error}</p>
     {:else if res}
-      <TileBody {tile} {res} {colors} {selected} onpick={canPick ? onpick : undefined} />
+      <TileBody {tile} {res} {colors} {selected} tables={app.tables} onpick={canPick ? (v) => onpick(v, res?.otherOf) : undefined} />
     {/if}
   </div>
   {#if ignored.length || note}

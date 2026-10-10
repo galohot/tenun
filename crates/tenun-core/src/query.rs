@@ -53,23 +53,46 @@ pub struct Dimension {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum Grain {
+    #[serde(rename = "year")]
     Year,
+    #[serde(rename = "quarter")]
     Quarter,
+    #[serde(rename = "month")]
     Month,
+    #[serde(rename = "week")]
     Week,
+    #[serde(rename = "day")]
     Day,
+    /// Date parts: the month (1–12), the weekday (1–7, Monday = 1) or the hour (0–23),
+    /// whatever the year. They come back as numbers.
+    #[serde(rename = "month_of_year")]
+    MonthOfYear,
+    #[serde(rename = "weekday")]
+    Weekday,
+    #[serde(rename = "hour")]
+    Hour,
 }
 
 impl Grain {
-    fn sql(self) -> &'static str {
+    /// A date part, not a period. Parts are numbers and read in ascending order.
+    pub fn is_part(self) -> bool {
+        matches!(self, Grain::MonthOfYear | Grain::Weekday | Grain::Hour)
+    }
+
+    /// The SQL for this grain applied to a date or time expression.
+    fn sql(self, r: &str) -> String {
+        let part = |f: &str| format!("CAST({f}({r}) AS DOUBLE)");
+        let trunc = |u: &str| format!("strftime(date_trunc('{u}', {r}), '%Y-%m-%d')");
         match self {
-            Grain::Year => "year",
-            Grain::Quarter => "quarter",
-            Grain::Month => "month",
-            Grain::Week => "week",
-            Grain::Day => "day",
+            Grain::Year => trunc("year"),
+            Grain::Quarter => trunc("quarter"),
+            Grain::Month => trunc("month"),
+            Grain::Week => trunc("week"),
+            Grain::Day => trunc("day"),
+            Grain::MonthOfYear => part("month"),
+            Grain::Weekday => part("isodow"),
+            Grain::Hour => part("hour"),
         }
     }
 }
@@ -93,6 +116,8 @@ pub enum FilterOp {
     Between,
     Gte,
     Lte,
+    /// `[lo, hi]`, with lo ≤ x < hi.
+    Range,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,11 +172,44 @@ pub enum QueryError {
 const DEFAULT_LIMIT: u32 = 1000;
 const MAX_LIMIT: u32 = 10_000;
 
-pub fn compile(
+/// The FROM, JOIN and WHERE part of a semantic query, with its parameters.
+/// `compile()` builds on it, and custom SELECTs (bins, quantiles) reuse it so
+/// they get the same joins and filters. Values stay parameters and identifiers
+/// stay quoted. Only the tables the query itself names are joined, so a custom
+/// SELECT may use the query's own columns and nothing else.
+pub struct Scope<'a> {
+    /// ` FROM <base> AS t0 LEFT JOIN … [WHERE …]`, with a leading space.
+    pub from_where: String,
+    /// One value for each `?` in `from_where`, in order.
+    pub params: Vec<Param>,
+    /// Indexes of filters that could not reach the base table and were skipped.
+    pub ignored_filters: Vec<usize>,
+    catalog: &'a Catalog,
+    joins: Joins,
+}
+
+impl Scope<'_> {
+    /// The SQL expression and type of a column at a grain, for use in a custom SELECT.
+    pub fn expr(
+        &self,
+        table: &str,
+        column: &str,
+        grain: Option<Grain>,
+    ) -> Result<(String, DType), QueryError> {
+        dim_expr(self.catalog, &self.joins, table, column, grain)
+    }
+
+    /// The SQL expression, type and name of a measure.
+    pub fn measure(&self, m: &Measure) -> Result<(String, DType, String), QueryError> {
+        measure_expr(self.catalog, &self.joins, m)
+    }
+}
+
+pub fn scope<'a>(
     q: &SemanticQuery,
-    catalog: &Catalog,
+    catalog: &'a Catalog,
     rels: &[Relationship],
-) -> Result<Compiled, QueryError> {
+) -> Result<Scope<'a>, QueryError> {
     let base_id = q
         .measures
         .first()
@@ -189,33 +247,6 @@ pub fn compile(
         }
     }
 
-    let mut select = Vec::new();
-    let mut columns = Vec::new();
-    for d in &q.dimensions {
-        let (expr, dtype) = dim_expr(catalog, &joins, &d.table, &d.column, d.grain)?;
-        select.push(format!(
-            "{expr} AS {}",
-            ident(&format!("d{}", columns.len()))
-        ));
-        columns.push(OutColumn {
-            name: d.column.clone(),
-            role: "dimension".into(),
-            dtype,
-        });
-    }
-    for m in &q.measures {
-        let (expr, dtype, name) = measure_expr(catalog, &joins, m)?;
-        select.push(format!(
-            "{expr} AS {}",
-            ident(&format!("m{}", columns.len()))
-        ));
-        columns.push(OutColumn {
-            name,
-            role: "measure".into(),
-            dtype,
-        });
-    }
-
     let mut params = Vec::new();
     let mut wheres = Vec::new();
     for (i, f) in q.filters.iter().enumerate() {
@@ -226,12 +257,7 @@ pub fn compile(
         wheres.push(filter_sql(&expr, dtype, f, &mut params)?);
     }
 
-    let mut sql = String::from("SELECT ");
-    if q.measures.is_empty() {
-        sql.push_str("DISTINCT ");
-    }
-    sql.push_str(&select.join(", "));
-    sql.push_str(&format!(" FROM {} AS t0", base.sql_ref));
+    let mut sql = format!(" FROM {} AS t0", base.sql_ref);
     for j in &joins.list {
         let to = lookup(catalog, &j.to_table)?;
         let from_t = lookup(catalog, &j.from_table)?;
@@ -256,6 +282,64 @@ pub fn compile(
         sql.push_str(" WHERE ");
         sql.push_str(&wheres.join(" AND "));
     }
+    Ok(Scope {
+        from_where: sql,
+        params,
+        ignored_filters: ignored,
+        catalog,
+        joins,
+    })
+}
+
+pub fn compile(
+    q: &SemanticQuery,
+    catalog: &Catalog,
+    rels: &[Relationship],
+) -> Result<Compiled, QueryError> {
+    let scope = scope(q, catalog, rels)?;
+
+    let mut select = Vec::new();
+    let mut columns = Vec::new();
+    // Dimensions that read in order: dates, and date parts.
+    let mut ordered = Vec::new();
+    for d in &q.dimensions {
+        let (expr, dtype) = scope.expr(&d.table, &d.column, d.grain)?;
+        select.push(format!(
+            "{expr} AS {}",
+            ident(&format!("d{}", columns.len()))
+        ));
+        ordered.push(
+            dtype.is_temporal()
+                || (d.grain.is_some_and(Grain::is_part)
+                    && lookup(catalog, &d.table)
+                        .and_then(|t| col(t, &d.column))
+                        .is_ok_and(|c| c.dtype.is_temporal())),
+        );
+        columns.push(OutColumn {
+            name: d.column.clone(),
+            role: "dimension".into(),
+            dtype,
+        });
+    }
+    for m in &q.measures {
+        let (expr, dtype, name) = scope.measure(m)?;
+        select.push(format!(
+            "{expr} AS {}",
+            ident(&format!("m{}", columns.len()))
+        ));
+        columns.push(OutColumn {
+            name,
+            role: "measure".into(),
+            dtype,
+        });
+    }
+
+    let mut sql = String::from("SELECT ");
+    if q.measures.is_empty() {
+        sql.push_str("DISTINCT ");
+    }
+    sql.push_str(&select.join(", "));
+    sql.push_str(&scope.from_where);
     let nd = q.dimensions.len();
     if nd > 0 && !q.measures.is_empty() {
         let g: Vec<String> = (1..=nd).map(|i| i.to_string()).collect();
@@ -276,10 +360,7 @@ pub fn compile(
         .collect();
     if order.is_empty() && !columns.is_empty() {
         // Time reads left to right; otherwise biggest first.
-        if let Some(i) = columns
-            .iter()
-            .position(|c| c.role == "dimension" && c.dtype.is_temporal())
-        {
+        if let Some(i) = ordered.iter().position(|&o| o) {
             order.push(format!("{} ASC", i + 1));
         } else if nd > 0 && !q.measures.is_empty() {
             order.push(format!("{} DESC NULLS LAST", nd + 1));
@@ -305,9 +386,9 @@ pub fn compile(
 
     Ok(Compiled {
         sql,
-        params,
+        params: scope.params,
         columns,
-        ignored_filters: ignored,
+        ignored_filters: scope.ignored_filters,
     })
 }
 
@@ -411,10 +492,8 @@ fn dim_expr(
     let c = col(t, column)?;
     let r = format!("{}.{}", joins.alias(table), ident(column));
     Ok(match (c.dtype, grain) {
-        (d, Some(g)) if d.is_temporal() => (
-            format!("strftime(date_trunc('{}', {r}), '%Y-%m-%d')", g.sql()),
-            DType::Date,
-        ),
+        (d, Some(g)) if d.is_temporal() && g.is_part() => (g.sql(&r), DType::Number),
+        (d, Some(g)) if d.is_temporal() => (g.sql(&r), DType::Date),
         (DType::Date, None) => (format!("strftime({r}, '%Y-%m-%d')"), DType::Date),
         (DType::DateTime, None) => (
             format!("strftime({r}, '%Y-%m-%dT%H:%M:%S')"),
@@ -540,6 +619,13 @@ fn filter_sql(
             }
             params.extend(non_null);
             Ok(format!("{expr} BETWEEN ? AND ?"))
+        }
+        FilterOp::Range => {
+            if non_null.len() != 2 {
+                return Err(QueryError::BadValue);
+            }
+            params.extend(non_null);
+            Ok(format!("({expr} >= ? AND {expr} < ?)"))
         }
         FilterOp::Gte | FilterOp::Lte => {
             let v = non_null.into_iter().next().ok_or(QueryError::BadValue)?;
@@ -777,6 +863,123 @@ mod tests {
             compile(&q, &cat, &rels),
             Err(QueryError::BadAgg(_, "summed"))
         ));
+    }
+
+    #[test]
+    fn scope_keeps_values_as_parameters() {
+        let (cat, rels) = fixture();
+        let evil = "x'); DROP TABLE orders; --";
+        let q = SemanticQuery {
+            measures: vec![sum_amount()],
+            dimensions: vec![Dimension {
+                table: "s3/regions".into(),
+                column: "name".into(),
+                grain: None,
+            }],
+            filters: vec![Filter {
+                table: "s2/stores".into(),
+                column: "city".into(),
+                grain: None,
+                op: FilterOp::In,
+                values: vec![evil.into()],
+            }],
+            ..Default::default()
+        };
+        let sc = scope(&q, &cat, &rels).unwrap();
+        assert!(!sc.from_where.contains("DROP"));
+        assert_eq!(sc.params, vec![Param::Text(evil.into())]);
+        assert!(
+            sc.from_where
+                .starts_with(" FROM \"s_s1\".\"orders\" AS t0 LEFT JOIN")
+        );
+        assert!(
+            sc.from_where
+                .contains("WHERE (CAST(t1.\"city\" AS VARCHAR) IN (?))")
+        );
+        // A custom SELECT builds on the same aliases.
+        let (e, t) = sc.expr("s3/regions", "name", None).unwrap();
+        assert_eq!(e, "CAST(t2.\"name\" AS VARCHAR)");
+        assert_eq!(t, DType::Text);
+        // compile() is scope() plus a SELECT, so both agree.
+        let c = compile(&q, &cat, &rels).unwrap();
+        assert!(c.sql.contains(&sc.from_where));
+        assert_eq!(c.params, sc.params);
+    }
+
+    #[test]
+    fn range_is_half_open() {
+        let (cat, rels) = fixture();
+        let q = SemanticQuery {
+            measures: vec![sum_amount()],
+            filters: vec![Filter {
+                table: "s1/orders".into(),
+                column: "amount".into(),
+                grain: None,
+                op: FilterOp::Range,
+                values: vec![10.into(), 20.into()],
+            }],
+            ..Default::default()
+        };
+        let c = compile(&q, &cat, &rels).unwrap();
+        assert!(c.sql.contains(
+            "WHERE (CAST(t0.\"amount\" AS DOUBLE) >= ? AND CAST(t0.\"amount\" AS DOUBLE) < ?)"
+        ));
+        assert_eq!(c.params, vec![Param::Double(10.0), Param::Double(20.0)]);
+        // Two bounds are required.
+        let mut bad = q.clone();
+        bad.filters[0].values = vec![10.into()];
+        assert_eq!(
+            compile(&bad, &cat, &rels).unwrap_err(),
+            QueryError::BadValue
+        );
+    }
+
+    #[test]
+    fn date_parts_are_numbers_in_ascending_order() {
+        let (cat, rels) = fixture();
+        for (grain, sql) in [
+            (Grain::MonthOfYear, "CAST(month(t0.\"date\") AS DOUBLE)"),
+            (Grain::Weekday, "CAST(isodow(t0.\"date\") AS DOUBLE)"),
+            (Grain::Hour, "CAST(hour(t0.\"date\") AS DOUBLE)"),
+        ] {
+            let q = SemanticQuery {
+                measures: vec![sum_amount()],
+                dimensions: vec![Dimension {
+                    table: "s1/orders".into(),
+                    column: "date".into(),
+                    grain: Some(grain),
+                }],
+                filters: vec![Filter {
+                    table: "s1/orders".into(),
+                    column: "date".into(),
+                    grain: Some(grain),
+                    op: FilterOp::In,
+                    values: vec![3.into()],
+                }],
+                ..Default::default()
+            };
+            let c = compile(&q, &cat, &rels).unwrap();
+            assert!(
+                c.sql.contains(&format!("SELECT {sql} AS \"d0\"")),
+                "{}",
+                c.sql
+            );
+            // The cross-filter on a part uses the same expression, with a number.
+            assert!(
+                c.sql.contains(&format!("WHERE ({sql} IN (?))")),
+                "{}",
+                c.sql
+            );
+            assert_eq!(c.params, vec![Param::Double(3.0)]);
+            assert!(c.sql.contains("ORDER BY 1 ASC"), "{}", c.sql);
+            assert_eq!(c.columns[0].dtype, DType::Number);
+        }
+        let g: Grain = serde_json::from_str("\"month_of_year\"").unwrap();
+        assert_eq!(g, Grain::MonthOfYear);
+        assert_eq!(
+            serde_json::to_string(&Grain::Weekday).unwrap(),
+            "\"weekday\""
+        );
     }
 
     #[test]

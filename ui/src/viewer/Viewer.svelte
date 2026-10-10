@@ -5,7 +5,7 @@
   import type { Cell, Tile } from '../lib/api';
   import type { ExportPayload } from '../lib/export';
   import { key, readColors, type Colors } from '../lib/chart';
-  import { cell, dimLabel, tileTitle } from '../lib/format';
+  import { cell, dimLabel, OTHER_KEY, tileTitle } from '../lib/format';
   import TileBody from '../components/dash/TileBody.svelte';
   import { partialNote } from '../lib/run';
 
@@ -107,7 +107,7 @@
     </div>
     <div class="chips">
       {#each data.filters as f}
-        <span class="chip static">{label(f.fromTile, f.values[0])}</span>
+        <span class="chip static">{label(f.fromTile, f.op === 'not_in' ? OTHER_KEY : f.values[0])}</span>
       {/each}
       {#if pick}
         <span class="chip">
@@ -138,6 +138,7 @@
                 tile={l.t}
                 res={r.res}
                 {colors}
+                tables={data.tables}
                 selected={pick?.tile === l.t.id ? [pick.value] : null}
                 onpick={data.cross[l.t.id] ? (v) => onpick(l.t, v) : undefined} />
             {/if}

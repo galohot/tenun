@@ -5,7 +5,8 @@
 //! published dashboards and the headless agent.
 
 use crate::engine::{Engine, QueryResult};
-use crate::query::{Agg, Dimension, Filter, FilterOp, Grain, Measure, SemanticQuery};
+use crate::query::{Agg, Dimension, Filter, FilterOp, Grain, Measure, SemanticQuery, Sort};
+use crate::shape;
 use chrono::{Datelike, Duration, Months, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -22,6 +23,35 @@ pub struct Tile {
     pub measures: Vec<Measure>,
     #[serde(default)]
     pub dims: Vec<Dimension>,
+    #[serde(default)]
+    pub sort: Option<TileSort>,
+    #[serde(default)]
+    pub top: Option<TopN>,
+}
+
+/// How a tile orders its groups. `manual` is left to the UI.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TileSort {
+    pub by: SortBy,
+    /// Biggest first for `value`, A to Z for `label`.
+    #[serde(default)]
+    pub desc: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortBy {
+    Value,
+    Label,
+    Manual,
+}
+
+/// Keep the biggest `n` groups and, unless `other` is false, add the rest as one "Other".
+#[derive(Debug, Clone, Deserialize)]
+pub struct TopN {
+    pub n: u32,
+    #[serde(default)]
+    pub other: Option<bool>,
 }
 
 /// A cross-filter from a click on a tile.
@@ -81,10 +111,14 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
     }
     let kind = tile.kind.as_str();
     let one = matches!(kind, "kpi" | "share" | "donut");
+    // Bar, line and area take up to four values side by side. Then there is no split.
+    let many = matches!(kind, "bar" | "line" | "area") && tile.measures.len() > 1;
     let dims: Vec<Dimension> = if one {
         tile.dims.iter().take(1).cloned().collect()
     } else if kind == "table" {
         tile.dims.clone()
+    } else if many {
+        tile.dims.iter().take(1).cloned().collect()
     } else {
         tile.dims.iter().take(2).cloned().collect()
     };
@@ -92,6 +126,12 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
     let measures = if !tile.measures.is_empty() {
         if kind == "table" {
             tile.measures.clone()
+        } else if many {
+            tile.measures
+                .iter()
+                .take(MAX_CHART_MEASURES)
+                .cloned()
+                .collect()
         } else {
             vec![tile.measures[0].clone()]
         }
@@ -100,11 +140,28 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
     } else {
         vec![count_rows(&tile.dims[0].table)]
     };
+    // Output columns are the dimensions, then the measures.
+    let mut sort = vec![];
+    if let Some(s) = &tile.sort
+        && !dims.is_empty()
+    {
+        match s.by {
+            SortBy::Value if !measures.is_empty() => sort.push(Sort {
+                by: dims.len(),
+                desc: s.desc.unwrap_or(true),
+            }),
+            SortBy::Label => sort.push(Sort {
+                by: 0,
+                desc: s.desc.unwrap_or(false),
+            }),
+            _ => {}
+        }
+    }
     Some(SemanticQuery {
         measures,
         dimensions: dims,
         filters: own_excluded(tile, filters),
-        sort: vec![],
+        sort,
         limit: Some(match kind {
             "table" => 500,
             "kpi" => 400,
@@ -112,6 +169,8 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
         }),
     })
 }
+
+const MAX_CHART_MEASURES: usize = 4;
 
 /// Runs one tile, with number-tile and unfinished-period extras.
 pub fn run_tile(
@@ -125,8 +184,16 @@ pub fn run_tile(
     let q =
         tile_query(tile, filters).ok_or_else(|| anyhow::anyhow!("the tile has no fields yet"))?;
     let mut res = engine.query(&q)?;
+    // Fill gaps and cut to the top N first, so the unfinished-period check below
+    // still sees the real last period.
+    shape::apply(engine, tile, &q, &mut res)?;
     let d = match tile.dims.first() {
-        Some(d) if d.grain.is_some() && matches!(tile.kind.as_str(), "bar" | "line" | "area") => d,
+        Some(d)
+            if d.grain.is_some_and(|g| !g.is_part())
+                && matches!(tile.kind.as_str(), "bar" | "line" | "area") =>
+        {
+            d
+        }
         _ => return Ok(res),
     };
     // A time chart also asks where the data ends, so an unfinished last
@@ -204,7 +271,7 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
     };
 
     // A number over time needs a date grouped by a grain; anything else is a plain total.
-    let Some((d, g)) = dim.and_then(|d| d.grain.map(|g| (d, g))) else {
+    let Some((d, g)) = dim.and_then(|d| d.grain.filter(|g| !g.is_part()).map(|g| (d, g))) else {
         res.kpi = Some(plain(first_num(&total), "All data"));
         return Ok(res);
     };
@@ -311,11 +378,11 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
 
 // ---- dates -------------------------------------------------------------------
 
-fn parse_day(s: &str) -> Option<NaiveDate> {
+pub(crate) fn parse_day(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s.get(..10)?, "%Y-%m-%d").ok()
 }
 
-fn iso(d: NaiveDate) -> String {
+pub(crate) fn iso(d: NaiveDate) -> String {
     d.format("%Y-%m-%d").to_string()
 }
 
@@ -334,6 +401,8 @@ pub fn add_grain(d: NaiveDate, g: Grain, n: i32) -> NaiveDate {
         Grain::Month => months(n),
         Grain::Quarter => months(3 * n),
         Grain::Year => months(12 * n),
+        // A date part has no next period.
+        Grain::MonthOfYear | Grain::Weekday | Grain::Hour => d,
     }
 }
 
@@ -367,6 +436,7 @@ pub fn period_name(d: NaiveDate, g: Grain, short_form: bool) -> String {
         Grain::Week if short_form => format!("{} {day}", short(m)),
         Grain::Week => format!("Week of {} {day}, {y}", short(m)),
         Grain::Day => format!("{} {day}, {y}", short(m)),
+        Grain::MonthOfYear | Grain::Weekday | Grain::Hour => short(m).to_string(),
     }
 }
 
@@ -457,13 +527,18 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                 .filter(|f| f.from_tile != src.id)
                 .cloned()
                 .collect();
+            // The "Other" bar stands for every group that is not in the top N.
+            let (op, values) = match (&res.other_of, js_key(&v) == shape::OTHER_KEY) {
+                (Some(keys), true) => (FilterOp::NotIn, keys.clone()),
+                _ => (FilterOp::In, vec![v.clone()]),
+            };
             fs.push(DashFilter {
                 filter: Filter {
                     table: d.table.clone(),
                     column: d.column.clone(),
                     grain: d.grain,
-                    op: FilterOp::In,
-                    values: vec![v.clone()],
+                    op,
+                    values,
                 },
                 from_tile: src.id.clone(),
             });

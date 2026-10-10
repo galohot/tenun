@@ -3,7 +3,7 @@
   // shares as a ranked list. Colours follow the category, never its rank.
   import type { Cell, QueryResult, Tile } from '../../lib/api';
   import { key, type Colors } from '../../lib/chart';
-  import { cell, compact, full } from '../../lib/format';
+  import { cell, compact, full, OTHER_KEY } from '../../lib/format';
 
   let {
     res,
@@ -17,28 +17,33 @@
 
   const items = $derived.by(() => {
     const mi = res.columns.findIndex((c) => c.role === 'measure');
-    const rows = res.rows
+    const all = res.rows
       .map((r) => ({ raw: r[0], value: typeof r[mi] === 'number' ? (r[mi] as number) : 0 }))
-      .filter((r) => r.value > 0)
-      .sort((a, b) => b.value - a.value);
-    const total = rows.reduce((s, r) => s + r.value, 0);
+      .filter((r) => r.value > 0);
+    // A top N already has its own "Other": it comes last, is never folded again, and can be clicked.
+    const topOther = res.other ? all.find((r) => r.raw === OTHER_KEY) : undefined;
+    const rows = all.filter((r) => r !== topOther).sort((a, b) => b.value - a.value);
+    const total = all.reduce((s, r) => s + r.value, 0);
     // As many rows as fit; the rest become one "Other" row.
     const fit = Math.max(3, Math.min(8, Math.floor((h - 64) / 36)));
-    const kept = rows.length > fit ? rows.slice(0, fit - 1) : rows;
+    const kept = !res.other && rows.length > fit ? rows.slice(0, fit - 1) : rows;
     const rest = rows.slice(kept.length);
     const byName = [...kept].sort((a, b) => String(a.raw).localeCompare(String(b.raw), undefined, { numeric: true }));
     const colorOf = new Map(byName.map((r, i) => [key(r.raw), colors.series[i % colors.series.length]]));
     const list = kept.map((r) => ({
       raw: r.raw as Cell,
-      other: false,
+      folded: false,
       label: cell(r.raw, res.columns[0].dtype, tile.dims[0]?.grain),
       value: r.value,
       share: total ? r.value / total : 0,
       color: colorOf.get(key(r.raw))!,
     }));
+    if (topOther) {
+      list.push({ raw: OTHER_KEY, folded: false, label: 'Other', value: topOther.value, share: total ? topOther.value / total : 0, color: colors.text2 });
+    }
     if (rest.length) {
       const v = rest.reduce((s, r) => s + r.value, 0);
-      list.push({ raw: null, other: true, label: `Other (${rest.length})`, value: v, share: total ? v / total : 0, color: colors.text2 });
+      list.push({ raw: null, folded: true, label: `Other (${rest.length})`, value: v, share: total ? v / total : 0, color: colors.text2 });
     }
     const top = Math.max(...list.map((r) => r.share), 0.0001);
     return { list, total, top };
@@ -46,7 +51,7 @@
   // Rows grow to use the tile's height when there are only a few of them.
   const rowH = $derived(Math.max(34, Math.min(48, (h - 64) / Math.max(items.list.length, 1))));
 
-  const isSel = (v: Cell, other: boolean) => !selected || (!other && selected.some((s) => key(s) === key(v)));
+  const isSel = (v: Cell, folded: boolean) => !selected || (!folded && selected.some((s) => key(s) === key(v)));
   const pct = (x: number) => (x >= 0.995 ? '100%' : x < 0.001 ? '<0.1%' : `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`);
 </script>
 
@@ -56,16 +61,16 @@
       <span
         style:flex-grow={it.share}
         style:background={it.color}
-        style:opacity={isSel(it.raw, it.other) ? 1 : 0.25}
+        style:opacity={isSel(it.raw, it.folded) ? 1 : 0.25}
         title="{it.label}: {pct(it.share)}"></span>
     {/each}
   </div>
   <ol>
     {#each items.list as it}
-      <li class:dim={!isSel(it.raw, it.other)}>
+      <li class:dim={!isSel(it.raw, it.folded)}>
         <button
           style:height="{rowH}px"
-          disabled={it.other || !onpick}
+          disabled={it.folded || !onpick}
           onclick={() => onpick?.(it.raw)}
           title="{it.label}: {full(it.value)}">
           <i style:background={it.color}></i>
@@ -84,7 +89,7 @@
   .share { height: 100%; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
   .strip { display: flex; gap: 2px; height: 10px; flex: none; border-radius: 5px; overflow: hidden; }
   .strip span { min-width: 2px; flex-basis: 0; transition: opacity 200ms; }
-  ol { list-style: none; margin: 0 -6px; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+  ol { list-style: none; margin: 0 -6px; padding: 0; overflow: auto; display: flex; flex-direction: column; }
   li { transition: opacity 200ms; }
   .total {
     display: flex;

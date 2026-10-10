@@ -2,7 +2,8 @@
 
 import { format as d3format } from 'd3-format';
 import { utcFormat } from 'd3-time-format';
-import type { Agg, Cell, Dim, DType, Grain, Measure, Table, Tile } from './api';
+import { MAX_CHART_MEASURES } from './tiles';
+import { isPart, type Agg, type Cell, type Dim, type DType, type Grain, type Measure, type Table, type Tile } from './api';
 
 const compactFmt = d3format('.3~s');
 const groupFmt = d3format(',.2~f');
@@ -50,9 +51,30 @@ export function formatDate(v: string, grain?: Grain | null, dtype?: DType): stri
   return dtype === 'datetime' ? fmtTime(d) : fmtDay(d);
 }
 
+/** The key the engine gives the "Other" group of a top N (the first column of its row). */
+export const OTHER_KEY = '\u0000other';
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/** Month of year 1–12 → Jan…Dec · weekday 1–7 (Monday = 1) → Mon…Sun · hour 0–23 → "09:00". */
+export function partName(n: number, grain: Grain): string {
+  const i = Math.round(n);
+  switch (grain) {
+    case 'month_of_year':
+      return MONTH_NAMES[i - 1] ?? String(n);
+    case 'weekday':
+      return WEEKDAY_NAMES[i - 1] ?? String(n);
+    default:
+      return `${String(i).padStart(2, '0')}:00`;
+  }
+}
+
 /** Formats one result cell for display. */
 export function cell(v: Cell, dtype: DType, grain?: Grain | null, short = false): string {
   if (v === null || v === undefined) return '(blank)';
+  if (v === OTHER_KEY) return 'Other';
+  if (grain && isPart(grain) && typeof v === 'number') return partName(v, grain);
   if (dtype === 'number' && typeof v === 'number') return short ? compact(v) : full(v);
   if ((dtype === 'date' || dtype === 'datetime') && typeof v === 'string') return formatDate(v, grain, dtype);
   if (typeof v === 'boolean') return v ? 'Yes' : 'No';
@@ -98,7 +120,7 @@ function idBase(column: string): string | null {
 
 const GENERIC = new Set(['name', 'title', 'label', 'code', 'id', 'key', 'type', 'description']);
 
-type Named = Pick<Table, 'id' | 'name' | 'label'>;
+export type Named = Pick<Table, 'id' | 'name' | 'label'>;
 
 export function measureLabel(m: Measure, tables: Named[]): string {
   const t = tables.find((x) => x.id === m.table);
@@ -113,6 +135,7 @@ export function measureLabel(m: Measure, tables: Named[]): string {
 
 /** "name" of the stores table reads as "store". */
 export function dimLabel(d: Dim, tables: Named[] = []): string {
+  if (d.grain === 'month_of_year') return 'month of year';
   if (d.grain) return d.grain;
   if (GENERIC.has(d.column.toLowerCase())) {
     const t = tables.find((x) => x.id === d.table);
@@ -124,12 +147,17 @@ export function dimLabel(d: Dim, tables: Named[] = []): string {
 export function tileTitle(t: Tile, tables: Named[]): string {
   if (t.title) return t.title;
   if (!t.measures.length && !t.dims.length) return 'New tile';
-  const m = t.measures[0] ? measureLabel(t.measures[0], tables) : pretty(t.dims[0].column);
+  let m = t.measures[0] ? measureLabel(t.measures[0], tables) : pretty(t.dims[0].column);
+  // Several values: "Sales and cost by month".
+  if ((t.type === 'bar' || t.type === 'line' || t.type === 'area') && t.measures.length > 1) {
+    const names = t.measures.slice(0, MAX_CHART_MEASURES).map((x, i) => (i ? measureLabel(x, tables).toLowerCase() : measureLabel(x, tables)));
+    m = names.length > 2 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names.join(' and ');
+  }
   if (t.type === 'table') {
     return t.dims.length ? `${m} by ${t.dims.map((d) => dimLabel(d, tables)).join(' and ')}` : m;
   }
   const by = t.dims[0] && t.type !== 'kpi' ? ` by ${dimLabel(t.dims[0], tables)}` : '';
-  const split = t.dims[1] && (t.type === 'bar' || t.type === 'line' || t.type === 'area') ? ` and ${dimLabel(t.dims[1], tables)}` : '';
+  const split = t.dims[1] && t.measures.length < 2 && (t.type === 'bar' || t.type === 'line' || t.type === 'area') ? ` and ${dimLabel(t.dims[1], tables)}` : '';
   return m + by + split;
 }
 

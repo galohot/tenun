@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { Agg, Grain, Tile, TileType } from '../../lib/api';
+  import { DATE_PARTS, type Agg, type Grain, type Tile, type TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { aggNames, tileTitle } from '../../lib/format';
   import { advancedLocked } from '../../lib/tiers';
-  import { defaultDim, defaultMeasure, dtypeOf, reachableFrom } from '../../lib/tiles';
+  import { defaultDim, defaultMeasure, dtypeOf, MAX_CHART_MEASURES, reachableFrom } from '../../lib/tiles';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
 
@@ -23,6 +23,16 @@
     { id: 'table', icon: 'table', label: 'Table' },
   ];
   const grains: Grain[] = ['year', 'quarter', 'month', 'week', 'day'];
+  const partNames: Record<string, string> = { month_of_year: 'Month of year', weekday: 'Weekday', hour: 'Hour' };
+
+  const TOP_PRESETS = [5, 10, 20];
+  const sorts: { id: string; label: string; sort?: Tile['sort'] }[] = [
+    { id: 'auto', label: 'Automatic' },
+    { id: 'value-desc', label: 'Biggest first', sort: { by: 'value', desc: true } },
+    { id: 'value-asc', label: 'Smallest first', sort: { by: 'value', desc: false } },
+    { id: 'label-asc', label: 'A → Z', sort: { by: 'label', desc: false } },
+    { id: 'label-desc', label: 'Z → A', sort: { by: 'label', desc: true } },
+  ];
 
   const m = $derived(tile.measures[0]);
   const rels = $derived(app.snap!.workspace.relationships);
@@ -35,6 +45,35 @@
   function set(patch: Partial<Tile>) {
     onchange({ ...tile, ...patch });
   }
+
+  // "Top N" keeps the biggest groups and shows the rest as one Other bar.
+  let customTop = $state(false);
+  $effect(() => {
+    void tile.id;
+    customTop = false;
+  });
+  const topKind = $derived(tile.type === 'bar' || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut');
+  const topChoice = $derived(!tile.top ? 'all' : customTop || !TOP_PRESETS.includes(tile.top.n) ? 'custom' : String(tile.top.n));
+
+  function setTop(choice: string) {
+    customTop = choice === 'custom';
+    if (choice === 'all') set({ top: undefined });
+    else if (choice === 'custom') set({ top: { ...(tile.top ?? {}), n: tile.top?.n ?? 15 } });
+    else set({ top: { ...(tile.top ?? {}), n: Number(choice) } });
+  }
+
+  function setTopN(raw: string) {
+    const n = Math.round(Number(raw));
+    if (Number.isFinite(n) && n >= 1) set({ top: { ...tile.top, n: Math.min(n, 1000) } });
+  }
+
+  const sortId = $derived(
+    !tile.sort
+      ? 'auto'
+      : tile.sort.by === 'manual'
+        ? 'manual'
+        : `${tile.sort.by}-${(tile.sort.desc ?? tile.sort.by === 'value') ? 'desc' : 'asc'}`,
+  );
 
   function setDim(i: number, table: string, column: string) {
     const dims = [...tile.dims];
@@ -53,6 +92,9 @@
     set({ dims: tile.dims.filter((_, j) => j !== i) });
   }
 
+  // A table takes any number of values; a bar, line or area takes up to four.
+  const manyValues = $derived(tile.type === 'table' || tile.type === 'bar' || tile.type === 'line' || tile.type === 'area');
+  const maxValues = $derived(tile.type === 'table' ? Infinity : MAX_CHART_MEASURES);
   const showSplit = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area' || tile.type === 'table');
   const dimTypes = $derived(tile.dims.map((d) => dtypeOf(app.tables, d.table, d.column)));
 </script>
@@ -114,7 +156,7 @@
         {#each aggs as a}<option value={a}>{aggNames[a]}</option>{/each}
       </select>
     {/if}
-    {#if tile.type === 'table'}
+    {#if manyValues}
       {#each tile.measures.slice(1) as extra, k}
         <FieldPicker
           mode="measure"
@@ -128,7 +170,7 @@
           }}
           onclear={() => set({ measures: tile.measures.filter((_, j) => j !== k + 1) })} />
       {/each}
-      {#if m}
+      {#if m && tile.measures.length < maxValues}
         <FieldPicker
           mode="measure"
           table={null}
@@ -140,7 +182,7 @@
     {/if}
   </div>
 
-    <div class="sec">
+  <div class="sec">
       <span class="label">{tile.type === 'kpi' ? 'Period (a date, for the comparison)' : tile.type === 'share' || tile.type === 'donut' ? 'Split into' : 'Group by'}</span>
       <FieldPicker
         mode="dim"
@@ -158,10 +200,20 @@
             </button>
           {/each}
         </div>
+        <!-- Parts of the date repeat every year, week or day. A number tile compares periods, so it has none. -->
+        {#if tile.type !== 'kpi'}
+          <div class="grains parts" role="radiogroup" aria-label="Part of the date">
+            {#each DATE_PARTS.filter((g) => g !== 'hour' || dimTypes[0] === 'datetime') as g}
+              <button role="radio" aria-checked={tile.dims[0].grain === g} class:on={tile.dims[0].grain === g} onclick={() => set({ dims: [{ ...tile.dims[0], grain: g }, ...tile.dims.slice(1)] })}>
+                {partNames[g]}
+              </button>
+            {/each}
+          </div>
+        {/if}
       {/if}
     </div>
 
-  {#if showSplit && tile.dims[0]}
+  {#if showSplit && tile.dims[0] && (tile.type === 'table' || tile.measures.length < 2)}
     <div class="sec">
       <span class="label">{tile.type === 'table' ? 'Then by' : 'Split by (optional)'}</span>
       <FieldPicker
@@ -172,6 +224,50 @@
         reachable={reach}
         onchange={(t, c) => c && setDim(1, t, c)}
         onclear={() => removeDim(1)} />
+    </div>
+  {/if}
+
+  {#if showSplit && tile.dims[0] && tile.type !== 'table' && tile.measures.length > 1}
+    <p class="hint">Split by is off while a tile shows several values.</p>
+  {/if}
+
+  {#if topKind && tile.dims[0] && dimTypes[0] !== 'date' && dimTypes[0] !== 'datetime'}
+    <div class="sec">
+      <span class="label">Top</span>
+      <select class="field" value={topChoice} onchange={(e) => setTop(e.currentTarget.value)}>
+        <option value="all">All</option>
+        {#each TOP_PRESETS as n}<option value={String(n)}>Top {n}</option>{/each}
+        <option value="custom">Custom…</option>
+      </select>
+      {#if topChoice === 'custom'}
+        <input
+          class="field"
+          type="number"
+          min="1"
+          max="1000"
+          aria-label="How many to keep"
+          value={tile.top?.n ?? 15}
+          onchange={(e) => setTopN(e.currentTarget.value)} />
+      {/if}
+      {#if tile.top}
+        <label class="check">
+          <input type="checkbox" checked={tile.top.other !== false} onchange={(e) => set({ top: { ...tile.top!, other: e.currentTarget.checked ? undefined : false } })} />
+          Show the rest as Other
+        </label>
+      {/if}
+    </div>
+  {/if}
+
+  {#if (tile.type === 'bar' || tile.type === 'table') && tile.dims[0]}
+    <div class="sec">
+      <span class="label">Sort</span>
+      <select
+        class="field"
+        value={sortId}
+        onchange={(e) => set({ sort: sorts.find((x) => x.id === e.currentTarget.value)?.sort })}>
+        {#each sorts as o}<option value={o.id}>{o.label}</option>{/each}
+        {#if sortId === 'manual'}<option value="manual" disabled>Manual order</option>{/if}
+      </select>
     </div>
   {/if}
 
@@ -258,6 +354,8 @@
     font-size: 11px;
     text-transform: capitalize;
   }
+  .grains.parts button { text-transform: none; }
   .grains button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
+  .hint { margin: -8px 0 0; font-size: 11px; color: var(--text-2); }
   .foot { margin-top: auto; padding-top: 8px; }
 </style>

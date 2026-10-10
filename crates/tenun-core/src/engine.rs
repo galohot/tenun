@@ -77,6 +77,12 @@ pub struct QueryResult {
     /// Time charts: the last period is not over yet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partial: Option<crate::snapshot::Partial>,
+    /// The last group is "Other": everything outside the top N (key `"\u0000other"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub other: Option<bool>,
+    /// The groups that are not in "Other", for a `not_in` filter.
+    #[serde(rename = "otherOf", skip_serializing_if = "Option::is_none")]
+    pub other_of: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -502,6 +508,8 @@ impl Engine {
             ms: start.elapsed().as_millis(),
             kpi: None,
             partial: None,
+            other: None,
+            other_of: None,
         })
     }
 
@@ -603,6 +611,12 @@ impl Engine {
     }
 
     /// Runs one statement for the export, which needs every tile's data.
+    /// The type of one column, if the table and column exist.
+    pub fn column_dtype(&self, table: &str, column: &str) -> Option<DType> {
+        let s = self.state.read().unwrap();
+        s.catalog.table(table)?.column(column).map(|c| c.dtype)
+    }
+
     pub fn catalog(&self) -> Catalog {
         self.state.read().unwrap().catalog.clone()
     }

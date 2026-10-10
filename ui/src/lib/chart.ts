@@ -6,8 +6,8 @@
 // segments; hairline solid grid; text in text colours, never in series colours.
 
 import type { EChartsCoreOption } from 'echarts/core';
-import type { Cell, QueryResult, Tile } from './api';
-import { cell, compact, full } from './format';
+import { isPart, type Cell, type QueryResult, type Tile } from './api';
+import { cell, compact, full, measureLabel, OTHER_KEY, type Named } from './format';
 
 export interface Colors {
   surface: string;
@@ -42,8 +42,14 @@ interface Pivot {
   series: { name: string; raw: Cell; values: (number | null)[] }[];
 }
 
+/** Several values on one group: each value is its own series. */
+const bySeriesPerMeasure = (res: QueryResult) => {
+  const nd = res.columns.filter((c) => c.role === 'dimension').length;
+  return nd < 2 && res.columns.length - nd > 1;
+};
+
 /** Turns rows [dim0, dim1?, measure...] into categories × series. */
-export function pivot(res: QueryResult, tile: Tile): Pivot {
+export function pivot(res: QueryResult, tile: Tile, tables: Named[] = []): Pivot {
   const nd = res.columns.filter((c) => c.role === 'dimension').length;
   const mi = nd; // first measure column
   const catIdx = new Map<string, number>();
@@ -56,10 +62,17 @@ export function pivot(res: QueryResult, tile: Tile): Pivot {
     }
   }
   if (nd < 2 || tile.dims.length < 2) {
-    const values = categories.map(() => null as number | null);
-    for (const r of res.rows) values[catIdx.get(key(r[0]))!] = r[mi] as number | null;
-    const name = res.columns[mi]?.name ?? '';
-    return { categories, series: [{ name, raw: name, values }] };
+    // One series for each value column; a chart with a single value has one.
+    const series: Pivot['series'] = [];
+    for (let k = mi; k < Math.max(res.columns.length, mi + 1); k++) {
+      const values = categories.map(() => null as number | null);
+      for (const r of res.rows) values[catIdx.get(key(r[0]))!] = r[k] as number | null;
+      const m = tile.measures[k - mi];
+      const many = res.columns.length - mi > 1;
+      const name = many && m ? measureLabel(m, tables) : (res.columns[k]?.name ?? '');
+      series.push({ name, raw: name, values });
+    }
+    return { categories, series };
   }
   // Split series: keep the biggest seven, fold the rest into Other.
   const totals = new Map<string, { raw: Cell; total: number }>();
@@ -119,6 +132,8 @@ export interface BuildArgs {
   /** Size in px, for label density and how many categories fit. */
   width: number;
   height: number;
+  /** For the names of several values. */
+  tables?: Named[];
 }
 
 export interface Built {
@@ -127,7 +142,7 @@ export interface Built {
   categories: (Cell | undefined)[];
 }
 
-const FOLDED = '\u0000other';
+const FOLDED = OTHER_KEY;
 
 /** Keeps the biggest categories that fit and folds the rest into one "Other" bar. */
 function fold(p: Pivot, max: number): Pivot {
@@ -141,19 +156,25 @@ function fold(p: Pivot, max: number): Pivot {
   };
 }
 
-export function buildOption({ res, tile, colors: c, selected, width, height }: BuildArgs): Built {
+export function buildOption({ res, tile, colors: c, selected, width, height, tables = [] }: BuildArgs): Built {
   const dim0 = res.columns[0];
   const grain = tile.dims[0]?.grain;
   const isSel = (v: Cell) => !selected || selected.some((s) => key(s) === key(v));
+  // The engine's "Other" (a top N): a real group that can be clicked, drawn muted.
+  const isOther = (v: Cell | undefined) => !!res.other && v === OTHER_KEY;
   const partialKey = res.partial?.key;
   const label = (v: Cell) =>
     v === FOLDED ? 'Other' : cell(v, dim0.dtype, grain, true) + (partialKey !== undefined && v === partialKey ? '*' : '');
 
-  const temporal = dim0.dtype === 'date' || dim0.dtype === 'datetime';
+  // Dates and date parts (months, weekdays, hours) read in order, so they are never folded.
+  const temporal = dim0.dtype === 'date' || dim0.dtype === 'datetime' || isPart(grain);
   const horizontal = tile.type === 'bar' && !!tile.horizontal;
   const room = horizontal ? Math.floor((height - 16) / 26) : Math.floor(width / 44);
-  const { categories, series } = temporal || tile.type !== 'bar' ? pivot(res, tile) : fold(pivot(res, tile), Math.max(4, room));
-  const stacked = series.length > 1 && tile.type !== 'line';
+  // A result that already has its "Other" is never folded again.
+  const { categories, series } =
+    temporal || tile.type !== 'bar' || res.other ? pivot(res, tile, tables) : fold(pivot(res, tile, tables), Math.max(4, room));
+  // Several values are different things, so they sit side by side instead of piling up.
+  const stacked = series.length > 1 && tile.type !== 'line' && !bySeriesPerMeasure(res);
   const multi = series.length > 1;
   const valueAxis = {
     type: 'value' as const,
@@ -189,8 +210,9 @@ export function buildOption({ res, tile, colors: c, selected, width, height }: B
     const top = si === series.length - 1;
     const data = s.values.map((v, ci) => ({
       value: v,
-      itemStyle:
-        categories[ci] === FOLDED
+      itemStyle: isOther(categories[ci])
+        ? { opacity: isSel(OTHER_KEY) ? 1 : 0.28, ...(multi ? {} : { color: c.text2 }) }
+        : categories[ci] === FOLDED
           ? { opacity: selected ? 0.28 : 1, color: c.grid }
           : { opacity: (isSel(categories[ci]) ? 1 : 0.28) * (categories[ci] === partialKey ? 0.45 : 1) },
     }));
@@ -299,5 +321,21 @@ export function buildOption({ res, tile, colors: c, selected, width, height }: B
     yAxis: horizontal ? catAxis : quietValue,
     series: built,
   };
-  return { option, categories: categories.map((v) => (v === FOLDED ? undefined : v)) };
+  return { option, categories: categories.map((v) => (v === FOLDED && !res.other ? undefined : v)) };
+}
+
+/**
+ * V3-D12: values that differ in size by more than 20× share one axis, so the small ones look flat.
+ * Say so under the chart instead of drawing a second axis.
+ */
+export function sizeNote(res: QueryResult): string | null {
+  if (!bySeriesPerMeasure(res)) return null;
+  const nd = res.columns.filter((c) => c.role === 'dimension').length;
+  const peaks: number[] = [];
+  for (let k = nd; k < res.columns.length; k++) {
+    const peak = Math.max(0, ...res.rows.map((r) => Math.abs(Number(r[k]) || 0)));
+    if (peak > 0) peaks.push(peak);
+  }
+  if (peaks.length < 2 || Math.max(...peaks) / Math.min(...peaks) <= 20) return null;
+  return 'These values have very different sizes, so the smaller ones look flat.';
 }

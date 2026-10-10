@@ -9,22 +9,41 @@ export interface DashFilter extends Filter {
   fromTile: string;
 }
 
+/** The most values a bar, line or area tile shows side by side. */
+export const MAX_CHART_MEASURES = 4;
+
+export const hasManyValues = (tile: Tile) =>
+  (tile.type === 'bar' || tile.type === 'line' || tile.type === 'area') && tile.measures.length > 1;
+
+/**
+ * The question a tile asks. The server builds its own copy of this (`snapshot::tile_query`); this one
+ * decides when a tile must ask again, so keep the two the same.
+ */
 export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | null {
   if (!tile.measures.length && !tile.dims.length) return null;
   const one = tile.type === 'kpi' || tile.type === 'share' || tile.type === 'donut';
-  const dims = one ? tile.dims.slice(0, 1) : tile.type === 'table' ? tile.dims : tile.dims.slice(0, 2);
+  const many = hasManyValues(tile);
+  const dims = one || many ? tile.dims.slice(0, 1) : tile.type === 'table' ? tile.dims : tile.dims.slice(0, 2);
   // A chart with a group but no value counts rows of the grouped table.
   const measures = tile.measures.length
     ? tile.type === 'table'
       ? tile.measures
-      : tile.measures.slice(0, 1)
+      : many
+        ? tile.measures.slice(0, MAX_CHART_MEASURES)
+        : tile.measures.slice(0, 1)
     : tile.type === 'table'
       ? []
       : [{ table: tile.dims[0].table, column: null, agg: 'count' as const }];
+  const sort: { by: number; desc: boolean }[] = [];
+  if (dims.length && tile.sort) {
+    if (tile.sort.by === 'value' && measures.length) sort.push({ by: dims.length, desc: tile.sort.desc ?? true });
+    else if (tile.sort.by === 'label') sort.push({ by: 0, desc: tile.sort.desc ?? false });
+  }
   return {
     measures,
     dimensions: dims,
     filters: filters.filter((f) => f.fromTile !== tile.id).map(({ fromTile: _, ...f }) => f),
+    sort,
     limit: tile.type === 'table' ? 500 : tile.type === 'kpi' ? 400 : 2000,
   };
 }
