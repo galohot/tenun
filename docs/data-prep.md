@@ -37,7 +37,7 @@ or more number columns that look like months, years or quarters, the **Data** vi
 **Turn these columns into rows**.
 
 1. Review the preview. It shows five rows before and after.
-2. Choose the columns to keep as they are (for example `product` and `region`).
+2. Name the two new columns. Tenun keeps every column that is not a month, for example `product` and `region`.
 3. Confirm. You get one row for each product, region and month, with a name column and a value column.
 
 If every heading reads as a period, the new name column becomes a date. You can undo the change

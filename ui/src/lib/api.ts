@@ -488,7 +488,23 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   if (!res.ok) {
     throw new ApiError((data as { error?: string })?.error ?? res.statusText);
   }
+  normalizeSnapshot(data);
   return data as T;
+}
+
+/**
+ * A ratio in an older or hand-edited file may leave out `per.column`; it means a count of rows, like null.
+ * The tiles are kept as JSON in the file, so the engine does not fill it in.
+ */
+export function normalizeSnapshot(data: unknown): void {
+  const dashboards = (data as { workspace?: { dashboards?: Dashboard[] } } | null)?.workspace?.dashboards;
+  for (const d of dashboards ?? []) {
+    for (const t of d.tiles ?? []) {
+      for (const m of t.measures ?? []) {
+        if (m.per && m.per.column === undefined) m.per.column = null;
+      }
+    }
+  }
 }
 
 export const api = {

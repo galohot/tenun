@@ -24,19 +24,26 @@ export function buildSankey({ res, tile, colors: c, selected, selectedStage, wid
   const colourOf = (n: FlowNode) => (n.slot === null ? c.text2 : c.series[n.slot % c.series.length]);
   const byId = new Map(flow.nodes.map((n) => [n.id, n]));
 
+  const room = Math.min(190, Math.max(80, width * 0.26));
+  const tail = (n: FlowNode) => `  ${fmt.short(n.value)} · ${pctShare(n.share, loc)}`;
+  // A long name is cut by itself, so its numbers always stay. A letter is about 6 px wide.
+  const clip = (text: string, rest: string) => {
+    const fit = Math.floor((room - 14) / 6.2) - rest.length;
+    return text.length <= fit ? text : `${text.slice(0, Math.max(3, fit - 1)).trimEnd()}…`;
+  };
+
   const nodes = flow.nodes.map((n) => ({
     name: n.id,
     depth: n.stage,
     value: n.value,
     itemStyle: { color: colourOf(n), opacity: anySel && !lit(n) ? 0.3 : 1 },
-    label: { formatter: () => `${name(n.stage, n.raw)}  ${fmt.short(n.value)} · ${pctShare(n.share, loc)}` },
+    label: { formatter: () => `${clip(name(n.stage, n.raw), tail(n))}${tail(n)}` },
   }));
   const links = flow.links.map((l) => {
     // With a node picked, only the bands that touch it keep their colour.
     const touches = !anySel || lit(byId.get(l.source)!) || lit(byId.get(l.target)!);
     return { source: l.source, target: l.target, value: l.value, lineStyle: { opacity: touches ? 0.4 : 0.08 } };
   });
-  const room = Math.min(190, Math.max(80, width * 0.26));
 
   const option = {
     animationDuration: 350,
@@ -69,7 +76,7 @@ export function buildSankey({ res, tile, colors: c, selected, selectedStage, wid
         emphasis: { focus: 'adjacency' },
         lineStyle: { color: 'source', curveness: 0.5 },
         // A thin ring of the surface colour keeps the names readable where a band runs behind them.
-        label: { color: c.text, fontSize: 11, position: 'right', overflow: 'truncate', width: room - 14, textBorderColor: c.surface, textBorderWidth: 3 },
+        label: { color: c.text, fontSize: 11, position: 'right', overflow: 'truncate', width: room - 14, textBorderColor: c.surface, textBorderWidth: 4 },
         labelLayout: { hideOverlap: true },
         data: nodes,
         links,

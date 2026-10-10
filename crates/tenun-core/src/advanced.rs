@@ -8,7 +8,7 @@ use crate::query::{
     Agg, Dimension, Filter, FilterOp, Grain, Measure, OutColumn, SemanticQuery, Sort, Unit,
 };
 use crate::shape::{Dim0, Layout, OTHER_KEY, classify, cmp_key};
-use crate::snapshot::{SortBy, Tile, TopN, add_grain, count_rows, iso, js_key, parse_day};
+use crate::snapshot::{Partial, SortBy, Tile, TopN, add_grain, count_rows, iso, js_key, parse_day};
 use chrono::{Datelike, Duration, NaiveDate};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -498,6 +498,12 @@ pub fn compare_periods(
                 .map(|r| r[0].clone())
                 .collect();
             keys.sort_by(cmp_key);
+            // The latest period counts only when its data is finished: a month that has just
+            // begun would make every line fall. Two finished periods are better than that; with
+            // fewer than three periods the unfinished one stays (and is marked, see `compare_partial`).
+            if keys.len() > 2 && unfinished(engine, &d, wide, keys.last()).is_some() {
+                keys.pop();
+            }
             let from = keys.len().saturating_sub(2);
             keys.split_off(from)
         }
@@ -510,6 +516,37 @@ pub fn compare_periods(
         values: chosen.clone(),
     });
     Ok(Some(chosen))
+}
+
+/// The last day of data when `key` (the start of a period of `field`) is a period that the data
+/// does not reach the end of; `None` for a finished period, a day grain or a key that is no date.
+fn unfinished(
+    engine: &Engine,
+    field: &Dimension,
+    filters: &[Filter],
+    key: Option<&Value>,
+) -> Option<NaiveDate> {
+    let grain = field.grain.filter(|g| *g != Grain::Day)?;
+    let start = key?.as_str().and_then(parse_day)?;
+    let max_day = latest_day(engine, field, filters)?;
+    (max_day < add_grain(start, grain, 1) - Duration::days(1)).then_some(max_day)
+}
+
+/// The mark for a slope chart whose second period is unfinished (the periods are picked by the
+/// user, or there are fewer than three). The same `Partial` the time charts carry.
+pub fn compare_partial(
+    engine: &Engine,
+    q: &SemanticQuery,
+    wide: &[Filter],
+    pair: Option<&Vec<Value>>,
+) -> Option<Partial> {
+    let d = q.dimensions.get(1)?;
+    let key = pair?.last()?;
+    let until = unfinished(engine, d, wide, Some(key))?;
+    Some(Partial {
+        key: key.as_str()?.to_string(),
+        until: iso(until),
+    })
 }
 
 /// Puts the rows of a compare chart in the shape `[group, first, second]`: the rows already have it

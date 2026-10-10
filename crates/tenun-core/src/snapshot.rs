@@ -387,6 +387,7 @@ pub fn run_tile(
     let mut res = engine.query(&q)?;
     res.repeat = repeat;
     if tile.kind == "compare" {
+        res.partial = advanced::compare_partial(engine, &q, &wide, pair.as_ref());
         advanced::compare_pairs(tile, &q, &mut res, pair);
     }
     if tile.kind == "calendar" {

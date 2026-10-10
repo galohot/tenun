@@ -201,8 +201,8 @@ export function measureLabel(m: Measure, tables: Named[], how?: ShowAs | null): 
  * of rows of another table counts the joined rows of the first table, so it reads "row" (V3-D36).
  */
 function perWord(p: NonNullable<Measure['per']>, top: string, tables: Named[]): string {
-  if (p.column === null && p.table !== top) return 'row';
-  if (p.column === null) return singular((tables.find((x) => x.id === p.table)?.label ?? 'row').toLowerCase());
+  if (p.column == null && p.table !== top) return 'row';
+  if (p.column == null) return singular((tables.find((x) => x.id === p.table)?.label ?? 'row').toLowerCase());
   return plainLabel({ table: p.table, column: p.column, agg: p.agg }, tables).toLowerCase();
 }
 

@@ -12,6 +12,7 @@ import { isGood, moveOf, moveWords, relative } from '../src/lib/charts/pairs.ts'
 import { barOf, dayMs, dayStart, spanOf, todayIn } from '../src/lib/charts/timeline.ts';
 import { groupKeys, isExpandable, pivotModel, pivotTree, visibleNodes } from '../src/lib/pivot.ts';
 import { tileQuery } from '../src/lib/tiles.ts';
+import { normalizeSnapshot } from '../src/lib/api.ts';
 
 const T = 'orders';
 const col = (column, grain) => ({ table: T, column, ...(grain ? { grain } : {}) });
@@ -308,4 +309,11 @@ test('tile questions: the new types ask what the engine asks', () => {
   // Scatter reads a third value for the size, and a scatter with two still asks two.
   assert.equal(q({ type: 'scatter', measures: [m('a'), m('b'), m('c')], dims: [col('r')] }).measures.length, 3);
   assert.equal(q({ type: 'scatter', measures: [m('a'), m('b')], dims: [col('r')] }).measures.length, 2);
+});
+
+test('a ratio with no per.column is read as a count of rows', () => {
+  const tiles = [{ measures: [{ table: T, column: 'amount', agg: 'sum', per: { table: T, agg: 'count' } }] }];
+  const snap = { workspace: { dashboards: [{ tiles }] } };
+  normalizeSnapshot(snap);
+  assert.equal(tiles[0].measures[0].per.column, null);
 });

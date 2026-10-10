@@ -23,7 +23,7 @@ export function unitOf(m: Pick<Measure, 'table' | 'column' | 'agg' | 'per'>, f?:
   if (how === 'pct_total' || how === 'pct_group' || how === 'pct_change') return 'percent';
   if (f?.currency) return `currency:${f.currency}`;
   if (f?.percent) return 'percent';
-  if (m.per) return `ratio:${m.table}.${m.column}/${m.per.table}.${m.per.column}`;
+  if (m.per) return `ratio:${m.table}.${m.column}/${m.per.table}.${m.per.column ?? ''}`;
   if (m.agg === 'count' || m.column === null) return `rows:${m.table}`;
   return `column:${m.table}.${m.column}`;
 }

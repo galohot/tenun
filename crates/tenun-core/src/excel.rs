@@ -504,14 +504,14 @@ fn header_names(
 }
 
 /// Fills blank cells of the first column from the cell above, when the column is a grouping
-/// column: text, more than half blank, with a value in the first row. The values must also look
+/// column: text, at least half blank, with a value in the first row. The values must also look
 /// like groups. Either one comes back in a later block, or every block spans 2 rows or more and
 /// the header is not the name of a notes column. A column of unique notes is left alone.
 fn fill_down(cells: &mut [Vec<Cell>], name: &str) -> bool {
     let col: Vec<&Cell> = cells.iter().map(|r| &r[0]).collect();
     let blanks = col.iter().filter(|c| ***c == Cell::Null).count();
     let all_text = col.iter().all(|c| matches!(c, Cell::Null | Cell::Text(_)));
-    if cells.len() < 2 || !all_text || blanks * 2 <= cells.len() || *col[0] == Cell::Null {
+    if cells.len() < 2 || !all_text || blanks * 2 < cells.len() || *col[0] == Cell::Null {
         return false;
     }
     let filled: Vec<String> = col
@@ -859,6 +859,31 @@ mod tests {
         let s = build_sheet("S", grid).unwrap();
         assert_eq!(s.rows[1][0], Cell::Null);
         assert!(s.notes.is_empty());
+    }
+
+    #[test]
+    fn groups_of_exactly_two_rows_are_filled_down() {
+        let grid = vec![
+            vec![t("Region"), t("Item"), t("Qty")],
+            vec![t("North"), t("a"), i(1)],
+            vec![n(), t("b"), i(2)],
+            vec![t("South"), t("c"), i(3)],
+            vec![n(), t("d"), i(4)],
+        ];
+        let s = build_sheet("S", grid).unwrap();
+        assert_eq!(s.rows[1][0], t("North"));
+        assert_eq!(s.rows[3][0], t("South"));
+        assert_eq!(s.notes, ["Filled down Region"]);
+        // A notes column in the same shape stays as it is.
+        let notes = vec![
+            vec![t("Remark"), t("Item")],
+            vec![t("VIP"), t("a")],
+            vec![n(), t("b")],
+            vec![t("Late"), t("c")],
+            vec![n(), t("d")],
+        ];
+        let s = build_sheet("S", notes).unwrap();
+        assert_eq!(s.rows[1][0], Cell::Null);
     }
 
     #[test]

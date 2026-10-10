@@ -31,14 +31,14 @@ E,50,90
 W,70,70
 ";
 
-// Yearly figures. E has nothing in 2025.
+// Yearly figures. E has nothing in 2025. The data runs to the last day of 2026, so that year is over.
 const YEARLY: &str = "region,year,amt
 N,2024-06-01,80
 N,2025-06-01,100
-N,2026-06-01,130
+N,2026-12-31,130
 S,2025-06-01,90
-S,2026-06-01,50
-E,2026-06-01,20
+S,2026-12-31,50
+E,2026-12-31,20
 ";
 
 // The latest day is 2026-03-20; the window starts on 2025-04-01.
@@ -270,6 +270,35 @@ fn compare_two_periods_takes_the_latest_two_by_default() {
     );
     assert_eq!(text(&r.rows[0][0]), "N");
     assert_eq!((num(&r.rows[0][1]), num(&r.rows[0][2])), (80.0, 100.0));
+}
+
+#[test]
+fn a_slope_chart_skips_the_period_that_is_not_over() {
+    // The data stops on 4 March 2026. March is not over, so the default pair is December and February.
+    let e = engine("slope-open");
+    let t = tile(
+        "compare",
+        json!([m("s8/open", "qty", "sum")]),
+        json!([col("s8/open", "product"), by("s8/open", "date", "month")]),
+        json!({}),
+    );
+    let r = run(&e, &t);
+    let p = r.pair.as_ref().unwrap().periods.clone().unwrap();
+    assert_eq!(p, [json!("2025-12-01"), json!("2026-02-01")]);
+    assert!(r.partial.is_none());
+    // A pair the user picks keeps the open month and marks it.
+    let t = tile(
+        "compare",
+        json!([m("s8/open", "qty", "sum")]),
+        json!([col("s8/open", "product"), by("s8/open", "date", "month")]),
+        json!({ "periods": ["2026-02-01", "2026-03-01"] }),
+    );
+    let r = run(&e, &t);
+    let part = r.partial.as_ref().unwrap();
+    assert_eq!(
+        (part.key.as_str(), part.until.as_str()),
+        ("2026-03-01", "2026-03-04")
+    );
 }
 
 #[test]

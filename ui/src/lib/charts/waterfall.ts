@@ -102,8 +102,10 @@ export function buildWaterfall({ res, tile, colors: c, selected, width }: BuildA
       const bar = bars[i];
       const cx = (bar.x0 + bar.x1) / 2;
       const [tw, bw, bh] = [labelWidth(text(s)), bar.x1 - bar.x0, bar.y1 - bar.y0];
-      const above = { box: { x0: cx - tw / 2, x1: cx + tw / 2, y0: bar.y0 - 4 - LABEL_H, y1: bar.y0 - 4 }, p: { x: cx, y: bar.y0 - 4, valign: 'bottom' as const, inside: false, rotate: false } };
-      const below = { box: { x0: cx - tw / 2, x1: cx + tw / 2, y0: bar.y1 + 4, y1: bar.y1 + 4 + LABEL_H }, p: { x: cx, y: bar.y1 + 4, valign: 'top' as const, inside: false, rotate: false } };
+      // A number above or below a bar may slide sideways, so it never reaches over the axis numbers.
+      const ax = Math.max(cs.x + tw / 2, Math.min(cx, cs.x + cs.width - tw / 2));
+      const above = { box: { x0: ax - tw / 2, x1: ax + tw / 2, y0: bar.y0 - 4 - LABEL_H, y1: bar.y0 - 4 }, p: { x: ax, y: bar.y0 - 4, valign: 'bottom' as const, inside: false, rotate: false } };
+      const below = { box: { x0: ax - tw / 2, x1: ax + tw / 2, y0: bar.y1 + 4, y1: bar.y1 + 4 + LABEL_H }, p: { x: ax, y: bar.y1 + 4, valign: 'top' as const, inside: false, rotate: false } };
       const within = { box: { x0: cx - tw / 2, x1: cx + tw / 2, y0: (bar.y0 + bar.y1) / 2 - LABEL_H / 2, y1: (bar.y0 + bar.y1) / 2 + LABEL_H / 2 }, p: { x: cx, y: (bar.y0 + bar.y1) / 2, valign: 'middle' as const, inside: true, rotate: false } };
       const turned = { box: { x0: cx - TURNED_W / 2, x1: cx + TURNED_W / 2, y0: (bar.y0 + bar.y1) / 2 - tw / 2, y1: (bar.y0 + bar.y1) / 2 + tw / 2 }, p: { x: cx, y: (bar.y0 + bar.y1) / 2, valign: 'middle' as const, inside: true, rotate: true } };
       // A bar wholly under zero hangs from the axis, so its number goes under it first.

@@ -164,10 +164,10 @@ pub fn workspace() -> Workspace {
         json!([{ "table": "s2/stores", "column": "region" }]),
     );
     region_filter["filter"] = json!({ "style": "list" });
-    let mut note = tile("t15", "text", 0, 8, 12, 1, json!([]), json!([]));
+    let mut note = tile("t15", "text", 0, 8, 12, 2, json!([]), json!([]));
     note["text"] = json!(
-        "The bar chart keeps the 5 biggest products and adds the rest as **Other**. \
-         The table adds up every row and column. Pick a region on the left, and every tile follows."
+        "The bar chart keeps 5 products and adds the rest as **Other**. \
+         The table adds up every row and column. Pick a region in the Region tile, and every tile follows."
     );
     let more_views = json!({
         "id": "d2",

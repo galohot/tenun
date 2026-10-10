@@ -227,21 +227,27 @@
     {:else if error}
       <p class="error"><Icon name="warning" size={14} /> {error}</p>
     {:else if res}
-      <TileBody
-        {tile}
-        {res}
-        {colors}
-        {selected}
-        {selectedCol}
-        {selectedStage}
-        tables={app.tables}
-        onpick={canPick ? (v, stage) => onpick(v, res?.otherOf, res?.bins, stage) : undefined}
-        onpickcol={isPivotLike(tile.type) && tile.cols ? onpickcol : undefined}
-        oncontext={canPick ? (v, e) => (menu = { x: e.clientX, y: e.clientY, mark: { value: v } }) : undefined}
-        {title}
-        {onfilter}
-        onwidths={tile.type === 'table' ? onwidths : undefined}
-        onlayout={advancedOn() ? onlayout : undefined} />
+      <!-- One tile that fails to draw says so; the other tiles stay. -->
+      <svelte:boundary>
+        <TileBody
+          {tile}
+          {res}
+          {colors}
+          {selected}
+          {selectedCol}
+          {selectedStage}
+          tables={app.tables}
+          onpick={canPick ? (v, stage) => onpick(v, res?.otherOf, res?.bins, stage) : undefined}
+          onpickcol={isPivotLike(tile.type) && tile.cols ? onpickcol : undefined}
+          oncontext={canPick ? (v, e) => (menu = { x: e.clientX, y: e.clientY, mark: { value: v } }) : undefined}
+          {title}
+          {onfilter}
+          onwidths={tile.type === 'table' ? onwidths : undefined}
+          onlayout={advancedOn() ? onlayout : undefined} />
+        {#snippet failed()}
+          <p class="error"><Icon name="warning" size={14} /> This tile could not be drawn. Check its fields.</p>
+        {/snippet}
+      </svelte:boundary>
     {/if}
   </div>
   {#if ignored.length || note}

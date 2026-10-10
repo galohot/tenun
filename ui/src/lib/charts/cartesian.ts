@@ -53,8 +53,8 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const horizontal = tile.type === 'bar' && !!tile.horizontal && !combo;
   const room = horizontal ? Math.floor((height - 16) / 26) : Math.floor(width / 44);
   // A result that already has its "Other" is never folded again.
-  const { categories, series } =
-    temporal || noFold || tile.type !== 'bar' || res.other ? pivot(res, tile, tables) : fold(pivot(res, tile, tables), Math.max(4, room));
+  const whole = pivot(res, tile, tables);
+  const { categories, series } = temporal || noFold || tile.type !== 'bar' || res.other ? whole : fold(whole, Math.max(4, room));
   const multi = series.length > 1;
   const hasBar = combo ? series.some((_, si) => drawnAs(si) === 'bar') : tile.type === 'bar';
   // Series are drawn in the order of `built`; the combo decides bar or line for each value.
@@ -226,11 +226,16 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         if (hi < 0 || v > (values[hi] as number)) hi = i;
       });
       if (lo === hi) return undefined;
+      // The axis starts at zero, except an indexed chart. A lowest point that sits near the bottom of
+      // the plot (a running total starts there) writes its number above itself, clear of the axis numbers.
+      const nums = values.filter((v): v is number => v !== null);
+      const floor = indexed ? Math.min(...nums) : Math.min(0, ...nums);
+      const nearFloor = (values[lo] as number) - floor < 0.15 * (Math.max(...nums) - floor);
       const point = (i: number) => ({
         coord: [i, values[i]],
         value: values[i],
         // A point on the first place of the axis writes its number to the right, clear of the axis numbers.
-        label: { position: i === hi ? ('top' as const) : ('bottom' as const), ...(i === 0 && !hasBar ? { align: 'left' as const } : {}) },
+        label: { position: i === hi || nearFloor ? ('top' as const) : ('bottom' as const), ...(i === 0 && !hasBar ? { align: 'left' as const } : {}) },
       });
       return {
         silent: true,
@@ -323,7 +328,9 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const guided = !percent;
   const isRest = (v: Cell) => v === FOLDED || isOther(v);
   const aligned = shownSeries(series, (!perValue && multi) || (perValue && stacked));
-  const shown = usableValues(aligned, categories, isRest);
+  // The statistics read every category, also the ones a short tile folds into "Other", so the lines do
+  // not change with the height of the tile.
+  const shown = usableValues(shownSeries(whole.series, (!perValue && multi) || (perValue && stacked)), whole.categories, isRest);
   // An indexed chart shows where it started: the line at 100.
   const levels = guided ? [...resolveLevels(tile.lines, false, () => shown), ...(indexed ? [{ axis: 'y' as const, value: 100, name: 'Start' }] : [])] : [];
   // The unfinished last period is left out of the fit, so a half month never bends the line.

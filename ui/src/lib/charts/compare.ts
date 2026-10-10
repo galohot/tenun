@@ -7,6 +7,8 @@ import type { Cell } from '../api';
 import { cell, getLocale, measureLabel, numberFormatter } from '../format';
 import { axisCommon, esc, key, makeLabel, tooltipBase, type BuildArgs, type Built } from './common';
 import { farFromZero } from './math';
+import { niceUp } from './small';
+import { partialNote } from '../run';
 import { isGood, moveOf, moveWords, relative } from './pairs';
 
 type Api = {
@@ -47,8 +49,12 @@ function buildDumbbell({ res, tile, colors: c, selected, width, tables = [] }: B
   const [lo, hi] = [Math.min(0, ...all), Math.max(0, ...all)];
   const [dLo, dHi] = [Math.min(...all), Math.max(...all)];
   const span = (far ? dHi - dLo : hi - lo) || 1;
-  const axisMin = far ? dLo - span * 0.08 : lo < 0 ? lo - span * 0.08 : 0;
-  const axisMax = (far ? dHi : hi) + span * 0.08;
+  const roomMin = far ? dLo - span * 0.08 : lo < 0 ? lo - span * 0.08 : 0;
+  const roomMax = (far ? dHi : hi) + span * 0.08;
+  // Both ends go out to a round tick, so the last two numbers of the axis never crowd each other.
+  const step = niceUp((roomMax - roomMin) / 5);
+  const axisMin = roomMin === 0 ? 0 : Math.floor(roomMin / step) * step;
+  const axisMax = Math.ceil(roomMax / step) * step;
   const nearEdge = (v: number) => (v - axisMin) / (axisMax - axisMin) < 0.14;
 
   // The hairline between the two dots.
@@ -112,7 +118,7 @@ function buildDumbbell({ res, tile, colors: c, selected, width, tables = [] }: B
     legend: { type: 'scroll', data: sides, top: 0, left: 0, icon: 'circle', itemWidth: 10, itemHeight: 10, textStyle: { color: c.text, fontSize: 12 }, pageTextStyle: { color: c.text2 } },
     grid: { left: 4, right: 36, top: 30, bottom: 4, containLabel: true },
     tooltip: { ...tooltipBase(c), trigger: 'item', formatter: (p: { dataIndex: number; data: { group?: number }; seriesType: string }) => tipOf(p.seriesType === 'scatter' ? (p.data.group ?? 0) : p.dataIndex) },
-    xAxis: { type: 'value' as const, ...axisCommon(c), scale: far, min: axisMin, max: axisMax, splitNumber: 5, axisLabel: { ...axisCommon(c).axisLabel, formatter: (v: number) => fmt.short(v) } },
+    xAxis: { type: 'value' as const, ...axisCommon(c), scale: far, min: axisMin, max: axisMax, interval: step, axisLabel: { ...axisCommon(c).axisLabel, formatter: (v: number) => fmt.short(v) } },
     yAxis: {
       type: 'category' as const,
       data: names,
@@ -136,7 +142,9 @@ function buildSlope({ res, tile, colors: c, selected, width, tables = [] }: Buil
   const isSel = (v: Cell) => !selected || selected.some((s) => key(s) === key(v));
   const periods = res.pair?.periods ?? [];
   const grain = tile.dims[1]?.grain;
-  const ends = [0, 1].map((i) => periodName(periods[i], grain));
+  // An unfinished second period is marked, and its change has no colour: the fall is not real.
+  const unfinished = res.partial !== undefined && key(periods[1]) === res.partial.key;
+  const ends = [0, 1].map((i) => periodName(periods[i], grain) + (i === 1 && unfinished ? '*' : ''));
   const measure = tile.measures[0] ? measureLabel(tile.measures[0], tables) : '';
   const groups = res.rows.map((r) => r[0]);
   const names = groups.map(label);
@@ -144,10 +152,16 @@ function buildSlope({ res, tile, colors: c, selected, width, tables = [] }: Buil
   const far = farFromZero(all);
 
   const colour = (i: number) => {
+    if (unfinished) return c.text2;
     const good = isGood(moveOf(res.rows[i][1], res.rows[i][2]), tile.better);
     return good === null ? c.text2 : good ? c.good : c.bad;
   };
   const room = Math.min(190, Math.max(70, width * 0.26));
+  // A long name is cut by itself, so the number beside it always stays. A letter is about 6 px wide.
+  const clip = (name: string, value: string) => {
+    const fit = Math.floor((room - 14) / 6.2) - value.length - 2;
+    return name.length <= fit ? name : `${name.slice(0, Math.max(3, fit - 1)).trimEnd()}…`;
+  };
   const series = res.rows.map((r, i) => {
     const [a, b] = [num(r[1]), num(r[2])];
     const mv = moveWords(moveOf(a, b));
@@ -160,7 +174,7 @@ function buildSlope({ res, tile, colors: c, selected, width, tables = [] }: Buil
         color: c.text2,
         fontSize: 11,
         // The right end carries the sign, so the colour of the line is never the only sign.
-        formatter: () => (side === 0 ? `${names[i]}  ${fmt.short(v ?? 0)}` : `${fmt.short(v ?? 0)} ${mv.glyph}`),
+        formatter: () => (side === 0 ? `${clip(names[i], fmt.short(v ?? 0))}  ${fmt.short(v ?? 0)}` : `${fmt.short(v ?? 0)} ${mv.glyph}`),
         width: room - 14,
         overflow: 'truncate' as const,
         opacity,
@@ -211,7 +225,7 @@ function buildSlope({ res, tile, colors: c, selected, width, tables = [] }: Buil
     yAxis: { type: 'value' as const, show: false, scale: far },
     series,
   };
-  const note = far ? 'The scale does not start at zero.' : null;
+  const note = [far ? 'The scale does not start at zero.' : '', unfinished ? partialNote(res, grain) : ''].filter(Boolean).join(' ') || null;
   return {
     option,
     categories: groups,
