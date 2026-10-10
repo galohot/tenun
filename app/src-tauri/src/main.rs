@@ -46,6 +46,14 @@ fn main() {
                         let path = p.to_string_lossy().into_owned();
                         let result = if path.ends_with(".tenun") {
                             state.engine.open(&p).map(|_| ())
+                        } else if p.is_dir() {
+                            state
+                                .engine
+                                .add_source(AddSource::Folder {
+                                    path,
+                                    pattern: None,
+                                })
+                                .map(|_| ())
                         } else {
                             state
                                 .engine
@@ -83,6 +91,11 @@ fn pick(app: &tauri::AppHandle, req: PickRequest) -> Vec<PathBuf> {
             .unwrap_or_default()
             .into_iter()
             .filter_map(to_path)
+            .collect(),
+        PickRequest::Folder => d
+            .blocking_pick_folder()
+            .and_then(to_path)
+            .into_iter()
             .collect(),
         PickRequest::Image => d
             .add_filter("Picture", &["png", "jpg", "jpeg", "webp"])

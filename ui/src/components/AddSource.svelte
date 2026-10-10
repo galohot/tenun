@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { api } from '../lib/api';
+  import { api, type UrlEvery } from '../lib/api';
+  import { DEFAULT_PATTERN, EVERY_CHOICES, linkProblem } from '../lib/sources';
   import { app, go } from '../lib/state.svelte';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
@@ -7,7 +8,7 @@
 
   let { onclose }: { onclose: () => void } = $props();
 
-  let tab = $state<'file' | 'database'>('file');
+  let tab = $state<'file' | 'folder' | 'link' | 'database'>('file');
   let browsing = $state(false);
   let kind = $state<'postgres' | 'mysql'>('postgres');
   let host = $state('localhost');
@@ -17,6 +18,15 @@
   let password = $state('');
   let schema = $state('');
   let path = $state('');
+  // A folder of files.
+  let browsingFolder = $state(false);
+  let folder = $state('');
+  let pattern = $state(DEFAULT_PATTERN);
+  // A CSV link.
+  let url = $state('');
+  let every = $state<UrlEvery>('hourly');
+  let linkName = $state('');
+  const problem = $derived(linkProblem(url));
 
   async function addFiles(paths: string[]) {
     let last: string | undefined;
@@ -40,6 +50,47 @@
       if (paths.length) await addFiles(paths);
     } else {
       browsing = true;
+    }
+  }
+
+  async function chooseFolder() {
+    if (app.health?.native) {
+      const { paths } = await api.pick({ kind: 'folder' });
+      if (paths[0]) folder = paths[0];
+    } else {
+      browsingFolder = true;
+    }
+  }
+
+  async function addFolder(e: SubmitEvent) {
+    e.preventDefault();
+    let added = '';
+    const ok = await app.run('Reading the folder…', async () => {
+      const r = await api.addFolder(folder, pattern.trim());
+      added = r.added;
+      return r;
+    });
+    if (ok) {
+      onclose();
+      const t = app.tables.find((x) => x.source_id === added);
+      go({ view: 'data', table: t?.id });
+      app.toast('Added the folder');
+    }
+  }
+
+  async function addLink(e: SubmitEvent) {
+    e.preventDefault();
+    let added = '';
+    const ok = await app.run('Fetching the link…', async () => {
+      const r = await api.addUrl(url.trim(), every, linkName.trim());
+      added = r.added;
+      return r;
+    });
+    if (ok) {
+      onclose();
+      const t = app.tables.find((x) => x.source_id === added);
+      go({ view: 'data', table: t?.id });
+      app.toast('Added the link');
     }
   }
 
@@ -72,6 +123,12 @@
     <button role="tab" aria-selected={tab === 'file'} class:on={tab === 'file'} onclick={() => (tab = 'file')}>
       <Icon name="sheet" size={14} /> File
     </button>
+    <button role="tab" aria-selected={tab === 'folder'} class:on={tab === 'folder'} onclick={() => (tab = 'folder')}>
+      <Icon name="folder" size={14} /> Folder
+    </button>
+    <button role="tab" aria-selected={tab === 'link'} class:on={tab === 'link'} onclick={() => (tab = 'link')}>
+      <Icon name="link" size={14} /> Link
+    </button>
     <button role="tab" aria-selected={tab === 'database'} class:on={tab === 'database'} onclick={() => (tab = 'database')}>
       <Icon name="database" size={14} /> Database
     </button>
@@ -87,6 +144,49 @@
     <form class="paste" onsubmit={(e) => { e.preventDefault(); if (path.trim()) addFiles([path.trim()]); }}>
       <input class="field" placeholder="Or paste a full file path" bind:value={path} />
       <button class="btn" disabled={!path.trim()}>Add</button>
+    </form>
+  {:else if tab === 'folder'}
+    <form class="db" id="folderform" onsubmit={addFolder}>
+      <button type="button" class="drop" onclick={chooseFolder} disabled={!!app.busy}>
+        <Icon name="folder" size={28} />
+        <strong>{folder ? folder.split(/[\\/]/).filter(Boolean).pop() : 'A folder of files…'}</strong>
+        <span>{folder || 'Excel and CSV files in one folder stack into one table.'}</span>
+        <span>Tenun adds a "file" column with the name of each file, and picks up files you add, change or remove.</span>
+      </button>
+      <label class="stack">
+        <span class="label">Files to read</span>
+        <input class="field" bind:value={pattern} placeholder={DEFAULT_PATTERN} />
+        <span class="help">Separate patterns with a semicolon. Use * for any text.</span>
+      </label>
+    </form>
+  {:else if tab === 'link'}
+    <form class="db" id="linkform" onsubmit={addLink}>
+      <label class="stack">
+        <span class="label">A CSV link (for example a Google Sheet published to the web)</span>
+        <input class="field" type="url" bind:value={url} placeholder="https://" autocomplete="off" required />
+        {#if problem}<span class="help bad">{problem}</span>{/if}
+      </label>
+      <p class="note">
+        <Icon name="info" size={14} />
+        In Google Sheets, open File, then Share, then Publish to the web. Pick the sheet, choose Comma-separated values
+        (.csv), press Publish and copy the link.
+      </p>
+      <div class="grid2">
+        <label class="stack">
+          <span class="label">Name</span>
+          <input class="field" bind:value={linkName} placeholder="Optional" />
+        </label>
+        <label class="stack">
+          <span class="label">Refresh</span>
+          <select class="field" bind:value={every}>
+            {#each EVERY_CHOICES as c}<option value={c.value}>{c.label}</option>{/each}
+          </select>
+        </label>
+      </div>
+      <p class="note">
+        <Icon name="info" size={14} />
+        Tenun downloads the link and keeps a copy next to your workspace. It sends no cookies, and reads up to 50 MB.
+      </p>
     </form>
   {:else}
     <form class="db" id="dbform" onsubmit={connect}>
@@ -116,11 +216,21 @@
     {#if tab === 'database'}
       <button class="btn" onclick={onclose}>Cancel</button>
       <button class="btn primary" type="submit" form="dbform" disabled={!!app.busy}>{app.busy ?? 'Connect'}</button>
+    {:else if tab === 'folder'}
+      <button class="btn" onclick={onclose}>Cancel</button>
+      <button class="btn primary" type="submit" form="folderform" disabled={!!app.busy || !folder}>{app.busy ?? 'Add folder'}</button>
+    {:else if tab === 'link'}
+      <button class="btn" onclick={onclose}>Cancel</button>
+      <button class="btn primary" type="submit" form="linkform" disabled={!!app.busy || !url.trim() || !!problem}>{app.busy ?? 'Add link'}</button>
     {:else}
       <button class="btn" onclick={onclose}>Close</button>
     {/if}
   {/snippet}
 </Modal>
+
+{#if browsingFolder}
+  <FileBrowser mode="folder" onclose={() => (browsingFolder = false)} onpick={(p) => { browsingFolder = false; folder = p[0]; }} />
+{/if}
 
 {#if browsing}
   <FileBrowser mode="files" onclose={() => (browsing = false)} onpick={(p) => { browsing = false; addFiles(p); }} />
@@ -169,6 +279,10 @@
   .grid { display: grid; grid-template-columns: 1fr 140px; gap: 10px 12px; }
   .grid label { display: flex; flex-direction: column; gap: 4px; }
   .grid .wide:nth-child(5), .grid .wide:nth-child(6) { grid-column: span 2; }
+  .stack { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+  .help { color: var(--text-2); font-size: 12px; }
+  .help.bad { color: var(--danger); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-top: 12px; }
   .note { display: flex; gap: 8px; margin: 14px 0 0; color: var(--text-2); font-size: 12px; }
   .note :global(svg) { margin-top: 1px; }
 </style>

@@ -15,3 +15,4 @@ thiserror.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 rusqlite = { version = "0.40", features = ["bundled", "column_decltype"] }
 tracing.workspace = true
+ureq = "3"

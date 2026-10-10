@@ -93,11 +93,26 @@ export interface Relationship {
   to: FieldRef;
 }
 
+/** How often a CSV link is fetched again. */
+export type UrlEvery = '15min' | 'hourly' | 'daily' | 'manual';
+
+export interface PastePreview {
+  columns: string[];
+  rows: string[][];
+  /** Rows of data, not counting the header. */
+  total: number;
+}
+
 export interface Source {
   id: string;
   name: string;
-  kind: 'excel' | 'csv' | 'parquet' | 'sqlite' | 'duckdb' | 'postgres' | 'mysql';
+  kind: 'excel' | 'csv' | 'parquet' | 'sqlite' | 'duckdb' | 'folder' | 'url' | 'postgres' | 'mysql';
   path?: string;
+  /** Folder: the file name patterns, separated by `;`. */
+  pattern?: string;
+  /** CSV link. */
+  url?: string;
+  every?: UrlEvery;
   host?: string;
   database?: string;
 }
@@ -408,6 +423,17 @@ export const api = {
   rename: (name: string) => call<Snapshot>('POST', '/workspace/rename', { name }),
   sample: () => call<Snapshot>('POST', '/sample'),
   addFile: (path: string) => call<Snapshot & { added: string }>('POST', '/sources', { kind: 'file', path }),
+  addFolder: (path: string, pattern?: string) =>
+    call<Snapshot & { added: string }>('POST', '/sources', { kind: 'folder', path, pattern: pattern || null }),
+  addUrl: (url: string, every: UrlEvery, name?: string) =>
+    call<Snapshot & { added: string }>('POST', '/sources', { kind: 'url', url, every, name: name || null }),
+  setUrlEvery: (id: string, every: UrlEvery) =>
+    call<Snapshot>('PUT', `/sources/${encodeURIComponent(id)}/every`, { every }),
+  /** The name, the first rows and the size of a pasted table. Fails when the text is not a table. */
+  pastePreview: (text: string, header: boolean) => call<PastePreview>('POST', '/paste/preview', { text, header }),
+  /** Writes a pasted table as a CSV file in the data folder and adds it as a source. */
+  paste: (name: string, text: string, header: boolean) =>
+    call<Snapshot & { added: string }>('POST', '/paste', { name, text, header }),
   addDatabase: (kind: 'postgres' | 'mysql', conn: Record<string, unknown>) =>
     call<Snapshot & { added: string }>('POST', '/sources', { kind, ...conn }),
   removeSource: (id: string) => call<Snapshot>('DELETE', `/sources/${encodeURIComponent(id)}`),
@@ -434,7 +460,7 @@ export const api = {
   query: (q: SemanticQuery) => call<QueryResult>('POST', '/query', q),
   fs: (path?: string) => call<FsListing>('GET', `/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   pick: (
-    req: { kind: 'data_files' } | { kind: 'image' } | { kind: 'open_workspace' } | { kind: 'save_workspace' | 'save_html'; name: string },
+    req: { kind: 'data_files' } | { kind: 'folder' } | { kind: 'image' } | { kind: 'open_workspace' } | { kind: 'save_workspace' | 'save_html'; name: string },
   ) =>
     call<{ paths: string[] }>('POST', '/pick', req),
   /** The picture the native dialog chose, for an image tile. */

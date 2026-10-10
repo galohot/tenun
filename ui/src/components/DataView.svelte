@@ -1,13 +1,15 @@
 <script lang="ts">
-  import { api, type Cell, type Column, type Profile, type TableSetup, type UnpivotPlan } from '../lib/api';
+  import { api, type Cell, type Column, type Profile, type TableSetup, type UnpivotPlan, type UrlEvery } from '../lib/api';
   import { typeIcon } from '../lib/ui';
   import { app, go } from '../lib/state.svelte';
   import { cell, full } from '../lib/format';
   import { failedText, hasUnpivot, isEmptySetup, withHeaderRow, withUnpivot, withoutUnpivot } from '../lib/prep';
+  import { looksTabular, sinceWords, EVERY_CHOICES } from '../lib/sources';
   import Icon from './Icon.svelte';
   import ColumnMenu from './data/ColumnMenu.svelte';
   import ProfileCard from './data/ProfileCard.svelte';
   import UnpivotSheet from './data/UnpivotSheet.svelte';
+  import PasteSheet from './data/PasteSheet.svelte';
 
   let { tableId }: { tableId?: string } = $props();
 
@@ -38,6 +40,8 @@
     parquet: 'Parquet',
     sqlite: 'SQLite',
     duckdb: 'DuckDB',
+    folder: 'Folder',
+    url: 'CSV link',
     postgres: 'PostgreSQL',
     mysql: 'MySQL',
   };
@@ -49,6 +53,52 @@
 
   // Identifiers read better without thousands separators.
   const isId = (name: string) => /(^|[ _-])(id|code|no|key)$|id$/i.test(name);
+
+  const iconOf = (kind: string) =>
+    kind === 'folder' ? 'folder' : kind === 'url' ? 'link' : ['postgres', 'mysql', 'sqlite', 'duckdb'].includes(kind) ? 'database' : 'sheet';
+
+  async function setEvery(id: string, every: UrlEvery) {
+    await app.run(null, () => api.setUrlEvery(id, every));
+  }
+
+  // --- Paste a table (build 09) -------------------------------------------------------------
+  // The paste event carries the text in the browser and in the desktop window. Where a window does
+  // not send one for Ctrl/Cmd+V, the clipboard is read directly (it may ask for permission).
+  let pasted = $state<string | null>(null);
+  let gotPaste = false;
+
+  const editable = (t: EventTarget | null) => {
+    const el = t as HTMLElement | null;
+    return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+  };
+  const dialogOpen = () => !!document.querySelector('[role="dialog"]');
+
+  function onpaste(e: ClipboardEvent) {
+    gotPaste = true;
+    if (pasted !== null || editable(e.target) || dialogOpen()) return;
+    const text = e.clipboardData?.getData('text/plain') ?? '';
+    if (looksTabular(text)) {
+      e.preventDefault();
+      pasted = text;
+    }
+  }
+
+  function onkeydown(e: KeyboardEvent) {
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'v') return;
+    if (pasted !== null || editable(e.target) || dialogOpen()) return;
+    gotPaste = false;
+    setTimeout(() => !gotPaste && readClipboard(false), 150);
+  }
+
+  async function readClipboard(announce: boolean) {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (looksTabular(text)) pasted = text;
+      else if (announce) app.toast('There is no table on the clipboard. Copy some cells in Excel or Google Sheets first.');
+    } catch {
+      if (announce) app.toast('Tenun cannot read the clipboard from here. Copy the cells, then press Ctrl+V (Cmd+V on a Mac).', 'error');
+    }
+  }
 
   const sourceOf = $derived(sources.find((s) => s.id === table?.source_id));
 
@@ -138,6 +188,7 @@
 <header class="toolbar">
   <h2>Data</h2>
   <span class="spacer"></span>
+  <button class="btn" title="Paste cells from Excel or Google Sheets as a new table (Ctrl+V)" onclick={() => readClipboard(true)}><Icon name="table" /> Paste a table</button>
   <button class="btn primary" onclick={() => (app.addOpen = true)}><Icon name="plus" /> Add data</button>
 </header>
 
@@ -145,7 +196,7 @@
   <div class="empty">
     <Icon name="sheet" size={32} />
     <h2>No data yet</h2>
-    <p class="muted">Add an Excel file, a CSV file or a database to start.</p>
+    <p class="muted">Add an Excel file, a CSV file, a folder of files, a link or a database to start. You can also paste cells from Excel.</p>
     <button class="btn primary" onclick={() => (app.addOpen = true)}><Icon name="plus" /> Add data</button>
   </div>
 {:else}
@@ -154,12 +205,22 @@
       {#each sources as s (s.id)}
         <section>
           <div class="src">
-            <Icon name={s.kind === 'postgres' || s.kind === 'mysql' || s.kind === 'sqlite' || s.kind === 'duckdb' ? 'database' : 'sheet'} size={15} />
+            <Icon name={iconOf(s.kind)} size={15} />
             <span class="src-name" title={s.path ?? s.host}>{s.name}</span>
             <span class="kind">{kindLabel[s.kind]}</span>
-            <button class="btn plain icon tiny" title="Reload" onclick={() => app.run(null, () => api.reloadSource(s.id))}><Icon name="refresh" size={13} /></button>
+            <button class="btn plain icon tiny" title={s.kind === 'url' ? 'Fetch the link now' : 'Reload'} onclick={() => app.run(null, () => api.reloadSource(s.id))}><Icon name="refresh" size={13} /></button>
             <button class="btn plain icon tiny" title="Remove" onclick={() => remove(s.id, s.name)}><Icon name="trash" size={13} /></button>
           </div>
+          {#if s.kind === 'url'}
+            <p class="srcline">
+              {#if app.snap?.loaded_at?.[s.id]}Fetched {sinceWords(app.snap.loaded_at[s.id])}{:else}Not fetched yet{/if}
+              <select class="every" aria-label="Refresh" value={s.every ?? 'hourly'} onchange={(e) => setEvery(s.id, e.currentTarget.value as UrlEvery)}>
+                {#each EVERY_CHOICES as c}<option value={c.value}>{c.label}</option>{/each}
+              </select>
+            </p>
+          {:else if s.kind === 'folder'}
+            <p class="srcline" title={s.path}>Reads {s.pattern}</p>
+          {/if}
           {#if errors[s.id]}
             <p class="err"><Icon name="warning" size={13} /> {errors[s.id]}</p>
           {/if}
@@ -303,11 +364,15 @@
     onclose={() => (menu = null)} />
 {/if}
 
+{#if pasted !== null}
+  <PasteSheet text={pasted} onclose={() => (pasted = null)} />
+{/if}
+
 {#if unpivotOpen && plan && table}
   <UnpivotSheet tableId={table.id} {plan} onapply={turnIntoRows} onclose={() => (unpivotOpen = false)} />
 {/if}
 
-<svelte:window onmousedown={(e) => prepareOpen && !(e.target as HTMLElement).closest('.prep') && (prepareOpen = false)} />
+<svelte:window {onpaste} {onkeydown} onmousedown={(e) => prepareOpen && !(e.target as HTMLElement).closest('.prep') && (prepareOpen = false)} />
 
 <style>
   .toolbar {
@@ -357,6 +422,8 @@
   .tbl.on { background: var(--selected); }
   .tname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rows { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .srcline { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 6px 4px 28px; color: var(--text-2); font-size: 11px; }
+  .every { height: 22px; max-width: 170px; border: 0; border-radius: 5px; background: var(--inset); color: var(--text); font-size: 11px; }
   .err { display: flex; gap: 6px; margin: 4px 6px 6px; color: var(--danger); font-size: 12px; }
   .detail { min-width: 0; display: flex; flex-direction: column; padding: 20px 24px; gap: 12px; overflow: hidden; }
   .head { display: flex; align-items: flex-start; gap: 16px; }

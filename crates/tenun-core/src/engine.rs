@@ -2,13 +2,16 @@
 
 use crate::catalog::{Catalog, Column, DType, Table, ident, lit};
 use crate::excel::{self, Cell, ColType};
+use crate::fetch;
+use crate::folder;
+use crate::paste;
 use crate::prep::{self, ColInfo};
 use crate::query::{self, Param, SemanticQuery};
 use crate::secrets::Secrets;
 use crate::suggest::{self, Suggestion};
 use crate::workspace::{
-    DbConn, FieldRef, Locale, Relationship, Source, SourceKind, TableSetup, Transform, Workspace,
-    resolve_path, store_path,
+    DEFAULT_PATTERN, DbConn, Every, FieldRef, Locale, Relationship, Source, SourceKind, TableSetup,
+    Transform, Workspace, resolve_path, store_path,
 };
 use duckdb::Connection;
 use duckdb::types::Value;
@@ -16,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
+use std::time::{Duration, SystemTime};
 
 pub struct Engine {
     db: Mutex<Connection>,
@@ -32,6 +36,8 @@ struct State {
     errors: BTreeMap<String, String>,
     /// Source id → when it last loaded without error (ISO 8601, UTC).
     loaded_at: BTreeMap<String, String>,
+    /// Source id → when a CSV link was last fetched (or tried), for its refresh schedule.
+    fetched: BTreeMap<String, SystemTime>,
     dirty: bool,
 }
 
@@ -53,6 +59,20 @@ pub struct Snapshot {
 pub enum AddSource {
     /// Any supported file; the kind is chosen from the extension.
     File { path: String },
+    /// A folder of CSV and Excel files that stack into one table.
+    Folder {
+        path: String,
+        #[serde(default)]
+        pattern: Option<String>,
+    },
+    /// A CSV file on the web (https only).
+    Url {
+        url: String,
+        #[serde(default)]
+        every: Every,
+        #[serde(default)]
+        name: Option<String>,
+    },
     Postgres {
         #[serde(flatten)]
         conn: DbConn,
@@ -233,7 +253,7 @@ impl Engine {
             };
         }
         for src in &ws.sources {
-            self.load(&src.id);
+            self.load_with(&src.id, false);
         }
     }
 
@@ -306,6 +326,41 @@ impl Engine {
                 };
                 (name, kind)
             }
+            AddSource::Folder { path, pattern } => {
+                let abs = PathBuf::from(&path);
+                if !abs.is_dir() {
+                    anyhow::bail!("{path} is not a folder");
+                }
+                let name = abs
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.clone());
+                let pattern = pattern
+                    .map(|p| p.trim().to_string())
+                    .filter(|p| !p.is_empty())
+                    .unwrap_or_else(|| DEFAULT_PATTERN.into());
+                (
+                    name,
+                    SourceKind::Folder {
+                        path: store_path(&abs, base.as_deref()),
+                        pattern,
+                    },
+                )
+            }
+            AddSource::Url { url, every, name } => {
+                let host = fetch::check(&url)?;
+                let name = name
+                    .map(|n| n.trim().to_string())
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or(host);
+                (
+                    name,
+                    SourceKind::Url {
+                        url: url.trim().to_string(),
+                        every,
+                    },
+                )
+            }
             AddSource::Postgres { conn, password } => {
                 if !password.is_empty() {
                     self.secrets
@@ -348,6 +403,14 @@ impl Engine {
         drop_source(&self.db.lock().unwrap(), id);
         {
             let mut s = self.state.write().unwrap();
+            // The downloaded copy of a CSV link is Tenun's own file, so it goes with the source.
+            if s.ws
+                .source(id)
+                .is_some_and(|x| matches!(x.kind, SourceKind::Url { .. }))
+            {
+                let _ = std::fs::remove_file(cache_file(s.path.as_deref(), id));
+            }
+            s.fetched.remove(id);
             s.ws.sources.retain(|x| x.id != id);
             let prefix = format!("{id}/");
             s.ws.relationships
@@ -360,35 +423,72 @@ impl Engine {
         self.persist();
     }
 
-    /// (Re)loads one source into DuckDB and refreshes its catalog entries.
-    /// Returns the ids of its tables.
+    /// (Re)loads one source into DuckDB and refreshes its catalog entries. A CSV link is fetched
+    /// again. Returns the ids of its tables.
     pub fn load(&self, id: &str) -> Vec<String> {
-        let (src, base, setups) = {
+        self.load_with(id, true)
+    }
+
+    /// `fetch` makes a CSV link download again. Without it, a copy that is still fresh is read
+    /// as it is, so opening a workspace does not download every link.
+    fn load_with(&self, id: &str, fetch: bool) -> Vec<String> {
+        let (src, base, setups, cache, cached_at) = {
             let s = self.state.read().unwrap();
             let Some(src) = s.ws.source(id).cloned() else {
                 return Vec::new();
             };
+            let cache = cache_file(s.path.as_deref(), id);
+            let cached_at = std::fs::metadata(&cache).and_then(|m| m.modified()).ok();
             (
                 src,
                 s.path
                     .as_ref()
                     .and_then(|p| p.parent().map(Path::to_path_buf)),
                 setups_of(&s.ws, id),
+                cache,
+                cached_at,
             )
         };
+        // A CSV link is fetched first. If that fails, the copy from the last fetch is still read
+        // and the error is shown beside the source.
+        let mut fetch_error = None;
+        let mut fetched = false;
+        if let SourceKind::Url { url, every } = &src.kind {
+            let fresh = cached_at.is_some_and(|t| {
+                every
+                    .secs()
+                    .is_none_or(|n| t.elapsed().is_ok_and(|e| e < Duration::from_secs(n)))
+            });
+            if fetch || !fresh {
+                fetched = true;
+                if let Err(e) = fetch::download(url, &cache) {
+                    fetch_error = Some(friendly(&e));
+                }
+            }
+        }
         let result = {
             let db = self.db.lock().unwrap();
-            load_source(&db, &src, base.as_deref(), &self.secrets, &setups)
+            load_source(&db, &src, base.as_deref(), &self.secrets, &setups, &cache)
         };
         let mut s = self.state.write().unwrap();
+        if fetched {
+            s.fetched.insert(id.to_string(), SystemTime::now());
+        }
         s.catalog.tables.retain(|t| t.source_id != id);
         match result {
             Ok(mut tables) => {
                 for t in &mut tables {
                     stamp_setup(t, s.ws.tables.get(&t.id));
                 }
-                s.errors.remove(id);
-                s.loaded_at.insert(id.to_string(), now_iso());
+                match fetch_error {
+                    Some(e) => {
+                        s.errors.insert(id.to_string(), e);
+                    }
+                    None => {
+                        s.errors.remove(id);
+                        s.loaded_at.insert(id.to_string(), now_iso());
+                    }
+                }
                 let ids = tables.iter().map(|t| t.id.clone()).collect();
                 s.catalog.tables.extend(tables);
                 let names: BTreeMap<String, String> =
@@ -401,13 +501,14 @@ impl Engine {
                 ids
             }
             Err(e) => {
-                s.errors.insert(id.to_string(), friendly(&e));
+                s.errors
+                    .insert(id.to_string(), fetch_error.unwrap_or_else(|| friendly(&e)));
                 Vec::new()
             }
         }
     }
 
-    /// Absolute paths of every file source, for the watcher.
+    /// Absolute paths of every single-file source, for the watcher.
     pub fn watched_files(&self) -> Vec<(String, PathBuf)> {
         let s = self.state.read().unwrap();
         let base = s
@@ -422,6 +523,131 @@ impl Engine {
                     .map(|p| (src.id.clone(), resolve_path(p, base.as_deref())))
             })
             .collect()
+    }
+
+    /// Absolute paths of every folder source, for the watcher.
+    pub fn watched_folders(&self) -> Vec<(String, PathBuf)> {
+        let s = self.state.read().unwrap();
+        let base = s
+            .path
+            .as_ref()
+            .and_then(|p| p.parent().map(Path::to_path_buf));
+        s.ws.sources
+            .iter()
+            .filter_map(|src| {
+                src.kind
+                    .folder()
+                    .map(|(p, _)| (src.id.clone(), resolve_path(p, base.as_deref())))
+            })
+            .collect()
+    }
+
+    /// The sources that read one of the changed paths: the file itself, or a file in the folder.
+    /// The paths come from the watcher, so they are in canonical form.
+    pub fn sources_for(&self, changed: &BTreeSet<PathBuf>) -> Vec<String> {
+        let s = self.state.read().unwrap();
+        let base = s
+            .path
+            .as_ref()
+            .and_then(|p| p.parent().map(Path::to_path_buf));
+        s.ws.sources
+            .iter()
+            .filter(|src| {
+                if let Some(p) = src.kind.path() {
+                    changed.contains(&crate::watch::canonical(&resolve_path(p, base.as_deref())))
+                } else if let Some((p, pattern)) = src.kind.folder() {
+                    let dir = crate::watch::canonical(&resolve_path(p, base.as_deref()));
+                    changed
+                        .iter()
+                        .any(|c| folder::is_touched_by(c, &dir, pattern))
+                } else {
+                    false
+                }
+            })
+            .map(|src| src.id.clone())
+            .collect()
+    }
+
+    /// Fetches the CSV links whose time has come, by their refresh interval. Returns the ids of
+    /// the sources that were fetched again (with or without an error).
+    pub fn refresh_due_urls(&self) -> Vec<String> {
+        let due: Vec<String> = {
+            let s = self.state.read().unwrap();
+            let now = SystemTime::now();
+            s.ws.sources
+                .iter()
+                .filter_map(|src| {
+                    let SourceKind::Url { every, .. } = &src.kind else {
+                        return None;
+                    };
+                    let last = s.fetched.get(&src.id).copied().or_else(|| {
+                        std::fs::metadata(cache_file(s.path.as_deref(), &src.id))
+                            .and_then(|m| m.modified())
+                            .ok()
+                    });
+                    url_due(*every, last, now).then(|| src.id.clone())
+                })
+                .collect()
+        };
+        for id in &due {
+            self.load(id);
+        }
+        due
+    }
+
+    /// Changes how often a CSV link is fetched.
+    pub fn set_url_every(&self, id: &str, every: Every) -> anyhow::Result<()> {
+        {
+            let mut s = self.state.write().unwrap();
+            match s
+                .ws
+                .sources
+                .iter_mut()
+                .find(|x| x.id == id)
+                .map(|x| &mut x.kind)
+            {
+                Some(SourceKind::Url { every: e, .. }) => *e = every,
+                _ => anyhow::bail!("{id} is not a CSV link"),
+            }
+        }
+        self.persist();
+        Ok(())
+    }
+
+    /// Writes a pasted table as a CSV file in the data folder next to the workspace file
+    /// (`<workspace> data/`) and adds that file as a normal CSV source. Returns the source id.
+    pub fn add_pasted(&self, name: &str, text: &str, header: bool) -> anyhow::Result<String> {
+        let path = self.state.read().unwrap().path.clone().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Save the workspace first. Tenun keeps a pasted table in a folder next to the workspace file."
+            )
+        })?;
+        let pasted = paste::parse(text)
+            .ok_or_else(|| anyhow::anyhow!("There is no table in what you pasted."))?;
+        let (names, rows) = paste::split(&pasted, header);
+        let dir = data_dir(&path);
+        std::fs::create_dir_all(&dir)?;
+        let stem = paste::file_stem(name);
+        let file = (1..)
+            .map(|n| {
+                dir.join(if n == 1 {
+                    format!("{stem}.csv")
+                } else {
+                    format!("{stem} {n}.csv")
+                })
+            })
+            .find(|p| !p.exists())
+            .expect("infinite range");
+        std::fs::write(&file, paste::to_csv(&names, &rows))?;
+        match self.add_source(AddSource::File {
+            path: file.to_string_lossy().into_owned(),
+        }) {
+            Ok(id) => Ok(id),
+            Err(e) => {
+                let _ = std::fs::remove_file(&file);
+                Err(e)
+            }
+        }
     }
 
     /// Adds a relationship between two columns. The direction is decided from
@@ -859,11 +1085,48 @@ fn rebase(kind: &mut SourceKind, old: Option<&Path>, new: Option<&Path>) {
         | SourceKind::Csv { path }
         | SourceKind::Parquet { path }
         | SourceKind::Sqlite { path }
-        | SourceKind::Duckdb { path } => path,
+        | SourceKind::Duckdb { path }
+        | SourceKind::Folder { path, .. } => path,
         _ => return,
     };
     let abs = resolve_path(p, old);
     *p = store_path(&abs, new);
+}
+
+/// `<workspace name> data/`, next to the workspace file. Pasted tables and downloaded links go here.
+fn data_dir(workspace_file: &Path) -> PathBuf {
+    let stem = workspace_file
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Untitled".into());
+    workspace_file
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(format!("{stem} data"))
+}
+
+/// Where the downloaded copy of a CSV link lives. A workspace that is not saved yet keeps it in
+/// the temporary folder.
+fn cache_file(workspace_file: Option<&Path>, id: &str) -> PathBuf {
+    match workspace_file {
+        Some(p) => data_dir(p).join(format!("link-{id}.csv")),
+        None => std::env::temp_dir()
+            .join(format!("tenun-links-{}", std::process::id()))
+            .join(format!("link-{id}.csv")),
+    }
+}
+
+/// True when a CSV link should be fetched again. A link never fetched is due.
+pub fn url_due(every: Every, last: Option<SystemTime>, now: SystemTime) -> bool {
+    let Some(secs) = every.secs() else {
+        return false;
+    };
+    match last {
+        None => true,
+        Some(t) => now
+            .duration_since(t)
+            .is_ok_and(|d| d >= Duration::from_secs(secs)),
+    }
 }
 
 fn schema_of(id: &str) -> String {
@@ -1040,6 +1303,7 @@ fn load_source(
     base: Option<&Path>,
     secrets: &Secrets,
     setups: &BTreeMap<String, TableSetup>,
+    cache: &Path,
 ) -> anyhow::Result<Vec<Table>> {
     let schema = schema_of(&src.id);
     let qs = ident(&schema);
@@ -1124,31 +1388,29 @@ fn load_source(
                 .unwrap_or_else(|| "data".into());
             let select = format!("SELECT * FROM {reader}({})", lit(&abs.to_string_lossy()));
             db.execute_batch(&format!("CREATE SCHEMA IF NOT EXISTS {qs};"))?;
-            let raw = raw_name(&stem);
-            let mut outcome = None;
-            match setups.get(&stem).filter(|s| s.changes_view()) {
-                Some(setup) => {
-                    db.execute_batch(&format!(
-                        "CREATE OR REPLACE VIEW {qs}.{} AS {select};",
-                        ident(&raw)
-                    ))?;
-                    outcome = Some(make_view(db, &schema, &stem, &raw, setup));
-                }
-                None => {
-                    drop_any(db, &qs, &raw);
-                    db.execute_batch(&format!(
-                        "CREATE OR REPLACE VIEW {qs}.{} AS {select};",
-                        ident(&stem)
-                    ))?;
-                }
-            }
+            let outcome = make_table(db, &schema, &stem, &select, setups)?;
             let mut tables = catalog_local(db, src, &schema)?;
-            if let Some(o) = outcome
-                && let Some(t) = tables.iter_mut().find(|t| t.name == stem)
-            {
-                stamp_outcome(t, &o);
-            }
+            stamp_table_outcome(&mut tables, &stem, outcome);
             Ok(tables)
+        }
+        SourceKind::Url { .. } => {
+            if !cache.is_file() {
+                anyhow::bail!("Nothing has been downloaded from this link yet.");
+            }
+            let name = crate::paste::file_stem(&src.name);
+            let select = format!(
+                "SELECT * FROM read_csv_auto({}, null_padding = true)",
+                lit(&cache.to_string_lossy())
+            );
+            db.execute_batch(&format!("CREATE SCHEMA IF NOT EXISTS {qs};"))?;
+            let outcome = make_table(db, &schema, &name, &select, setups)?;
+            let mut tables = catalog_local(db, src, &schema)?;
+            stamp_table_outcome(&mut tables, &name, outcome);
+            Ok(tables)
+        }
+        SourceKind::Folder { path, pattern } => {
+            let abs = resolve_path(path, base);
+            load_folder(db, src, &abs, pattern, setups)
         }
         SourceKind::Duckdb { path } => {
             let abs = resolve_path(path, base);
@@ -1201,6 +1463,284 @@ fn load_source(
             catalog_attached(db, src, &name, &[default_schema])
         }
     }
+}
+
+/// Creates the table `name` as a view over a SELECT. When the table has changes (types, unpivot)
+/// the SELECT sits under a second view that holds them.
+fn make_table(
+    db: &Connection,
+    schema: &str,
+    name: &str,
+    select: &str,
+    setups: &BTreeMap<String, TableSetup>,
+) -> anyhow::Result<Option<ViewOutcome>> {
+    let qs = ident(schema);
+    let raw = raw_name(name);
+    match setups.get(name).filter(|s| s.changes_view()) {
+        Some(setup) => {
+            db.execute_batch(&format!(
+                "CREATE OR REPLACE VIEW {qs}.{} AS {select};",
+                ident(&raw)
+            ))?;
+            Ok(Some(make_view(db, schema, name, &raw, setup)))
+        }
+        None => {
+            drop_any(db, &qs, &raw);
+            db.execute_batch(&format!(
+                "CREATE OR REPLACE VIEW {qs}.{} AS {select};",
+                ident(name)
+            ))?;
+            Ok(None)
+        }
+    }
+}
+
+fn stamp_table_outcome(tables: &mut [Table], name: &str, outcome: Option<ViewOutcome>) {
+    if let Some(o) = outcome
+        && let Some(t) = tables.iter_mut().find(|t| t.name == name)
+    {
+        stamp_outcome(t, &o);
+    }
+}
+
+/// One file of a folder, read into the schema as the relation `rel`.
+struct Part {
+    file: String,
+    rel: String,
+    columns: Vec<String>,
+}
+
+/// Stacks the files of a folder into one table named after the folder, with the file name in the
+/// first column. Columns are matched by name; a file that lacks one leaves it blank. A file that
+/// shares no column with the others is skipped and named in the table's notes.
+fn load_folder(
+    db: &Connection,
+    src: &Source,
+    dir: &Path,
+    pattern: &str,
+    setups: &BTreeMap<String, TableSetup>,
+) -> anyhow::Result<Vec<Table>> {
+    if !dir.is_dir() {
+        anyhow::bail!("{} is missing", dir.display());
+    }
+    let files = folder::files(dir, pattern)?;
+    if files.is_empty() {
+        anyhow::bail!("No files in this folder match {pattern}.");
+    }
+    let schema = schema_of(&src.id);
+    let qs = ident(&schema);
+    db.execute_batch(&format!(
+        "DROP SCHEMA IF EXISTS {qs} CASCADE; CREATE SCHEMA {qs};"
+    ))?;
+    let mut notes: Vec<String> = Vec::new();
+    let mut parts: Vec<Part> = Vec::new();
+
+    // Excel files first: the sheet that most workbooks have is the one that stacks.
+    let mut books: Vec<(String, Vec<excel::Sheet>)> = Vec::new();
+    for f in &files {
+        let name = f
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        if is_book(f) {
+            match excel::read_workbook(f, &BTreeMap::new()) {
+                Ok(sheets) => books.push((name, sheets)),
+                Err(e) => notes.push(format!("Skipped {name}: {e:#}")),
+            }
+        }
+    }
+    let mut tally: Vec<(String, usize)> = Vec::new();
+    for (_, sheets) in &books {
+        for sh in sheets.iter().filter(|s| !s.columns.is_empty()) {
+            match tally.iter_mut().find(|(n, _)| *n == sh.name) {
+                Some(t) => t.1 += 1,
+                None => tally.push((sh.name.clone(), 1)),
+            }
+        }
+    }
+    let target = tally
+        .iter()
+        .fold(None::<&(String, usize)>, |best, t| match best {
+            Some(b) if b.1 >= t.1 => Some(b),
+            _ => Some(t),
+        })
+        .map(|t| t.0.clone());
+
+    for f in &files {
+        let name = f
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let rel = format!("__raw_#{}", parts.len());
+        let read: anyhow::Result<()> = if let Some((_, sheets)) =
+            books.iter().find(|(n, _)| *n == name)
+        {
+            let sheet = sheets
+                .iter()
+                .filter(|s| !s.columns.is_empty())
+                .find(|s| Some(&s.name) == target.as_ref())
+                .or_else(|| sheets.iter().find(|s| !s.columns.is_empty()));
+            match sheet {
+                Some(sh) => {
+                    for n in sh.notes.iter().take(3) {
+                        notes.push(format!("{name}: {n}"));
+                    }
+                    write_sheet(db, &schema, sh, &rel)
+                }
+                None => Err(anyhow::anyhow!("it has no data")),
+            }
+        } else if is_book(f) {
+            continue; // a workbook that could not be opened is already in the notes
+        } else if folder::is_readable(f) {
+            db.execute_batch(&format!(
+                    "CREATE OR REPLACE VIEW {qs}.{} AS SELECT * FROM read_csv_auto({}, null_padding = true);",
+                    ident(&rel),
+                    lit(&f.to_string_lossy())
+                ))
+                .map_err(Into::into)
+        } else {
+            Err(anyhow::anyhow!("Tenun cannot read this kind of file"))
+        };
+        match read {
+            Ok(()) => {
+                let columns = columns_where(
+                    db,
+                    "current_database()",
+                    &format!(
+                        "table_schema = {} AND table_name = {}",
+                        lit(&schema),
+                        lit(&rel)
+                    ),
+                )?
+                .into_iter()
+                .map(|c| c.2)
+                .collect();
+                parts.push(Part {
+                    file: name,
+                    rel,
+                    columns,
+                });
+            }
+            Err(e) => {
+                drop_any(db, &qs, &rel);
+                notes.push(format!("Skipped {name}: {e:#}"));
+            }
+        }
+    }
+
+    // Keep the files that share a column with the biggest group of files.
+    let lower =
+        |p: &Part| -> BTreeSet<String> { p.columns.iter().map(|c| c.to_lowercase()).collect() };
+    let sets: Vec<BTreeSet<String>> = parts.iter().map(lower).collect();
+    let linked = |a: usize, b: usize| !sets[a].is_disjoint(&sets[b]);
+    let seed = (0..parts.len()).max_by_key(|&i| {
+        (
+            (0..parts.len()).filter(|&j| linked(i, j)).count(),
+            std::cmp::Reverse(i),
+        )
+    });
+    let mut keep: Vec<bool> = vec![false; parts.len()];
+    if let Some(seed) = seed {
+        let mut known = sets[seed].clone();
+        keep[seed] = true;
+        // A file joins when it shares a column with what is stacked so far.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for i in 0..parts.len() {
+                if !keep[i] && !sets[i].is_disjoint(&known) {
+                    keep[i] = true;
+                    known.extend(sets[i].iter().cloned());
+                    changed = true;
+                }
+            }
+        }
+    }
+    for (i, p) in parts.iter().enumerate() {
+        if !keep[i] {
+            notes.push(format!(
+                "Skipped {}: it has no column in common with the other files.",
+                p.file
+            ));
+        }
+    }
+    let used: Vec<&Part> = parts
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| keep[*i])
+        .map(|(_, p)| p)
+        .collect();
+    if used.is_empty() {
+        let why = notes.first().cloned().unwrap_or_default();
+        anyhow::bail!("Tenun could not read any file in this folder. {why}");
+    }
+
+    // The file name comes first. A column of the files that is itself called "file" is renamed.
+    let own = |c: &str| {
+        if c.eq_ignore_ascii_case("file") {
+            "file 2".to_string()
+        } else {
+            c.to_string()
+        }
+    };
+    let stack = |as_text: bool| -> String {
+        used.iter()
+            .map(|p| {
+                let cols: String = p
+                    .columns
+                    .iter()
+                    .map(|c| {
+                        let q = ident(c);
+                        if as_text {
+                            format!(", CAST({q} AS VARCHAR) AS {}", ident(&own(c)))
+                        } else if c.eq_ignore_ascii_case("file") {
+                            format!(", {q} AS {}", ident(&own(c)))
+                        } else {
+                            format!(", {q}")
+                        }
+                    })
+                    .collect();
+                format!(
+                    "SELECT {} AS \"file\"{cols} FROM {qs}.{}",
+                    lit(&p.file),
+                    ident(&p.rel)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" UNION ALL BY NAME ")
+    };
+    let name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "files".into());
+    let name = crate::paste::file_stem(&name);
+    // Files can disagree about a type (numbers in one, words in the next). Then every column is text.
+    let outcome = match make_table(db, &schema, &name, &stack(false), setups) {
+        Ok(o) => o,
+        Err(_) => {
+            notes.push(
+                "The files disagree about some column types, so Tenun reads every column as text."
+                    .into(),
+            );
+            make_table(db, &schema, &name, &stack(true), setups)?
+        }
+    };
+    let mut tables = catalog_local(db, src, &schema)?;
+    stamp_table_outcome(&mut tables, &name, outcome);
+    notes.truncate(30);
+    if let Some(t) = tables.iter_mut().find(|t| t.name == name) {
+        t.notes = notes;
+    }
+    Ok(tables)
+}
+
+fn is_book(path: &Path) -> bool {
+    path.extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|e| matches!(e.as_str(), "xlsx" | "xlsm" | "xlsb" | "xls" | "ods"))
 }
 
 /// libpq-style value quoting: wrap in single quotes, escape \ and '.
