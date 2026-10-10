@@ -7,7 +7,8 @@
 
 import type { EChartsCoreOption } from 'echarts/core';
 import type { Cell, QueryResult, Tile } from '../api';
-import { cell, measureLabel, OTHER_KEY, type Named } from '../format';
+import { cell, measureLabel, OTHER_KEY, resultDim0, type Named } from '../format';
+import { effectiveShowAs } from '../showas';
 import { assignSlots } from './math';
 
 export interface Colors {
@@ -90,7 +91,7 @@ export function pivot(res: QueryResult, tile: Tile, tables: Named[] = []): Pivot
       for (const r of res.rows) values[catIdx.get(key(r[0]))!] = r[k] as number | null;
       const m = tile.measures[k - mi];
       const many = res.columns.length - mi > 1;
-      const name = many && m ? measureLabel(m, tables) : (res.columns[k]?.name ?? '');
+      const name = many && m ? measureLabel(m, tables, effectiveShowAs(tile, k - mi, resultDim0(res, tile))) : (res.columns[k]?.name ?? '');
       series.push({ name, raw: name, values, slot: k - mi });
     }
     return { categories, series };

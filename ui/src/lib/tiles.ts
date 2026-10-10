@@ -76,8 +76,8 @@ export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | nu
 }
 
 /**
- * What a tile's result depends on. The type, the comparison setting, the top N, the bin width, the
- * totals and the column field change what the server sends back, beside the question itself.
+ * What a tile's result depends on. The type, the top N, the bin width, the totals, the column field,
+ * "Show as" and the comparison change what the server sends back, beside the question itself.
  */
 export function resultKey(tile: Tile, filters: DashFilter[]): string {
   return JSON.stringify([
@@ -88,6 +88,8 @@ export function resultKey(tile: Tile, filters: DashFilter[]): string {
     tile.bins ?? null,
     tile.totals ?? null,
     tile.cols ?? null,
+    tile.showAs ?? null,
+    tile.compare ?? null,
   ]);
 }
 

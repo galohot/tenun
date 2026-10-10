@@ -1,7 +1,7 @@
 // The arithmetic behind the stack modes and the waterfall. Pure functions with no imports
 // at run time, so the node tests can load this file on its own.
 
-import type { Measure, NumFormat, Tile } from '../api';
+import type { Measure, NumFormat, ShowAs, Tile } from '../api';
 
 /** Sums and counts add up, so they can be stacked. An average, a minimum or a distinct count cannot. */
 export const STACKABLE: readonly string[] = ['sum', 'count'];
@@ -17,9 +17,13 @@ export const stackable = (aggs: readonly string[]): boolean => aggs.every((a) =>
  * unit only when they come from the same column, and rows counted in one table share it too.
  * A sum of Amount and a sum of Quantity are different units: a stack of them adds money to units.
  */
-export function unitOf(m: Pick<Measure, 'table' | 'column' | 'agg'>, f?: NumFormat | null): string {
+export function unitOf(m: Pick<Measure, 'table' | 'column' | 'agg' | 'per'>, f?: NumFormat | null, how?: ShowAs | null): string {
+  // A share or a rank is its own unit, whatever the value was.
+  if (how === 'rank') return 'rank';
+  if (how === 'pct_total' || how === 'pct_group' || how === 'pct_change') return 'percent';
   if (f?.currency) return `currency:${f.currency}`;
   if (f?.percent) return 'percent';
+  if (m.per) return `ratio:${m.table}.${m.column}/${m.per.table}.${m.per.column}`;
   if (m.agg === 'count' || m.column === null) return `rows:${m.table}`;
   return `column:${m.table}.${m.column}`;
 }
@@ -29,9 +33,9 @@ export function unitOf(m: Pick<Measure, 'table' | 'column' | 'agg'>, f?: NumForm
  * is stacked. Several values (one series for each) are stacked only when every one is a sum or a
  * count and they all share one unit; otherwise they sit side by side.
  */
-export function defaultStack(tile: Pick<Tile, 'measures' | 'formats'>, perValue: boolean): StackMode {
+export function defaultStack(tile: Pick<Tile, 'measures' | 'formats' | 'showAs'>, perValue: boolean): StackMode {
   if (!perValue) return 'stacked';
-  const units = new Set(tile.measures.map((m, i) => unitOf(m, tile.formats?.[i])));
+  const units = new Set(tile.measures.map((m, i) => unitOf(m, tile.formats?.[i], tile.showAs?.[i])));
   return units.size <= 1 ? 'stacked' : 'side';
 }
 
@@ -40,10 +44,18 @@ export function defaultStack(tile: Pick<Tile, 'measures' | 'formats'>, perValue:
  * (stacking averages) is ignored. `perValue` is true when the series are the tile's values, false
  * when they are the split groups.
  */
-export function stackMode(tile: Pick<Tile, 'stack' | 'measures' | 'formats'>, perValue: boolean): StackMode {
-  const used = perValue ? tile.measures : tile.measures.slice(0, 1);
-  if (!stackable(used.map((m) => m.agg))) return 'side';
+export function stackMode(tile: Pick<Tile, 'stack' | 'measures' | 'formats' | 'showAs'>, perValue: boolean): StackMode {
+  if (!stackableTile(tile, perValue)) return 'side';
   return tile.stack ?? defaultStack(tile, perValue);
+}
+
+/**
+ * Can the series of this tile be piled up? Every value has to add up: a sum or a count, not a ratio,
+ * and not shown as a rank or a percent change (those do not add up either).
+ */
+export function stackableTile(tile: Pick<Tile, 'measures' | 'showAs'>, perValue: boolean): boolean {
+  const used = perValue ? tile.measures : tile.measures.slice(0, 1);
+  return used.every((m, i) => !m.per && stackable([m.agg]) && tile.showAs?.[i] !== 'rank' && tile.showAs?.[i] !== 'pct_change');
 }
 
 /**

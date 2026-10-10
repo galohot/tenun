@@ -36,6 +36,13 @@ pub struct Tile {
     /// Pivot: the field whose values become the columns.
     #[serde(default)]
     pub cols: Option<Dimension>,
+    /// How each value is shown (share, running total, change, rank…), index-aligned with
+    /// `measures`.
+    #[serde(default, rename = "showAs")]
+    pub show_as: Option<Vec<Option<shape::ShowAs>>>,
+    /// A time chart also draws the same question one year or one period earlier.
+    #[serde(default)]
+    pub compare: Option<shape::CompareTo>,
 }
 
 /// Tiles that show something the user typed or picked, not a query: they have no result.
@@ -134,6 +141,7 @@ fn count_rows(table: &str) -> Measure {
         table: table.to_string(),
         column: None,
         agg: Agg::Count,
+        per: None,
     }
 }
 
@@ -289,6 +297,7 @@ pub fn run_tile(
             table: d.table.clone(),
             column: Some(d.column.clone()),
             agg: Agg::Max,
+            per: None,
         }],
         dimensions: vec![],
         filters: q.filters.clone(),
@@ -369,6 +378,7 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
             table: d.table.clone(),
             column: Some(d.column.clone()),
             agg: Agg::Max,
+            per: None,
         }],
         dimensions: vec![],
         filters: fs.clone(),
@@ -784,7 +794,10 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         .flat_map(|t| {
             t.measures
                 .iter()
-                .map(|m| m.table.as_str())
+                .flat_map(|m| {
+                    std::iter::once(m.table.as_str())
+                        .chain(m.per.as_ref().map(|p| p.table.as_str()))
+                })
                 .chain(t.dims.iter().map(|d| d.table.as_str()))
         })
         .collect();

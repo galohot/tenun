@@ -1,7 +1,8 @@
 // Human formatting for numbers, dates and field names.
 
 import { MAX_CHART_MEASURES } from './tiles';
-import { isPart, type Agg, type Cell, type Dim, type DType, type Grain, type Measure, type NumFormat, type QueryResult, type Table, type Tile } from './api';
+import { isPart, type Agg, type Cell, type Column, type Dim, type DType, type Grain, type Measure, type NumFormat, type QueryResult, type ShowAs, type Table, type Tile, type Unit } from './api';
+import { dim0Kind, effectiveShowAs, SHOW_AS_WORDS, type Dim0Kind } from './showas';
 import * as L from './locale';
 import type { Locale } from './locale';
 import { localeState } from './localeState.svelte';
@@ -37,11 +38,17 @@ export function tip(n: number, f?: NumFormat | null, loc: Locale = getLocale()):
  * The formats of one value, bound to a locale. A chart builds this once, so a change of
  * locale makes it build again. A table, a pivot and a tooltip default to the full number.
  */
-export function numberFormatter(f?: NumFormat | null, loc: Locale = getLocale()) {
+export function numberFormatter(f?: NumFormat | null, loc: Locale = getLocale(), unit?: Unit | null) {
+  // A rank reads "#3". A share reads as a percent, whatever currency the value has.
+  if (unit === 'rank') {
+    const rank = (n: number) => (Number.isFinite(n) ? `#${Math.round(n)}` : '–');
+    return { short: rank, long: rank, tip: rank };
+  }
+  const g = unit === 'percent' ? { ...f, percent: true, currency: undefined } : f;
   return {
-    short: (n: number) => L.shortNumber(n, loc, f),
-    long: (n: number) => L.longNumber(n, loc, f),
-    tip: (n: number) => L.tipNumber(n, loc, f),
+    short: (n: number) => L.shortNumber(n, loc, g),
+    long: (n: number) => L.longNumber(n, loc, g),
+    tip: (n: number) => L.tipNumber(n, loc, g),
   };
 }
 
@@ -111,11 +118,14 @@ export function dateMedium(when: string | Date, loc: Locale = getLocale()): stri
 }
 
 /** Formats one result cell for display. */
-export function cell(v: Cell, dtype: DType, grain?: Grain | null, short = false, f?: NumFormat | null): string {
+export function cell(v: Cell, dtype: DType, grain?: Grain | null, short = false, f?: NumFormat | null, unit?: Unit | null): string {
   if (v === null || v === undefined) return '(blank)';
   if (v === OTHER_KEY) return 'Other';
   if (grain && isPart(grain) && typeof v === 'number') return partName(v, grain);
-  if (dtype === 'number' && typeof v === 'number') return short ? compact(v, f) : full(v, f);
+  if (dtype === 'number' && typeof v === 'number') {
+    if (unit) return short ? numberFormatter(f, getLocale(), unit).short(v) : numberFormatter(f, getLocale(), unit).long(v);
+    return short ? compact(v, f) : full(v, f);
+  }
   if ((dtype === 'date' || dtype === 'datetime') && typeof v === 'string') return formatDate(v, grain, dtype);
   if (typeof v === 'boolean') return v ? 'Yes' : 'No';
   return String(v);
@@ -135,6 +145,8 @@ const aggWords: Record<Agg, string> = {
   max: 'Highest',
   count: 'Count of',
   count_distinct: 'Unique',
+  median: 'Median',
+  p90: '90th percentile of',
   stdev: 'Spread of',
   variance: 'Variance of',
 };
@@ -146,6 +158,8 @@ export const aggNames: Record<Agg, string> = {
   max: 'Maximum',
   count: 'Count',
   count_distinct: 'Count unique',
+  median: 'Median',
+  p90: '90th percentile',
   stdev: 'Standard deviation',
   variance: 'Variance',
 };
@@ -160,9 +174,29 @@ function idBase(column: string): string | null {
 
 const GENERIC = new Set(['name', 'title', 'label', 'code', 'id', 'key', 'type', 'description']);
 
-export type Named = Pick<Table, 'id' | 'name' | 'label'>;
+export type Named = Pick<Table, 'id' | 'name' | 'label'> & { columns?: Column[] };
 
-export function measureLabel(m: Measure, tables: Named[]): string {
+/**
+ * The name of a value: "Revenue", "Average amount". A ratio reads "Revenue per order". A value shown
+ * another way adds its words: "Revenue (% of total)".
+ */
+export function measureLabel(m: Measure, tables: Named[], how?: ShowAs | null): string {
+  const base = ratioLabel(m, tables);
+  return how && how !== 'value' ? `${base} (${SHOW_AS_WORDS[how]})` : base;
+}
+
+/** What a ratio divides by, in words: "order" for a count of rows, else the name of the value. */
+function perWord(p: NonNullable<Measure['per']>, tables: Named[]): string {
+  if (p.column === null) return singular((tables.find((x) => x.id === p.table)?.label ?? 'row').toLowerCase());
+  return plainLabel({ table: p.table, column: p.column, agg: p.agg }, tables).toLowerCase();
+}
+
+function ratioLabel(m: Measure, tables: Named[]): string {
+  const top = plainLabel(m, tables);
+  return m.per ? `${top} per ${perWord(m.per, tables)}` : top;
+}
+
+function plainLabel(m: Measure, tables: Named[]): string {
   const t = tables.find((x) => x.id === m.table);
   if (m.column === null) return `Number of ${(t?.label ?? 'rows').toLowerCase()}`;
   const base = idBase(m.column);
@@ -178,13 +212,27 @@ export function measureLabel(m: Measure, tables: Named[]): string {
  * a value as in the charts ("Amount", "Average amount", "Number of rows"). Two values from one column
  * differ by their way of adding up, so they are never both "amount".
  */
-export function columnHeads(res: Pick<QueryResult, 'columns'>, tile: Pick<Tile, 'measures'>, tables: Named[]): string[] {
+export function columnHeads(
+  res: Pick<QueryResult, 'columns'>,
+  tile: Pick<Tile, 'type' | 'dims' | 'measures' | 'cols' | 'showAs'>,
+  tables: Named[],
+): string[] {
+  const kind = resultDim0(res, tile);
   let j = 0;
   return res.columns.map((c) => {
     if (c.role !== 'measure') return pretty(c.name);
-    const m = tile.measures[j++];
-    return m ? measureLabel(m, tables) : pretty(c.name);
+    const i = j++;
+    const m = tile.measures[i];
+    return m ? measureLabel(m, tables, effectiveShowAs(tile, i, kind)) : pretty(c.name);
   });
+}
+
+/** What the first group-by column of a result is, read from the result itself. */
+export function resultDim0(res: Pick<QueryResult, 'columns'>, tile: Pick<Tile, 'dims'>): Dim0Kind {
+  const c = res.columns[0];
+  if (!c || c.role !== 'dimension') return 'none';
+  if (c.dtype === 'date' || c.dtype === 'datetime') return 'date';
+  return isPart(tile.dims[0]?.grain) ? 'part' : 'other';
 }
 
 /** "name" of the stores table reads as "store". */
@@ -200,13 +248,18 @@ export function dimLabel(d: Dim, tables: Named[] = []): string {
 
 export function tileTitle(t: Tile, tables: Named[]): string {
   if (t.title) return t.title;
+  // A value shown another way adds its words to its name; the engine ignores a way that does not fit.
+  const d0 = t.dims[0];
+  const dtype = d0 ? tables.find((x) => x.id === d0.table)?.columns?.find((c) => c.name === d0.column)?.dtype : undefined;
+  const kind = d0 ? dim0Kind(dtype, d0.grain) : 'none';
+  const label = (x: Measure, i: number) => measureLabel(x, tables, effectiveShowAs(t, i, kind));
   // A note or a picture needs no title.
   if (t.type === 'text' || t.type === 'image' || t.type === 'filter') return '';
   if (!t.measures.length && !t.dims.length) return 'New tile';
-  let m = t.measures[0] ? measureLabel(t.measures[0], tables) : pretty(t.dims[0].column);
+  let m = t.measures[0] ? label(t.measures[0], 0) : pretty(t.dims[0].column);
   // Several values: "Sales and cost by month".
   if ((t.type === 'bar' || t.type === 'line' || t.type === 'area') && t.measures.length > 1) {
-    const names = t.measures.slice(0, MAX_CHART_MEASURES).map((x, i) => (i ? measureLabel(x, tables).toLowerCase() : measureLabel(x, tables)));
+    const names = t.measures.slice(0, MAX_CHART_MEASURES).map((x, i) => (i ? label(x, i).toLowerCase() : label(x, i)));
     m = names.length > 2 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names.join(' and ');
   }
   // "Revenue by category and channel": rows, then columns.
@@ -220,7 +273,7 @@ export function tileTitle(t: Tile, tables: Named[]): string {
   // "Distribution of amount": a histogram bins one column, whatever the way it is added up.
   if (t.type === 'histogram') return t.measures[0]?.column ? `Distribution of ${pretty(t.measures[0].column).toLowerCase()}` : m;
   // "Revenue vs quantity by product": one dot for each product.
-  if (t.type === 'scatter' && t.measures[1]) m = `${m} vs ${measureLabel(t.measures[1], tables).toLowerCase()}`;
+  if (t.type === 'scatter' && t.measures[1]) m = `${m} vs ${label(t.measures[1], 1).toLowerCase()}`;
   const by = t.dims[0] && t.type !== 'kpi' ? ` by ${dimLabel(t.dims[0], tables)}` : '';
   const split = t.dims[1] && t.measures.length < 2 && (t.type === 'bar' || t.type === 'line' || t.type === 'area') ? ` and ${dimLabel(t.dims[1], tables)}` : '';
   return m + by + split;

@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { api, DATE_PARTS, type Agg, type Grain, type Measure, type NumFormat, type QueryResult, type Tile, type TileType } from '../../lib/api';
+  import { api, DATE_PARTS, isPart, type Agg, type Grain, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { aggNames, tileTitle } from '../../lib/format';
-  import { defaultStack, stackable, stackMode } from '../../lib/charts/math';
+  import { defaultStack, stackableTile, stackMode } from '../../lib/charts/math';
+  import { dim0Kind, SHOW_AS_LABELS, showAsOptions, withShowAs } from '../../lib/showas';
   import { advancedLocked, SHOW_ADVANCED_SWITCH } from '../../lib/tiers';
   import { defaultDim, defaultMeasure, dtypeOf, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, reachableFrom, type DashFilter } from '../../lib/tiles';
   import Icon, { type IconName } from '../Icon.svelte';
@@ -71,11 +72,37 @@
     set({ formats: formats.some(Boolean) ? formats : undefined });
   }
 
-  /** Removes a value and its format together, so the two lists stay in step. */
+  /** Removes a value with its format and its "Show as", so the lists stay in step. */
   function removeMeasure(i: number) {
     const formats = (tile.formats ?? []).filter((_, j) => j !== i);
-    set({ measures: tile.measures.filter((_, j) => j !== i), formats: formats.some(Boolean) ? formats : undefined });
+    const showAs = (tile.showAs ?? []).filter((_, j) => j !== i);
+    set({
+      measures: tile.measures.filter((_, j) => j !== i),
+      formats: formats.some(Boolean) ? formats : undefined,
+      showAs: showAs.some(Boolean) ? showAs : undefined,
+    });
   }
+
+  /** Another field for value `i`. Its "Divide by" stays. */
+  function swapField(i: number, table: string, column: string | null) {
+    const ms = [...tile.measures];
+    ms[i] = { ...defaultMeasure(app.tables, table, column), ...(ms[i]?.per ? { per: ms[i].per } : {}) };
+    set({ measures: ms });
+  }
+
+  /** Sets or clears what value `i` is divided by. */
+  function setPer(i: number, per: Measure | null) {
+    const { per: _old, ...rest } = tile.measures[i];
+    dividing = null;
+    set({ measures: tile.measures.map((x, j) => (j === i ? (per ? { ...rest, per: { table: per.table, column: per.column, agg: per.agg } } : rest) : x)) });
+  }
+
+  function setShowAs(i: number, how: string) {
+    set({ showAs: withShowAs(tile.showAs, i, how as ShowAs, tile.measures.length) });
+  }
+
+  // The value whose "Divide by" picker is open.
+  let dividing = $state<number | null>(null);
 
   const m = $derived(tile.measures[0]);
   const rels = $derived(app.snap!.workspace.relationships);
@@ -85,7 +112,7 @@
     !x || x.column === null
       ? ['count']
       : dtypeOf(app.tables, x.table, x.column) === 'number'
-        ? ['sum', 'avg', 'min', 'max', 'count', 'count_distinct']
+        ? ['sum', 'avg', 'min', 'max', 'median', 'p90', 'count', 'count_distinct']
         : ['count', 'count_distinct', 'min', 'max'];
   const aggs = $derived(aggsOf(m));
 
@@ -101,6 +128,7 @@
     if (tile.id !== lastId) {
       lastId = tile.id;
       customTop = false;
+      dividing = null;
     }
   });
   const topKind = $derived(tile.type === 'bar' || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'pivot');
@@ -156,7 +184,7 @@
   const showSplit = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area' || tile.type === 'table' || isScatter);
   // Several values draw one series each; otherwise the series are the groups of a split.
   const perValue = $derived(tile.measures.length > 1);
-  const stackAble = $derived(stackable((perValue ? tile.measures.slice(0, MAX_CHART_MEASURES) : tile.measures.slice(0, 1)).map((x) => x.agg)));
+  const stackAble = $derived(stackableTile({ measures: tile.measures.slice(0, MAX_CHART_MEASURES), showAs: tile.showAs }, perValue));
   // The choice on show: the saved one, or the default for these values.
   const stackNow = $derived(stackMode(tile, perValue));
   const stackDefault = $derived(defaultStack(tile, perValue));
@@ -176,6 +204,11 @@
     set({ bins: raw.trim() !== '' && Number.isFinite(w) && w > 0 ? { width: w } : undefined });
   }
   const dimTypes = $derived(tile.dims.map((d) => dtypeOf(app.tables, d.table, d.column)));
+  const dim0 = $derived(dim0Kind(dimTypes[0], tile.dims[0]?.grain));
+  const showAsChoices = $derived(showAsOptions(tile, dim0));
+  // The same period last year needs a line, area or bar over a date with a grain, one value, no split.
+  const compareType = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area');
+  const canCompare = $derived(compareType && dim0 === 'date' && !!tile.dims[0]?.grain && !isPart(tile.dims[0].grain) && tile.measures.length <= 1 && !tile.dims[1]);
 
   /** A target of 0 or less, or an empty box, clears the target. */
   function setTarget(raw: string) {
@@ -261,6 +294,50 @@
       Short ({app.locale === 'id' ? '1,2 jt' : '1.2M'})
     </label>
   </div>
+{/snippet}
+
+{#snippet valueRows(i: number)}
+  {@const x = tile.measures[i]}
+  {#if x && !isHistogram}
+    {#if x.per}
+      <div class="per">
+        <span class="label">Divide by</span>
+        <FieldPicker
+          mode="measure"
+          table={x.per.table}
+          column={x.per.column}
+          reachable={reach}
+          onchange={(t, c) => setPer(i, defaultMeasure(app.tables, t, c))}
+          onclear={() => setPer(i, null)} />
+        <select
+          class="field"
+          aria-label="How to add up the value you divide by"
+          value={x.per.agg}
+          onchange={(e) => setPer(i, { ...x.per!, agg: e.currentTarget.value as Agg })}>
+          {#each aggsOf({ ...x.per, per: undefined }) as a}<option value={a}>{aggNames[a]}</option>{/each}
+        </select>
+      </div>
+    {:else if dividing === i}
+      <div class="per">
+        <span class="label">Divide by</span>
+        <FieldPicker mode="measure" table={null} column={null} placeholder="What to divide by" reachable={reach} onchange={(t, c) => setPer(i, defaultMeasure(app.tables, t, c))} />
+        <button class="link" onclick={() => (dividing = null)}>Cancel</button>
+      </div>
+    {:else}
+      <button class="link" onclick={() => (dividing = i)}>Divide by…</button>
+    {/if}
+    {#if showAsChoices.length}
+      {@const saved = tile.showAs?.[i] ?? 'value'}
+      <div class="showas">
+        <span class="label">Show as</span>
+        <select class="field" aria-label="Show this value as" value={saved} onchange={(e) => setShowAs(i, e.currentTarget.value)}>
+          {#each showAsChoices as o}<option value={o}>{SHOW_AS_LABELS[o]}</option>{/each}
+          {#if !showAsChoices.includes(saved)}<option value={saved} disabled>{SHOW_AS_LABELS[saved]} (not available here)</option>{/if}
+        </select>
+      </div>
+    {/if}
+  {/if}
+  {@render formatRow(i)}
 {/snippet}
 
 <aside class="insp">
@@ -377,7 +454,7 @@
       column={m?.column ?? null}
       placeholder={isHistogram ? 'A column of numbers' : 'What to measure'}
       numbersOnly={isHistogram}
-      onchange={(t, c) => set({ measures: [defaultMeasure(app.tables, t, c), ...tile.measures.slice(1)] })} />
+      onchange={(t, c) => swapField(0, t, c)} />
     {#if m}
       <!-- A histogram counts every row of the column, so there is nothing to add up. -->
       {#if !isHistogram}
@@ -385,7 +462,7 @@
           {#each aggs as a}<option value={a}>{aggNames[a]}</option>{/each}
         </select>
       {/if}
-      {@render formatRow(0)}
+      {@render valueRows(0)}
     {/if}
     {#if isScatter && m}
       <span class="label up">Up (Y)</span>
@@ -395,13 +472,13 @@
         column={tile.measures[1]?.column ?? null}
         placeholder="What to measure"
         reachable={reach}
-        onchange={(t, c) => set({ measures: [m, defaultMeasure(app.tables, t, c)] })}
+        onchange={(t, c) => swapField(1, t, c)}
         onclear={() => removeMeasure(1)} />
       {#if tile.measures[1]}
         <select class="field" value={tile.measures[1].agg} onchange={(e) => set({ measures: [m, { ...tile.measures[1], agg: e.currentTarget.value as Agg }] })}>
           {#each aggsOf(tile.measures[1]) as a}<option value={a}>{aggNames[a]}</option>{/each}
         </select>
-        {@render formatRow(1)}
+        {@render valueRows(1)}
       {/if}
     {/if}
     {#if manyValues}
@@ -411,13 +488,9 @@
           table={extra.table}
           column={extra.column}
           reachable={reach}
-          onchange={(t, c) => {
-            const ms = [...tile.measures];
-            ms[k + 1] = defaultMeasure(app.tables, t, c);
-            set({ measures: ms });
-          }}
+          onchange={(t, c) => swapField(k + 1, t, c)}
           onclear={() => removeMeasure(k + 1)} />
-        {@render formatRow(k + 1)}
+        {@render valueRows(k + 1)}
       {/each}
       {#if m && tile.measures.length < maxValues}
         <FieldPicker
@@ -462,6 +535,19 @@
         {/if}
       {/if}
     </div>
+  {/if}
+
+  {#if canCompare}
+    <div class="sec">
+      <span class="label">Compare with</span>
+      <select class="field" aria-label="Compare with an earlier period" value={tile.compare ?? ''} onchange={(e) => set({ compare: (e.currentTarget.value || undefined) as Tile['compare'] })}>
+        <option value="">Nothing</option>
+        <option value="prev_year">Same period last year</option>
+        <option value="prev_period">Previous period</option>
+      </select>
+    </div>
+  {:else if tile.compare && compareType}
+    <p class="hint">Comparing needs one value, a date with a grain and no split.</p>
   {/if}
 
   {#if showSplit && tile.dims[0] && (tile.type === 'table' || isScatter || tile.measures.length < 2)}
@@ -711,6 +797,10 @@
   .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .pair select.field { min-width: 0; }
   .hint { margin: -8px 0 0; font-size: 11px; color: var(--text-2); }
+  .per, .showas { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+  .per .label, .showas .label { font-size: 11px; }
+  .link { align-self: flex-start; border: 0; background: none; padding: 0; font-size: 12px; color: var(--accent-text); cursor: pointer; }
+  .link:hover { text-decoration: underline; }
   .hint.tight { margin: 0; line-height: 1.4; }
   .label.up { margin-top: 6px; }
   .check.first { margin-top: 0; }

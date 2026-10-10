@@ -90,6 +90,17 @@ pub struct QueryResult {
     /// right and never a sum of cells.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub totals: Option<Totals>,
+    /// Time charts with `tile.compare`: the same question one year (or one period) earlier, with
+    /// its keys moved forward so they line up with the rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compare: Option<Compare>,
+}
+
+/// The comparison series of a time chart. `rows` have the shape of the result's rows.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Compare {
+    pub label: String,
+    pub rows: Vec<Vec<serde_json::Value>>,
 }
 
 /// Totals of a table or pivot. Every row holds measure values only, in the order of the measures.
@@ -560,6 +571,7 @@ impl Engine {
             other_of: None,
             bins: None,
             totals: None,
+            compare: None,
         })
     }
 

@@ -1,16 +1,21 @@
-//! Shapes a tile's result after the main query: fills missing periods and keeps
-//! the top N groups with one "Other" row for the rest. The engine computes these
-//! numbers once, so the app, exported files, published dashboards and the
-//! headless agent all agree. The UI only draws what comes back.
+//! Shapes a tile's result after the main query: fills missing periods, keeps
+//! the top N groups with one "Other" row for the rest, shows a value another way
+//! (share, running total, change, rank…) and adds the series of "same period last
+//! year". The engine computes these numbers once, so the app, exported files,
+//! published dashboards and the headless agent all agree. The UI only draws what
+//! comes back.
 //!
 //! Histograms live here too: their bin width and counts are computed in one place.
 
 use crate::catalog::DType;
-use crate::engine::{Bins, Engine, QueryResult, Totals};
+use crate::engine::{Bins, Compare, Engine, QueryResult, Totals};
 use crate::query::{
-    Agg, Dimension, Filter, FilterOp, Grain, Measure, OutColumn, Param, SemanticQuery, Sort,
+    Agg, Dimension, Filter, FilterOp, Grain, Measure, OutColumn, Param, SemanticQuery, Sort, Unit,
 };
 use crate::snapshot::{SortBy, Tile, add_grain, iso, js_key, parse_day};
+use crate::workspace::Locale;
+use chrono::{Datelike, Duration, NaiveDate};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 
@@ -27,7 +32,8 @@ pub const AUTO_MAX_BINS: usize = 60;
 /// A width typed by the user never makes more bins than this.
 const MAX_BINS: u32 = 200;
 
-/// Fills gaps, then applies top N and adds totals. Called by `snapshot::run_tile`.
+/// Fills gaps, applies top N, adds totals, reads the comparison series and shows values another
+/// way. Called by `snapshot::run_tile`.
 ///
 /// `wide` holds the filters of the whole question. It differs from `q.filters` only for a pivot
 /// with many columns, where the cell query reads just the columns on show. The ranking of a top N
@@ -41,7 +47,10 @@ pub fn apply(
 ) -> anyhow::Result<()> {
     densify(engine, tile, q, res);
     top_n(engine, tile, q, wide, res)?;
-    totals(engine, tile, q, wide, res)
+    totals(engine, tile, q, wide, res)?;
+    compare(engine, tile, q, res)?;
+    show_as(tile, q, engine, res);
+    Ok(())
 }
 
 /// What the first group-by column is.
@@ -160,7 +169,8 @@ pub fn densify(engine: &Engine, tile: &Tile, q: &SemanticQuery, res: &mut QueryR
         .measures
         .iter()
         .map(|m| match m.agg {
-            Agg::Sum | Agg::Count | Agg::CountDistinct => json!(0.0),
+            // A ratio of nothing is a gap, not zero.
+            Agg::Sum | Agg::Count | Agg::CountDistinct if m.per.is_none() => json!(0.0),
             _ => Value::Null,
         })
         .collect();
@@ -376,6 +386,390 @@ pub fn totals(
     Ok(())
 }
 
+// ---- show value as -----------------------------------------------------------
+
+/// How a value is shown next to the others (`tile.showAs`). A value this version does not know
+/// reads as `value`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum ShowAs {
+    #[serde(rename = "value")]
+    Value,
+    #[serde(rename = "pct_total")]
+    PctTotal,
+    #[serde(rename = "pct_group")]
+    PctGroup,
+    #[serde(rename = "running")]
+    Running,
+    #[serde(rename = "moving_3")]
+    Moving3,
+    #[serde(rename = "moving_7")]
+    Moving7,
+    #[serde(rename = "moving_12")]
+    Moving12,
+    #[serde(rename = "change")]
+    Change,
+    #[serde(rename = "pct_change")]
+    PctChange,
+    #[serde(rename = "rank")]
+    Rank,
+    #[serde(rename = "ytd")]
+    Ytd,
+    #[serde(other)]
+    Unknown,
+}
+
+impl ShowAs {
+    /// The words that follow the name of the column: "amount (% of total)".
+    fn suffix(self) -> &'static str {
+        match self {
+            ShowAs::PctTotal => "% of total",
+            ShowAs::PctGroup => "% of group",
+            ShowAs::Running => "running total",
+            ShowAs::Moving3 => "3-period average",
+            ShowAs::Moving7 => "7-period average",
+            ShowAs::Moving12 => "12-period average",
+            ShowAs::Change => "change",
+            ShowAs::PctChange => "% change",
+            ShowAs::Rank => "rank",
+            ShowAs::Ytd => "year to date",
+            ShowAs::Value | ShowAs::Unknown => "",
+        }
+    }
+
+    fn unit(self) -> Option<Unit> {
+        match self {
+            ShowAs::PctTotal | ShowAs::PctGroup | ShowAs::PctChange => Some(Unit::Percent),
+            ShowAs::Rank => Some(Unit::Rank),
+            _ => None,
+        }
+    }
+
+    /// The window of a moving average.
+    fn window(self) -> Option<usize> {
+        match self {
+            ShowAs::Moving3 => Some(3),
+            ShowAs::Moving7 => Some(7),
+            ShowAs::Moving12 => Some(12),
+            _ => None,
+        }
+    }
+}
+
+/// The year of a period start, for year to date.
+fn year_of(v: &Value) -> Option<i32> {
+    parse_day(v.as_str()?).map(|d| d.year())
+}
+
+/// Shows each value the way `tile.showAs` asks. It runs on the rows the tile shows (after the gaps
+/// are filled and the top N is cut, "Other" included). Rows keep the order the engine gave: the
+/// first group-by column in order (time ascending for dates), and with a split, each group of the
+/// other columns is its own sequence. A null stays null. The column name gains its words ("amount
+/// (% of total)") and a share or a rank gets a `unit`. Number tiles and charts that do not read in
+/// order (scatter, waterfall, share) are left alone.
+pub fn show_as(tile: &Tile, q: &SemanticQuery, engine: &Engine, res: &mut QueryResult) {
+    let Some(list) = &tile.show_as else { return };
+    if !matches!(
+        tile.kind.as_str(),
+        "bar" | "line" | "area" | "table" | "pivot"
+    ) {
+        return;
+    }
+    let (Some(d0), nd) = (q.dimensions.first(), q.dimensions.len()) else {
+        return;
+    };
+    let dated = matches!(classify(engine, d0), Dim0::Period(_) | Dim0::Time);
+    for j in 0..q.measures.len() {
+        let Some(how) = list.get(j).copied().flatten() else {
+            continue;
+        };
+        if matches!(how, ShowAs::Value | ShowAs::Unknown) {
+            continue;
+        }
+        // Year to date needs a date to read the year from.
+        if how == ShowAs::Ytd && !dated {
+            continue;
+        }
+        let col = nd + j;
+        if res.rows.iter().any(|r| r.len() <= col) || res.columns.len() <= col {
+            continue;
+        }
+        let how = if how == ShowAs::PctGroup && nd < 2 {
+            ShowAs::PctTotal
+        } else {
+            how
+        };
+        shape_column(&mut res.rows, nd, col, how);
+        let c = &mut res.columns[col];
+        c.name = format!("{} ({})", c.name, how.suffix());
+        c.unit = how.unit();
+    }
+}
+
+/// Replaces column `col` of `rows` with the value shown as `how`. The first `nd` columns are the
+/// groups. Used for the result and for the comparison series.
+fn shape_column(rows: &mut [Vec<Value>], nd: usize, col: usize, how: ShowAs) {
+    let vals: Vec<Option<f64>> = rows.iter().map(|r| r[col].as_f64()).collect();
+    let out = match how {
+        ShowAs::PctTotal => share_of(&vals, &vec![0; vals.len()]),
+        ShowAs::PctGroup => {
+            // One group for each value of the first column, across the split.
+            let ids = group_ids(rows, 0..1);
+            share_of(&vals, &ids)
+        }
+        _ => {
+            // A sequence for each combination of the split columns, in the order rows come.
+            let ids = group_ids(rows, 1..nd);
+            let mut out = vec![None; vals.len()];
+            let groups = ids.iter().copied().max().map_or(0, |m| m + 1);
+            for g in 0..groups {
+                let at: Vec<usize> = (0..vals.len()).filter(|&i| ids[i] == g).collect();
+                let v: Vec<Option<f64>> = at.iter().map(|&i| vals[i]).collect();
+                let years: Vec<Option<i32>> = at.iter().map(|&i| year_of(&rows[i][0])).collect();
+                for (k, x) in sequence(how, &v, &years).into_iter().enumerate() {
+                    out[at[k]] = x;
+                }
+            }
+            out
+        }
+    };
+    for (r, v) in rows.iter_mut().zip(out) {
+        r[col] = match v {
+            Some(x) if x.is_finite() => json!(x),
+            _ => Value::Null,
+        };
+    }
+}
+
+/// A number for each row that says which group of the given columns it belongs to.
+fn group_ids(rows: &[Vec<Value>], cols: std::ops::Range<usize>) -> Vec<usize> {
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    rows.iter()
+        .map(|r| {
+            let key: Vec<String> = cols.clone().map(|c| js_key(&r[c])).collect();
+            let next = seen.len();
+            *seen.entry(key.join("\u{1}")).or_insert(next)
+        })
+        .collect()
+}
+
+/// Each value over the sum of its group. A group that sums to zero has no shares.
+fn share_of(vals: &[Option<f64>], ids: &[usize]) -> Vec<Option<f64>> {
+    let mut sum: HashMap<usize, f64> = HashMap::new();
+    for (v, g) in vals.iter().zip(ids) {
+        if let Some(v) = v {
+            *sum.entry(*g).or_default() += v;
+        }
+    }
+    vals.iter()
+        .zip(ids)
+        .map(|(v, g)| match (v, sum.get(g)) {
+            (Some(v), Some(t)) if *t != 0.0 => Some(v / t),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The shows that read a sequence of points in order. `years` is the year of each point, for
+/// year to date.
+fn sequence(how: ShowAs, v: &[Option<f64>], years: &[Option<i32>]) -> Vec<Option<f64>> {
+    let mut out = Vec::with_capacity(v.len());
+    match how {
+        ShowAs::Running => {
+            let mut acc = 0.0;
+            for x in v {
+                out.push(x.map(|x| {
+                    acc += x;
+                    acc
+                }));
+            }
+        }
+        ShowAs::Ytd => {
+            let (mut acc, mut year) = (0.0, None);
+            for (x, y) in v.iter().zip(years) {
+                out.push(match (x, y) {
+                    (Some(x), Some(y)) => {
+                        if year != Some(*y) {
+                            year = Some(*y);
+                            acc = 0.0;
+                        }
+                        acc += x;
+                        Some(acc)
+                    }
+                    _ => None,
+                });
+            }
+        }
+        ShowAs::Moving3 | ShowAs::Moving7 | ShowAs::Moving12 => {
+            // The mean of the last k values that exist. Fewer than k so far is a gap, so a part
+            // of a window never reads as a full one.
+            let k = how.window().unwrap_or(3);
+            let mut seen: Vec<f64> = Vec::new();
+            for x in v {
+                out.push(match x {
+                    Some(x) => {
+                        seen.push(*x);
+                        (seen.len() >= k)
+                            .then(|| seen[seen.len() - k..].iter().sum::<f64>() / k as f64)
+                    }
+                    None => None,
+                });
+            }
+        }
+        ShowAs::Change | ShowAs::PctChange => {
+            for (i, x) in v.iter().enumerate() {
+                let prev = i.checked_sub(1).and_then(|p| v[p]);
+                out.push(match (x, prev) {
+                    (Some(x), Some(p)) if how == ShowAs::Change => Some(x - p),
+                    (Some(x), Some(p)) if p != 0.0 => Some((x - p) / p.abs()),
+                    _ => None,
+                });
+            }
+        }
+        ShowAs::Rank => {
+            // 1 is the biggest. Equal values share a rank and the next rank is not skipped.
+            let mut distinct: Vec<f64> = v.iter().flatten().copied().collect();
+            distinct.sort_by(|a, b| b.total_cmp(a));
+            distinct.dedup();
+            for x in v {
+                out.push(x.and_then(|x| {
+                    distinct
+                        .iter()
+                        .position(|d| *d == x)
+                        .map(|p| (p + 1) as f64)
+                }));
+            }
+        }
+        _ => out.extend(v.iter().copied()),
+    }
+    out
+}
+
+// ---- same period last year ---------------------------------------------------
+
+/// What a time chart is compared with (`tile.compare`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum CompareTo {
+    #[serde(rename = "prev_year")]
+    PrevYear,
+    #[serde(rename = "prev_period")]
+    PrevPeriod,
+    #[serde(other)]
+    Unknown,
+}
+
+/// A period start moved one step: `dir` is -1 for back and 1 for forward. A year is a calendar
+/// year (the same date), except for weeks, where it is 52 weeks so a Monday meets a Monday.
+fn shift(d: NaiveDate, g: Grain, to: CompareTo, dir: i32) -> NaiveDate {
+    match (to, g) {
+        (CompareTo::PrevPeriod, _) => add_grain(d, g, dir),
+        (_, Grain::Week) => d + Duration::days(364 * i64::from(dir)),
+        _ => add_grain(d, Grain::Year, dir),
+    }
+}
+
+/// A date text moved back one step, keeping the time of day if it has one.
+fn shift_text(s: &str, g: Grain, to: CompareTo) -> Option<String> {
+    let d = parse_day(s)?;
+    Some(format!("{}{}", iso(shift(d, g, to, -1)), s.get(10..)?))
+}
+
+/// The label of the comparison line, in the language of the workspace.
+fn compare_label(to: CompareTo, loc: Locale) -> &'static str {
+    match (to, loc) {
+        (CompareTo::PrevYear, Locale::En) => "Same period last year",
+        (CompareTo::PrevYear, Locale::Id) => "Periode yang sama tahun lalu",
+        (_, Locale::En) => "Previous period",
+        (_, Locale::Id) => "Periode sebelumnya",
+    }
+}
+
+/// Reads the same question one year (or one period) earlier, for a bar, line or area with a date
+/// grouped by a grain and one value. The date filters move back by the same step, then the keys
+/// move forward, so each earlier point sits under the period it is compared with. A key that has
+/// no partner after the move (29 February) is dropped. The series is filled and shown the same
+/// way as the result, and keeps only the periods the result has.
+pub fn compare(
+    engine: &Engine,
+    tile: &Tile,
+    q: &SemanticQuery,
+    res: &mut QueryResult,
+) -> anyhow::Result<()> {
+    let Some(to) = tile.compare.filter(|c| *c != CompareTo::Unknown) else {
+        return Ok(());
+    };
+    if !matches!(tile.kind.as_str(), "bar" | "line" | "area")
+        || q.measures.len() != 1
+        || q.dimensions.len() != 1
+    {
+        return Ok(());
+    }
+    let d0 = &q.dimensions[0];
+    let Dim0::Period(g) = classify(engine, d0) else {
+        return Ok(());
+    };
+    let filters = q
+        .filters
+        .iter()
+        .map(|f| {
+            let mut f = f.clone();
+            if f.table == d0.table && f.column == d0.column {
+                f.values = f
+                    .values
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .and_then(|s| shift_text(s, g, to))
+                            .map_or_else(|| v.clone(), Value::String)
+                    })
+                    .collect();
+            }
+            f
+        })
+        .collect();
+    let mut earlier = engine.query(&SemanticQuery {
+        measures: q.measures.clone(),
+        dimensions: q.dimensions.clone(),
+        filters,
+        sort: vec![],
+        limit: q.limit,
+    })?;
+    // Move the keys forward. A key that does not come back to itself has no partner.
+    earlier.rows.retain_mut(|r| {
+        let Some(d) = r[0].as_str().and_then(parse_day) else {
+            return false;
+        };
+        let at = shift(d, g, to, 1);
+        if shift(at, g, to, -1) != d {
+            return false;
+        }
+        r[0] = Value::String(iso(at));
+        true
+    });
+    densify(engine, tile, q, &mut earlier);
+    if let Some(how) = tile
+        .show_as
+        .as_ref()
+        .and_then(|l| l.first().copied().flatten())
+        .filter(|h| !matches!(h, ShowAs::Value | ShowAs::Unknown))
+        .map(|h| {
+            if h == ShowAs::PctGroup {
+                ShowAs::PctTotal
+            } else {
+                h
+            }
+        })
+    {
+        shape_column(&mut earlier.rows, 1, 1, how);
+    }
+    let mine: HashSet<String> = res.rows.iter().map(|r| js_key(&r[0])).collect();
+    earlier.rows.retain(|r| mine.contains(&js_key(&r[0])));
+    res.compare = Some(Compare {
+        label: compare_label(to, engine.locale()).into(),
+        rows: earlier.rows,
+    });
+    Ok(())
+}
+
 // ---- histogram ---------------------------------------------------------------
 
 /// The nice numbers a bin width can be: 1, 2, 2.5 or 5 times a power of ten.
@@ -460,6 +854,7 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
             table: m.table.clone(),
             column: Some(column.clone()),
             agg: Agg::Count,
+            per: None,
         }],
         dimensions: vec![],
         filters: filters.to_vec(),
@@ -484,11 +879,13 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
             name: column.clone(),
             role: "dimension".into(),
             dtype: DType::Number,
+            unit: None,
         },
         OutColumn {
             name: "Rows".into(),
             role: "measure".into(),
             dtype: DType::Number,
+            unit: None,
         },
     ];
     let mut res = QueryResult {
@@ -502,6 +899,7 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
         other_of: None,
         bins: None,
         totals: None,
+        compare: None,
     };
     let (Some(n), Some(min), Some(max), Some(q1), Some(q3)) =
         (num(0), num(1), num(2), num(3), num(4))
@@ -593,5 +991,18 @@ mod tests {
         // No IQR but a range falls back to Sturges' rule.
         let w = bin_width(100.0, 0.0, 100.0, 5.0, 5.0);
         assert!((5..=60).contains(&bin_count(0.0, 100.0, w)), "{w}");
+    }
+
+    #[test]
+    fn rank_is_dense() {
+        let v = [Some(10.0), Some(20.0), Some(20.0), None, Some(5.0)];
+        let r = sequence(ShowAs::Rank, &v, &[None; 5]);
+        assert_eq!(r, vec![Some(2.0), Some(1.0), Some(1.0), None, Some(3.0)]);
+    }
+
+    #[test]
+    fn shares_of_a_zero_group_are_gaps() {
+        let r = share_of(&[Some(0.0), Some(0.0), Some(3.0)], &[0, 0, 1]);
+        assert_eq!(r, vec![None, None, Some(1.0)]);
     }
 }

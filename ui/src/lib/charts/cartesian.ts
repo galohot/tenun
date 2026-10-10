@@ -1,7 +1,8 @@
 // Bars, lines and areas: the v1 chart types, with stack modes for bars and areas.
 
 import { isPart, type Cell, type QueryResult } from '../api';
-import { getLocale, numberFormatter, OTHER_KEY, pctShare } from '../format';
+import { getLocale, numberFormatter, OTHER_KEY, pctChange, pctShare } from '../format';
+import { isShare } from '../showas';
 import {
   axisCommon,
   bySeriesPerMeasure,
@@ -26,7 +27,10 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   // has its own format; split series all show the first value.
   const loc = getLocale();
   const perValue = bySeriesPerMeasure(res);
-  const fmtOf = (si: number) => numberFormatter(tile.formats?.[perValue ? si : 0], loc);
+  const nd = res.columns.filter((x) => x.role === 'dimension').length;
+  // A value shown as a share or a rank carries its unit; it formats as a percent or "#3".
+  const unitOf = (si: number) => res.columns[nd + (perValue ? si : 0)]?.unit;
+  const fmtOf = (si: number) => numberFormatter(tile.formats?.[perValue ? si : 0], loc, unitOf(si));
   // The engine's "Other" (a top N): a real group that can be clicked, drawn muted.
   const isOther = (v: Cell | undefined) => !!res.other && v === OTHER_KEY;
   const partialKey = res.partial?.key;
@@ -45,8 +49,19 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const mode = tile.type === 'line' ? 'side' : stackMode(tile, perValue);
   const stacked = multi && mode !== 'side';
   const percent = stacked && mode === 'percent';
+  // "Same period last year": a grey series lined up with the categories.
+  const earlier = res.compare && !multi ? new Map(res.compare.rows.map((r) => [key(r[0]), r[1]])) : null;
+  const earlierValues = earlier ? categories.map((v) => (typeof earlier.get(key(v)) === 'number' ? (earlier.get(key(v)) as number) : null)) : null;
+  const hasCompare = !!earlierValues && earlierValues.some((v) => v !== null);
+  const compareName = res.compare?.label ?? '';
   // The 100 % view draws each category's share and keeps the value for the tooltip.
   const shares = percent ? normalizeShares(series.map((s) => s.values)).shares : null;
+  // A share of the total (or of the group) runs from 0 to 100 %, unless a value falls outside that.
+  const shareAxis =
+    !percent &&
+    unitOf(0) === 'percent' &&
+    isShare(tile.showAs?.[0]) &&
+    series.every((s) => s.values.every((v) => v === null || (v >= 0 && v <= 1.000001)));
   const valueAxis = {
     type: 'value' as const,
     ...axisCommon(c),
@@ -55,7 +70,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       formatter: percent ? (v: number) => `${Math.round(v * 100)}%` : (v: number) => fmtOf(0).short(v),
     },
     splitNumber: 4,
-    ...(percent ? { min: 0, max: 1, interval: 0.25 } : {}),
+    ...(percent || shareAxis ? { min: 0, max: 1, interval: 0.25 } : {}),
   };
   const catAxis = {
     type: 'category' as const,
@@ -74,7 +89,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
 
   const radius = horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0];
   // Direct labels before gridlines: when every bar carries its value, the value axis goes.
-  const labelled = tile.type === 'bar' && !multi && categories.length <= (horizontal ? 16 : Math.floor(width / 48));
+  const labelled = tile.type === 'bar' && !multi && !hasCompare && categories.length <= (horizontal ? 16 : Math.floor(width / 48));
   // Name the lines at their ends only when they end far enough apart to read.
   const ends = series.map((s) => s.values.at(-1) ?? 0).sort((a, b) => a - b);
   const top = Math.max(1, ...series.flatMap((s) => s.values.map((v) => v ?? 0)));
@@ -107,7 +122,10 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         type: 'bar',
         name: s.name,
         stack: stacked ? 'total' : undefined,
-        barMaxWidth: 24,
+        z: 3,
+        // With a comparison, the grey bar behind is the wide one and this bar sits inside it.
+        barMaxWidth: hasCompare ? 12 : 24,
+        barGap: hasCompare ? '-100%' : undefined,
         barCategoryGap: '30%',
         itemStyle: {
           color,
@@ -178,6 +196,58 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     return [main, dashed];
   }).flat();
 
+  // The comparison series goes behind the others: grey bars (wider, so they show beside the bar in
+  // front) or a 2 px dashed grey line.
+  if (hasCompare && earlierValues) {
+    (built as object[]).unshift(
+      tile.type === 'bar'
+        ? {
+            type: 'bar',
+            name: compareName,
+            z: 2,
+            barMaxWidth: 22,
+            barGap: '-100%',
+            barCategoryGap: '30%',
+            itemStyle: { color: c.text2, opacity: 0.32, borderRadius: radius },
+            emphasis: { focus: 'none' },
+            tooltip: { valueFormatter: (v: number | null) => (v === null ? '–' : fmtOf(0).tip(v)) },
+            data: earlierValues,
+          }
+        : {
+            type: 'line',
+            name: compareName,
+            z: 1,
+            smooth: false,
+            showSymbol: false,
+            symbol: 'none',
+            lineStyle: { width: 2, color: c.text2, type: [5, 4], cap: 'round' },
+            itemStyle: { color: c.text2 },
+            emphasis: { focus: 'none', scale: false },
+            connectNulls: false,
+            tooltip: { valueFormatter: (v: number | null) => (v === null ? '–' : fmtOf(0).tip(v)) },
+            data: earlierValues,
+          },
+    );
+  }
+
+  /** Both values and the change between them, for a chart with a comparison. */
+  const compareTip = (ps: { marker: string; seriesName: string; value: unknown; axisValueLabel: string }[]) => {
+    const num = (v: unknown) => (typeof v === 'number' ? v : null);
+    const fmt = fmtOf(0);
+    const now = num(ps.find((p) => p.seriesName !== compareName)?.value);
+    const before = num(ps.find((p) => p.seriesName === compareName)?.value);
+    // A relative change of a share or a rank would read oddly, so those show the two values only.
+    const change =
+      now !== null && before !== null && before !== 0 && !unitOf(0)
+        ? `<br/>Change <b>${now > before ? '+' : now < before ? '−' : ''}${pctChange((now - before) / Math.abs(before))}</b>`
+        : '';
+    return (
+      `${esc(ps[0]?.axisValueLabel ?? '')}<br/>` +
+      ps.map((p) => `${p.marker} ${esc(p.seriesName)} <b>${num(p.value) === null ? '–' : esc(fmt.tip(num(p.value) as number))}</b>`).join('<br/>') +
+      change
+    );
+  };
+
   const longest = Math.max(0, ...categories.map((x) => label(x).length));
   const quietValue = labelled ? { ...valueAxis, axisLabel: { show: false }, splitLine: { show: false } } : valueAxis;
   const option = {
@@ -185,13 +255,15 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     grid: {
       left: 4,
       right: tile.type === 'bar' && horizontal ? 44 : nameEnds ? 72 : multi ? 12 : 44,
-      top: multi ? 34 : 14,
+      top: multi || hasCompare ? 34 : 14,
       bottom: 4,
       containLabel: true,
     },
-    legend: multi
+    legend: multi || hasCompare
       ? {
           type: 'scroll',
+          // The comparison goes behind the others but is named last.
+          data: hasCompare ? [series[0].name, compareName] : undefined,
           top: 0,
           left: 0,
           icon: tile.type === 'bar' ? 'roundRect' : 'circle',
@@ -222,7 +294,9 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
                 })
                 .join('<br/>'),
           }
-        : { valueFormatter: (v: number | null) => (v === null ? '–' : fmtOf(0).tip(v)) }),
+        : hasCompare
+          ? { formatter: compareTip }
+          : { valueFormatter: (v: number | null) => (v === null ? '–' : fmtOf(0).tip(v)) }),
     },
     xAxis: horizontal ? quietValue : { ...catAxis, axisLabel: { ...catAxis.axisLabel, rotate: !temporal && longest > 10 && categories.length > 6 ? 30 : 0 } },
     yAxis: horizontal ? catAxis : quietValue,

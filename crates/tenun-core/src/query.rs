@@ -31,6 +31,18 @@ pub struct Measure {
     #[serde(default)]
     pub column: Option<String>,
     pub agg: Agg,
+    /// Makes a ratio: `agg(column)` divided by `agg(per.column)`, in the same SELECT.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per: Option<Per>,
+}
+
+/// The bottom of a ratio measure. It may come from any table the query can reach.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Per {
+    pub table: String,
+    #[serde(default)]
+    pub column: Option<String>,
+    pub agg: Agg,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +54,14 @@ pub enum Agg {
     Max,
     Count,
     CountDistinct,
+    /// The middle value. Numbers only.
+    Median,
+    /// The 90th percentile. Numbers only.
+    P90,
+    /// Sample standard deviation. Numbers only. The UI offers it in Advanced.
+    Stdev,
+    /// Sample variance. Numbers only. The UI offers it in Advanced.
+    Variance,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,6 +162,17 @@ pub struct OutColumn {
     pub name: String,
     pub role: String,
     pub dtype: DType,
+    /// Set when a value is shown another way (`tile.showAs`): the number is a share or a rank.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<Unit>,
+}
+
+/// What a shaped value counts. A `percent` is a fraction: 0.25 reads as 25 %.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unit {
+    Percent,
+    Rank,
 }
 
 #[derive(Debug, Clone)]
@@ -227,6 +258,11 @@ pub fn scope<'a>(
         .iter()
         .map(|d| &d.table)
         .chain(q.measures.iter().map(|m| &m.table))
+        .chain(
+            q.measures
+                .iter()
+                .filter_map(|m| m.per.as_ref().map(|p| &p.table)),
+        )
     {
         lookup(catalog, t)?;
         if !paths.contains_key(t) {
@@ -319,6 +355,7 @@ pub fn compile(
             name: d.column.clone(),
             role: "dimension".into(),
             dtype,
+            unit: None,
         });
     }
     for m in &q.measures {
@@ -331,6 +368,7 @@ pub fn compile(
             name,
             role: "measure".into(),
             dtype,
+            unit: None,
         });
     }
 
@@ -510,9 +548,38 @@ fn measure_expr(
     joins: &Joins,
     m: &Measure,
 ) -> Result<(String, DType, String), QueryError> {
-    let t = lookup(catalog, &m.table)?;
-    let Some(cname) = &m.column else {
-        return match m.agg {
+    let top = agg_expr(catalog, joins, &m.table, m.column.as_deref(), m.agg)?;
+    let Some(per) = &m.per else {
+        return Ok(top);
+    };
+    // A ratio divides one aggregate by another in the same SELECT. A zero below gives a gap,
+    // never an error. Totals ask the same question without groups, so they are a ratio of
+    // totals and never a sum of ratios.
+    let bottom = agg_expr(catalog, joins, &per.table, per.column.as_deref(), per.agg)?;
+    for (_, dtype, name) in [&top, &bottom] {
+        if *dtype != DType::Number {
+            return Err(QueryError::BadAgg(name.clone(), "divided"));
+        }
+    }
+    let low = per.column.clone().unwrap_or_else(|| "row".into());
+    Ok((
+        format!("({}) / NULLIF(({}), 0)", top.0, bottom.0),
+        DType::Number,
+        format!("{} per {low}", top.2),
+    ))
+}
+
+/// One aggregate of one column (or of the rows of a table) as SQL, its type and its name.
+fn agg_expr(
+    catalog: &Catalog,
+    joins: &Joins,
+    table: &str,
+    column: Option<&str>,
+    agg: Agg,
+) -> Result<(String, DType, String), QueryError> {
+    let t = lookup(catalog, table)?;
+    let Some(cname) = column else {
+        return match agg {
             Agg::Count => Ok((
                 "CAST(count(*) AS DOUBLE)".to_string(),
                 DType::Number,
@@ -522,31 +589,40 @@ fn measure_expr(
         };
     };
     let c = col(t, cname)?;
-    let r = format!("{}.{}", joins.alias(&m.table), ident(cname));
-    let name = cname.clone();
-    match m.agg {
+    let r = format!("{}.{}", joins.alias(table), ident(cname));
+    let name = cname.to_string();
+    match agg {
         Agg::Count => Ok((format!("CAST(count({r}) AS DOUBLE)"), DType::Number, name)),
         Agg::CountDistinct => Ok((
             format!("CAST(count(DISTINCT {r}) AS DOUBLE)"),
             DType::Number,
             name,
         )),
-        Agg::Sum | Agg::Avg => {
+        Agg::Sum | Agg::Avg | Agg::Median | Agg::P90 | Agg::Stdev | Agg::Variance => {
             if c.dtype != DType::Number {
                 return Err(QueryError::BadAgg(
                     name,
-                    if m.agg == Agg::Sum {
-                        "summed"
-                    } else {
-                        "averaged"
+                    match agg {
+                        Agg::Sum => "summed",
+                        Agg::Avg => "averaged",
+                        Agg::Median => "used for a median",
+                        Agg::P90 => "used for a 90th percentile",
+                        _ => "used for a spread",
                     },
                 ));
             }
-            let f = if m.agg == Agg::Sum { "sum" } else { "avg" };
-            Ok((format!("CAST({f}({r}) AS DOUBLE)"), DType::Number, name))
+            let call = match agg {
+                Agg::Sum => format!("sum({r})"),
+                Agg::Avg => format!("avg({r})"),
+                Agg::Median => format!("median({r})"),
+                Agg::P90 => format!("quantile_cont({r}, 0.9)"),
+                Agg::Stdev => format!("stddev_samp({r})"),
+                _ => format!("var_samp({r})"),
+            };
+            Ok((format!("CAST({call} AS DOUBLE)"), DType::Number, name))
         }
         Agg::Min | Agg::Max => {
-            let f = if m.agg == Agg::Min { "min" } else { "max" };
+            let f = if agg == Agg::Min { "min" } else { "max" };
             match c.dtype {
                 DType::Number => Ok((format!("CAST({f}({r}) AS DOUBLE)"), DType::Number, name)),
                 DType::Date => Ok((format!("strftime({f}({r}), '%Y-%m-%d')"), DType::Date, name)),
@@ -708,6 +784,7 @@ mod tests {
             table: "s1/orders".into(),
             column: Some("amount".into()),
             agg: Agg::Sum,
+            per: None,
         }
     }
 
@@ -780,6 +857,7 @@ mod tests {
                 table: "s2/stores".into(),
                 column: None,
                 agg: Agg::Count,
+                per: None,
             }],
             filters: vec![Filter {
                 table: "s1/orders".into(),
@@ -841,6 +919,7 @@ mod tests {
                 table: "s1/t".into(),
                 column: Some("a\"; DROP".into()),
                 agg: Agg::Sum,
+                per: None,
             }],
             ..Default::default()
         };
@@ -856,6 +935,7 @@ mod tests {
                 table: "s1/orders".into(),
                 column: Some("customer".into()),
                 agg: Agg::Sum,
+                per: None,
             }],
             ..Default::default()
         };

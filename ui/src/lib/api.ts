@@ -38,8 +38,8 @@ export interface Source {
   database?: string;
 }
 
-/** `stdev` and `variance` are Advanced (see tiers.ts). */
-export type Agg = 'sum' | 'avg' | 'min' | 'max' | 'count' | 'count_distinct' | 'stdev' | 'variance';
+/** `median` and `p90` (the 90th percentile) take numbers only. `stdev` and `variance` are Advanced (see tiers.ts). */
+export type Agg = 'sum' | 'avg' | 'min' | 'max' | 'count' | 'count_distinct' | 'median' | 'p90' | 'stdev' | 'variance';
 export type Grain = 'year' | 'quarter' | 'month' | 'week' | 'day' | 'month_of_year' | 'weekday' | 'hour';
 /** Date parts come back as numbers: months 1–12, weekdays 1–7 (Monday = 1), hours 0–23. */
 export const DATE_PARTS: readonly Grain[] = ['month_of_year', 'weekday', 'hour'];
@@ -49,6 +49,8 @@ export interface Measure {
   table: string;
   column: string | null;
   agg: Agg;
+  /** Makes a ratio: agg(column) divided by agg(per). A zero below gives a gap. */
+  per?: { table: string; column: string | null; agg: Agg };
 }
 
 export interface Dim {
@@ -73,10 +75,15 @@ export interface SemanticQuery {
   limit?: number;
 }
 
+/** What a value shown another way counts. A percent is a fraction: 0.25 reads as 25 %. */
+export type Unit = 'percent' | 'rank';
+
 export interface OutColumn {
   name: string;
   role: 'dimension' | 'measure';
   dtype: DType;
+  /** Set by "Show as": the value is a share (`percent`) or a place in the ranking (`rank`). */
+  unit?: Unit;
 }
 
 export type Cell = string | number | boolean | null;
@@ -98,6 +105,8 @@ export interface QueryResult {
   bins?: Bins;
   /** Tables with a total row, and pivots. Computed by the engine from the same measures. */
   totals?: Totals;
+  /** Time charts with `tile.compare`: the earlier series, its keys moved forward to line up with `rows`. */
+  compare?: { label: string; rows: Cell[][] };
 }
 
 /**
@@ -152,7 +161,7 @@ export interface NumFormat {
   percent?: boolean;
 }
 
-/** How a value is shown next to the others. Build 06 draws these; a total cell is blank for any but `value`. */
+/** How a value is shown next to the others. The engine computes it; a total cell is blank for any but `value`. */
 export type ShowAs =
   | 'value' | 'pct_total' | 'pct_group' | 'running' | 'moving_3' | 'moving_7' | 'moving_12'
   | 'change' | 'pct_change' | 'rank' | 'ytd';
@@ -213,6 +222,8 @@ export interface Tile {
   cols?: Dim;
   /** How each value is shown, index-aligned with `measures`. */
   showAs?: (ShowAs | null)[];
+  /** Line, area and bar over time: also draw the same question one year (or one period) earlier. */
+  compare?: 'prev_year' | 'prev_period' | null;
   /** Text tile: a small Markdown subset (see markdown.ts). */
   text?: string;
   /** Image tile. */

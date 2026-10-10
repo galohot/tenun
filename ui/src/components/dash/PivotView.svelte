@@ -34,7 +34,8 @@
   const blank = (v: Cell | undefined) => v === null || v === undefined;
   // A value shown another way (build 06) has no meaningful total.
   const noTotal = (j: number) => !!tile.showAs?.[j] && tile.showAs[j] !== 'value';
-  const show = (v: Cell | undefined, j: number) => (blank(v) ? '–' : cell(v as Cell, 'number', null, false, fmtOf(j)));
+  const unitOf = (j: number) => res.columns[nd + j]?.unit;
+  const show = (v: Cell | undefined, j: number) => (blank(v) ? '–' : cell(v as Cell, 'number', null, false, fmtOf(j), unitOf(j)));
   const total = (cells: Cell[] | null | undefined, j: number) => (!cells || noTotal(j) || blank(cells[j]) ? '' : cell(cells[j], 'number', null, false, fmtOf(j)));
   const key = (v: Cell) => (v === null ? '\u0000null' : String(v));
   const rowDimName = (i: number) => heads[i] ?? '';
