@@ -9,6 +9,8 @@
   import TileView from './dash/TileView.svelte';
   import Inspector from './dash/Inspector.svelte';
   import PublishSheet from './dash/PublishSheet.svelte';
+  // tenun.cloud is not live yet; build with VITE_TENUN_CLOUD=1 to show Publish.
+  const CLOUD_ON = import.meta.env.VITE_TENUN_CLOUD === '1';
 
   let { id }: { id: string } = $props();
 
@@ -390,6 +392,7 @@
     <button class="btn plain icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo} onclick={undo}><Icon name="undo" /></button>
     <button class="btn plain icon" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!canRedo} onclick={redo}><Icon name="redo" /></button>
     <button class="btn plain icon" title="Refresh now" onclick={() => tick++}><Icon name="refresh" /></button>
+    {#if CLOUD_ON}
     <button
       class="btn"
       class:live={!!dash.publish?.url}
@@ -399,6 +402,7 @@
       title={dash.publish?.error ?? (dash.publish?.url ? 'Published on tenun.cloud' : 'Share this dashboard online')}>
       <Icon name={dash.publish?.error ? 'warning' : 'globe'} /> {dash.publish?.url ? 'Published' : 'Publish'}
     </button>
+    {/if}
     <button class="btn" onclick={exportHtml} disabled={!dash.tiles.length || !!exporting} title="Save this dashboard as one HTML file that works offline">
       <Icon name="export" /> {exporting ?? 'Export'}
     </button>
