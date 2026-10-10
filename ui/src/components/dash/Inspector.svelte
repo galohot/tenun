@@ -48,9 +48,13 @@
 
   // "Top N" keeps the biggest groups and shows the rest as one Other bar.
   let customTop = $state(false);
+  // The tile prop is a new object after every change, so reset only when the id changes.
+  let lastId = '';
   $effect(() => {
-    void tile.id;
-    customTop = false;
+    if (tile.id !== lastId) {
+      lastId = tile.id;
+      customTop = false;
+    }
   });
   const topKind = $derived(tile.type === 'bar' || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut');
   const topChoice = $derived(!tile.top ? 'all' : customTop || !TOP_PRESETS.includes(tile.top.n) ? 'custom' : String(tile.top.n));

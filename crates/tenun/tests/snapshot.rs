@@ -3,12 +3,15 @@
 
 use serde_json::Value;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tenun_core::Engine;
 use tenun_core::secrets::Secrets;
 
 fn engine() -> Engine {
-    let dir = std::env::temp_dir().join(format!("tenun-snap-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    // One folder per call: the tests run in parallel and must not share files.
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("tenun-snap-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample");
     for f in ["coffee.xlsx", "stores.csv", "customers.sqlite"] {
