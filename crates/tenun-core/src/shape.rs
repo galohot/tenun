@@ -27,16 +27,21 @@ pub const AUTO_MAX_BINS: usize = 60;
 /// A width typed by the user never makes more bins than this.
 const MAX_BINS: u32 = 200;
 
-/// Fills gaps, then applies top N. Called by `snapshot::run_tile`.
+/// Fills gaps, then applies top N and adds totals. Called by `snapshot::run_tile`.
+///
+/// `wide` holds the filters of the whole question. It differs from `q.filters` only for a pivot
+/// with many columns, where the cell query reads just the columns on show. The ranking of a top N
+/// and every total still cover all the data.
 pub fn apply(
     engine: &Engine,
     tile: &Tile,
     q: &SemanticQuery,
+    wide: &[Filter],
     res: &mut QueryResult,
 ) -> anyhow::Result<()> {
     densify(engine, tile, q, res);
-    top_n(engine, tile, q, res)?;
-    totals(engine, tile, q, res)
+    top_n(engine, tile, q, wide, res)?;
+    totals(engine, tile, q, wide, res)
 }
 
 /// What the first group-by column is.
@@ -202,6 +207,7 @@ pub fn top_n(
     engine: &Engine,
     tile: &Tile,
     q: &SemanticQuery,
+    wide: &[Filter],
     res: &mut QueryResult,
 ) -> anyhow::Result<()> {
     let Some(top) = &tile.top else {
@@ -233,7 +239,7 @@ pub fn top_n(
     let ranked = engine.query(&SemanticQuery {
         measures: vec![m0.clone()],
         dimensions: vec![d0.clone()],
-        filters: q.filters.clone(),
+        filters: wide.to_vec(),
         sort: vec![Sort { by: 1, desc: true }],
         limit: Some(n as u32),
     })?;
@@ -286,6 +292,7 @@ pub fn totals(
     engine: &Engine,
     tile: &Tile,
     q: &SemanticQuery,
+    wide: &[Filter],
     res: &mut QueryResult,
 ) -> anyhow::Result<()> {
     let wanted = match tile.kind.as_str() {
@@ -305,11 +312,7 @@ pub fn totals(
             limit,
         })
     };
-    let Some(grand) = ask(vec![], q.filters.clone(), None)?
-        .rows
-        .into_iter()
-        .next()
-    else {
+    let Some(grand) = ask(vec![], wide.to_vec(), None)?.rows.into_iter().next() else {
         return Ok(());
     };
     let mut out = Totals {
@@ -324,7 +327,7 @@ pub fn totals(
         let row_dims = q.dimensions[..q.dimensions.len() - 1].to_vec();
         let mut rows = ask(
             row_dims.clone(),
-            q.filters.clone(),
+            wide.to_vec(),
             Some(crate::snapshot::PIVOT_LIMIT),
         )?
         .rows;
@@ -338,7 +341,7 @@ pub fn totals(
                 .collect();
             rows.retain(|r| kept.contains(&js_key(&r[0])));
             if let Some(keys) = &res.other_of {
-                let mut filters = q.filters.clone();
+                let mut filters = wide.to_vec();
                 filters.push(Filter {
                     table: row_dims[0].table.clone(),
                     column: row_dims[0].column.clone(),
@@ -363,7 +366,7 @@ pub fn totals(
         out.cols = Some(
             ask(
                 vec![c.clone()],
-                q.filters.clone(),
+                wide.to_vec(),
                 Some(crate::snapshot::PIVOT_LIMIT),
             )?
             .rows,

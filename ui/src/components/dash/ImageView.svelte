@@ -1,13 +1,20 @@
 <script lang="ts">
   // An image tile. Only PNG, JPEG and WebP data URLs are drawn, whatever a hand-edited file holds.
   import type { TileImage } from '../../lib/api';
+  import { imageKind } from '../../lib/image';
 
   let { image, editing = false }: { image?: TileImage; editing?: boolean } = $props();
-  const ok = $derived(!!image && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(image.data));
+  const ok = $derived(!!image && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(image.data) && imageKind(image.data) !== null);
+  // The bytes can look right and still not decode. Then the tile says so in words.
+  let broken = $state(false);
+  $effect(() => {
+    image?.data;
+    broken = false;
+  });
 </script>
 
-{#if image && ok}
-  <img src={image.data} alt={image.alt} style:object-fit={image.fit ?? 'contain'} />
+{#if image && ok && !broken}
+  <img src={image.data} alt={image.alt} style:object-fit={image.fit ?? 'contain'} onerror={() => (broken = true)} />
 {:else if editing || image}
   <div class="none">{image ? 'This picture cannot be shown. Pick a PNG, JPEG or WebP file.' : 'Pick a picture in the panel on the right.'}</div>
 {/if}

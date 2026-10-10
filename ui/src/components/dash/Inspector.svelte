@@ -8,6 +8,7 @@
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
   import Suggestions from './Suggestions.svelte';
+  import { normalisePicture } from '../../lib/image';
 
   let {
     tile,
@@ -198,8 +199,9 @@
       imageError = 'That picture is too big. Pick one under 1 MB.';
       return;
     }
-    const data = await readBlob(blob);
-    if (!/^data:image\/(png|jpeg|webp);base64,/.test(data)) {
+    // The first bytes decide, not the file name: a name that ends in .png can hold anything.
+    const data = normalisePicture(await readBlob(blob));
+    if (!data) {
       imageError = 'Pick a PNG, JPEG or WebP picture.';
       return;
     }
@@ -356,7 +358,7 @@
             </button>
           {/each}
         </div>
-        <button class="btn plain" onclick={() => set({ image: undefined })}><Icon name="trash" /> Remove picture</button>
+        <button class="btn plain flush" onclick={() => set({ image: undefined })}><Icon name="trash" /> Remove picture</button>
       {/if}
     </div>
   {/if}
@@ -651,6 +653,7 @@
   .notice p { margin: 0; line-height: 1.4; }
   .notice .btn { grid-column: 2; justify-self: start; height: 24px; font-size: 12px; }
   .sec { display: flex; flex-direction: column; gap: 6px; }
+  .btn.flush { align-self: flex-start; padding-left: 0; }
   .types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .types button {
     display: flex;

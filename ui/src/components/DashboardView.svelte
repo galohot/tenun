@@ -129,7 +129,9 @@
   function change(nt: Tile) {
     const old = dash?.tiles.find((x) => x.id === nt.id);
     const keys = old ? (Object.keys({ ...old, ...nt }) as (keyof Tile)[]).filter((k) => JSON.stringify(old[k]) !== JSON.stringify(nt[k])) : [];
-    update((ts) => ts.map((x) => (x.id === nt.id ? nt : x)), keys.length === 1 && ['title', 'text', 'image'].includes(keys[0]) ? `${keys[0]}:${nt.id}` : '');
+    // Typing merges into one step. Picking a picture or changing how it fits is a step of its own.
+    const typing = keys.length === 1 && (['title', 'text'].includes(keys[0]) || (keys[0] === 'image' && old?.image?.data === nt.image?.data && old?.image?.fit === nt.image?.fit));
+    update((ts) => ts.map((x) => (x.id === nt.id ? nt : x)), typing ? `${keys[0]}:${nt.id}` : '');
   }
 
   function onKeydown(e: KeyboardEvent) {

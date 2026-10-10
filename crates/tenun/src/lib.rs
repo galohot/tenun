@@ -197,6 +197,9 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
     Ok(Running { addr, url, state })
 }
 
+/// The biggest request body any route takes. Image tiles hold up to 1 MB each as a data URL.
+const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
+
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .nest("/api", api::routes())
@@ -206,5 +209,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             guard::guard,
         ))
         .layer(tower_http::compression::CompressionLayer::new())
+        // A dashboard can hold several pictures as data URLs. The default 2 MB would refuse the save.
+        .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
 }

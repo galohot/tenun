@@ -114,6 +114,8 @@ pub struct Partial {
 const MAX_CROSS_VALUES: usize = 30;
 /// A pivot reads up to this many rows, and its row and column totals up to the same.
 pub(crate) const PIVOT_LIMIT: u32 = 5000;
+/// A pivot draws at most this many columns. Its cells are read for these columns only.
+pub(crate) const PIVOT_MAX_COLS: usize = 30;
 const PIVOT_MAX_ROWS: usize = 3;
 const PIVOT_MAX_MEASURES: usize = 4;
 /// The key of a pivot column click in the offline cross-filter map of an export.
@@ -237,12 +239,40 @@ pub fn run_tile(
     if tile.kind == "histogram" {
         return shape::histogram(engine, tile, &own_excluded(tile, filters));
     }
-    let q =
+    let mut q =
         tile_query(tile, filters).ok_or_else(|| anyhow::anyhow!("the tile has no fields yet"))?;
+    let wide = q.filters.clone();
+    if tile.kind == "pivot"
+        && let (Some(c), Some(m)) = (&tile.cols, q.measures.first())
+    {
+        // With many column values the cells are read for the first ones only, in the order of
+        // the column totals. Otherwise the row limit could cut the data in the middle of a column.
+        let all = engine.query(&SemanticQuery {
+            measures: vec![m.clone()],
+            dimensions: vec![c.clone()],
+            filters: wide.clone(),
+            sort: vec![],
+            limit: Some(PIVOT_LIMIT),
+        })?;
+        if all.rows.len() > PIVOT_MAX_COLS {
+            q.filters.push(Filter {
+                table: c.table.clone(),
+                column: c.column.clone(),
+                grain: c.grain,
+                op: FilterOp::In,
+                values: all
+                    .rows
+                    .iter()
+                    .take(PIVOT_MAX_COLS)
+                    .filter_map(|r| r.first().cloned())
+                    .collect(),
+            });
+        }
+    }
     let mut res = engine.query(&q)?;
     // Fill gaps and cut to the top N first, so the unfinished-period check below
     // still sees the real last period.
-    shape::apply(engine, tile, &q, &mut res)?;
+    shape::apply(engine, tile, &q, &wide, &mut res)?;
     let d = match tile.dims.first() {
         Some(d)
             if d.grain.is_some_and(|g| !g.is_part())

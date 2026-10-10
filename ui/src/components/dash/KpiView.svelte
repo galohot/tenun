@@ -20,7 +20,11 @@
   const pace = $derived(goal && goal.projected !== null ? (goal.onTrack ? 'on pace' : 'behind pace') : '');
   // With a target there are two more lines of text, so the history waits for a wider tile.
   const showBars = $derived(kpi.bars.length > 2 && w >= (goal ? 420 : 200));
-  const size = $derived(Math.round(Math.max(26, Math.min(48, Math.min(w / 8.5, h / (goal ? 3.3 : 2.4))))));
+  // In a narrow tile the target line would wrap and push the figure into the title. The chip stays
+  // and the words move to its tooltip.
+  const narrow = $derived(w < 200);
+  const size = $derived(Math.round(Math.max(26, Math.min(48, Math.min(w / 8.5, h / (goal ? (narrow ? 3 : 3.3) : 2.4))))));
+  const goalWords = $derived(target === null || !goal ? '' : `Target ${compact(target, fmt)} · ${pctOfTarget(goal.share)} of target${pace ? ` · ${pace}` : ''}`);
 
   // Under half a percent is "about the same", not a trend.
   const tone = $derived.by(() => {
@@ -68,12 +72,12 @@
       </div>
     {/if}
     {#if goal && target !== null}
-      <div class="goal" title={goal.projected === null ? '' : `At this pace the period ends near ${tip(goal.projected, fmt)}.`}>
+      <div class="goal" title={narrow ? `${goalWords}${goal.projected === null ? '' : `. At this pace the period ends near ${tip(goal.projected, fmt)}`}.` : goal.projected === null ? '' : `At this pace the period ends near ${tip(goal.projected, fmt)}.`}>
         <span class="status {goal.onTrack ? 'good' : 'bad'}">
           <Icon name={goal.onTrack ? 'check' : 'warning'} size={12} />
           {goal.onTrack ? 'On track' : 'Behind'}
         </span>
-        <span class="muted">Target {compact(target, fmt)} · {pctOfTarget(goal.share)} of target{pace ? ` · ${pace}` : ''}</span>
+        {#if !narrow}<span class="muted">{goalWords}</span>{/if}
       </div>
     {/if}
   </div>

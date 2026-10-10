@@ -3,7 +3,7 @@
   // The engine computed every number, totals included. This only lays them out.
   import type { Cell, QueryResult, Tile } from '../../lib/api';
   import { cell, pretty } from '../../lib/format';
-  import { pivotModel } from '../../lib/pivot';
+  import { MAX_PIVOT_ROWS, pivotModel } from '../../lib/pivot';
 
   let {
     res,
@@ -38,7 +38,8 @@
   const rowLabel = (v: Cell, i: number) => cell(v, res.columns[i]?.dtype ?? 'text', tile.dims[i]?.grain);
 
   const hasRowTotals = $derived(m.hasCols && m.rows.some((r) => r.total));
-  const hasTotalRow = $derived(!!m.grand);
+  // With no row field there is one row, which already is the total.
+  const hasTotalRow = $derived(!!m.grand && m.nRows > 0);
   const twoHeads = $derived(m.hasCols && m.nValues > 1);
   const values = $derived(Array.from({ length: m.nValues }, (_, j) => j));
   // A repeated row heading is left blank, so groups read as groups.
@@ -124,7 +125,12 @@
       {/if}
     </table>
   </div>
-  {#if m.cut}<p class="note">Showing {m.cols.length} of {m.colCount} columns.</p>{/if}
+  {#if m.cut || m.limited}
+    <p class="note">
+      {#if m.cut}Showing {m.cols.length} of {m.colCount} columns.{/if}
+      {#if m.limited}Showing the first {MAX_PIVOT_ROWS.toLocaleString('en-US')} cells. Add a filter to see the rest.{/if}
+    </p>
+  {/if}
 </div>
 
 <style>

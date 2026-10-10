@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { targetInfo } from '../src/lib/kpi.ts';
 import { MAX_PIVOT_COLS, pivotModel } from '../src/lib/pivot.ts';
+import { imageKind, normalisePicture } from '../src/lib/image.ts';
 import { suggestTypes } from '../src/lib/suggest.ts';
 
 test('target: a finished period compares the value itself', () => {
@@ -198,4 +199,30 @@ test('pivot: with two row fields, rows of the same first value sit together', ()
   const m = pivotModel(res, { cols: { table: 't', column: 'ch' } });
   assert.deepEqual(m.rows.map((r) => r.raw.join('/')), ['A/N', 'A/S', 'B/N', 'B/S']);
   assert.deepEqual(m.rows.map((r) => r.total[0]), [9, 7, 8, 6]);
+});
+
+test('pivot: counts every column the engine knows, and a pivot with no row field has its total on the one row', () => {
+  const res = {
+    columns: [col('day', 'dimension', 'date'), col('v', 'measure', 'number')],
+    rows: [['a', 1], ['b', 2]],
+    ignored_filters: [],
+    ms: 1,
+    totals: { grand: [10], cols: [['a', 1], ['b', 2], ['c', 3], ['d', 4]] },
+  };
+  const m = pivotModel(res, { cols: { table: 't', column: 'day' } });
+  assert.equal(m.nRows, 0);
+  assert.equal(m.colCount, 4);
+  assert.deepEqual(m.rows[0].total, [10]);
+});
+
+test('image: the first bytes decide the kind, not the name', () => {
+  const b64 = (s) => Buffer.from(s, 'latin1').toString('base64');
+  const png = `data:image/png;base64,${b64('\x89PNG\r\n\x1a\n\0\0\0\rIHDR')}`;
+  assert.equal(imageKind(png), 'png');
+  const svg = `data:image/png;base64,${b64('<svg xmlns="http://www.w3.org/2000/svg"/>')}`;
+  assert.equal(imageKind(svg), null);
+  assert.equal(normalisePicture(svg), null);
+  const jpeg = `data:image/png;base64,${b64('\xff\xd8\xff\xe0\0\x10JFIF')}`;
+  assert.ok(normalisePicture(jpeg).startsWith('data:image/jpeg;base64,'));
+  assert.equal(imageKind(`data:image/webp;base64,${b64('RIFF\0\0\0\0WEBPVP8 ')}`), 'webp');
 });

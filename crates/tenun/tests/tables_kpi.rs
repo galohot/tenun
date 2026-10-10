@@ -25,12 +25,22 @@ const DONE: &str = "date,amount
 2026-08-31,7
 ";
 
+// 40 columns for a pivot: group G0 holds the even numbers 2..40 (420), G1 the odd ones (400).
+fn wide() -> String {
+    let mut s = String::from("grp,code,v\n");
+    for i in 1..=40 {
+        s.push_str(&format!("G{},c{i:02},{i}\n", i % 2));
+    }
+    s
+}
+
 fn engine(tag: &str) -> Engine {
     let dir: PathBuf = std::env::temp_dir().join(format!("tenun-tk-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("sales.csv"), SALES).unwrap();
     std::fs::write(dir.join("done.csv"), DONE).unwrap();
+    std::fs::write(dir.join("wide.csv"), wide()).unwrap();
     let source = |id: &str, file: &str| Source {
         id: id.into(),
         name: file.into(),
@@ -38,23 +48,38 @@ fn engine(tag: &str) -> Engine {
     };
     let ws = Workspace {
         name: "TK".into(),
-        sources: vec![source("s1", "sales.csv"), source("s2", "done.csv")],
-        dashboards: vec![json!({ "id": "d1", "title": "T", "refresh": 0, "tiles": [
-            { "id": "k", "type": "kpi", "title": "", "x": 0, "y": 0, "w": 3, "h": 2,
-              "measures": [{ "table": "s1/sales", "column": "amount", "agg": "sum" }],
-              "dims": [{ "table": "s1/sales", "column": "date", "grain": "month" }] },
-            { "id": "note", "type": "text", "title": "Notes", "x": 3, "y": 0, "w": 3, "h": 1,
-              "measures": [], "dims": [], "text": "# Hello\n\nSome **bold** text." },
-            { "id": "pic", "type": "image", "title": "", "x": 6, "y": 0, "w": 3, "h": 2,
-              "measures": [], "dims": [], "image": { "data": "data:image/png;base64,AAAA", "alt": "Logo" } },
-            { "id": "bycat", "type": "bar", "title": "", "x": 0, "y": 2, "w": 6, "h": 4,
-              "measures": [{ "table": "s1/sales", "column": "amount", "agg": "sum" }],
-              "dims": [{ "table": "s1/sales", "column": "cat" }] },
-            { "id": "pv", "type": "pivot", "title": "", "x": 6, "y": 2, "w": 6, "h": 4,
-              "measures": [{ "table": "s1/sales", "column": "amount", "agg": "sum" }],
-              "dims": [{ "table": "s1/sales", "column": "cat" }],
-              "cols": { "table": "s1/sales", "column": "channel" } },
-        ]})],
+        sources: vec![
+            source("s1", "sales.csv"),
+            source("s2", "done.csv"),
+            source("s3", "wide.csv"),
+        ],
+        dashboards: vec![
+            json!({ "id": "d2", "title": "W", "refresh": 0, "tiles": [
+                { "id": "wp", "type": "pivot", "title": "", "x": 0, "y": 0, "w": 6, "h": 4,
+                  "measures": [{ "table": "s3/wide", "column": "v", "agg": "sum" }],
+                  "dims": [{ "table": "s3/wide", "column": "grp" }],
+                  "cols": { "table": "s3/wide", "column": "code" } },
+                { "id": "wb", "type": "bar", "title": "", "x": 6, "y": 0, "w": 6, "h": 4,
+                  "measures": [{ "table": "s3/wide", "column": "v", "agg": "sum" }],
+                  "dims": [{ "table": "s3/wide", "column": "grp" }] },
+            ]}),
+            json!({ "id": "d1", "title": "T", "refresh": 0, "tiles": [
+                { "id": "k", "type": "kpi", "title": "", "x": 0, "y": 0, "w": 3, "h": 2,
+                  "measures": [{ "table": "s1/sales", "column": "amount", "agg": "sum" }],
+                  "dims": [{ "table": "s1/sales", "column": "date", "grain": "month" }] },
+                { "id": "note", "type": "text", "title": "Notes", "x": 3, "y": 0, "w": 3, "h": 1,
+                  "measures": [], "dims": [], "text": "# Hello\n\nSome **bold** text." },
+                { "id": "pic", "type": "image", "title": "", "x": 6, "y": 0, "w": 3, "h": 2,
+                  "measures": [], "dims": [], "image": { "data": "data:image/png;base64,AAAA", "alt": "Logo" } },
+                { "id": "bycat", "type": "bar", "title": "", "x": 0, "y": 2, "w": 6, "h": 4,
+                  "measures": [{ "table": "s1/sales", "column": "amount", "agg": "sum" }],
+                  "dims": [{ "table": "s1/sales", "column": "cat" }] },
+                { "id": "pv", "type": "pivot", "title": "", "x": 6, "y": 2, "w": 6, "h": 4,
+                  "measures": [{ "table": "s1/sales", "column": "amount", "agg": "sum" }],
+                  "dims": [{ "table": "s1/sales", "column": "cat" }],
+                  "cols": { "table": "s1/sales", "column": "channel" } },
+            ]}),
+        ],
         ..Workspace::default()
     };
     let e = Engine::new(Secrets::new(dir.join("secrets.json"))).unwrap();
@@ -277,4 +302,33 @@ fn text_and_image_tiles_stay_in_the_snapshot() {
     let bars = &snap["cross"]["pv"]["\u{1}col:Shop"]["bycat"]["rows"];
     let sum: f64 = bars.as_array().unwrap().iter().map(|r| num(&r[1])).sum();
     assert_eq!(sum, 170.0);
+}
+
+#[test]
+fn a_wide_pivot_reads_its_first_30_columns_and_totals_all_of_them() {
+    let e = engine("widepivot");
+    let t: Tile = serde_json::from_value(json!({
+        "id": "wp", "type": "pivot",
+        "measures": [{ "table": "s3/wide", "column": "v", "agg": "sum" }],
+        "dims": [{ "table": "s3/wide", "column": "grp" }],
+        "cols": { "table": "s3/wide", "column": "code" },
+    }))
+    .unwrap();
+    let r = run(&e, &t);
+    // The cells cover the 30 biggest columns (c11 to c40). The totals cover all 40.
+    let codes: std::collections::HashSet<&str> =
+        r.rows.iter().map(|row| row[1].as_str().unwrap()).collect();
+    assert_eq!(codes.len(), 30);
+    assert!(codes.contains("c40") && codes.contains("c11") && !codes.contains("c10"));
+    let totals = r.totals.unwrap();
+    assert_eq!(totals.cols.unwrap().len(), 40);
+    assert_eq!(num(&totals.grand[0]), 820.0);
+    let rows = totals.rows.unwrap();
+    let of = |g: &str| num(&rows.iter().find(|r| r[0] == g).unwrap()[1]);
+    assert_eq!((of("G0"), of("G1")), (420.0, 400.0));
+
+    // A column click in an exported file is stored for those 30 columns.
+    let snap = snapshot::build(&e, "d2", &[]).unwrap();
+    let pv = snap["cross"]["wp"].as_object().unwrap();
+    assert!(pv.contains_key("\u{1}col:c40") && !pv.contains_key("\u{1}col:c01"));
 }

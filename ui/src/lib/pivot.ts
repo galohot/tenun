@@ -6,6 +6,8 @@ import type { Cell, QueryResult, Tile } from './api';
 
 /** At most this many columns are drawn. */
 export const MAX_PIVOT_COLS = 30;
+/** The engine reads at most this many rows (cells) for a pivot. */
+export const MAX_PIVOT_ROWS = 5000;
 
 const keyOf = (v: Cell | undefined): string => (v === null || v === undefined ? '\u0000null' : String(v));
 const tupleKey = (vs: Cell[]): string => vs.map(keyOf).join('\u0001');
@@ -19,6 +21,8 @@ export interface PivotModel {
   /** All the column values there are, and whether some were left out. */
   colCount: number;
   cut: boolean;
+  /** The engine stopped reading cells at its row limit, so some cells may be missing. */
+  limited: boolean;
   /** The column field has a heading (false: a plain list of the row fields). */
   hasCols: boolean;
   rows: {
@@ -95,6 +99,8 @@ export function pivotModel(res: QueryResult, tile: Pick<Tile, 'cols'>): PivotMod
     }
     order = [...groups.values()].flat();
   }
+  // The engine's column list counts every column, also those it did not read cells for.
+  const colCount = hasCols && totals?.cols ? Math.max(totals.cols.length, colList.length) : colList.length;
   const colTotalOf = new Map<string, Cell[]>();
   for (const t of totals?.cols ?? []) colTotalOf.set(keyOf(t[0]), t.slice(1));
 
@@ -102,8 +108,9 @@ export function pivotModel(res: QueryResult, tile: Pick<Tile, 'cols'>): PivotMod
     nRows,
     nValues,
     cols,
-    colCount: colList.length,
-    cut: colList.length > cols.length,
+    colCount,
+    cut: colCount > cols.length,
+    limited: res.rows.length >= MAX_PIVOT_ROWS,
     hasCols,
     rows: order.map((k) => {
       const e = byRow.get(k)!;
@@ -111,7 +118,8 @@ export function pivotModel(res: QueryResult, tile: Pick<Tile, 'cols'>): PivotMod
         raw: e.raw,
         key: k,
         cells: cols.map((c) => e.cells.get(c.key) ?? null),
-        total: rowTotals.get(k) ?? null,
+        // With no row field the one row is the whole data.
+        total: rowTotals.get(k) ?? (nRows === 0 ? (totals?.grand ?? null) : null),
       };
     }),
     colTotals: cols.map((c) => colTotalOf.get(c.key) ?? null),
