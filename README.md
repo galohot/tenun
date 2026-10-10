@@ -63,7 +63,9 @@ every other chart filters. Save the Excel file and the dashboard updates.
 
 The apps are not code-signed yet:
 
-- **macOS:** right-click the app, choose **Open**, then **Open** again. You do this once.
+- **macOS:** open the app once and close the warning. Then open **System Settings → Privacy &
+  Security**, scroll down, and choose **Open Anyway**. You do this once. Or, in Terminal:
+  `xattr -dr com.apple.quarantine /Applications/Tenun.app`
 - **Windows:** in the SmartScreen window, choose **More info**, then **Run anyway**.
 
 **Command line (browser mode):** download `tenun-<version>-<platform>` from the same page, then:
