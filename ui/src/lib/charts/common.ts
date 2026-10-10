@@ -53,10 +53,11 @@ export interface Pivot {
 // must not repaint the groups that stay, so a group keeps the slot it had when first drawn.
 const slotMemory = new Map<string, Map<string, number>>();
 
-/** The palette slot of each key, kept per tile and per split field (see `assignSlots`). */
+/** The palette slot of each key, kept per tile, per split field and per source table (see `assignSlots`). */
 export function slotsFor(tile: Tile, keys: string[]): number[] {
   const d = tile.dims[1];
-  const id = `${tile.id}|${d ? `${d.table}.${d.column}.${d.grain ?? ''}` : ''}`;
+  const source = [...new Set(tile.measures.map((m) => m.table))].join(',');
+  const id = `${tile.id}|${source}|${d ? `${d.table}.${d.column}.${d.grain ?? ''}` : ''}`;
   let memory = slotMemory.get(id);
   if (!memory) slotMemory.set(id, (memory = new Map()));
   return assignSlots(memory, keys, MAX_SERIES);
