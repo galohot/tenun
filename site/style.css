@@ -103,6 +103,11 @@ h1 {
 .model > div { max-width: 40rem; }
 .model h2 { font-size: 1.6rem; }
 
+.online { padding: 1rem 0 3.5rem; max-width: 44rem; }
+.online h2 { font-size: 1.6rem; margin: 0 0 0.5rem; letter-spacing: -0.01em; }
+.online p, .online li { color: var(--text-2); }
+.online ul { padding-left: 1.2rem; }
+.online b { color: var(--text); font-weight: 600; }
 .download { text-align: center; padding: 3rem 0 4rem; border-top: 1px solid var(--sep); }
 .download h2 { font-size: 2rem; margin: 0; letter-spacing: -0.02em; }
 .download > p { color: var(--text-2); }

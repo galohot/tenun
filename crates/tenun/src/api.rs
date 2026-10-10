@@ -1,6 +1,6 @@
 //! JSON routes under `/api`, the event socket, and the embedded UI files.
 
-use crate::{AppState, VERSION, export, fsbrowse, sample};
+use crate::{AppState, VERSION, cloud, export, fsbrowse, sample};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, Uri, header};
@@ -70,6 +70,11 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/fs", get(fs))
         .route("/viewer", get(viewer))
         .route("/tile", post(tile))
+        .route("/cloud", get(cloud_status))
+        .route("/cloud/connect", post(cloud_connect))
+        .route("/cloud/disconnect", post(cloud_disconnect))
+        .route("/cloud/publish", post(cloud_publish))
+        .route("/cloud/unpublish", post(cloud_unpublish))
         .route("/snapshot", post(snapshot))
         .route("/export-html", post(export_html))
         .route("/export-file", post(export_file))
@@ -359,6 +364,123 @@ async fn export_html(State(s): S, Json(b): Json<SnapBody>) -> R<Response> {
         return Ok(Json(json!({ "ok": true })).into_response());
     }
     Ok(([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response())
+}
+
+// ---- tenun.cloud --------------------------------------------------------------
+
+async fn cloud_status(State(s): S) -> R<Json<Value>> {
+    let v = blocking(&s, |st| {
+        let conn = cloud::connection(&st.secrets, &st.cloud_base);
+        // How much of the free plan is used; the app works without it when offline.
+        let usage = conn.as_ref().and_then(|(token, _)| {
+            let me = cloud::Client::new(st.cloud_base.clone()).me(token).ok()?;
+            Some(json!({
+                "dashboards": me["dashboards"].as_array().map(|a| a.len()).unwrap_or(0),
+                "limit": me["limits"]["dashboards"],
+            }))
+        });
+        Ok(json!({
+            "base": st.cloud_base,
+            "connected": conn.is_some(),
+            "email": conn.map(|c| c.1),
+            "source": cloud::source_label(),
+            "usage": usage,
+        }))
+    })
+    .await?;
+    Ok(Json(v))
+}
+
+#[derive(Deserialize)]
+struct ConnectBody {
+    /// Open the approval page in the default browser (desktop app).
+    #[serde(default)]
+    open: bool,
+}
+
+/// Starts device sign-in and waits for approval in the background.
+async fn cloud_connect(State(s): S, Json(b): Json<ConnectBody>) -> R<Json<Value>> {
+    let st = s.clone();
+    let start = blocking(&s, |st| {
+        let client = cloud::Client::new(st.cloud_base.clone());
+        Ok(client.start_device(&format!("Tenun on {}", cloud::source_label()))?)
+    })
+    .await?;
+    if b.open {
+        let _ = webbrowser::open(&start.verification_uri_complete);
+    }
+    let device = start.clone();
+    std::thread::spawn(move || {
+        let client = cloud::Client::new(st.cloud_base.clone());
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(device.expires_in);
+        while std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_secs(device.interval.max(2)));
+            match client.poll_device(&device.device_code) {
+                Ok(cloud::Poll::Pending) => continue,
+                Ok(cloud::Poll::Done { token, email }) => {
+                    let ok =
+                        cloud::save_connection(&st.secrets, &st.cloud_base, &token, &email).is_ok();
+                    st.emit(json!({ "type": "cloud-connected", "ok": ok, "email": email }));
+                    return;
+                }
+                Ok(cloud::Poll::Expired) | Err(_) => break,
+            }
+        }
+        st.emit(json!({ "type": "cloud-connected", "ok": false }));
+    });
+    Ok(Json(json!({
+        "user_code": start.user_code,
+        "url": start.verification_uri_complete,
+        "expires_in": start.expires_in,
+    })))
+}
+
+async fn cloud_disconnect(State(s): S) -> R<Json<Value>> {
+    blocking(&s, |st| {
+        cloud::forget_connection(&st.secrets, &st.cloud_base)
+    })
+    .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct DashBody {
+    dashboard: String,
+}
+
+async fn cloud_publish(State(s): S, Json(b): Json<DashBody>) -> R<Json<Value>> {
+    let (result, snap) = blocking(&s, move |st| {
+        let r = cloud::publish(&st.engine, &st.secrets, &st.cloud_base, &b.dashboard);
+        st.schedule.lock().unwrap().record(
+            &b.dashboard,
+            r.is_ok(),
+            r.as_ref().err(),
+            chrono::Utc::now(),
+        );
+        Ok((
+            r.map_err(|e| e.to_string()),
+            serde_json::to_value(st.engine.snapshot())?,
+        ))
+    })
+    .await?;
+    match result {
+        Ok(v) => Ok(Json(
+            json!({ "ok": true, "url": v["url"], "version": v["version"], "snapshot": snap }),
+        )),
+        // The snapshot still matters: it carries the error on the dashboard.
+        Err(e) => Err(anyhow::anyhow!(e).into()),
+    }
+}
+
+async fn cloud_unpublish(State(s): S, Json(b): Json<DashBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            cloud::unpublish(&st.engine, &st.secrets, &st.cloud_base, &b.dashboard)?;
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
 }
 
 async fn viewer() -> Json<Value> {

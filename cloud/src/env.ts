@@ -26,4 +26,6 @@ export const LIMITS = {
   keepVersions: 5,
   /** Schedules faster than this are refused; the app offers hourly as the fastest. */
   minEveryMinutes: 60,
+  /** Device sign-ins waiting for approval, across everyone. */
+  openDevices: 500,
 };

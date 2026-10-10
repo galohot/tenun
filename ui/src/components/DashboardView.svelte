@@ -8,6 +8,7 @@
   import Icon from './Icon.svelte';
   import TileView from './dash/TileView.svelte';
   import Inspector from './dash/Inspector.svelte';
+  import PublishSheet from './dash/PublishSheet.svelte';
 
   let { id }: { id: string } = $props();
 
@@ -22,6 +23,7 @@
   let tick = $state(0);
   let editingTitle = $state(false);
   let addMenu = $state(false);
+  let publishing = $state(false);
 
   /** The live layout while a drag is in progress; null otherwise. */
   let preview = $state<Tile[] | null>(null);
@@ -171,6 +173,10 @@
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && (filters.length ? (filters = []) : (selectedTile = null))} />
 
+{#if dash && publishing}
+  <PublishSheet {dash} onclose={() => (publishing = false)} />
+{/if}
+
 {#if dash}
   <header class="toolbar">
     {#if editingTitle}
@@ -218,6 +224,15 @@
       </label>
     {/if}
     <button class="btn plain icon" title="Refresh now" onclick={() => tick++}><Icon name="refresh" /></button>
+    <button
+      class="btn"
+      class:live={!!dash.publish?.url}
+      class:warn={!!dash.publish?.error}
+      onclick={() => (publishing = true)}
+      disabled={!dash.tiles.length}
+      title={dash.publish?.error ?? (dash.publish?.url ? 'Published on tenun.cloud' : 'Share this dashboard online')}>
+      <Icon name={dash.publish?.error ? 'warning' : 'globe'} /> {dash.publish?.url ? 'Published' : 'Publish'}
+    </button>
     <button class="btn" onclick={exportHtml} disabled={!dash.tiles.length || !!exporting} title="Save this dashboard as one HTML file that works offline">
       <Icon name="export" /> {exporting ?? 'Export'}
     </button>
@@ -351,6 +366,8 @@
   .chip button:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
   .small { height: 24px; font-size: 12px; }
   .spacer { flex: 1; }
+  .btn.live :global(svg) { color: var(--success); }
+  .btn.warn :global(svg) { color: var(--danger); }
   .refresh { display: flex; align-items: center; gap: 4px; color: var(--text-2); }
   .refresh select { border: 0; background: none; color: var(--text); padding: 2px; }
   .add { position: relative; }

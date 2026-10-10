@@ -34,6 +34,9 @@ api.post('/devices', async (c) => {
   const code = userCode();
   const t = now();
   await c.env.DB.prepare('DELETE FROM devices WHERE expires_at < ?1').bind(t).run();
+  // Sign-in codes are open to anyone, so their number is capped (each lives 10 minutes).
+  const open = await c.env.DB.prepare('SELECT count(*) AS n FROM devices').first<{ n: number }>();
+  if ((open?.n ?? 0) >= LIMITS.openDevices) return fail(c, 503, 'busy', { message: 'Too many sign-ins are waiting. Try again in a few minutes.' });
   await c.env.DB.prepare('INSERT INTO devices (code_hash, user_code, label, created_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)')
     .bind(await sha256(device), code, label, t, t + DEVICE_TTL)
     .run();

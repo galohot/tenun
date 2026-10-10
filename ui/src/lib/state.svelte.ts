@@ -1,6 +1,6 @@
 // App-wide state: the workspace snapshot, the route, the theme, live events.
 
-import { api, type Dashboard, type Health, type Snapshot, type Table } from './api';
+import { api, type CloudStatus, type Dashboard, type Health, type Snapshot, type Table } from './api';
 
 export type Route =
   | { view: 'home' }
@@ -46,6 +46,9 @@ class App {
   /** Bumped when source data changes; tiles re-query when it moves. */
   dataVersion = $state(0);
   addOpen = $state(false);
+  cloud = $state<CloudStatus | null>(null);
+  /** Set while waiting for the browser approval of a tenun.cloud connection. */
+  connecting = $state<{ code: string; url: string } | null>(null);
   busy = $state<string | null>(null);
 
   theme = $derived<'light' | 'dark'>(
@@ -71,7 +74,7 @@ class App {
 
   async init() {
     try {
-      [this.health, this.snap] = await Promise.all([api.health(), api.workspace()]);
+      [this.health, this.snap, this.cloud] = await Promise.all([api.health(), api.workspace(), api.cloud().catch(() => null)]);
     } catch (e) {
       this.error(e);
     }
@@ -147,6 +150,13 @@ class App {
       } else if (ev.type === 'dashboards-changed') {
         // Our own save echoes back; only other windows need to reload.
         if (Date.now() - this.#lastLocalSave > 1500) this.refresh();
+      } else if (ev.type === 'cloud-connected') {
+        this.connecting = null;
+        api.cloud().then((c) => (this.cloud = c));
+        if ((ev as { ok?: boolean }).ok) this.toast('Connected to tenun.cloud');
+        else this.toast('The connection was not approved in time. Try again.', 'error');
+      } else if (ev.type === 'published') {
+        this.refresh();
       } else if (ev.type === 'error' && ev.message) {
         this.toast(ev.message, 'error');
       }

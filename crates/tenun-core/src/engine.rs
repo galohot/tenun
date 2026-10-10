@@ -433,8 +433,35 @@ impl Engine {
         self.persist();
     }
 
-    pub fn set_dashboards(&self, dashboards: Vec<serde_json::Value>) {
-        self.state.write().unwrap().ws.dashboards = dashboards;
+    /// Saves the dashboards the UI sends. The publish status that only the
+    /// publisher writes (cloud id, link, last time, last error) is kept from the
+    /// current copy, so a UI save never rolls it back.
+    pub fn set_dashboards(&self, mut dashboards: Vec<serde_json::Value>) {
+        {
+            let mut s = self.state.write().unwrap();
+            for d in &mut dashboards {
+                let id = d.get("id").and_then(|v| v.as_str()).map(str::to_string);
+                let old = id.and_then(|id| {
+                    s.ws.dashboards
+                        .iter()
+                        .find(|o| o.get("id").and_then(|v| v.as_str()) == Some(id.as_str()))
+                        .and_then(|o| o.get("publish").cloned())
+                });
+                if let Some(p) = d.get_mut("publish").and_then(|p| p.as_object_mut()) {
+                    for k in ["id", "url", "last", "error"] {
+                        match old.as_ref().and_then(|o| o.get(k)) {
+                            Some(v) => {
+                                p.insert(k.to_string(), v.clone());
+                            }
+                            None => {
+                                p.remove(k);
+                            }
+                        }
+                    }
+                }
+            }
+            s.ws.dashboards = dashboards;
+        }
         self.persist();
     }
 
@@ -480,6 +507,33 @@ impl Engine {
             .iter()
             .find(|d| d.get("id").and_then(|v| v.as_str()) == Some(id))
             .cloned()
+    }
+
+    /// Changes one dashboard in place (for example its publish settings) and saves.
+    pub fn update_dashboard(&self, id: &str, f: impl FnOnce(&mut serde_json::Value)) -> bool {
+        let found = {
+            let mut s = self.state.write().unwrap();
+            match s
+                .ws
+                .dashboards
+                .iter_mut()
+                .find(|d| d.get("id").and_then(|v| v.as_str()) == Some(id))
+            {
+                Some(d) => {
+                    f(d);
+                    true
+                }
+                None => false,
+            }
+        };
+        if found {
+            self.persist();
+        }
+        found
+    }
+
+    pub fn dashboards(&self) -> Vec<serde_json::Value> {
+        self.state.read().unwrap().ws.dashboards.clone()
     }
 
     pub fn workspace_name(&self) -> String {

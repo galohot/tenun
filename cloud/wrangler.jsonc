@@ -10,7 +10,7 @@
   },
   "routes": [{ "pattern": "tenun.cloud", "custom_domain": true }],
   "d1_databases": [
-    { "binding": "DB", "database_name": "tenun-cloud", "database_id": "<D1_DATABASE_ID>", "migrations_dir": "migrations" }
+    { "binding": "DB", "database_name": "tenun-cloud", "database_id": "e30490d1-df9e-4343-972e-9df48fa124dd", "migrations_dir": "migrations" }
   ],
   "r2_buckets": [{ "binding": "SNAPSHOTS", "bucket_name": "tenun-snapshots" }],
   "triggers": { "crons": ["17 3 * * *"] },

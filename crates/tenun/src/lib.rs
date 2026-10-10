@@ -2,6 +2,7 @@
 //! The desktop app and `tenun serve` both run this same server.
 
 mod api;
+pub mod cloud;
 mod export;
 mod fsbrowse;
 mod guard;
@@ -54,6 +55,9 @@ pub struct AppState {
     pub picker: Option<Picker>,
     /// This server's own URL, for "Open in browser".
     pub url: Mutex<String>,
+    pub secrets: Secrets,
+    pub cloud_base: String,
+    pub schedule: Mutex<cloud::Schedule>,
 }
 
 pub struct Running {
@@ -109,6 +113,9 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
         token: token.clone(),
         picker: opts.picker.clone(),
         url: Mutex::new(String::new()),
+        secrets: Secrets::new(Secrets::default_path()),
+        cloud_base: cloud::base_url(),
+        schedule: Mutex::new(cloud::Schedule::default()),
     });
 
     // File changes reload the source and tell every open window.
@@ -131,6 +138,7 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
             for id in &changed {
                 tables.extend(state.engine.load(id));
             }
+            state.schedule.lock().unwrap().mark_changed(&state.engine);
             state.emit(serde_json::json!({
                 "type": "data-changed", "sources": changed, "tables": tables
             }));
@@ -138,6 +146,25 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
     })?;
     *state.watcher.lock().unwrap() = Some(watcher);
     state.rewatch();
+
+    // Published dashboards that keep themselves updated: checked once a minute.
+    let sched = state.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            tick.tick().await;
+            let st = sched.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                let mut schedule = st.schedule.lock().unwrap();
+                let (ok, failed) =
+                    cloud::run_due(&st.engine, &st.secrets, &st.cloud_base, &mut schedule);
+                if !ok.is_empty() || !failed.is_empty() {
+                    st.emit(serde_json::json!({ "type": "published", "ok": ok, "failed": failed }));
+                }
+            })
+            .await;
+        }
+    });
 
     let app = router(state.clone());
     let listener = tokio::net::TcpListener::bind((opts.host, opts.port)).await?;

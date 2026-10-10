@@ -103,6 +103,25 @@ dashboard and **Add tile**.
   paths are stored relative to it, so a folder with the file and its data moves as one. It is
   safe to commit to git.
 
+## Share online with tenun.cloud
+
+Choose **Publish** on a dashboard to give it a private link on [tenun.cloud](https://tenun.cloud). Tenun
+builds the dashboard on your computer and sends only the results: not your files, and never your
+database passwords. The cloud never connects to your data.
+
+- **Who can see it:** anyone with the link, or only people you invite (they sign in with Google).
+- **Keep it updated:** when the data changes, hourly, daily, or by hand. Updates run while the app is
+  open; [`tenun agent`](docs/agent.md) keeps them running on a computer that stays on.
+- **Always honest about age:** every hosted dashboard says when it was updated and from which
+  computer, and shows a banner when an update is late.
+- **Free:** up to 3 published dashboards, 10 MB each.
+
+```sh
+tenun login                    # connect this computer (approve a code in the browser)
+tenun publish sales.tenun      # publish now
+tenun agent sales.tenun        # keep publishing on schedule
+```
+
 ## Privacy and security
 
 - The server listens on `127.0.0.1` only. It refuses requests that name another host, which

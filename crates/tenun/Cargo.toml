@@ -29,6 +29,11 @@ webbrowser = "1"
 getrandom = "0.4"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures-util = "0.3"
+ureq = "3"
+flate2 = "1"
+gethostname = "1"
+thiserror.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 
 [dev-dependencies]
 rust_xlsxwriter = "0.99"

@@ -122,12 +122,35 @@ export interface Tile {
   better?: 'up' | 'down';
 }
 
+export interface PublishSettings {
+  /** Set by the publisher: the cloud dashboard, its link, the last success and the last error. */
+  id?: string;
+  url?: string;
+  last?: string;
+  error?: string;
+  access: 'link' | 'invited';
+  invites: string[];
+  every: 'manual' | 'change' | 'hour' | 'day';
+  /** Overrides this computer's name on the hosted page. */
+  source: string;
+}
+
 export interface Dashboard {
   id: string;
   title: string;
   /** Seconds between refreshes of database data; 0 = off. */
   refresh: number;
   tiles: Tile[];
+  publish?: PublishSettings;
+}
+
+export interface CloudStatus {
+  base: string;
+  connected: boolean;
+  email: string | null;
+  source: string;
+  /** Free-plan usage; null when tenun.cloud could not be reached. */
+  usage: { dashboards: number; limit: number } | null;
 }
 
 export interface Workspace {
@@ -217,6 +240,11 @@ export const api = {
     call<{ paths: string[] }>('POST', '/pick', req),
   openBrowser: () => call<{ ok: boolean }>('POST', '/open-browser'),
   tile: (tile: Tile, filters: unknown[]) => call<QueryResult>('POST', '/tile', { tile, filters }),
+  cloud: () => call<CloudStatus>('GET', '/cloud'),
+  cloudConnect: (open: boolean) => call<{ user_code: string; url: string; expires_in: number }>('POST', '/cloud/connect', { open }),
+  cloudDisconnect: () => call<{ ok: boolean }>('POST', '/cloud/disconnect', {}),
+  publish: (dashboard: string) => call<{ ok: boolean; url: string; version: number; snapshot: Snapshot }>('POST', '/cloud/publish', { dashboard }),
+  unpublish: (dashboard: string) => call<Snapshot>('POST', '/cloud/unpublish', { dashboard }),
   /** Writes the HTML file (desktop app) when `path` is given. */
   exportTo: (dashboard: string, filters: unknown[], path: string) =>
     call<{ ok: boolean }>('POST', '/export-html', { dashboard, filters, path }),

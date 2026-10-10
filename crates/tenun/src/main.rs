@@ -1,3 +1,5 @@
+mod agent;
+
 use clap::{Parser, Subcommand};
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -27,6 +29,23 @@ enum Command {
         #[arg(long)]
         no_open: bool,
     },
+    /// Connect this computer to tenun.cloud (opens a code to approve in a browser).
+    Login,
+    /// Forget the tenun.cloud connection on this computer.
+    Logout,
+    /// Publish dashboards to tenun.cloud now.
+    Publish {
+        /// The .tenun workspace.
+        file: PathBuf,
+        /// Dashboard id or title (default: every dashboard set to publish).
+        #[arg(long)]
+        dashboard: Option<String>,
+    },
+    /// Keep published dashboards updated, without the app (for an always-on computer).
+    Agent {
+        /// The .tenun workspace.
+        file: PathBuf,
+    },
     /// Build a dashboard's snapshot without the app: one HTML file, or the JSON data.
     Snapshot {
         /// The .tenun workspace.
@@ -52,14 +71,20 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
     let cli = Cli::parse();
-    if let Some(Command::Snapshot {
-        file,
-        dashboard,
-        html,
-        json,
-    }) = cli.command
-    {
-        return snapshot_cmd(file, dashboard, html, json);
+    match cli.command {
+        Some(Command::Snapshot {
+            file,
+            dashboard,
+            html,
+            json,
+        }) => return snapshot_cmd(file, dashboard, html, json),
+        Some(Command::Login) => return agent::login(),
+        Some(Command::Logout) => return agent::logout(),
+        Some(Command::Publish { file, dashboard }) => {
+            return agent::publish_now(&file, dashboard.as_deref());
+        }
+        Some(Command::Agent { file }) => return agent::run(&file),
+        _ => {}
     }
     let (file, port, host, no_open) = match cli.command {
         Some(Command::Serve {
