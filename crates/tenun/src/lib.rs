@@ -1,0 +1,167 @@
+//! Tenun's local HTTP server: the JSON API, live events and the embedded UI.
+//! The desktop app and `tenun serve` both run this same server.
+
+mod api;
+mod export;
+mod fsbrowse;
+mod guard;
+pub mod sample;
+
+use axum::Router;
+use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tenun_core::Engine;
+use tenun_core::secrets::Secrets;
+use tenun_core::watch::FileWatcher;
+use tokio::sync::broadcast;
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub struct Options {
+    pub host: IpAddr,
+    /// 0 picks a free port.
+    pub port: u16,
+    pub workspace: Option<PathBuf>,
+    /// Native file dialogs, when a desktop shell provides them.
+    pub picker: Option<Picker>,
+}
+
+/// What the UI asks a native dialog for.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PickRequest {
+    DataFiles,
+    OpenWorkspace,
+    SaveWorkspace { name: String },
+}
+
+/// Shows a native dialog and returns the chosen paths (empty = cancelled).
+pub type Picker = Arc<dyn Fn(PickRequest) -> Vec<PathBuf> + Send + Sync>;
+
+pub struct AppState {
+    pub engine: Engine,
+    pub events: broadcast::Sender<String>,
+    watcher: Mutex<Option<FileWatcher>>,
+    /// Required when listening beyond this computer.
+    pub token: Option<String>,
+    pub picker: Option<Picker>,
+    /// This server's own URL, for "Open in browser".
+    pub url: Mutex<String>,
+}
+
+pub struct Running {
+    pub addr: SocketAddr,
+    /// The URL to open, including the access token in LAN mode.
+    pub url: String,
+    pub state: Arc<AppState>,
+}
+
+impl AppState {
+    /// Points the watcher at the current file sources.
+    pub fn rewatch(&self) {
+        let files: Vec<PathBuf> = self
+            .engine
+            .watched_files()
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
+        if let Some(w) = self.watcher.lock().unwrap().as_mut() {
+            w.set(&files);
+        }
+    }
+
+    pub fn emit(&self, value: serde_json::Value) {
+        let _ = self.events.send(value.to_string());
+    }
+}
+
+fn random_token() -> String {
+    let mut b = [0u8; 16];
+    getrandom::fill(&mut b).expect("system randomness");
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// Starts the server in the background and returns once it listens.
+pub async fn start(opts: Options) -> anyhow::Result<Running> {
+    let engine = Engine::new(Secrets::new(Secrets::default_path()))?;
+    if let Some(p) = &opts.workspace {
+        if p.exists() {
+            engine.open(p)?;
+        } else {
+            // A new file: start empty and save there on the first change.
+            engine.new_workspace();
+            engine.save(Some(p.clone()))?;
+        }
+    }
+    let token = (!opts.host.is_loopback()).then(random_token);
+    let (events, _) = broadcast::channel(64);
+    let state = Arc::new(AppState {
+        engine,
+        events,
+        watcher: Mutex::new(None),
+        token: token.clone(),
+        picker: opts.picker.clone(),
+        url: Mutex::new(String::new()),
+    });
+
+    // File changes reload the source and tell every open window.
+    let weak = Arc::downgrade(&state);
+    let handle = tokio::runtime::Handle::current();
+    let watcher = FileWatcher::new(move |paths| {
+        let Some(state) = weak.upgrade() else { return };
+        handle.spawn_blocking(move || {
+            let changed: Vec<String> = state
+                .engine
+                .watched_files()
+                .into_iter()
+                .filter(|(_, p)| paths.contains(&tenun_core::watch::canonical(p)))
+                .map(|(id, _)| id)
+                .collect();
+            if changed.is_empty() {
+                return;
+            }
+            let mut tables = Vec::new();
+            for id in &changed {
+                tables.extend(state.engine.load(id));
+            }
+            state.emit(serde_json::json!({
+                "type": "data-changed", "sources": changed, "tables": tables
+            }));
+        });
+    })?;
+    *state.watcher.lock().unwrap() = Some(watcher);
+    state.rewatch();
+
+    let app = router(state.clone());
+    let listener = tokio::net::TcpListener::bind((opts.host, opts.port)).await?;
+    let addr = listener.local_addr()?;
+    tokio::spawn(async move {
+        if let Err(e) = axum::serve(listener, app).await {
+            tracing::error!("server stopped: {e}");
+        }
+    });
+    let shown_host = if opts.host.is_loopback() || opts.host.is_unspecified() {
+        "127.0.0.1".to_string()
+    } else {
+        opts.host.to_string()
+    };
+    let mut url = format!("http://{shown_host}:{}/", addr.port());
+    if let Some(t) = &token {
+        url.push_str(&format!("?token={t}"));
+    }
+    *state.url.lock().unwrap() = url.clone();
+    Ok(Running { addr, url, state })
+}
+
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .nest("/api", api::routes())
+        .fallback(api::static_file)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            guard::guard,
+        ))
+        .layer(tower_http::compression::CompressionLayer::new())
+        .with_state(state)
+}

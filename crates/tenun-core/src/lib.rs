@@ -1,0 +1,13 @@
+//! Tenun's engine: sources, relationships and the query compiler, on DuckDB.
+
+pub mod catalog;
+pub mod engine;
+pub mod excel;
+pub mod query;
+pub mod secrets;
+pub mod sqlite;
+pub mod suggest;
+pub mod watch;
+pub mod workspace;
+
+pub use engine::Engine;

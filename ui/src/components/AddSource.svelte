@@ -1,0 +1,174 @@
+<script lang="ts">
+  import { api } from '../lib/api';
+  import { app, go } from '../lib/state.svelte';
+  import Icon from './Icon.svelte';
+  import Modal from './Modal.svelte';
+  import FileBrowser from './FileBrowser.svelte';
+
+  let { onclose }: { onclose: () => void } = $props();
+
+  let tab = $state<'file' | 'database'>('file');
+  let browsing = $state(false);
+  let kind = $state<'postgres' | 'mysql'>('postgres');
+  let host = $state('localhost');
+  let port = $state('');
+  let database = $state('');
+  let user = $state('');
+  let password = $state('');
+  let schema = $state('');
+  let path = $state('');
+
+  async function addFiles(paths: string[]) {
+    let last: string | undefined;
+    for (const p of paths) {
+      const ok = await app.run(`Reading ${p.split(/[\\/]/).pop()}…`, async () => {
+        const r = await api.addFile(p);
+        last = r.added;
+        return r;
+      });
+      if (!ok) return;
+    }
+    onclose();
+    const t = app.tables.find((x) => x.source_id === last);
+    go({ view: 'data', table: t?.id });
+    app.toast(paths.length > 1 ? `Added ${paths.length} files` : 'Added');
+  }
+
+  async function chooseFiles() {
+    if (app.health?.native) {
+      const { paths } = await api.pick({ kind: 'data_files' });
+      if (paths.length) await addFiles(paths);
+    } else {
+      browsing = true;
+    }
+  }
+
+  async function connect(e: SubmitEvent) {
+    e.preventDefault();
+    let added = '';
+    const ok = await app.run('Connecting…', async () => {
+      const r = await api.addDatabase(kind, {
+        host,
+        port: port ? Number(port) : null,
+        database,
+        user,
+        password,
+        schema: schema || null,
+      });
+      added = r.added;
+      return r;
+    });
+    if (ok) {
+      onclose();
+      const t = app.tables.find((x) => x.source_id === added);
+      go({ view: 'data', table: t?.id });
+      app.toast(`Connected to ${database}`);
+    }
+  }
+</script>
+
+<Modal title="Add data" onclose={onclose} width={560}>
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected={tab === 'file'} class:on={tab === 'file'} onclick={() => (tab = 'file')}>
+      <Icon name="sheet" size={14} /> File
+    </button>
+    <button role="tab" aria-selected={tab === 'database'} class:on={tab === 'database'} onclick={() => (tab = 'database')}>
+      <Icon name="database" size={14} /> Database
+    </button>
+  </div>
+
+  {#if tab === 'file'}
+    <button class="drop" onclick={chooseFiles} disabled={!!app.busy}>
+      <Icon name="sheet" size={28} />
+      <strong>{app.busy ?? 'Choose files…'}</strong>
+      <span>Excel, CSV, Parquet, SQLite or DuckDB.{app.health?.native ? ' You can also drop files on the window.' : ''}</span>
+      <span>Tenun reads the file where it is and updates when you save it.</span>
+    </button>
+    <form class="paste" onsubmit={(e) => { e.preventDefault(); if (path.trim()) addFiles([path.trim()]); }}>
+      <input class="field" placeholder="Or paste a full file path" bind:value={path} />
+      <button class="btn" disabled={!path.trim()}>Add</button>
+    </form>
+  {:else}
+    <form class="db" id="dbform" onsubmit={connect}>
+      <div class="seg" role="radiogroup" aria-label="Database type">
+        <button type="button" role="radio" aria-checked={kind === 'postgres'} class:on={kind === 'postgres'} onclick={() => (kind = 'postgres')}>PostgreSQL</button>
+        <button type="button" role="radio" aria-checked={kind === 'mysql'} class:on={kind === 'mysql'} onclick={() => (kind = 'mysql')}>MySQL</button>
+      </div>
+      <div class="grid">
+        <label class="wide"><span class="label">Host</span><input class="field" bind:value={host} required /></label>
+        <label><span class="label">Port</span><input class="field" bind:value={port} placeholder={kind === 'postgres' ? '5432' : '3306'} inputmode="numeric" /></label>
+        <label class="wide"><span class="label">Database</span><input class="field" bind:value={database} required /></label>
+        {#if kind === 'postgres'}
+          <label><span class="label">Schema</span><input class="field" bind:value={schema} placeholder="all" /></label>
+        {/if}
+        <label class="wide"><span class="label">User</span><input class="field" bind:value={user} required autocomplete="username" /></label>
+        <label class="wide"><span class="label">Password</span><input class="field" type="password" bind:value={password} autocomplete="current-password" /></label>
+      </div>
+      <p class="note">
+        <Icon name="info" size={14} />
+        Read-only. The password is kept on this computer, never in the workspace file. The first connection downloads
+        the {kind === 'postgres' ? 'PostgreSQL' : 'MySQL'} connector once.
+      </p>
+    </form>
+  {/if}
+
+  {#snippet footer()}
+    {#if tab === 'database'}
+      <button class="btn" onclick={onclose}>Cancel</button>
+      <button class="btn primary" type="submit" form="dbform" disabled={!!app.busy}>{app.busy ?? 'Connect'}</button>
+    {:else}
+      <button class="btn" onclick={onclose}>Close</button>
+    {/if}
+  {/snippet}
+</Modal>
+
+{#if browsing}
+  <FileBrowser mode="files" onclose={() => (browsing = false)} onpick={(p) => { browsing = false; addFiles(p); }} />
+{/if}
+
+<style>
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 14px;
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--inset);
+    width: max-content;
+  }
+  .tabs button, .seg button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-2);
+    font-weight: 500;
+  }
+  .tabs button.on, .seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
+  .drop {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 28px 16px;
+    border: 1.5px dashed var(--sep-strong);
+    border-radius: var(--r-card);
+    background: var(--window);
+    color: var(--text-2);
+  }
+  .drop :global(svg) { color: var(--accent-text); margin-bottom: 4px; }
+  .drop strong { color: var(--text); font-size: 15px; font-weight: 600; }
+  .drop:hover { border-color: var(--accent); }
+  .paste { display: flex; gap: 8px; margin-top: 12px; }
+  .seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--inset); margin-bottom: 14px; }
+  .grid { display: grid; grid-template-columns: 1fr 140px; gap: 10px 12px; }
+  .grid label { display: flex; flex-direction: column; gap: 4px; }
+  .grid .wide:nth-child(5), .grid .wide:nth-child(6) { grid-column: span 2; }
+  .note { display: flex; gap: 8px; margin: 14px 0 0; color: var(--text-2); font-size: 12px; }
+  .note :global(svg) { margin-top: 1px; }
+</style>

@@ -1,0 +1,143 @@
+//! The sample workspace: a small coffee chain spread over three sources (an
+//! Excel workbook, a CSV file and a SQLite database), already related, with one
+//! dashboard. The files are written to a folder the user can open and edit, so
+//! saving `coffee.xlsx` in Excel shows live refresh at work.
+
+use serde_json::json;
+use std::path::PathBuf;
+use tenun_core::Engine;
+use tenun_core::workspace::{FieldRef, Relationship, Source, SourceKind, Workspace};
+
+const COFFEE: &[u8] = include_bytes!("../../../examples/sample/coffee.xlsx");
+const STORES: &[u8] = include_bytes!("../../../examples/sample/stores.csv");
+const CUSTOMERS: &[u8] = include_bytes!("../../../examples/sample/customers.sqlite");
+
+pub fn folder() -> PathBuf {
+    let home = crate::fsbrowse::home();
+    let docs = home.join("Documents");
+    let base = if docs.is_dir() { docs } else { home };
+    base.join("Tenun Sample")
+}
+
+pub fn open(engine: &Engine) -> anyhow::Result<()> {
+    let dir = folder();
+    std::fs::create_dir_all(&dir)?;
+    for (name, bytes) in [
+        ("coffee.xlsx", COFFEE),
+        ("stores.csv", STORES),
+        ("customers.sqlite", CUSTOMERS),
+    ] {
+        let p = dir.join(name);
+        // Keep the user's edits if the sample is opened a second time.
+        if !p.exists() {
+            std::fs::write(&p, bytes)?;
+        }
+    }
+    let file = dir.join("Coffee.tenun");
+    if file.exists() {
+        engine.open(&file)?;
+        return Ok(());
+    }
+    engine.replace(workspace(), Some(file.clone()));
+    engine.save(Some(file))?;
+    Ok(())
+}
+
+fn f(table: &str, column: &str) -> FieldRef {
+    FieldRef {
+        table: table.into(),
+        column: column.into(),
+    }
+}
+
+fn rel(id: &str, from: FieldRef, to: FieldRef) -> Relationship {
+    Relationship {
+        id: id.into(),
+        from,
+        to,
+    }
+}
+
+pub fn workspace() -> Workspace {
+    let orders = "s1/Orders";
+    let tile = |id: &str,
+                ty: &str,
+                x: u32,
+                y: u32,
+                w: u32,
+                h: u32,
+                measures: serde_json::Value,
+                dims: serde_json::Value| {
+        json!({ "id": id, "type": ty, "title": "", "x": x, "y": y, "w": w, "h": h,
+                "measures": measures, "dims": dims, "horizontal": false })
+    };
+    let month = json!([{ "table": orders, "column": "date", "grain": "month" }]);
+    let mut by_store = tile(
+        "t7",
+        "bar",
+        0,
+        6,
+        6,
+        4,
+        json!([{ "table": orders, "column": "amount", "agg": "sum" }]),
+        json!([{ "table": "s2/stores", "column": "name" }]),
+    );
+    by_store["horizontal"] = json!(true);
+    let dashboard = json!({
+        "id": "d1",
+        "title": "Coffee overview",
+        "refresh": 60,
+        "tiles": [
+            tile("t1", "kpi", 0, 0, 3, 2, json!([{ "table": orders, "column": "amount", "agg": "sum" }]), month.clone()),
+            tile("t2", "kpi", 3, 0, 3, 2, json!([{ "table": orders, "column": null, "agg": "count" }]), month.clone()),
+            tile("t3", "kpi", 6, 0, 3, 2, json!([{ "table": orders, "column": "customer_id", "agg": "count_distinct" }]), month.clone()),
+            tile("t4", "kpi", 9, 0, 3, 2, json!([{ "table": orders, "column": "amount", "agg": "avg" }]), month.clone()),
+            tile("t5", "area", 0, 2, 8, 4, json!([{ "table": orders, "column": "amount", "agg": "sum" }]),
+                 json!([{ "table": orders, "column": "date", "grain": "month" }, { "table": "s2/stores", "column": "region" }])),
+            tile("t6", "donut", 8, 2, 4, 4, json!([{ "table": orders, "column": "amount", "agg": "sum" }]),
+                 json!([{ "table": "s1/Products", "column": "category" }])),
+            by_store,
+            tile("t8", "bar", 6, 6, 6, 4, json!([{ "table": orders, "column": "amount", "agg": "sum" }]),
+                 json!([{ "table": "s3/customers", "column": "segment" }])),
+        ]
+    });
+    Workspace {
+        name: "Coffee".into(),
+        sources: vec![
+            Source {
+                id: "s1".into(),
+                name: "coffee.xlsx".into(),
+                kind: SourceKind::Excel {
+                    path: "coffee.xlsx".into(),
+                },
+            },
+            Source {
+                id: "s2".into(),
+                name: "stores.csv".into(),
+                kind: SourceKind::Csv {
+                    path: "stores.csv".into(),
+                },
+            },
+            Source {
+                id: "s3".into(),
+                name: "customers.sqlite".into(),
+                kind: SourceKind::Sqlite {
+                    path: "customers.sqlite".into(),
+                },
+            },
+        ],
+        relationships: vec![
+            rel("r1", f(orders, "store_id"), f("s2/stores", "id")),
+            rel("r2", f(orders, "customer_id"), f("s3/customers", "id")),
+            rel("r3", f(orders, "product"), f("s1/Products", "product")),
+        ],
+        dashboards: vec![dashboard],
+        layout: json!({ "model": {
+            "s1/Orders": { "x": 0, "y": 60 },
+            "s1/Products": { "x": 0, "y": 330 },
+            "s2/stores": { "x": 340, "y": 0 },
+            "s3/customers": { "x": 340, "y": 230 }
+        }}),
+        ..Workspace::default()
+    }
+}

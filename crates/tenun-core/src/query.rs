@@ -1,0 +1,786 @@
+//! The semantic query and its compiler.
+//!
+//! A dashboard tile asks for measures grouped by dimensions, with filters. The
+//! compiler picks a base table (the table of the measures), walks relationships
+//! from the many side to the one side to reach every other table it needs, and
+//! emits one SQL statement. Identifiers are quoted; every value is a parameter.
+
+use crate::catalog::{Catalog, DType, Table, ident};
+use crate::workspace::Relationship;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SemanticQuery {
+    #[serde(default)]
+    pub measures: Vec<Measure>,
+    #[serde(default)]
+    pub dimensions: Vec<Dimension>,
+    #[serde(default)]
+    pub filters: Vec<Filter>,
+    #[serde(default)]
+    pub sort: Vec<Sort>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Measure {
+    pub table: String,
+    /// `None` with `count` means "number of rows".
+    #[serde(default)]
+    pub column: Option<String>,
+    pub agg: Agg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Agg {
+    Sum,
+    Avg,
+    Min,
+    Max,
+    Count,
+    CountDistinct,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Dimension {
+    pub table: String,
+    pub column: String,
+    #[serde(default)]
+    pub grain: Option<Grain>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Grain {
+    Year,
+    Quarter,
+    Month,
+    Week,
+    Day,
+}
+
+impl Grain {
+    fn sql(self) -> &'static str {
+        match self {
+            Grain::Year => "year",
+            Grain::Quarter => "quarter",
+            Grain::Month => "month",
+            Grain::Week => "week",
+            Grain::Day => "day",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Filter {
+    pub table: String,
+    pub column: String,
+    #[serde(default)]
+    pub grain: Option<Grain>,
+    pub op: FilterOp,
+    #[serde(default)]
+    pub values: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilterOp {
+    In,
+    NotIn,
+    Between,
+    Gte,
+    Lte,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Sort {
+    /// Index into the output columns (dimensions first, then measures).
+    pub by: usize,
+    #[serde(default)]
+    pub desc: bool,
+}
+
+/// A bound value. Kept independent of DuckDB so the compiler is testable alone.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Param {
+    Null,
+    Text(String),
+    Double(f64),
+    Bool(bool),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OutColumn {
+    pub name: String,
+    pub role: &'static str,
+    pub dtype: DType,
+}
+
+#[derive(Debug, Clone)]
+pub struct Compiled {
+    pub sql: String,
+    pub params: Vec<Param>,
+    pub columns: Vec<OutColumn>,
+    /// Indexes of filters that could not reach the base table and were skipped.
+    pub ignored_filters: Vec<usize>,
+}
+
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum QueryError {
+    #[error("Pick at least one value or group.")]
+    Empty,
+    #[error("The table {0} no longer exists.")]
+    UnknownTable(String),
+    #[error("The column {1} is not in {0}.")]
+    UnknownColumn(String, String),
+    #[error("{1} is not related to {0}. Draw a line between them in Model.")]
+    Unreachable(String, String),
+    #[error("{0} cannot be {1}.")]
+    BadAgg(String, &'static str),
+    #[error("A filter value does not match the column type.")]
+    BadValue,
+}
+
+const DEFAULT_LIMIT: u32 = 1000;
+const MAX_LIMIT: u32 = 10_000;
+
+pub fn compile(
+    q: &SemanticQuery,
+    catalog: &Catalog,
+    rels: &[Relationship],
+) -> Result<Compiled, QueryError> {
+    let base_id = q
+        .measures
+        .first()
+        .map(|m| m.table.clone())
+        .or_else(|| q.dimensions.first().map(|d| d.table.clone()))
+        .ok_or(QueryError::Empty)?;
+    let base = lookup(catalog, &base_id)?;
+
+    let paths = reach(&base_id, rels);
+    let mut joins = Joins::new(&base_id);
+
+    // Dimensions and measures must all be reachable.
+    for t in q
+        .dimensions
+        .iter()
+        .map(|d| &d.table)
+        .chain(q.measures.iter().map(|m| &m.table))
+    {
+        lookup(catalog, t)?;
+        if !paths.contains_key(t) {
+            return Err(QueryError::Unreachable(
+                label(catalog, &base_id),
+                label(catalog, t),
+            ));
+        }
+        joins.add(t, &paths);
+    }
+    // Filters that cannot reach the base table are skipped and reported.
+    let mut ignored = Vec::new();
+    for (i, f) in q.filters.iter().enumerate() {
+        if catalog.table(&f.table).is_none() || !paths.contains_key(&f.table) {
+            ignored.push(i);
+        } else {
+            joins.add(&f.table, &paths);
+        }
+    }
+
+    let mut select = Vec::new();
+    let mut columns = Vec::new();
+    for d in &q.dimensions {
+        let (expr, dtype) = dim_expr(catalog, &joins, &d.table, &d.column, d.grain)?;
+        select.push(format!(
+            "{expr} AS {}",
+            ident(&format!("d{}", columns.len()))
+        ));
+        columns.push(OutColumn {
+            name: d.column.clone(),
+            role: "dimension",
+            dtype,
+        });
+    }
+    for m in &q.measures {
+        let (expr, dtype, name) = measure_expr(catalog, &joins, m)?;
+        select.push(format!(
+            "{expr} AS {}",
+            ident(&format!("m{}", columns.len()))
+        ));
+        columns.push(OutColumn {
+            name,
+            role: "measure",
+            dtype,
+        });
+    }
+
+    let mut params = Vec::new();
+    let mut wheres = Vec::new();
+    for (i, f) in q.filters.iter().enumerate() {
+        if ignored.contains(&i) {
+            continue;
+        }
+        let (expr, dtype) = dim_expr(catalog, &joins, &f.table, &f.column, f.grain)?;
+        wheres.push(filter_sql(&expr, dtype, f, &mut params)?);
+    }
+
+    let mut sql = String::from("SELECT ");
+    if q.measures.is_empty() {
+        sql.push_str("DISTINCT ");
+    }
+    sql.push_str(&select.join(", "));
+    sql.push_str(&format!(" FROM {} AS t0", base.sql_ref));
+    for j in &joins.list {
+        let to = lookup(catalog, &j.to_table)?;
+        let from_t = lookup(catalog, &j.from_table)?;
+        let fc = col(from_t, &j.from_col)?;
+        let tc = col(to, &j.to_col)?;
+        let (l, r) = (
+            format!("{}.{}", joins.alias(&j.from_table), ident(&j.from_col)),
+            format!("{}.{}", joins.alias(&j.to_table), ident(&j.to_col)),
+        );
+        let on = if fc.dtype == tc.dtype {
+            format!("{l} = {r}")
+        } else {
+            format!("CAST({l} AS VARCHAR) = CAST({r} AS VARCHAR)")
+        };
+        sql.push_str(&format!(
+            " LEFT JOIN {} AS {} ON {on}",
+            to.sql_ref,
+            joins.alias(&j.to_table)
+        ));
+    }
+    if !wheres.is_empty() {
+        sql.push_str(" WHERE ");
+        sql.push_str(&wheres.join(" AND "));
+    }
+    let nd = q.dimensions.len();
+    if nd > 0 && !q.measures.is_empty() {
+        let g: Vec<String> = (1..=nd).map(|i| i.to_string()).collect();
+        sql.push_str(&format!(" GROUP BY {}", g.join(", ")));
+    }
+
+    let mut order: Vec<String> = q
+        .sort
+        .iter()
+        .filter(|s| s.by < columns.len())
+        .map(|s| {
+            format!(
+                "{} {} NULLS LAST",
+                s.by + 1,
+                if s.desc { "DESC" } else { "ASC" }
+            )
+        })
+        .collect();
+    if order.is_empty() && !columns.is_empty() {
+        // Time reads left to right; otherwise biggest first.
+        if let Some(i) = columns
+            .iter()
+            .position(|c| c.role == "dimension" && c.dtype.is_temporal())
+        {
+            order.push(format!("{} ASC", i + 1));
+        } else if nd > 0 && !q.measures.is_empty() {
+            order.push(format!("{} DESC NULLS LAST", nd + 1));
+        } else if nd > 0 {
+            order.push("1 ASC".into());
+        }
+    }
+    if !order.is_empty() {
+        sql.push_str(&format!(" ORDER BY {}", order.join(", ")));
+    }
+    let limit = q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+    sql.push_str(&format!(" LIMIT {limit}"));
+
+    Ok(Compiled {
+        sql,
+        params,
+        columns,
+        ignored_filters: ignored,
+    })
+}
+
+fn lookup<'a>(catalog: &'a Catalog, id: &str) -> Result<&'a Table, QueryError> {
+    catalog
+        .table(id)
+        .ok_or_else(|| QueryError::UnknownTable(id.to_string()))
+}
+
+fn label(catalog: &Catalog, id: &str) -> String {
+    catalog
+        .table(id)
+        .map(|t| t.label.clone())
+        .unwrap_or_else(|| id.to_string())
+}
+
+fn col<'a>(t: &'a Table, c: &str) -> Result<&'a crate::catalog::Column, QueryError> {
+    t.column(c)
+        .ok_or_else(|| QueryError::UnknownColumn(t.label.clone(), c.to_string()))
+}
+
+#[derive(Debug, Clone)]
+struct Edge {
+    from_table: String,
+    from_col: String,
+    to_table: String,
+    to_col: String,
+}
+
+/// Breadth-first from the base table, many side → one side. Maps every
+/// reachable table to the edge that reached it.
+fn reach(base: &str, rels: &[Relationship]) -> HashMap<String, Option<Edge>> {
+    let mut seen: HashMap<String, Option<Edge>> = HashMap::new();
+    seen.insert(base.to_string(), None);
+    let mut queue = VecDeque::from([base.to_string()]);
+    while let Some(t) = queue.pop_front() {
+        for r in rels.iter().filter(|r| r.from.table == t) {
+            if !seen.contains_key(&r.to.table) {
+                seen.insert(
+                    r.to.table.clone(),
+                    Some(Edge {
+                        from_table: r.from.table.clone(),
+                        from_col: r.from.column.clone(),
+                        to_table: r.to.table.clone(),
+                        to_col: r.to.column.clone(),
+                    }),
+                );
+                queue.push_back(r.to.table.clone());
+            }
+        }
+    }
+    seen
+}
+
+struct Joins {
+    aliases: Vec<String>,
+    list: Vec<Edge>,
+}
+
+impl Joins {
+    fn new(base: &str) -> Self {
+        Self {
+            aliases: vec![base.to_string()],
+            list: Vec::new(),
+        }
+    }
+
+    fn add(&mut self, table: &str, paths: &HashMap<String, Option<Edge>>) {
+        if self.aliases.iter().any(|a| a == table) {
+            return;
+        }
+        // Collect the chain back to the base, then add it base-first.
+        let mut chain = Vec::new();
+        let mut cur = table.to_string();
+        while let Some(Some(e)) = paths.get(&cur) {
+            chain.push(e.clone());
+            cur = e.from_table.clone();
+        }
+        for e in chain.into_iter().rev() {
+            if !self.aliases.contains(&e.to_table) {
+                self.aliases.push(e.to_table.clone());
+                self.list.push(e);
+            }
+        }
+    }
+
+    fn alias(&self, table: &str) -> String {
+        let i = self.aliases.iter().position(|a| a == table).unwrap_or(0);
+        format!("t{i}")
+    }
+}
+
+fn dim_expr(
+    catalog: &Catalog,
+    joins: &Joins,
+    table: &str,
+    column: &str,
+    grain: Option<Grain>,
+) -> Result<(String, DType), QueryError> {
+    let t = lookup(catalog, table)?;
+    let c = col(t, column)?;
+    let r = format!("{}.{}", joins.alias(table), ident(column));
+    Ok(match (c.dtype, grain) {
+        (d, Some(g)) if d.is_temporal() => (
+            format!("strftime(date_trunc('{}', {r}), '%Y-%m-%d')", g.sql()),
+            DType::Date,
+        ),
+        (DType::Date, None) => (format!("strftime({r}, '%Y-%m-%d')"), DType::Date),
+        (DType::DateTime, None) => (
+            format!("strftime({r}, '%Y-%m-%dT%H:%M:%S')"),
+            DType::DateTime,
+        ),
+        (DType::Number, _) => (format!("CAST({r} AS DOUBLE)"), DType::Number),
+        (DType::Bool, _) => (r, DType::Bool),
+        _ => (format!("CAST({r} AS VARCHAR)"), DType::Text),
+    })
+}
+
+fn measure_expr(
+    catalog: &Catalog,
+    joins: &Joins,
+    m: &Measure,
+) -> Result<(String, DType, String), QueryError> {
+    let t = lookup(catalog, &m.table)?;
+    let Some(cname) = &m.column else {
+        return match m.agg {
+            Agg::Count => Ok((
+                format!("CAST(count(*) AS DOUBLE)"),
+                DType::Number,
+                "Rows".into(),
+            )),
+            _ => Err(QueryError::BadAgg("Rows".into(), "summed")),
+        };
+    };
+    let c = col(t, cname)?;
+    let r = format!("{}.{}", joins.alias(&m.table), ident(cname));
+    let name = cname.clone();
+    match m.agg {
+        Agg::Count => Ok((format!("CAST(count({r}) AS DOUBLE)"), DType::Number, name)),
+        Agg::CountDistinct => Ok((
+            format!("CAST(count(DISTINCT {r}) AS DOUBLE)"),
+            DType::Number,
+            name,
+        )),
+        Agg::Sum | Agg::Avg => {
+            if c.dtype != DType::Number {
+                return Err(QueryError::BadAgg(
+                    name,
+                    if m.agg == Agg::Sum {
+                        "summed"
+                    } else {
+                        "averaged"
+                    },
+                ));
+            }
+            let f = if m.agg == Agg::Sum { "sum" } else { "avg" };
+            Ok((format!("CAST({f}({r}) AS DOUBLE)"), DType::Number, name))
+        }
+        Agg::Min | Agg::Max => {
+            let f = if m.agg == Agg::Min { "min" } else { "max" };
+            match c.dtype {
+                DType::Number => Ok((format!("CAST({f}({r}) AS DOUBLE)"), DType::Number, name)),
+                DType::Date => Ok((format!("strftime({f}({r}), '%Y-%m-%d')"), DType::Date, name)),
+                DType::DateTime => Ok((
+                    format!("strftime({f}({r}), '%Y-%m-%dT%H:%M:%S')"),
+                    DType::DateTime,
+                    name,
+                )),
+                _ => Ok((format!("{f}(CAST({r} AS VARCHAR))"), DType::Text, name)),
+            }
+        }
+    }
+}
+
+fn to_param(v: &serde_json::Value, dtype: DType) -> Result<Param, QueryError> {
+    use serde_json::Value as J;
+    Ok(match (v, dtype) {
+        (J::Null, _) => Param::Null,
+        (J::Number(n), DType::Number) => Param::Double(n.as_f64().ok_or(QueryError::BadValue)?),
+        (J::String(s), DType::Number) => {
+            Param::Double(s.trim().parse().map_err(|_| QueryError::BadValue)?)
+        }
+        (J::Bool(b), DType::Bool) => Param::Bool(*b),
+        (J::String(s), DType::Bool) => Param::Bool(s == "true"),
+        (J::String(s), _) => Param::Text(s.clone()),
+        (J::Number(n), _) => Param::Text(n.to_string()),
+        (J::Bool(b), _) => Param::Text(b.to_string()),
+        _ => return Err(QueryError::BadValue),
+    })
+}
+
+fn filter_sql(
+    expr: &str,
+    dtype: DType,
+    f: &Filter,
+    params: &mut Vec<Param>,
+) -> Result<String, QueryError> {
+    let vals: Vec<Param> = f
+        .values
+        .iter()
+        .map(|v| to_param(v, dtype))
+        .collect::<Result<_, _>>()?;
+    let has_null = vals.contains(&Param::Null);
+    let non_null: Vec<Param> = vals.into_iter().filter(|p| *p != Param::Null).collect();
+    match f.op {
+        FilterOp::In | FilterOp::NotIn => {
+            let mut parts = Vec::new();
+            if !non_null.is_empty() {
+                let marks = vec!["?"; non_null.len()].join(", ");
+                parts.push(format!("{expr} IN ({marks})"));
+                params.extend(non_null);
+            }
+            if has_null {
+                parts.push(format!("{expr} IS NULL"));
+            }
+            let inner = if parts.is_empty() {
+                "FALSE".to_string()
+            } else {
+                format!("({})", parts.join(" OR "))
+            };
+            Ok(if f.op == FilterOp::NotIn {
+                format!("NOT COALESCE({inner}, FALSE)")
+            } else {
+                inner
+            })
+        }
+        FilterOp::Between => {
+            if non_null.len() != 2 {
+                return Err(QueryError::BadValue);
+            }
+            params.extend(non_null);
+            Ok(format!("{expr} BETWEEN ? AND ?"))
+        }
+        FilterOp::Gte | FilterOp::Lte => {
+            let v = non_null.into_iter().next().ok_or(QueryError::BadValue)?;
+            params.push(v);
+            Ok(format!(
+                "{expr} {} ?",
+                if f.op == FilterOp::Gte { ">=" } else { "<=" }
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::Column;
+    use crate::workspace::FieldRef;
+
+    fn table(id: &str, cols: &[(&str, DType)]) -> Table {
+        let (src, name) = id.split_once('/').unwrap();
+        Table {
+            id: id.into(),
+            source_id: src.into(),
+            name: name.into(),
+            label: name.into(),
+            sql_ref: format!("\"s_{src}\".\"{name}\""),
+            columns: cols
+                .iter()
+                .map(|(n, d)| Column {
+                    name: n.to_string(),
+                    dtype: *d,
+                    raw_type: String::new(),
+                })
+                .collect(),
+            rows: None,
+        }
+    }
+
+    fn fixture() -> (Catalog, Vec<Relationship>) {
+        use DType::*;
+        let cat = Catalog {
+            tables: vec![
+                table(
+                    "s1/orders",
+                    &[
+                        ("date", Date),
+                        ("store_id", Number),
+                        ("customer", Text),
+                        ("amount", Number),
+                    ],
+                ),
+                table(
+                    "s2/stores",
+                    &[("id", Number), ("region_code", Text), ("city", Text)],
+                ),
+                table("s3/regions", &[("code", Text), ("name", Text)]),
+                table("s4/customers", &[("name", Text), ("tier", Text)]),
+            ],
+        };
+        let rel = |id: &str, a: (&str, &str), b: (&str, &str)| Relationship {
+            id: id.into(),
+            from: FieldRef {
+                table: a.0.into(),
+                column: a.1.into(),
+            },
+            to: FieldRef {
+                table: b.0.into(),
+                column: b.1.into(),
+            },
+        };
+        let rels = vec![
+            rel("r1", ("s1/orders", "store_id"), ("s2/stores", "id")),
+            rel("r2", ("s2/stores", "region_code"), ("s3/regions", "code")),
+        ];
+        (cat, rels)
+    }
+
+    fn sum_amount() -> Measure {
+        Measure {
+            table: "s1/orders".into(),
+            column: Some("amount".into()),
+            agg: Agg::Sum,
+        }
+    }
+
+    #[test]
+    fn joins_two_hops_and_groups() {
+        let (cat, rels) = fixture();
+        let q = SemanticQuery {
+            measures: vec![sum_amount()],
+            dimensions: vec![Dimension {
+                table: "s3/regions".into(),
+                column: "name".into(),
+                grain: None,
+            }],
+            ..Default::default()
+        };
+        let c = compile(&q, &cat, &rels).unwrap();
+        assert_eq!(
+            c.sql,
+            "SELECT CAST(t2.\"name\" AS VARCHAR) AS \"d0\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m1\" \
+             FROM \"s_s1\".\"orders\" AS t0 \
+             LEFT JOIN \"s_s2\".\"stores\" AS t1 ON t0.\"store_id\" = t1.\"id\" \
+             LEFT JOIN \"s_s3\".\"regions\" AS t2 ON t1.\"region_code\" = t2.\"code\" \
+             GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 1000"
+        );
+    }
+
+    #[test]
+    fn date_grain_orders_by_time() {
+        let (cat, rels) = fixture();
+        let q = SemanticQuery {
+            measures: vec![sum_amount()],
+            dimensions: vec![Dimension {
+                table: "s1/orders".into(),
+                column: "date".into(),
+                grain: Some(Grain::Month),
+            }],
+            ..Default::default()
+        };
+        let c = compile(&q, &cat, &rels).unwrap();
+        assert!(
+            c.sql
+                .contains("strftime(date_trunc('month', t0.\"date\"), '%Y-%m-%d')")
+        );
+        assert!(c.sql.contains("ORDER BY 1 ASC"));
+    }
+
+    #[test]
+    fn unrelated_table_is_a_clear_error() {
+        let (cat, rels) = fixture();
+        let q = SemanticQuery {
+            measures: vec![sum_amount()],
+            dimensions: vec![Dimension {
+                table: "s4/customers".into(),
+                column: "tier".into(),
+                grain: None,
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            compile(&q, &cat, &rels).unwrap_err(),
+            QueryError::Unreachable("orders".into(), "customers".into())
+        );
+    }
+
+    #[test]
+    fn unreachable_filter_is_ignored_and_reported() {
+        let (cat, rels) = fixture();
+        let q = SemanticQuery {
+            measures: vec![Measure {
+                table: "s2/stores".into(),
+                column: None,
+                agg: Agg::Count,
+            }],
+            filters: vec![Filter {
+                table: "s1/orders".into(),
+                column: "customer".into(),
+                grain: None,
+                op: FilterOp::In,
+                values: vec!["x".into()],
+            }],
+            ..Default::default()
+        };
+        let c = compile(&q, &cat, &rels).unwrap();
+        assert_eq!(c.ignored_filters, vec![0]);
+        assert!(!c.sql.contains("WHERE"));
+    }
+
+    #[test]
+    fn filter_values_are_parameters_never_sql() {
+        let (cat, rels) = fixture();
+        let evil = "x'); DROP TABLE orders; --";
+        let q = SemanticQuery {
+            measures: vec![sum_amount()],
+            filters: vec![
+                Filter {
+                    table: "s2/stores".into(),
+                    column: "city".into(),
+                    grain: None,
+                    op: FilterOp::In,
+                    values: vec![evil.into(), serde_json::Value::Null],
+                },
+                Filter {
+                    table: "s1/orders".into(),
+                    column: "amount".into(),
+                    grain: None,
+                    op: FilterOp::Gte,
+                    values: vec![10.into()],
+                },
+            ],
+            ..Default::default()
+        };
+        let c = compile(&q, &cat, &rels).unwrap();
+        assert!(!c.sql.contains("DROP"));
+        assert!(c.sql.contains(
+            "WHERE (CAST(t1.\"city\" AS VARCHAR) IN (?) OR CAST(t1.\"city\" AS VARCHAR) IS NULL) AND CAST(t0.\"amount\" AS DOUBLE) >= ?"
+        ));
+        assert_eq!(
+            c.params,
+            vec![Param::Text(evil.into()), Param::Double(10.0)]
+        );
+    }
+
+    #[test]
+    fn hostile_column_names_are_quoted() {
+        let mut cat = Catalog {
+            tables: vec![table("s1/t", &[("a\"; DROP", DType::Number)])],
+        };
+        cat.tables[0].label = "t".into();
+        let q = SemanticQuery {
+            measures: vec![Measure {
+                table: "s1/t".into(),
+                column: Some("a\"; DROP".into()),
+                agg: Agg::Sum,
+            }],
+            ..Default::default()
+        };
+        let c = compile(&q, &cat, &[]).unwrap();
+        assert!(c.sql.contains("sum(t0.\"a\"\"; DROP\")"));
+    }
+
+    #[test]
+    fn summing_text_is_refused() {
+        let (cat, rels) = fixture();
+        let q = SemanticQuery {
+            measures: vec![Measure {
+                table: "s1/orders".into(),
+                column: Some("customer".into()),
+                agg: Agg::Sum,
+            }],
+            ..Default::default()
+        };
+        assert!(matches!(
+            compile(&q, &cat, &rels),
+            Err(QueryError::BadAgg(_, "summed"))
+        ));
+    }
+
+    #[test]
+    fn dimensions_only_is_distinct() {
+        let (cat, rels) = fixture();
+        let q = SemanticQuery {
+            dimensions: vec![Dimension {
+                table: "s2/stores".into(),
+                column: "city".into(),
+                grain: None,
+            }],
+            ..Default::default()
+        };
+        let c = compile(&q, &cat, &rels).unwrap();
+        assert!(c.sql.starts_with("SELECT DISTINCT"));
+    }
+}

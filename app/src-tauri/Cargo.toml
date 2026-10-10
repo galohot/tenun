@@ -1,0 +1,19 @@
+[package]
+name = "tenun-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tenun = { path = "../../crates/tenun" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tokio.workspace = true
+anyhow.workspace = true
+webbrowser = "1"
+serde_json.workspace = true
+tenun-core = { path = "../../crates/tenun-core" }

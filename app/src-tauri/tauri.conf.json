@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Tenun",
+  "identifier": "cloud.tenun.desktop",
+  "build": {
+    "frontendDist": "../loading"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Weave your spreadsheets and databases into one dashboard.",
+    "longDescription": "Tenun is a local dashboard maker. Add Excel files, CSV files and databases, draw relationships between them, and build dashboards that update when the data changes.",
+    "copyright": "Tenun contributors",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "deb": { "section": "utils" }
+    }
+  }
+}
