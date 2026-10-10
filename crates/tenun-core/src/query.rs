@@ -425,7 +425,7 @@ fn measure_expr(
     let Some(cname) = &m.column else {
         return match m.agg {
             Agg::Count => Ok((
-                format!("CAST(count(*) AS DOUBLE)"),
+                "CAST(count(*) AS DOUBLE)".to_string(),
                 DType::Number,
                 "Rows".into(),
             )),

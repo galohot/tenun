@@ -233,7 +233,7 @@ fn watcher_reports_a_saved_file() {
     })
     .unwrap();
     let target = dir.join("stores.csv");
-    w.set(&[target.clone()]);
+    w.set(std::slice::from_ref(&target));
     std::thread::sleep(Duration::from_millis(200));
     // Save the way spreadsheet apps do: write a temp file, rename it over.
     let tmp = dir.join(".~stores.csv");

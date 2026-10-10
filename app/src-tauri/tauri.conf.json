@@ -3,7 +3,8 @@
   "productName": "Tenun",
   "identifier": "cloud.tenun.desktop",
   "build": {
-    "frontendDist": "../loading"
+    "frontendDist": "../loading",
+    "beforeBuildCommand": "pnpm --dir ../ui install --frozen-lockfile && pnpm --dir ../ui build"
   },
   "app": {
     "windows": [],
@@ -26,7 +27,9 @@
       "icons/icon.ico"
     ],
     "linux": {
-      "deb": { "section": "utils" }
+      "deb": {
+        "section": "utils"
+      }
     }
   }
 }
