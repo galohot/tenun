@@ -83,6 +83,16 @@ pub struct QueryResult {
     /// The groups that are not in "Other", for a `not_in` filter.
     #[serde(rename = "otherOf", skip_serializing_if = "Option::is_none")]
     pub other_of: Option<Vec<serde_json::Value>>,
+    /// Histograms: where the first bin starts and how wide every bin is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bins: Option<Bins>,
+}
+
+/// The bins of a histogram: bin `i` covers `[start + i·width, start + (i+1)·width)`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct Bins {
+    pub start: f64,
+    pub width: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -531,7 +541,26 @@ impl Engine {
             partial: None,
             other: None,
             other_of: None,
+            bins: None,
         })
+    }
+
+    /// Runs a custom SELECT that builds on the scope of a semantic query (its FROM, JOINs and
+    /// WHERE). `build` returns the SQL and its parameters, in the order the `?` marks appear.
+    /// Also returns the indexes of the filters that could not reach the table.
+    pub fn query_custom(
+        &self,
+        q: &SemanticQuery,
+        build: impl FnOnce(&query::Scope<'_>) -> Result<(String, Vec<Param>), query::QueryError>,
+    ) -> anyhow::Result<(Vec<Vec<serde_json::Value>>, Vec<usize>)> {
+        let (sql, params, ignored) = {
+            let s = self.state.read().unwrap();
+            let sc = query::scope(q, &s.catalog, &s.ws.relationships)?;
+            let (sql, params) = build(&sc)?;
+            (sql, params, sc.ignored_filters.clone())
+        };
+        let conn = self.conn()?;
+        Ok((run(&conn, &sql, &params)?, ignored))
     }
 
     /// A dashboard stored in the workspace, by id.

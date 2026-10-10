@@ -191,6 +191,10 @@ export function tileTitle(t: Tile, tables: Named[]): string {
   if (t.type === 'table') {
     return t.dims.length ? `${m} by ${t.dims.map((d) => dimLabel(d, tables)).join(' and ')}` : m;
   }
+  // "Distribution of amount": a histogram bins one column, whatever the way it is added up.
+  if (t.type === 'histogram') return t.measures[0]?.column ? `Distribution of ${pretty(t.measures[0].column).toLowerCase()}` : m;
+  // "Revenue vs quantity by product": one dot for each product.
+  if (t.type === 'scatter' && t.measures[1]) m = `${m} vs ${measureLabel(t.measures[1], tables).toLowerCase()}`;
   const by = t.dims[0] && t.type !== 'kpi' ? ` by ${dimLabel(t.dims[0], tables)}` : '';
   const split = t.dims[1] && t.measures.length < 2 && (t.type === 'bar' || t.type === 'line' || t.type === 'area') ? ` and ${dimLabel(t.dims[1], tables)}` : '';
   return m + by + split;

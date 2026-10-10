@@ -1,7 +1,7 @@
 <script lang="ts">
   // Draws one tile from its result. Used by the app and by exported files.
   import type { Cell, QueryResult, Tile } from '../../lib/api';
-  import { buildOption, sizeNote, type Colors } from '../../lib/chart';
+  import { buildOption, CHART_TYPES, type Colors } from '../../lib/chart';
   import { cell, OTHER_KEY, type Named } from '../../lib/format';
   import ChartView from './ChartView.svelte';
   import KpiView from './KpiView.svelte';
@@ -27,8 +27,10 @@
   let width = $state(400);
   let height = $state(240);
 
-  const isChart = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area');
-  const built = $derived(isChart ? buildOption({ res, tile, colors, selected, width, height, tables }) : null);
+  const isChart = $derived((CHART_TYPES as readonly string[]).includes(tile.type));
+  // A scatter needs two values and a field for its dots; without them there is nothing to draw.
+  const unfinished = $derived(tile.type === 'scatter' && (tile.measures.length < 2 || !tile.dims.length));
+  const built = $derived(isChart && !unfinished ? buildOption({ res, tile, colors, selected, width, height, tables }) : null);
 
   // Table: click a header to sort.
   let sortBy = $state<number | null>(null);
@@ -52,12 +54,14 @@
   // The format of a value column: the columns are the groups, then the values.
   const groups = $derived(res.columns.filter((c) => c.role === 'dimension').length);
   const formatOf = (i: number) => (res.columns[i]?.role === 'measure' ? (tile.formats?.[i - groups] ?? null) : null);
-  const note = $derived(isChart ? sizeNote(res) : null);
+  const note = $derived(built?.note ?? null);
   const selKeys = $derived(new Set((selected ?? []).map((v) => String(v))));
 </script>
 
 {#if tile.type === 'kpi' && res.kpi}
   <KpiView kpi={res.kpi} {tile} {colors} />
+{:else if unfinished}
+  <div class="none">A scatter chart needs two values and a field to draw one dot for each.</div>
 {:else if res.rows.length === 0}
   <div class="none">No data for this selection.</div>
 {:else if tile.type === 'share' || tile.type === 'donut'}
@@ -98,11 +102,24 @@
         option={built.option}
         horizontal={!!tile.horizontal && tile.type === 'bar'}
         onresize={(w, h) => ((width = w), (height = h))}
-        onpick={onpick &&
-          ((i) => {
-            const v = built.categories[i];
-            if (i < built.categories.length && v !== undefined) onpick?.(v);
-          })} />
+        onpick={onpick && !built.pick
+          ? (i) => {
+              const v = built.categories[i];
+              if (i < built.categories.length && v !== undefined) onpick?.(v);
+            }
+          : undefined}
+        onitem={onpick && built.pick?.by === 'item'
+          ? (si, i) => {
+              const v = built.pick?.by === 'item' ? built.pick.value(si, i) : undefined;
+              if (v !== undefined) onpick?.(v);
+            }
+          : undefined}
+        onx={onpick && built.pick?.by === 'x'
+          ? (x) => {
+              const v = built.pick?.by === 'x' ? built.pick.value(x) : undefined;
+              if (v !== undefined) onpick?.(v);
+            }
+          : undefined} />
     </div>
     {#if note}<p class="size-note">{note}</p>{/if}
   </div>

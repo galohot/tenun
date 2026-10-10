@@ -28,6 +28,15 @@ pub struct Tile {
     pub sort: Option<TileSort>,
     #[serde(default)]
     pub top: Option<TopN>,
+    #[serde(default)]
+    pub bins: Option<TileBins>,
+}
+
+/// Histogram options. No width means the engine picks one.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TileBins {
+    #[serde(default)]
+    pub width: Option<f64>,
 }
 
 /// How a tile orders its groups. `manual` is left to the UI.
@@ -114,8 +123,10 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
     let one = matches!(kind, "kpi" | "share" | "donut");
     // Bar, line and area take up to four values side by side. Then there is no split.
     let many = matches!(kind, "bar" | "line" | "area") && tile.measures.len() > 1;
-    let dims: Vec<Dimension> = if one {
+    let dims: Vec<Dimension> = if one || kind == "waterfall" {
         tile.dims.iter().take(1).cloned().collect()
+    } else if kind == "histogram" {
+        vec![]
     } else if kind == "table" {
         tile.dims.clone()
     } else if many {
@@ -133,6 +144,9 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
                 .take(MAX_CHART_MEASURES)
                 .cloned()
                 .collect()
+        } else if kind == "scatter" {
+            // Across and up: two values for each dot.
+            tile.measures.iter().take(2).cloned().collect()
         } else {
             vec![tile.measures[0].clone()]
         }
@@ -182,6 +196,9 @@ pub fn run_tile(
     if tile.kind == "kpi" {
         return run_kpi(engine, tile, filters);
     }
+    if tile.kind == "histogram" {
+        return shape::histogram(engine, tile, &own_excluded(tile, filters));
+    }
     let q =
         tile_query(tile, filters).ok_or_else(|| anyhow::anyhow!("the tile has no fields yet"))?;
     let mut res = engine.query(&q)?;
@@ -191,7 +208,7 @@ pub fn run_tile(
     let d = match tile.dims.first() {
         Some(d)
             if d.grain.is_some_and(|g| !g.is_part())
-                && matches!(tile.kind.as_str(), "bar" | "line" | "area") =>
+                && matches!(tile.kind.as_str(), "bar" | "line" | "area" | "waterfall") =>
         {
             d
         }
@@ -566,43 +583,81 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
     let mut cross: BTreeMap<String, BTreeMap<String, BTreeMap<String, QueryResult>>> =
         BTreeMap::new();
     for src in &tiles {
-        let Some(d) = src.dims.first() else { continue };
         if src.kind == "kpi" {
             continue;
         }
         let Some(res) = base.get(&src.id) else {
             continue;
         };
-        let mut seen = HashSet::new();
-        let values: Vec<Value> = res
-            .rows
-            .iter()
-            .filter_map(|r| r.first().cloned())
-            .filter(|v| seen.insert(js_key(v)))
-            .collect();
-        if values.is_empty() || values.len() > MAX_CROSS_VALUES {
+        // What a click on each mark filters by: a group of the first dimension, or for a
+        // histogram the range of the bin.
+        let choices: Vec<(Value, Filter)> = if src.kind == "histogram" {
+            let (Some(m), Some(bins)) = (
+                src.measures.first().filter(|m| m.column.is_some()),
+                res.bins,
+            ) else {
+                continue;
+            };
+            res.rows
+                .iter()
+                .filter(|r| r.get(1).and_then(Value::as_f64).is_some_and(|n| n > 0.0))
+                .filter_map(|r| {
+                    let lo = r.first()?.as_f64()?;
+                    Some((
+                        r[0].clone(),
+                        Filter {
+                            table: m.table.clone(),
+                            column: m.column.clone()?,
+                            grain: None,
+                            op: FilterOp::Range,
+                            values: vec![r[0].clone(), shape::round_edge(lo + bins.width).into()],
+                        },
+                    ))
+                })
+                .collect()
+        } else {
+            let Some(d) = src.dims.first() else { continue };
+            let mut seen = HashSet::new();
+            res.rows
+                .iter()
+                .filter_map(|r| r.first().cloned())
+                .filter(|v| seen.insert(js_key(v)))
+                .map(|v| {
+                    // The "Other" bar stands for every group that is not in the top N.
+                    let (op, values) = match (&res.other_of, js_key(&v) == shape::OTHER_KEY) {
+                        (Some(keys), true) => (FilterOp::NotIn, keys.clone()),
+                        _ => (FilterOp::In, vec![v.clone()]),
+                    };
+                    (
+                        v,
+                        Filter {
+                            table: d.table.clone(),
+                            column: d.column.clone(),
+                            grain: d.grain,
+                            op,
+                            values,
+                        },
+                    )
+                })
+                .collect()
+        };
+        let cap = if src.kind == "histogram" {
+            shape::AUTO_MAX_BINS
+        } else {
+            MAX_CROSS_VALUES
+        };
+        if choices.is_empty() || choices.len() > cap {
             continue;
         }
         let per_value = cross.entry(src.id.clone()).or_default();
-        for v in values {
+        for (v, filter) in choices {
             let mut fs: Vec<DashFilter> = filters
                 .iter()
                 .filter(|f| f.from_tile != src.id)
                 .cloned()
                 .collect();
-            // The "Other" bar stands for every group that is not in the top N.
-            let (op, values) = match (&res.other_of, js_key(&v) == shape::OTHER_KEY) {
-                (Some(keys), true) => (FilterOp::NotIn, keys.clone()),
-                _ => (FilterOp::In, vec![v.clone()]),
-            };
             fs.push(DashFilter {
-                filter: Filter {
-                    table: d.table.clone(),
-                    column: d.column.clone(),
-                    grain: d.grain,
-                    op,
-                    values,
-                },
+                filter,
                 from_tile: src.id.clone(),
             });
             let mut per_tile = BTreeMap::new();

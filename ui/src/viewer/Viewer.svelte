@@ -64,10 +64,17 @@
 
   function label(tileId: string, v: Cell): string {
     const t = data.tiles.find((x) => x.id === tileId)!;
-    const d = t.dims[0];
+    // A histogram bin is a range of its number column.
+    const bins = t.type === 'histogram' ? data.base[tileId]?.bins : undefined;
+    const m = t.measures[0];
+    const d = bins && m?.column ? { table: m.table, column: m.column } : t.dims[0];
     const dtype = data.tables.find((x) => x.id === d.table)?.columns.find((c) => c.name === d.column)?.dtype ?? 'text';
     const name = dimLabel(d, data.tables);
-    return `${name.charAt(0).toUpperCase() + name.slice(1)}: ${cell(v, dtype, d.grain)}`;
+    const shown =
+      bins && typeof v === 'number'
+        ? `${cell(v, 'number', null, true)} to ${cell(Math.round((v + bins.width) * 1e10) / 1e10, 'number', null, true)}`
+        : cell(v, dtype, d.grain);
+    return `${name.charAt(0).toUpperCase() + name.slice(1)}: ${shown}`;
   }
 
   const when = $derived(dateTimeMedium(data.generated));

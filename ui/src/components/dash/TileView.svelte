@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Cell, QueryResult, Tile } from '../../lib/api';
+  import type { Bins, Cell, QueryResult, Tile } from '../../lib/api';
   import { partialNote, runTile } from '../../lib/run';
   import { app } from '../../lib/state.svelte';
   import { readColors, type Colors } from '../../lib/chart';
@@ -22,7 +22,7 @@
     filters: DashFilter[];
     tick: number;
     active: boolean;
-    onpick: (value: Cell, otherOf?: Cell[]) => void;
+    onpick: (value: Cell, otherOf?: Cell[], bins?: Bins) => void;
     onselect: () => void;
     ondragstart: (e: PointerEvent) => void;
     onresizestart: (e: PointerEvent) => void;
@@ -34,8 +34,8 @@
   let colors = $state<Colors>(readColors());
 
   const q = $derived(tileQuery(tile, filters));
-  // The type, the comparison setting and the top N change what the server sends back.
-  const qKey = $derived(JSON.stringify([q, tile.type, tile.type === 'kpi' ? tile.dims : null, tile.top ?? null]));
+  // The type, the comparison setting, the top N and the bin width change what the server sends back.
+  const qKey = $derived(JSON.stringify([q, tile.type, tile.type === 'kpi' ? tile.dims : null, tile.top ?? null, tile.bins ?? null]));
 
   // Re-query when the question, the filters or the data change.
   $effect(() => {
@@ -73,13 +73,14 @@
     res ? res.ignored_filters.map((i) => appliedFilters(tile, filters)[i]).filter(Boolean) : [],
   );
   // A click on "Other" is a not_in filter; the tile shows it as the Other group being picked.
+  // A click on a histogram bin is a range; the tile shows the bin that starts it.
   const selected = $derived.by(() => {
     const f = filters.find((x) => x.fromTile === tile.id);
-    return f ? (f.op === 'not_in' ? [OTHER_KEY] : f.values) : null;
+    return f ? (f.op === 'not_in' ? [OTHER_KEY] : f.op === 'range' ? f.values.slice(0, 1) : f.values) : null;
   });
   const note = $derived(res && tile.type !== 'kpi' ? partialNote(res, tile.dims[0]?.grain) : null);
   const title = $derived(tileTitle(tile, app.tables));
-  const canPick = $derived(tile.type !== 'kpi' && tile.dims.length > 0);
+  const canPick = $derived(tile.type === 'histogram' ? tile.measures.length > 0 : tile.type !== 'kpi' && tile.dims.length > 0);
 </script>
 
 <article class="tile" class:active>
@@ -99,7 +100,7 @@
     {:else if error}
       <p class="error"><Icon name="warning" size={14} /> {error}</p>
     {:else if res}
-      <TileBody {tile} {res} {colors} {selected} tables={app.tables} onpick={canPick ? (v) => onpick(v, res?.otherOf) : undefined} />
+      <TileBody {tile} {res} {colors} {selected} tables={app.tables} onpick={canPick ? (v) => onpick(v, res?.otherOf, res?.bins) : undefined} />
     {/if}
   </div>
   {#if ignored.length || note}

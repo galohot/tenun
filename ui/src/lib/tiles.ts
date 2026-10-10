@@ -21,16 +21,20 @@ export const hasManyValues = (tile: Tile) =>
  */
 export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | null {
   if (!tile.measures.length && !tile.dims.length) return null;
-  const one = tile.type === 'kpi' || tile.type === 'share' || tile.type === 'donut';
+  const one = tile.type === 'kpi' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'waterfall';
   const many = hasManyValues(tile);
-  const dims = one || many ? tile.dims.slice(0, 1) : tile.type === 'table' ? tile.dims : tile.dims.slice(0, 2);
+  // A histogram has no groups: it bins one number column.
+  const dims =
+    tile.type === 'histogram' ? [] : one || many ? tile.dims.slice(0, 1) : tile.type === 'table' ? tile.dims : tile.dims.slice(0, 2);
   // A chart with a group but no value counts rows of the grouped table.
   const measures = tile.measures.length
     ? tile.type === 'table'
       ? tile.measures
       : many
         ? tile.measures.slice(0, MAX_CHART_MEASURES)
-        : tile.measures.slice(0, 1)
+        : tile.type === 'scatter'
+          ? tile.measures.slice(0, 2) // across and up
+          : tile.measures.slice(0, 1)
     : tile.type === 'table'
       ? []
       : [{ table: tile.dims[0].table, column: null, agg: 'count' as const }];

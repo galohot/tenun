@@ -10,6 +10,7 @@
     column,
     placeholder = 'Choose a field',
     reachable,
+    numbersOnly = false,
     onchange,
     onclear,
   }: {
@@ -19,6 +20,8 @@
     placeholder?: string;
     /** Tables that can be used together with the tile's other fields. */
     reachable?: Set<string> | null;
+    /** Lists number columns only, and no row count (a histogram bins a column of numbers). */
+    numbersOnly?: boolean;
     onchange: (table: string, column: string | null) => void;
     onclear?: () => void;
   } = $props();
@@ -37,10 +40,12 @@
       .map((t) => ({
         t,
         cols: t.columns.filter(
-          (c) => !q || c.name.toLowerCase().includes(q.toLowerCase()) || t.label.toLowerCase().includes(q.toLowerCase()),
+          (c) =>
+            (!numbersOnly || c.dtype === 'number') &&
+            (!q || c.name.toLowerCase().includes(q.toLowerCase()) || t.label.toLowerCase().includes(q.toLowerCase())),
         ),
       }))
-      .filter((g) => g.cols.length || (mode === 'measure' && !q)),
+      .filter((g) => g.cols.length || (mode === 'measure' && !q && !numbersOnly)),
   );
 
   function pick(t: string, c: string | null) {
@@ -83,7 +88,7 @@
               <Icon name="table" size={12} />{g.t.label}
               {#if far}<span class="note">not related</span>{/if}
             </div>
-            {#if mode === 'measure' && !q}
+            {#if mode === 'measure' && !q && !numbersOnly}
               <button class="opt" onclick={() => pick(g.t.id, null)}>
                 <Icon name="hash" size={12} /> Number of {g.t.label.toLowerCase()}
               </button>

@@ -94,6 +94,13 @@ export interface QueryResult {
   other?: boolean;
   /** The groups that are not in "Other", for a `not_in` filter. */
   otherOf?: Cell[];
+  /** Histograms: bin `i` covers `[start + i·width, start + (i+1)·width)`. */
+  bins?: Bins;
+}
+
+export interface Bins {
+  start: number;
+  width: number;
 }
 
 export interface KpiInfo {
@@ -166,6 +173,10 @@ export interface Tile {
   layout?: 'together' | 'panels' | 'indexed';
   /** Bars plus a line, index-aligned with measures (Advanced). */
   mix?: ('bar' | 'line')[];
+  /** Bars and areas with a split or several values: pile them up, put them side by side, or fill the height. */
+  stack?: 'stacked' | 'side' | 'percent';
+  /** Histogram: the width of a bin. Not set: the engine picks one. */
+  bins?: { width?: number };
 }
 
 /** Settings of this computer (not of the workspace). */

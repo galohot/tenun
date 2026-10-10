@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { api, type Cell, type Tile, type TileType } from '../lib/api';
+  import { api, type Bins, type Cell, type Tile, type TileType } from '../lib/api';
   import { app, go } from '../lib/state.svelte';
   import { cell, dimLabel, OTHER_KEY, stampLabel } from '../lib/format';
   import { COLS, compact, defaultSize, newId, place, type DashFilter } from '../lib/tiles';
@@ -187,11 +187,20 @@
   }
 
   /** `otherOf` comes with a click on the "Other" group of a top N: everything except those groups. */
-  function pick(tile: Tile, value: Cell, otherOf?: Cell[]) {
-    const d = tile.dims[0];
-    if (!d) return;
+  function pick(tile: Tile, value: Cell, otherOf?: Cell[], bins?: Bins) {
     const mine = filters.find((f) => f.fromTile === tile.id);
     const others = filters.filter((f) => f.fromTile !== tile.id);
+    // A histogram bin filters its column to the range of the bin. The edges are the engine's own numbers.
+    if (tile.type === 'histogram') {
+      const m = tile.measures[0];
+      if (!m?.column || !bins || typeof value !== 'number') return;
+      const hi = Math.round((value + bins.width) * 1e10) / 1e10;
+      const same = mine?.op === 'range' && mine.values[0] === value && mine.values[1] === hi;
+      filters = same ? others : [...others, { table: m.table, column: m.column, grain: null, op: 'range', values: [value, hi], fromTile: tile.id }];
+      return;
+    }
+    const d = tile.dims[0];
+    if (!d) return;
     const isOther = value === OTHER_KEY && !!otherOf;
     if (mine && (isOther ? mine.op === 'not_in' : mine.op === 'in' && mine.values.length === 1 && key(mine.values[0]) === key(value))) {
       filters = others;
@@ -206,7 +215,8 @@
     const t = app.table(f.table);
     const dtype = t?.columns.find((c) => c.name === f.column)?.dtype ?? 'text';
     const name = dimLabel({ table: f.table, column: f.column, grain: f.grain }, app.tables);
-    const shown = f.op === 'not_in' ? 'Other' : f.values.map((v) => cell(v, dtype, f.grain)).join(', ');
+    const shown =
+      f.op === 'not_in' ? 'Other' : f.op === 'range' ? f.values.map((v) => cell(v, dtype, f.grain, true)).join(' to ') : f.values.map((v) => cell(v, dtype, f.grain)).join(', ');
     return `${name.charAt(0).toUpperCase() + name.slice(1)}: ${shown}`;
   }
 
@@ -440,7 +450,7 @@
               {filters}
               {tick}
               active={selectedTile === t.id}
-              onpick={(v, otherOf) => pick(t, v, otherOf)}
+              onpick={(v, otherOf, bins) => pick(t, v, otherOf, bins)}
               onselect={() => (selectedTile = t.id)}
               ondragstart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'move')}
               onresizestart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'resize')} />
