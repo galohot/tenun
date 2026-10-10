@@ -8,7 +8,7 @@
 A local app. No server, no Docker, no account.</p>
 
 <p align="center">
-  <img src="docs/dashboard-light.png" alt="A Tenun dashboard: four number tiles, an area chart by month and region, a donut by category, and bar charts by store and customer segment" width="900">
+  <img src="docs/demo.gif" alt="Opening the sample, clicking a store to filter every chart, saving the Excel file so the numbers update, and the model view that links three files" width="900">
 </p>
 
 Tenun reads your Excel files, CSV files and databases where they are. You draw a line between a
@@ -16,6 +16,10 @@ column in one source and a column in another, and every chart can use both. Clic
 every other chart filters. Save the Excel file and the dashboard updates.
 
 *Tenun* is Indonesian for woven cloth.
+
+<p align="center">
+  <img src="docs/dashboard-light.png" alt="A Tenun dashboard: four number tiles, an area chart by month and region, a donut by category, and bar charts by store and customer segment" width="900">
+</p>
 
 ## Why
 
@@ -33,7 +37,7 @@ every other chart filters. Save the Excel file and the dashboard updates.
   suggests the likely ones (`store_id` → `stores.id`) and checks them against the data.
 - **Six tile types:** number (with change and trend), bar, line, area, donut and table.
 - **Click to filter:** click a bar, a slice or a row, and every other tile filters, across sources.
-- **Live:** saving an Excel or CSV file updates open dashboards in about a second. Databases
+- **Live:** saving an Excel or CSV file updates open dashboards in under a second. Databases
   refresh on an interval you choose.
 - **Export to one HTML file:** it opens offline, anywhere, and click-to-filter still works.
 - **Two ways to run it:** the desktop app, or `tenun serve` in your browser.
