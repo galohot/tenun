@@ -27,6 +27,20 @@ enum Command {
         #[arg(long)]
         no_open: bool,
     },
+    /// Build a dashboard's snapshot without the app: one HTML file, or the JSON data.
+    Snapshot {
+        /// The .tenun workspace.
+        file: PathBuf,
+        /// Dashboard id or title (default: the first dashboard).
+        #[arg(long)]
+        dashboard: Option<String>,
+        /// Write a self-contained HTML file here.
+        #[arg(long)]
+        html: Option<PathBuf>,
+        /// Write the snapshot JSON here (default: standard output).
+        #[arg(long)]
+        json: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -38,6 +52,15 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
     let cli = Cli::parse();
+    if let Some(Command::Snapshot {
+        file,
+        dashboard,
+        html,
+        json,
+    }) = cli.command
+    {
+        return snapshot_cmd(file, dashboard, html, json);
+    }
     let (file, port, host, no_open) = match cli.command {
         Some(Command::Serve {
             file,
@@ -45,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
             host,
             no_open,
         }) => (file, port, host, no_open),
-        None => (None, 4310, IpAddr::from([127, 0, 0, 1]), false),
+        _ => (None, 4310, IpAddr::from([127, 0, 0, 1]), false),
     };
     let opts = |port| tenun::Options {
         host,
@@ -70,5 +93,50 @@ async fn main() -> anyhow::Result<()> {
         let _ = webbrowser::open(&running.url);
     }
     tokio::signal::ctrl_c().await?;
+    Ok(())
+}
+
+fn snapshot_cmd(
+    file: PathBuf,
+    dashboard: Option<String>,
+    html: Option<PathBuf>,
+    json: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    use tenun_core::Engine;
+    use tenun_core::secrets::Secrets;
+    let engine = Engine::new(Secrets::new(Secrets::default_path()))?;
+    engine.open(&file)?;
+    let snap = engine.snapshot();
+    if let Some((id, e)) = snap.errors.iter().next() {
+        anyhow::bail!("source {id} did not load: {e}");
+    }
+    let dashboards = &snap.workspace.dashboards;
+    let pick = match &dashboard {
+        Some(want) => dashboards.iter().find(|d| {
+            d.get("id").and_then(|v| v.as_str()) == Some(want.as_str())
+                || d.get("title").and_then(|v| v.as_str()) == Some(want.as_str())
+        }),
+        None => dashboards.first(),
+    }
+    .ok_or_else(|| anyhow::anyhow!("no such dashboard in {}", file.display()))?;
+    let id = pick
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let payload = tenun_core::snapshot::build(&engine, &id, &[])?;
+    let to_stdout = html.is_none() && json.is_none();
+    if let Some(p) = html {
+        std::fs::write(&p, tenun::export_html(&payload))?;
+        eprintln!("wrote {}", p.display());
+    }
+    match json {
+        Some(p) => {
+            std::fs::write(&p, serde_json::to_string(&payload)?)?;
+            eprintln!("wrote {}", p.display());
+        }
+        None if to_stdout => println!("{payload}"),
+        None => {}
+    }
     Ok(())
 }

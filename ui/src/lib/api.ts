@@ -216,6 +216,18 @@ export const api = {
   ) =>
     call<{ paths: string[] }>('POST', '/pick', req),
   openBrowser: () => call<{ ok: boolean }>('POST', '/open-browser'),
-  viewer: () => call<{ js: string; css: string }>('GET', '/viewer'),
-  writeExport: (path: string, html: string) => call<{ ok: boolean }>('POST', '/export-file', { path, html }),
+  tile: (tile: Tile, filters: unknown[]) => call<QueryResult>('POST', '/tile', { tile, filters }),
+  /** Writes the HTML file (desktop app) when `path` is given. */
+  exportTo: (dashboard: string, filters: unknown[], path: string) =>
+    call<{ ok: boolean }>('POST', '/export-html', { dashboard, filters, path }),
+  /** Returns the HTML file's text (browser mode). */
+  exportHtml: async (dashboard: string, filters: unknown[]): Promise<string> => {
+    const res = await fetch('/api/export-html', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Tenun': '1' },
+      body: JSON.stringify({ dashboard, filters }),
+    });
+    if (!res.ok) throw new ApiError((await res.json().catch(() => null))?.error ?? res.statusText);
+    return res.text();
+  },
 };

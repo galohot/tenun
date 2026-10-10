@@ -18,6 +18,11 @@ use tokio::sync::broadcast;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// A self-contained HTML file for a snapshot (viewer bundle + data).
+pub fn export_html(payload: &serde_json::Value) -> String {
+    export::html(payload)
+}
+
 pub struct Options {
     pub host: IpAddr,
     /// 0 picks a free port.

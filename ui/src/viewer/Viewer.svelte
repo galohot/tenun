@@ -5,7 +5,7 @@
   import type { Cell, Tile } from '../lib/api';
   import type { ExportPayload } from '../lib/export';
   import { key, readColors, type Colors } from '../lib/chart';
-  import { cell, dimLabel } from '../lib/format';
+  import { cell, dimLabel, tileTitle } from '../lib/format';
   import TileBody from '../components/dash/TileBody.svelte';
   import { partialNote } from '../lib/run';
 
@@ -90,7 +90,7 @@
       {#each layout as l (l.t.id)}
         {@const r = resultFor(l.t)}
         <article class="tile" style:transform="translate({l.x}px, {l.y}px)" style:width="{l.w}px" style:height="{l.h}px">
-          <h3>{data.titles[l.t.id]}</h3>
+          <h3>{data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables)}</h3>
           <div class="body">
             {#if r.res}
               <TileBody

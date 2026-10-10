@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tenun_core::engine::AddSource;
 use tenun_core::query::SemanticQuery;
+use tenun_core::snapshot::{self, DashFilter, Tile, run_tile};
 use tenun_core::workspace::FieldRef;
 
 type S = State<Arc<AppState>>;
@@ -68,6 +69,9 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/query", post(query))
         .route("/fs", get(fs))
         .route("/viewer", get(viewer))
+        .route("/tile", post(tile))
+        .route("/snapshot", post(snapshot))
+        .route("/export-html", post(export_html))
         .route("/export-file", post(export_file))
         .route("/events", get(events))
         .route("/pick", post(pick))
@@ -304,6 +308,57 @@ struct FsQ {
 async fn fs(Query(q): Query<FsQ>) -> R<Json<Value>> {
     let listing = tokio::task::spawn_blocking(move || fsbrowse::list(q.path.as_deref())).await??;
     Ok(Json(serde_json::to_value(listing)?))
+}
+
+#[derive(Deserialize)]
+struct TileBody {
+    tile: Value,
+    #[serde(default)]
+    filters: Vec<DashFilter>,
+}
+
+/// One live tile, computed by the same engine as snapshots.
+async fn tile(State(s): S, Json(b): Json<TileBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let t: Tile = serde_json::from_value(b.tile)?;
+            Ok(serde_json::to_value(run_tile(&st.engine, &t, &b.filters)?)?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct SnapBody {
+    dashboard: String,
+    #[serde(default)]
+    filters: Vec<DashFilter>,
+    /// Export only: write the HTML file here (desktop app) instead of returning it.
+    #[serde(default)]
+    path: Option<String>,
+}
+
+async fn snapshot(State(s): S, Json(b): Json<SnapBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            snapshot::build(&st.engine, &b.dashboard, &b.filters)
+        })
+        .await?,
+    ))
+}
+
+async fn export_html(State(s): S, Json(b): Json<SnapBody>) -> R<Response> {
+    let (html, path) = blocking(&s, move |st| {
+        let payload = snapshot::build(&st.engine, &b.dashboard, &b.filters)?;
+        Ok((export::html(&payload), b.path))
+    })
+    .await?;
+    if let Some(p) = path {
+        tokio::task::spawn_blocking(move || export::write(export::WriteFile { path: p, html }))
+            .await??;
+        return Ok(Json(json!({ "ok": true })).into_response());
+    }
+    Ok(([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response())
 }
 
 async fn viewer() -> Json<Value> {

@@ -60,12 +60,18 @@ pub enum AddSource {
     },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct QueryResult {
     pub columns: Vec<query::OutColumn>,
     pub rows: Vec<Vec<serde_json::Value>>,
     pub ignored_filters: Vec<usize>,
     pub ms: u128,
+    /// Number tiles: the figure and its fair comparison.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kpi: Option<crate::snapshot::KpiInfo>,
+    /// Time charts: the last period is not over yet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial: Option<crate::snapshot::Partial>,
 }
 
 #[derive(Debug, Serialize)]
@@ -459,7 +465,25 @@ impl Engine {
             rows,
             ignored_filters: compiled.ignored_filters,
             ms: start.elapsed().as_millis(),
+            kpi: None,
+            partial: None,
         })
+    }
+
+    /// A dashboard stored in the workspace, by id.
+    pub fn dashboard(&self, id: &str) -> Option<serde_json::Value> {
+        self.state
+            .read()
+            .unwrap()
+            .ws
+            .dashboards
+            .iter()
+            .find(|d| d.get("id").and_then(|v| v.as_str()) == Some(id))
+            .cloned()
+    }
+
+    pub fn workspace_name(&self) -> String {
+        self.state.read().unwrap().ws.name.clone()
     }
 
     pub fn preview(&self, table_id: &str, limit: u32) -> anyhow::Result<Preview> {

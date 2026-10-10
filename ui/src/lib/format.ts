@@ -94,7 +94,9 @@ function idBase(column: string): string | null {
 
 const GENERIC = new Set(['name', 'title', 'label', 'code', 'id', 'key', 'type', 'description']);
 
-export function measureLabel(m: Measure, tables: Table[]): string {
+type Named = Pick<Table, 'id' | 'name' | 'label'>;
+
+export function measureLabel(m: Measure, tables: Named[]): string {
   const t = tables.find((x) => x.id === m.table);
   if (m.column === null) return `Number of ${(t?.label ?? 'rows').toLowerCase()}`;
   const base = idBase(m.column);
@@ -106,7 +108,7 @@ export function measureLabel(m: Measure, tables: Table[]): string {
 }
 
 /** "name" of the stores table reads as "store". */
-export function dimLabel(d: Dim, tables: Pick<Table, 'id' | 'name'>[] = []): string {
+export function dimLabel(d: Dim, tables: Named[] = []): string {
   if (d.grain) return d.grain;
   if (GENERIC.has(d.column.toLowerCase())) {
     const t = tables.find((x) => x.id === d.table);
@@ -115,7 +117,7 @@ export function dimLabel(d: Dim, tables: Pick<Table, 'id' | 'name'>[] = []): str
   return pretty(d.column).toLowerCase();
 }
 
-export function tileTitle(t: Tile, tables: Table[]): string {
+export function tileTitle(t: Tile, tables: Named[]): string {
   if (t.title) return t.title;
   if (!t.measures.length && !t.dims.length) return 'New tile';
   const m = t.measures[0] ? measureLabel(t.measures[0], tables) : pretty(t.dims[0].column);

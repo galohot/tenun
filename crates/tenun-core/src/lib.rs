@@ -5,6 +5,7 @@ pub mod engine;
 pub mod excel;
 pub mod query;
 pub mod secrets;
+pub mod snapshot;
 pub mod sqlite;
 pub mod suggest;
 pub mod watch;

@@ -5,7 +5,6 @@
   import { cell, dimLabel } from '../lib/format';
   import { COLS, compact, defaultSize, newId, place, type DashFilter } from '../lib/tiles';
   import { key } from '../lib/chart';
-  import { buildHtml, buildPayload } from '../lib/export';
   import Icon from './Icon.svelte';
   import TileView from './dash/TileView.svelte';
   import Inspector from './dash/Inspector.svelte';
@@ -138,15 +137,13 @@
       target = paths[0].endsWith('.html') ? paths[0] : paths[0] + '.html';
     }
     exporting = 'Preparing…';
+    const fs = $state.snapshot(filters) as DashFilter[];
     try {
-      const payload = await buildPayload($state.snapshot(dash) as typeof dash, app.tables, app.snap!.workspace.name, $state.snapshot(filters) as DashFilter[], (d, t) => {
-        exporting = `Preparing ${Math.round((d / t) * 100)}%`;
-      });
-      const html = await buildHtml(payload);
       if (target) {
-        await api.writeExport(target, html);
+        await api.exportTo(dash.id, fs, target);
         app.toast(`Exported ${target.split(/[\\/]/).pop()}`);
       } else {
+        const html = await api.exportHtml(dash.id, fs);
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
         a.download = `${dash.title.replace(/[\\/:*?"<>|]/g, '_')}.html`;

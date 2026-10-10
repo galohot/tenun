@@ -112,10 +112,10 @@ pub enum Param {
     Bool(bool),
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutColumn {
     pub name: String,
-    pub role: &'static str,
+    pub role: String,
     pub dtype: DType,
 }
 
@@ -199,7 +199,7 @@ pub fn compile(
         ));
         columns.push(OutColumn {
             name: d.column.clone(),
-            role: "dimension",
+            role: "dimension".into(),
             dtype,
         });
     }
@@ -211,7 +211,7 @@ pub fn compile(
         ));
         columns.push(OutColumn {
             name,
-            role: "measure",
+            role: "measure".into(),
             dtype,
         });
     }
@@ -285,6 +285,16 @@ pub fn compile(
             order.push(format!("{} DESC NULLS LAST", nd + 1));
         } else if nd > 0 {
             order.push("1 ASC".into());
+        }
+    }
+    // Ties are broken by every other dimension, so the same question always
+    // returns rows in the same order.
+    for i in 1..=nd {
+        if !order
+            .iter()
+            .any(|o| o.split(' ').next() == Some(&i.to_string()))
+        {
+            order.push(format!("{i} ASC NULLS LAST"));
         }
     }
     if !order.is_empty() {
@@ -634,7 +644,7 @@ mod tests {
              FROM \"s_s1\".\"orders\" AS t0 \
              LEFT JOIN \"s_s2\".\"stores\" AS t1 ON t0.\"store_id\" = t1.\"id\" \
              LEFT JOIN \"s_s3\".\"regions\" AS t2 ON t1.\"region_code\" = t2.\"code\" \
-             GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 1000"
+             GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000"
         );
     }
 
