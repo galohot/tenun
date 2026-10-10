@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Privacy — Tenun</title>
+<meta name="description" content="What tenun.cloud stores, who can see it, and how to delete it.">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/cloud.css">
+</head>
+<body>
+<header class="nav"><a class="brand" href="/"><img src="/icon.svg" alt="" width="28" height="28"> Tenun</a><nav><a href="/account">Account</a></nav></header>
+<main class="cloud prose">
+<h1>Privacy</h1>
+<p class="lede">tenun.cloud stores only what is needed to show the dashboards you publish. The Tenun app on your computer works without it.</p>
+
+<h2>What we store</h2>
+<ul>
+<li><b>Your account:</b> your email address and name, from Google sign-in.</li>
+<li><b>Published dashboards:</b> the title, the layout, and the results each tile shows (for example "Amount by store"), including the results needed to filter by clicking. Not your files, not your databases, and not your database passwords: those never leave your computer.</li>
+<li><b>Freshness:</b> when each snapshot was made, the name of the computer that published it (you choose this label), and how often it updates.</li>
+<li><b>Connected apps:</b> a fingerprint (hash) of each publishing key, when it was created and last used. The key itself is not stored.</li>
+<li><b>Invited people:</b> the email addresses you add to a dashboard.</li>
+</ul>
+
+<h2>Who can see it</h2>
+<ul>
+<li>A dashboard set to <b>anyone with the link</b> can be seen by anyone who has its address. The address is long and random, and search engines are told not to index it.</li>
+<li>A dashboard set to <b>invited people</b> can be seen only after signing in with an email you invited.</li>
+<li>We do not sell data, show ads, or use analytics or tracking cookies.</li>
+</ul>
+
+<h2>How long we keep it</h2>
+<ul>
+<li>The last five versions of each dashboard. Older versions are deleted when a new one arrives.</li>
+<li>Deleting a dashboard deletes every version at once. Deleting your account deletes everything listed above.</li>
+</ul>
+
+<h2>Cookies</h2>
+<p>One cookie keeps you signed in. It is needed for sign-in and is not used for anything else.</p>
+
+<h2>Services we use</h2>
+<ul>
+<li><b>Cloudflare</b> stores and serves the data.</li>
+<li><b>WorkOS</b> and <b>Google</b> handle sign-in.</li>
+</ul>
+
+<h2>Your choices</h2>
+<p>You can see, disconnect and delete everything on your <a href="/account">account page</a>. For anything else, open an issue on <a href="https://github.com/galohot/tenun/issues">GitHub</a>.</p>
+</main>
+<footer><p><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="https://github.com/galohot/tenun">Source code</a></p></footer>
+</body>
+</html>

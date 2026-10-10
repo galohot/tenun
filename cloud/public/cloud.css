@@ -1,0 +1,35 @@
+/* Account and notice pages on tenun.cloud (on top of /style.css). */
+.nav nav { align-items: center; }
+.nav .who { color: var(--text-2); font-size: 0.85rem; }
+main.cloud { max-width: 46rem; padding-top: 3rem; padding-bottom: 4rem; min-height: 60vh; }
+main.cloud h1 { font-size: 2rem; letter-spacing: -0.02em; margin: 0 0 0.5rem; }
+main.cloud h2 { font-size: 1.2rem; margin: 2.5rem 0 0.25rem; }
+main.cloud .lede { font-size: 1.05rem; color: var(--text-2); margin: 0 0 1.5rem; }
+main.cloud .lede.warn { color: var(--text); }
+.meta { color: var(--text-2); font-size: 0.85rem; margin: 0.15rem 0 0; }
+.list { list-style: none; padding: 0; margin: 0.75rem 0 0; border-top: 1px solid var(--sep); }
+.list li { padding: 0.9rem 0; border-bottom: 1px solid var(--sep); }
+.list .row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.list .title { font-weight: 600; color: var(--text); }
+.list .empty { color: var(--text-2); }
+.stack { display: flex; flex-direction: column; gap: 0.75rem; max-width: 22rem; }
+.row-buttons { display: flex; gap: 0.75rem; }
+.field {
+  height: 2.75rem;
+  padding: 0 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--sep);
+  background: var(--bg-2);
+  color: var(--text);
+  font: inherit;
+}
+.field.code { font-size: 1.3rem; letter-spacing: 0.15em; text-transform: uppercase; }
+.code-show { font-size: 1.6rem; font-weight: 600; letter-spacing: 0.15em; margin: 0 0 1.5rem; }
+button.button { font: inherit; cursor: pointer; background: var(--bg); }
+.button.small { height: 2.1rem; padding: 0 0.9rem; font-size: 0.85rem; }
+.button.danger { color: #c4001a; }
+@media (prefers-color-scheme: dark) { .button.danger { color: #ff6b6b; } }
+.check { display: flex; gap: 0.5rem; align-items: center; color: var(--text-2); font-size: 0.9rem; }
+.error { color: #c4001a; }
+.prose p, .prose li { color: var(--text-2); }
+.prose h2 { color: var(--text); }

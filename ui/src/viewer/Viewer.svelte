@@ -9,7 +9,14 @@
   import TileBody from '../components/dash/TileBody.svelte';
   import { partialNote } from '../lib/run';
 
-  const data = (window as unknown as { TENUN: ExportPayload }).TENUN;
+  let {
+    data,
+    hosted = null,
+  }: {
+    data: ExportPayload;
+    /** Set on tenun.cloud: when and where the snapshot was published, and how often it should update. */
+    hosted?: { updated: string; source: string; every: number | null } | null;
+  } = $props();
   const ROW = 76;
   const GAP = 12;
 
@@ -63,14 +70,40 @@
     return `${name.charAt(0).toUpperCase() + name.slice(1)}: ${cell(v, dtype, d.grain)}`;
   }
 
-  const when = new Date(data.generated).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const when = $derived(new Date(data.generated).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }));
+
+  // Freshness: a published dashboard says how old it is, and says so loudly when an update is late.
+  let clock = $state(Date.now());
+  onMount(() => {
+    const h = setInterval(() => (clock = Date.now()), 60_000);
+    return () => clearInterval(h);
+  });
+  const updatedAt = $derived(hosted ? Date.parse(hosted.updated) : NaN);
+  const age = $derived.by(() => {
+    if (!Number.isFinite(updatedAt)) return '';
+    const s = (clock - updatedAt) / 1000;
+    if (s < 90) return 'just now';
+    if (s < 5400) return `${Math.round(s / 60)} minutes ago`;
+    const d = new Date(updatedAt);
+    const today = new Date(clock).toDateString() === d.toDateString();
+    const t = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    return today ? `at ${t} today` : `${d.toLocaleDateString(undefined, { dateStyle: 'medium' })} ${t}`;
+  });
+  // Late = more than twice the schedule (daily schedules get two extra hours of slack).
+  const late = $derived(
+    !!hosted?.every && Number.isFinite(updatedAt) && clock - updatedAt > (2 * hosted.every + (hosted.every >= 1440 ? 120 : 0)) * 60_000,
+  );
 </script>
 
 <div class="page">
   <header>
     <div>
       <h1>{data.title}</h1>
-      <p>{data.workspace} · exported {when}</p>
+      {#if hosted}
+        <p>Updated {age}{hosted.source ? ` from ${hosted.source}` : ''}</p>
+      {:else}
+        <p>{data.workspace} · exported {when}</p>
+      {/if}
     </div>
     <div class="chips">
       {#each data.filters as f}
@@ -84,6 +117,14 @@
       {/if}
     </div>
   </header>
+
+  {#if late}
+    <div class="late" role="status">
+      This dashboard has not updated since {new Date(updatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}.
+      It should update every {hosted!.every! >= 1440 ? 'day' : hosted!.every! >= 120 ? `${Math.round(hosted!.every! / 60)} hours` : 'hour'}.
+      The numbers below may be out of date.
+    </div>
+  {/if}
 
   <div class="grid" bind:clientWidth={width} style:height="{height}px">
     {#if colors}
@@ -111,7 +152,11 @@
   </div>
 
   <footer>
-    Made with <a href="https://github.com/galohot/tenun" target="_blank" rel="noopener">Tenun</a> · the data in this file is a snapshot.
+    {#if hosted}
+      Published with <a href="https://tenun.cloud" target="_blank" rel="noopener">Tenun</a> · the numbers update when the owner's computer publishes them.
+    {:else}
+      Made with <a href="https://github.com/galohot/tenun" target="_blank" rel="noopener">Tenun</a> · the data in this file is a snapshot.
+    {/if}
   </footer>
 </div>
 
@@ -151,6 +196,14 @@
   h3 { padding: 10px 14px 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .body { flex: 1; min-height: 0; padding: 6px 14px 10px; }
   .note { margin: 0; padding: 0 14px 8px; font-size: 11px; color: var(--text-2); }
+  .late {
+    margin: 0 0 16px;
+    padding: 10px 14px;
+    border-radius: var(--r-card);
+    background: color-mix(in srgb, #c47400 14%, var(--surface));
+    color: var(--text);
+    font-size: 13px;
+  }
   footer { margin-top: 24px; font-size: 12px; color: var(--text-2); text-align: center; }
   footer a { color: var(--accent-text); }
 </style>

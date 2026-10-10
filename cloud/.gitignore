@@ -1,0 +1,7 @@
+public/*
+!public/cloud.css
+!public/privacy.html
+!public/terms.html
+.build/
+.wrangler/
+node_modules/

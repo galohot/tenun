@@ -1,0 +1,20 @@
+{
+  "name": "tenun-cloud",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  },
+  "routes": [{ "pattern": "tenun.cloud", "custom_domain": true }],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "tenun-cloud", "database_id": "<D1_DATABASE_ID>", "migrations_dir": "migrations" }
+  ],
+  "r2_buckets": [{ "binding": "SNAPSHOTS", "bucket_name": "tenun-snapshots" }],
+  "triggers": { "crons": ["17 3 * * *"] },
+  // Sign-in stays closed until the Akun keys are set as secrets and SIGNIN is switched to "open".
+  "vars": { "SIGNIN": "closed" },
+  "observability": { "enabled": true }
+}

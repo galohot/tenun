@@ -1,0 +1,24 @@
+{
+  "name": "tenun-cloud",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "assets": "node scripts/assets.mjs",
+    "bundle": "node scripts/bundle.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm assets && pnpm bundle && vitest run",
+    "check": "pnpm typecheck && pnpm test",
+    "dev": "pnpm assets && wrangler dev --port 8820 --var DEV_LOGIN:1 --var SIGNIN:dev"
+  },
+  "dependencies": {
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261009.1",
+    "esbuild": "^0.28.2",
+    "miniflare": "^4.20260730.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
