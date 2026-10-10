@@ -107,6 +107,8 @@ export interface QueryResult {
   totals?: Totals;
   /** Time charts with `tile.compare`: the earlier series, its keys moved forward to line up with `rows`. */
   compare?: { label: string; rows: Cell[][] };
+  /** Tables only, when the row limit cut the result: how many rows there are in all. */
+  total_rows?: number;
 }
 
 /**
@@ -180,6 +182,18 @@ export interface TileLine {
   value?: number;
   to?: number;
   label?: string;
+  /** Scatter only: `y` is a level line (a value up the side), `x` an upright one. Unset: both, for a median. */
+  axis?: 'x' | 'y';
+}
+
+/** How the cells of a value look in a table or pivot. Index-aligned with `Tile.measures`. */
+export interface CondFormat {
+  /** `bars`: a thin bar behind the number. `goodbad`: the number is coloured, with a ▲ or ▼. */
+  kind: 'bars' | 'goodbad';
+  /** Good-bad: the value to compare with (0 when unset, and for a change). */
+  threshold?: number;
+  /** Good-bad: which direction is good. Default up. */
+  better?: 'up' | 'down';
 }
 
 export interface Tile {
@@ -204,6 +218,12 @@ export interface Tile {
   lines?: TileLine[];
   /** How each value is written, index-aligned with `measures`. */
   formats?: (NumFormat | null)[];
+  /** Values written on the chart: Auto (the usual few), every bar or point, or none. */
+  labels?: 'auto' | 'all' | 'none';
+  /** Table and pivot: how the cells of each value look, index-aligned with `measures`. */
+  cond?: (CondFormat | null)[];
+  /** Table: the width in px of each column, from a drag on a heading. The engine ignores it. */
+  widths?: number[];
   /** Small multiples (Advanced). */
   repeat?: Dim;
   /** Several measures: `panels` and `indexed` are Advanced. */

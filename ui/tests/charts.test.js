@@ -1,7 +1,8 @@
 // The arithmetic behind stack modes, the 100 % view and the waterfall (build 04).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assignSlots, farFromZero, labelledSteps, median, normalizeShares, stackMode, stackable, unitOf, waterfallSteps } from '../src/lib/charts/math.ts';
+import { median } from '../src/lib/charts/lines.ts';
+import { assignSlots, farFromZero, labelledSteps, normalizeShares, stackMode, stackable, unitOf, waterfallSteps } from '../src/lib/charts/math.ts';
 
 const m = (agg) => ({ table: 't', column: 'c', agg });
 const shape = (steps) => steps.map((s) => [s.kind, s.from, s.to, s.value]);

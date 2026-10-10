@@ -58,10 +58,24 @@ export function buildHistogram({ res, tile, colors: c, selected, width }: BuildA
         ) => {
           const a = api.coord([api.value(0), api.value(2)]);
           const b = api.coord([api.value(1), 0]);
-          return {
+          const bar = {
             type: 'rect',
             shape: { x: a[0], y: a[1], width: b[0] - a[0], height: b[1] - a[1] },
             style: api.style({ fill: c.series[0], stroke: c.surface, lineWidth: 1 }),
+          };
+          // "All" writes the count above each bar that is wide enough to carry it.
+          const text = count.short(api.value(2));
+          if (tile.labels !== 'all' || !api.value(2) || b[0] - a[0] < 8 + text.length * 6.3) return bar;
+          return {
+            type: 'group',
+            children: [
+              bar,
+              {
+                type: 'text',
+                silent: true,
+                style: { text, x: (a[0] + b[0]) / 2, y: a[1] - 3, fill: c.text2, fontSize: 11, textAlign: 'center', textVerticalAlign: 'bottom' },
+              },
+            ],
           };
         },
       },

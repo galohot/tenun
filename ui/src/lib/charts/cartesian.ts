@@ -17,7 +17,12 @@ import {
   type BuildArgs,
   type Built,
 } from './common';
+import { axisSpan, levelMarkLine, resolveLevels, wantsTrend } from './guides';
+import { fitAt, shownSeries, stepWord, trendFit, trendSentence, usableValues } from './lines';
 import { normalizeShares, stackMode } from './math';
+
+/** The name of the trend line in the legend and the tooltip. */
+const TREND = 'Trend';
 
 export function buildCartesian({ res, tile, colors: c, selected, width, height, tables = [] }: BuildArgs): Built {
   const dim0 = res.columns[0];
@@ -88,13 +93,21 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   };
 
   const radius = horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0];
+  // Values written on the chart. Auto: a bar chart that has room labels every bar, and a line labels
+  // its last, lowest and highest point. All: every bar or point, where it fits. None: no values.
+  const labelMode = tile.labels ?? 'auto';
   // Direct labels before gridlines: when every bar carries its value, the value axis goes.
-  const labelled = tile.type === 'bar' && !multi && !hasCompare && categories.length <= (horizontal ? 16 : Math.floor(width / 48));
+  const fits = tile.type === 'bar' && !multi && !hasCompare && categories.length <= (horizontal ? 16 : Math.floor(width / 48));
+  const barLabels = tile.type === 'bar' && (labelMode === 'all' || (labelMode === 'auto' && fits));
+  const labelText = (v: number) => (percent ? pctShare(v) : fmtOf(0).short(v));
   // Name the lines at their ends only when they end far enough apart to read.
   const ends = series.map((s) => s.values.at(-1) ?? 0).sort((a, b) => a - b);
   const top = Math.max(1, ...series.flatMap((s) => s.values.map((v) => v ?? 0)));
   const nameEnds =
     tile.type === 'line' && series.length <= 4 && ends.every((v, i) => i === 0 || (v - ends[i - 1]) / top > 0.08);
+  // Value labels along a line are as wide as their numbers: leave points out so two never touch.
+  const labelWidth = Math.max(0, ...series.flatMap((s) => s.values.map((v) => (v === null ? 0 : 8 + labelText(v).length * 6.3 + 6))));
+  const every = Math.max(1, Math.ceil(labelWidth / Math.max(1, (width - 60) / Math.max(1, categories.length - 1))));
   // A stacked area puts the biggest series at the base. Colours stay with their series.
   const order = series.map((_, i) => i);
   if (stacked && tile.type === 'area') {
@@ -134,11 +147,12 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         },
         // A value at the bar's end when there is one series and room for it.
         label: {
-          show: labelled,
-          position: horizontal ? 'right' : 'top',
+          show: barLabels,
+          // A pile of segments carries its numbers inside; the end of the bar is for the whole.
+          position: stacked ? 'inside' : horizontal ? 'right' : 'top',
           color: c.text2,
           fontSize: 11,
-          formatter: (p: { value: number }) => fmt.short(p.value),
+          formatter: (p: { value: number }) => (percent ? pctShare(p.value) : fmt.short(p.value)),
         },
         // Full-digit labels can be wider than the bar slot; hide the ones that collide.
         labelLayout: { hideOverlap: true },
@@ -149,11 +163,40 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     }
     const lineStyle = { width: 2, color, cap: 'round', join: 'round' };
     const itemStyle = { color, borderColor: c.surface, borderWidth: 2 };
+    // A single line names its last value at the end. With "All" the value sits on the point instead,
+    // and with "None" there are no values. Several lines name themselves at their ends.
     const endLabel = {
-      show: categories.length > 2 && (!multi || nameEnds),
+      show: categories.length > 2 && (multi ? nameEnds : labelMode === 'auto'),
       color: c.text2,
       fontSize: 11,
       formatter: multi ? () => s.name : (p: { value: number }) => fmt.short(p.value),
+    };
+    // Auto: a single line also names its lowest and highest point, with a dot on each (a label hangs on
+    // a symbol, and the line itself draws none). Its last has the label at the end.
+    const marks = (values: (number | null)[]) => {
+      if (labelMode !== 'auto' || multi || hasCompare || values.length < 4) return undefined;
+      let lo = -1;
+      let hi = -1;
+      values.forEach((v, i) => {
+        if (v === null || i === values.length - 1) return;
+        if (lo < 0 || v < (values[lo] as number)) lo = i;
+        if (hi < 0 || v > (values[hi] as number)) hi = i;
+      });
+      if (lo === hi) return undefined;
+      const point = (i: number) => ({
+        coord: [i, values[i]],
+        value: values[i],
+        label: { position: i === hi ? ('top' as const) : ('bottom' as const) },
+      });
+      return {
+        silent: true,
+        animation: false,
+        symbol: 'circle',
+        symbolSize: 8,
+        itemStyle: { color, borderColor: c.surface, borderWidth: 2 },
+        label: { show: true, color: c.text2, fontSize: 11, formatter: (p: { value: number }) => labelText(p.value) },
+        data: [point(hi), point(lo)],
+      };
     };
     // An unfinished last period: the line stops one point early and a dashed
     // copy draws the final segment, so a half month never reads as a drop.
@@ -163,20 +206,30 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       name: s.name,
       stack: stacked && tile.type === 'area' ? 'total' : undefined,
       smooth: false,
-      showSymbol: categories.length <= 2,
+      showSymbol: categories.length <= 2 || labelMode === 'all',
       symbol: 'circle',
-      symbolSize: 8,
+      symbolSize: labelMode === 'all' ? 6 : 8,
       lineStyle,
       itemStyle,
       areaStyle: tile.type === 'area' ? { color, opacity: multi ? 0.14 : 0.1 } : undefined,
       emphasis: { focus: 'none', scale: false },
       connectNulls: false,
       tooltip,
+      markPoint: marks(shares ? shares[si] : s.values),
       data: unfinished
         ? [...s.values.slice(0, -1), null]
         : shares
           ? shares[si].map((v, i) => ({ value: v, raw: s.values[i] }))
           : s.values,
+      // "All" names every point that has room: with k points to the label, every k-th one from the end.
+      label: {
+        show: labelMode === 'all',
+        position: 'top',
+        color: c.text2,
+        fontSize: 11,
+        formatter: (p: { value: number; dataIndex: number }) => ((s.values.length - 1 - p.dataIndex) % every === 0 ? labelText(p.value) : ''),
+      },
+      labelLayout: { hideOverlap: true },
       endLabel: unfinished ? { show: false } : endLabel,
     };
     if (!unfinished) return [main];
@@ -194,6 +247,72 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     };
     return [main, dashed];
   }).flat();
+
+  // Reference lines and the trend line. A 100 % chart has no values to compare with.
+  // The numbers are those shown: the first value, or the total of each category when the series pile
+  // up (a split, or several stacked values). "Other" never counts.
+  const guided = !percent;
+  const isRest = (v: Cell) => v === FOLDED || isOther(v);
+  const aligned = shownSeries(series, (!perValue && multi) || (perValue && stacked));
+  const shown = usableValues(aligned, categories, isRest);
+  const levels = guided ? resolveLevels(tile.lines, false, () => shown) : [];
+  // The unfinished last period is left out of the fit, so a half month never bends the line.
+  const rest = new Set<number>();
+  categories.forEach((v, i) => {
+    if (isRest(v) || (partialKey !== undefined && v === partialKey)) rest.add(i);
+  });
+  const fit = guided && wantsTrend(tile.lines) ? trendFit(aligned, undefined, rest) : null;
+  const trendTip = fit ? trendSentence(fit, fmtOf(0).short(Math.abs(fit.slope)), `per ${stepWord(temporal ? grain : null)}`) : '';
+  const lineKey = horizontal ? 'xAxis' : 'yAxis';
+  // The plot is about as tall (or wide) as the chart less its margins and axis text.
+  const plotLength = horizontal ? width - 70 : height - (multi || hasCompare || fit ? 34 : 14) - 30;
+  const markLine = levelMarkLine(
+    levels,
+    lineKey,
+    axisSpan(shown, levels.map((l) => l.value), true, plotLength),
+    c,
+    (_, n) => fmtOf(0).short(n),
+    // The category axis of horizontal bars runs top to bottom, so the top of an upright line is its start.
+    'start',
+  );
+  if (markLine || fit) {
+    // One unseen series carries the lines. Its two points keep the axis wide enough for every line,
+    // also a target above the data.
+    const reach = levels.map((l) => l.value);
+    (built as object[]).push(
+      {
+        type: 'line',
+        silent: true,
+        z: 5,
+        showSymbol: false,
+        symbol: 'none',
+        lineStyle: { opacity: 0, width: 0 },
+        tooltip: { show: false },
+        emphasis: { disabled: true },
+        data: reach.length ? categories.map((_, i) => (i === 0 ? Math.max(...reach) : i === 1 ? Math.min(0, ...reach) : null)) : [],
+        markLine: markLine ?? undefined,
+      },
+      ...(fit
+        ? [
+            {
+              type: 'line',
+              name: TREND,
+              z: 4,
+              silent: true,
+              showSymbol: false,
+              symbol: 'none',
+              color: c.text2,
+              lineStyle: { width: 1.5, color: c.text2, type: [5, 4], cap: 'round' },
+              itemStyle: { color: c.text2 },
+              emphasis: { disabled: true },
+              // A straight dashed line across the plot.
+              data: categories.map((v, i) => (isRest(v) ? null : fitAt(fit, i))),
+              tooltip: { valueFormatter: (v: number | null) => (v === null ? '–' : trendTip) },
+            },
+          ]
+        : []),
+    );
+  }
 
   // The comparison series goes behind the others: grey bars (wider, so they show beside the bar in
   // front) or a 2 px dashed grey line.
@@ -238,7 +357,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     const num = (v: unknown) => (typeof v === 'number' ? v : null);
     const fmt = fmtOf(0);
     // The value first and the comparison last, as the legend names them.
-    const ps = all.filter((p) => p.seriesName !== compareName);
+    const ps = all.filter((p) => p.seriesName !== compareName && p.seriesName !== TREND);
     const now = num(ps[0]?.value);
     const before = earlierValues && ps[0] ? earlierValues[ps[0].dataIndex] : null;
     // A relative change of a share or a rank would read oddly, so those show the two values only.
@@ -251,7 +370,8 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       `${esc(all[0]?.axisValueLabel ?? '')}<br/>` +
       ps.map((p) => `${p.marker} ${esc(p.seriesName)} <b>${num(p.value) === null ? '–' : esc(fmt.tip(num(p.value) as number))}</b>`).join('<br/>') +
       `<br/>${dot} ${esc(compareName)} <b>${before === null ? '–' : esc(fmt.tip(before))}</b>` +
-      change
+      change +
+      (fit ? `<br/>${esc(trendTip)}` : '')
     );
   };
 
@@ -259,21 +379,22 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const withBehind = <T extends object>(axis: T) =>
     hasCompare && tile.type === 'bar' ? [axis, { ...axis, show: false, axisPointer: { show: false } }] : axis;
   const longest = Math.max(0, ...categories.map((x) => label(x).length));
-  const quietValue = labelled ? { ...valueAxis, axisLabel: { show: false }, splitLine: { show: false } } : valueAxis;
+  const quietValue = fits && barLabels ? { ...valueAxis, axisLabel: { show: false }, splitLine: { show: false } } : valueAxis;
   const option = {
     animationDuration: 350,
     grid: {
       left: 4,
       right: tile.type === 'bar' && horizontal ? 44 : nameEnds ? 72 : multi ? 12 : 44,
-      top: multi || hasCompare ? 34 : 14,
+      top: multi || hasCompare || fit ? 34 : horizontal && markLine ? 30 : 14,
       bottom: 4,
       containLabel: true,
     },
-    legend: multi || hasCompare
+    legend: multi || hasCompare || fit
       ? {
           type: 'scroll',
-          // The comparison goes behind the others but is named last.
-          data: hasCompare ? [series[0].name, compareName] : undefined,
+          // The comparison goes behind the others but is named last, and the trend after it.
+          // The unseen series that carries the lines is not named.
+          data: [...(hasCompare ? [series[0].name, compareName] : series.map((s) => s.name)), ...(fit ? [TREND] : [])],
           top: 0,
           left: 0,
           icon: tile.type === 'bar' ? 'roundRect' : 'circle',

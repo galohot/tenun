@@ -150,14 +150,6 @@ export function labelledSteps(steps: Step[], n = 3): Set<number> {
   return out;
 }
 
-/** The middle value. An even count averages the two in the middle. */
-export function median(values: number[]): number | null {
-  if (!values.length) return null;
-  const v = [...values].sort((a, b) => a - b);
-  const mid = v.length >> 1;
-  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
-}
-
 /** True when every value sits far from zero, so an axis from zero would squeeze the dots. */
 export function farFromZero(values: number[]): boolean {
   if (!values.length) return false;

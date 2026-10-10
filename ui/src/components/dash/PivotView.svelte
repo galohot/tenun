@@ -2,7 +2,9 @@
   // A pivot table: rows down the side, one field across the top, one or more values in each cell.
   // The engine computed every number, totals included. This only lays them out.
   import type { Cell, QueryResult, Tile } from '../../lib/api';
-  import { cell, columnHeads, type Named } from '../../lib/format';
+  import { barScale, barSpan, barStyle, goodBad } from '../../lib/cells';
+  import { cell, columnHeads, resultDim0, type Named } from '../../lib/format';
+  import { effectiveShowAs } from '../../lib/showas';
   import { MAX_PIVOT_ROWS, pivotModel } from '../../lib/pivot';
 
   let {
@@ -41,6 +43,28 @@
   const rowDimName = (i: number) => heads[i] ?? '';
   const colLabel = (v: Cell) => cell(v, res.columns[m.nRows]?.dtype ?? 'text', tile.cols?.grain);
   const rowLabel = (v: Cell, i: number) => cell(v, res.columns[i]?.dtype ?? 'text', tile.dims[i]?.grain);
+
+  // How the cells of a value look (build 07). All the cells of one value share a scale; totals have none.
+  const kind = $derived(resultDim0(res, tile));
+  const condOf = (j: number) => tile.cond?.[j] ?? null;
+  const scales = $derived(
+    Array.from({ length: m.nValues }, (_, j) =>
+      condOf(j)?.kind === 'bars' ? barScale(m.rows.flatMap((r) => r.cells.map((c) => (typeof c?.[j] === 'number' ? (c[j] as number) : null)))) : null,
+    ),
+  );
+  const barOf = (v: Cell | undefined, j: number) => {
+    const sc = scales[j];
+    return sc && typeof v === 'number' ? barStyle(barSpan(v, sc)) : '';
+  };
+  const verdictOf = (v: Cell | undefined, j: number) => {
+    const cond = condOf(j);
+    return cond?.kind === 'goodbad' ? goodBad(typeof v === 'number' ? v : null, cond, effectiveShowAs(tile, j, kind)) : null;
+  };
+  const lineText = (j: number) => {
+    const how = effectiveShowAs(tile, j, kind);
+    const t = how === 'change' || how === 'pct_change' ? 0 : (condOf(j)?.threshold ?? 0);
+    return cell(t, 'number', null, false, how === 'pct_change' ? { percent: true } : fmtOf(j));
+  };
 
   const hasRowTotals = $derived(m.hasCols && m.rows.some((r) => r.total));
   // With no row field there is one row, which already is the total.
@@ -104,7 +128,17 @@
             {/each}
             {#each r.cells as c, ci}
               {#each values as j}
-                <td class="num" class:dim={!colSel(m.cols[ci].raw)} class:empty={blank(c?.[j])}>{show(c?.[j], j)}</td>
+                {@const verdict = verdictOf(c?.[j], j)}
+                <td
+                  class="num"
+                  class:dim={!colSel(m.cols[ci].raw)}
+                  class:empty={blank(c?.[j])}
+                  class:good={verdict?.tone === 'good'}
+                  class:bad={verdict?.tone === 'bad'}
+                  style={barOf(c?.[j], j) || undefined}
+                  title={verdict ? `${verdict.word} ${lineText(j)}` : undefined}>
+                  {#if verdict}<span class="glyph" role="img" aria-label={verdict.word.toLowerCase()}>{verdict.glyph}</span>{/if}{show(c?.[j], j)}
+                </td>
               {/each}
             {/each}
             {#if hasRowTotals}
@@ -146,6 +180,9 @@
   th, td { padding: 5px 12px; border-bottom: 1px solid var(--sep); white-space: nowrap; background: var(--surface); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
   td.empty { color: var(--text-3); }
+  td.good { color: var(--success); }
+  td.bad { color: var(--danger); }
+  .glyph { display: inline-block; margin-right: 4px; font-size: 9px; vertical-align: 1px; }
   td.strong, tfoot td { font-weight: 600; }
   thead th { position: sticky; top: 0; z-index: 2; font-weight: 600; text-align: right; padding: 0; }
   thead tr.sub th { top: 28px; font-weight: 500; color: var(--text-2); padding: 5px 12px; }

@@ -57,7 +57,10 @@ export function buildWaterfall({ res, tile, colors: c, selected, width }: BuildA
   const steps = waterfallSteps(values, byDate);
   const cats: (Cell | undefined)[] = steps.map((s) => (s.row === null ? undefined : res.rows[s.row][0]));
   const names = steps.map((s, i) => (s.row === null ? (byDate ? 'End' : 'Total') : label(cats[i] as Cell)));
-  const showNumber = labelledSteps(steps);
+  // Auto: the start, end and total bars and the biggest steps. All: every bar, where its number fits
+  // (the layout leaves out a number with no free place). None: no numbers.
+  const showNumber =
+    tile.labels === 'none' ? new Set<number>() : tile.labels === 'all' ? new Set(steps.map((s) => s.index)) : labelledSteps(steps);
   const lastRow = res.rows.length - 1;
   const partial = res.partial !== undefined && res.rows.length > 0 && key(res.rows[lastRow][0]) === res.partial.key;
 

@@ -4,13 +4,15 @@
 import type { Cell } from '../api';
 import { cell, getLocale, measureLabel, numberFormatter } from '../format';
 import { axisCommon, esc, key, OTHER, slotsFor, tooltipBase, type BuildArgs, type Built } from './common';
-import { farFromZero, median } from './math';
+import { axisSpan, levelMarkLine, resolveLevels, wantsTrend, type Level } from './guides';
+import { fitAt, trendFit, trendSentence } from './lines';
+import { farFromZero } from './math';
 
 /** The query asks for this many dots at most (`snapshot::tile_query`). */
 const DOT_LIMIT = 2000;
 const MAX_GROUPS = 8;
 
-export function buildScatter({ res, tile, colors: c, selected, tables = [] }: BuildArgs): Built {
+export function buildScatter({ res, tile, colors: c, selected, width, height, tables = [] }: BuildArgs): Built {
   const nd = res.columns.filter((x) => x.role === 'dimension').length;
   const [xi, yi] = [nd, nd + 1];
   const hasColour = nd > 1 && tile.dims.length > 1;
@@ -79,35 +81,54 @@ export function buildScatter({ res, tile, colors: c, selected, tables = [] }: Bu
     splitNumber: 4,
   });
 
-  // Median lines on both axes, from the dots on screen.
-  const medians = !!tile.lines?.some((l) => l.kind === 'median');
-  const [mx, my] = [median(xs), median(ys)];
-  const medianLine = (v: number, fmt: ReturnType<typeof numberFormatter>, horizontal: boolean) => ({
-    ...(horizontal ? { yAxis: v } : { xAxis: v }),
-    // The label of an upright line sits above the plot and reads level.
-    label: { formatter: () => `Median ${fmt.short(v)}`, color: c.text2, fontSize: 11, position: horizontal ? ('insideEndTop' as const) : ('end' as const), rotate: 0, distance: 4 },
-  });
-  const guide =
-    medians && mx !== null && my !== null
+  // Reference lines: a level up the side (a line across) or a value along the bottom (an upright
+  // line), each read from the dots on screen. A median with no axis draws both, as it always did.
+  const levels = resolveLevels(tile.lines, true, (axis) => (axis === 'x' ? xs : ys));
+  const levelsOf = (axis: 'x' | 'y'): Level[] => levels.filter((l) => l.axis === axis);
+  const shortOf = (axis: 'x' | 'y', n: number) => (axis === 'x' ? fx : fy).short(n);
+  const top = multi ? 56 : 30;
+  const [plotW, plotH] = [width - 60, height - top - 40];
+  const across = levelMarkLine(levelsOf('x'), 'xAxis', axisSpan(xs, levelsOf('x').map((l) => l.value), !xFar, plotW), c, shortOf);
+  const up = levelMarkLine(levelsOf('y'), 'yAxis', axisSpan(ys, levelsOf('y').map((l) => l.value), !yFar, plotH), c, shortOf);
+  const markLine = across || up ? { ...(up ?? across!), data: [...(up?.data ?? []), ...(across?.data ?? [])] } : null;
+  // The trend line is a straight line through the dots (least squares on across and up).
+  const fit = wantsTrend(tile.lines) ? trendFit(ys, xs) : null;
+  const trendTip = fit ? trendSentence(fit, fy.short(Math.abs(fit.slope)), `for each 1 more of ${xName}`) : '';
+  const [x0, x1] = [Math.min(...xs), Math.max(...xs)];
+  // Unseen series carry the lines. Their points keep both axes wide enough for every line.
+  const reach: number[][] = [
+    ...levelsOf('y').map((l) => [xs[0] ?? 0, l.value]),
+    ...levelsOf('x').map((l) => [l.value, ys[0] ?? 0]),
+  ];
+  const carrier = (extra: object) => ({ type: 'scatter', silent: true, symbolSize: 0, itemStyle: { opacity: 0 }, tooltip: { show: false }, ...extra });
+  const guide = [
+    ...(markLine ? [carrier({ data: reach, markLine })] : []),
+    ...(fit
       ? [
-          {
-            type: 'scatter',
-            silent: true,
+          carrier({
             data: [],
+            silent: false,
             markLine: {
-              silent: true,
               symbol: 'none',
               animation: false,
-              lineStyle: { color: c.text2, width: 1, type: [5, 4] },
-              data: [medianLine(mx, fx, false), medianLine(my, fy, true)],
+              lineStyle: { color: c.text2, width: 1.5, type: [5, 4] },
+              emphasis: { lineStyle: { width: 2 } },
+              tooltip: { trigger: 'item', formatter: () => esc(trendTip) },
+              data: [
+                [
+                  { coord: [x0, fitAt(fit, x0)], name: 'Trend' },
+                  { coord: [x1, fitAt(fit, x1)], name: 'Trend', label: { show: true, formatter: 'Trend', position: 'end', color: c.text2, fontSize: 11, backgroundColor: c.surface, padding: [1, 4], borderRadius: 3 } },
+                ],
+              ],
             },
-          },
+          }),
         ]
-      : [];
+      : []),
+  ];
 
   const option = {
     animationDuration: 350,
-    grid: { left: 4, right: 16, top: multi ? 56 : 30, bottom: 22, containLabel: true },
+    grid: { left: 4, right: 16, top, bottom: 22, containLabel: true },
     legend: multi
       ? {
           type: 'scroll',
@@ -137,6 +158,9 @@ export function buildScatter({ res, tile, colors: c, selected, tables = [] }: Bu
         symbolSize: 10,
         // ECharts draws scatter dots at 80 % by default; the palette is meant to show at full strength.
         itemStyle: { color: g.color, borderColor: c.surface, borderWidth: 2, opacity: 1 },
+        // "All" writes the height of every dot, where there is room for it.
+        label: { show: tile.labels === 'all', position: 'top', color: c.text2, fontSize: 11, formatter: (p: { value: number[] }) => fy.short(p.value[1]) },
+        labelLayout: { hideOverlap: true },
         emphasis: { focus: 'none', scale: 1.2 },
         data: data[i],
       })),

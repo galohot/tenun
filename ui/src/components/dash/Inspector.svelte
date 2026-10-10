@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { api, DATE_PARTS, isPart, type Agg, type Grain, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileType } from '../../lib/api';
+  import { api, DATE_PARTS, isPart, type Agg, type CondFormat, type Grain, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileLine, type TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
-  import { aggNames, tileTitle } from '../../lib/format';
+  import { aggNames, cell, tileTitle } from '../../lib/format';
+  import { isChange } from '../../lib/cells';
+  import { MAX_LINES } from '../../lib/charts/lines';
   import { defaultStack, stackableTile, stackMode } from '../../lib/charts/math';
-  import { dim0Kind, SHOW_AS_LABELS, showAsOptions, withShowAs } from '../../lib/showas';
+  import { dim0Kind, effectiveShowAs, SHOW_AS_LABELS, showAsOptions, withShowAs } from '../../lib/showas';
   import { advancedLocked, SHOW_ADVANCED_SWITCH } from '../../lib/tiers';
   import { defaultDim, defaultMeasure, dtypeOf, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, reachableFrom, type DashFilter } from '../../lib/tiles';
   import Icon, { type IconName } from '../Icon.svelte';
@@ -76,8 +78,10 @@
   function removeMeasure(i: number) {
     const formats = (tile.formats ?? []).filter((_, j) => j !== i);
     const showAs = (tile.showAs ?? []).filter((_, j) => j !== i);
+    const cond = (tile.cond ?? []).filter((_, j) => j !== i);
     set({
       measures: tile.measures.filter((_, j) => j !== i),
+      cond: cond.some(Boolean) ? cond : undefined,
       formats: formats.some(Boolean) ? formats : undefined,
       showAs: showAs.some(Boolean) ? showAs : undefined,
     });
@@ -190,12 +194,73 @@
   const stackDefault = $derived(defaultStack(tile, perValue));
   // Stacking needs more than one series: a split, or several values.
   const hasSeries = $derived((tile.type === 'bar' || tile.type === 'area') && !!tile.measures.length && (!!tile.dims[1] || tile.measures.length > 1));
-  const medianOn = $derived(!!tile.lines?.some((l) => l.kind === 'median'));
 
-  function setMedian(on: boolean) {
-    const rest = (tile.lines ?? []).filter((l) => l.kind !== 'median');
-    const lines = on ? [...rest, { kind: 'median' as const }] : rest;
-    set({ lines: lines.length ? lines : undefined });
+  // Reference lines (build 07): on bars, lines, areas and scatter charts, at most four.
+  const LINE_MENU: { id: TileLine['kind']; label: string }[] = [
+    { id: 'target', label: 'Target…' },
+    { id: 'average', label: 'Average' },
+    { id: 'median', label: 'Median' },
+    { id: 'min', label: 'Minimum' },
+    { id: 'max', label: 'Maximum' },
+    { id: 'trend', label: 'Trend' },
+  ];
+  const lineChart = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area' || isScatter);
+  const valueChart = $derived(lineChart || isHistogram || tile.type === 'waterfall');
+  // A scatter line sits at a value of Y (level) or of X (upright).
+  let lineAxis = $state<'x' | 'y'>('y');
+  let askTarget = $state(false);
+  let targetValue = $state('');
+  let targetLabel = $state('');
+  const lines = $derived((tile.lines ?? []).filter((l) => l.kind !== 'band'));
+  const hasLine = (kind: TileLine['kind']) =>
+    lines.some((l) => l.kind === kind && (kind === 'trend' || !isScatter || !l.axis || l.axis === lineAxis));
+
+  function lineWords(l: TileLine): string {
+    const value = l.value === undefined ? '' : ` ${cell(l.value, 'number', null, false, tile.formats?.[0])}`;
+    const of = !isScatter || l.kind === 'trend' ? '' : l.axis === 'x' ? ' of X (across)' : l.axis === 'y' ? ' of Y (up)' : l.kind === 'median' ? ' of X and Y' : ' of Y (up)';
+    const name = l.label?.trim() || LINE_MENU.find((o) => o.id === l.kind)?.label.replace('…', '') || l.kind;
+    return `${name}${l.kind === 'target' ? value : ''}${of}`;
+  }
+
+  function setLines(next: TileLine[]) {
+    const band = (tile.lines ?? []).filter((l) => l.kind === 'band');
+    const all = [...next, ...band];
+    set({ lines: all.length ? all : undefined });
+  }
+
+  function pickLine(id: string) {
+    if (id === 'target') {
+      askTarget = true;
+      return;
+    }
+    if (!id || lines.length >= MAX_LINES) return;
+    const kind = id as TileLine['kind'];
+    setLines([...lines, { kind, ...(isScatter && kind !== 'trend' ? { axis: lineAxis } : {}) }]);
+  }
+
+  function addTarget() {
+    const v = Number(targetValue.replace(/\s/g, ''));
+    if (targetValue.trim() === '' || !Number.isFinite(v) || lines.length >= MAX_LINES) return;
+    const label = targetLabel.trim();
+    setLines([...lines, { kind: 'target', value: v, ...(label ? { label } : {}), ...(isScatter ? { axis: lineAxis } : {}) }]);
+    askTarget = false;
+    targetValue = '';
+    targetLabel = '';
+  }
+
+  // How the cells of a value look in a table or pivot.
+  function setCond(i: number, next: CondFormat | null) {
+    const cond = tile.measures.map((_, j) => tile.cond?.[j] ?? null);
+    cond[i] = next;
+    set({ cond: cond.some(Boolean) ? cond : undefined });
+  }
+
+  function setThreshold(i: number, raw: string) {
+    const f = tile.cond?.[i];
+    if (!f) return;
+    const v = Number(raw.replace(/\s/g, ''));
+    const { threshold: _old, ...rest } = f;
+    setCond(i, raw.trim() !== '' && Number.isFinite(v) ? { ...rest, threshold: v } : rest);
   }
 
   /** A bin width of 0 or less, or an empty box, means the engine picks one. */
@@ -206,6 +271,9 @@
   const dimTypes = $derived(tile.dims.map((d) => dtypeOf(app.tables, d.table, d.column)));
   const dim0 = $derived(dim0Kind(dimTypes[0], tile.dims[0]?.grain));
   const showAsChoices = $derived(showAsOptions(tile, dim0));
+  /** A trend needs an order: a date or part of a date, or the two values of a scatter. */
+  const trendFits = $derived(isScatter || dim0 === 'date' || dim0 === 'part');
+  const menu = $derived(LINE_MENU.filter((o) => (o.id === 'target' ? true : o.id === 'trend' ? trendFits && !hasLine('trend') : !hasLine(o.id))));
   // The same period last year needs a line, area or bar over a date with a grain, one value, no split.
   const compareType = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area');
   const canCompare = $derived(compareType && dim0 === 'date' && !!tile.dims[0]?.grain && !isPart(tile.dims[0].grain) && tile.measures.length <= 1 && !tile.dims[1]);
@@ -336,6 +404,43 @@
         </select>
       </div>
     {/if}
+  {/if}
+  {#if tableLike && x}
+    {@const cf = tile.cond?.[i] ?? null}
+    {@const how = effectiveShowAs(tile, i, dim0)}
+    <div class="cells">
+      <span class="label">Cells</span>
+      <div class="grains stack" role="radiogroup" aria-label="How the cells of this value look">
+        {#each [[null, 'Plain'], ['bars', 'Bars'], ['goodbad', 'Good-bad']] as [id, label]}
+          <button
+            role="radio"
+            aria-checked={(cf?.kind ?? null) === id}
+            class:on={(cf?.kind ?? null) === id}
+            onclick={() => setCond(i, id ? { ...(cf?.kind === id ? cf : {}), kind: id as CondFormat['kind'] } : null)}>
+            {label}
+          </button>
+        {/each}
+      </div>
+      {#if cf?.kind === 'goodbad'}
+        {#if isChange(how)}
+          <p class="hint tight">A change is good above 0 and bad below it.</p>
+        {:else}
+          <input
+            class="field"
+            type="number"
+            step="any"
+            placeholder="Good above… (0)"
+            aria-label="The value that splits good from bad"
+            value={cf.threshold ?? ''}
+            onchange={(e) => setThreshold(i, e.currentTarget.value)} />
+        {/if}
+        <div class="better" role="radiogroup" aria-label="Which direction is good">
+          <span class="label">A higher number is</span>
+          <button role="radio" aria-checked={(cf.better ?? 'up') === 'up'} class:on={(cf.better ?? 'up') === 'up'} onclick={() => setCond(i, { ...cf, better: undefined })}>good</button>
+          <button role="radio" aria-checked={cf.better === 'down'} class:on={cf.better === 'down'} onclick={() => setCond(i, { ...cf, better: 'down' })}>bad</button>
+        </div>
+      {/if}
+    </div>
   {/if}
   {@render formatRow(i)}
 {/snippet}
@@ -638,12 +743,50 @@
     </div>
   {/if}
 
-  {#if isScatter}
+  {#if lineChart && m}
     <div class="sec">
-      <label class="check first">
-        <input type="checkbox" checked={medianOn} onchange={(e) => setMedian(e.currentTarget.checked)} />
-        Median lines
-      </label>
+      <span class="label">Lines</span>
+      {#each lines as l}
+        <div class="linerow">
+          <span>{lineWords(l)}</span>
+          <button class="btn plain icon" aria-label="Remove {lineWords(l)}" onclick={() => setLines(lines.filter((x) => x !== l))}><Icon name="x" size={12} /></button>
+        </div>
+      {/each}
+      {#if lines.length < MAX_LINES}
+        {#if isScatter}
+          <select class="field" aria-label="Which value the new line is for" bind:value={lineAxis}>
+            <option value="y">For Y (up)</option>
+            <option value="x">For X (across)</option>
+          </select>
+        {/if}
+        <select class="field" aria-label="Add line" value="" onchange={(e) => { pickLine(e.currentTarget.value); e.currentTarget.value = ''; }}>
+          <option value="">Add line…</option>
+          {#each menu as o}<option value={o.id}>{o.label}</option>{/each}
+        </select>
+        {#if askTarget}
+          <div class="targetform">
+            <input class="field" type="number" step="any" placeholder="Target value" aria-label="Target value" bind:value={targetValue} />
+            <input class="field" placeholder="Name (optional)" aria-label="Name of the target" bind:value={targetLabel} />
+            <div class="row">
+              <button class="btn small" disabled={targetValue.trim() === ''} onclick={addTarget}>Add target</button>
+              <button class="link" onclick={() => (askTarget = false)}>Cancel</button>
+            </div>
+          </div>
+        {/if}
+      {:else}
+        <p class="hint tight">A tile can have up to {MAX_LINES} lines.</p>
+      {/if}
+    </div>
+  {/if}
+
+  {#if valueChart}
+    <div class="sec">
+      <span class="label">Values on chart</span>
+      <select class="field" aria-label="Values written on the chart" value={tile.labels ?? 'auto'} onchange={(e) => set({ labels: e.currentTarget.value === 'auto' ? undefined : (e.currentTarget.value as Tile['labels']) })}>
+        <option value="auto">Auto</option>
+        <option value="all">All</option>
+        <option value="none">None</option>
+      </select>
     </div>
   {/if}
 
@@ -806,6 +949,12 @@
   .check.first { margin-top: 0; }
   .grains.stack button { text-transform: none; padding: 0 4px; }
   .foot { margin-top: auto; padding-top: 8px; }
+  .cells { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+  .cells .label { font-size: 11px; }
+  .linerow { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
+  .linerow .btn.icon { width: 22px; height: 22px; }
+  .targetform { display: flex; flex-direction: column; gap: 6px; }
+  .targetform .row { display: flex; align-items: center; gap: 12px; }
   .target { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
   textarea.field { height: auto; padding: 8px 10px; line-height: 1.4; resize: vertical; font-family: inherit; }
   .hidden { display: none; }

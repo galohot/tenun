@@ -94,6 +94,9 @@ pub struct QueryResult {
     /// its keys moved forward so they line up with the rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compare: Option<Compare>,
+    /// Tables whose row limit cut the result: how many rows there are in all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_rows: Option<u64>,
 }
 
 /// The comparison series of a time chart. `rows` have the shape of the result's rows.
@@ -572,6 +575,7 @@ impl Engine {
             bins: None,
             totals: None,
             compare: None,
+            total_rows: None,
         })
     }
 

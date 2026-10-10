@@ -474,6 +474,7 @@
               onpickcol={(v) => pickCol(t, v)}
               onresult={(r, k) => setResult(t.id, r, k)}
               onselect={() => (selectedTile = t.id)}
+              onwidths={(w) => change({ ...(dash.tiles.find((x) => x.id === t.id) ?? t), widths: w })}
               ondragstart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'move')}
               onresizestart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'resize')} />
           </div>

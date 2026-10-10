@@ -50,6 +50,50 @@ pub fn apply(
     totals(engine, tile, q, wide, res)?;
     compare(engine, tile, q, res)?;
     show_as(tile, q, engine, res);
+    total_rows(engine, tile, q, res)?;
+    Ok(())
+}
+
+/// A table that hit its row limit says how many rows it has in all, so the footer can read
+/// "Rows 1–500 of 12,345". One count over the same groups; nothing is read when the limit did not
+/// cut the result, and a top N already decided the rows on show.
+fn total_rows(
+    engine: &Engine,
+    tile: &Tile,
+    q: &SemanticQuery,
+    res: &mut QueryResult,
+) -> anyhow::Result<()> {
+    let cut = q.limit.is_some_and(|l| res.rows.len() >= l as usize);
+    if tile.kind != "table" || q.dimensions.is_empty() || tile.top.is_some() || !cut {
+        return Ok(());
+    }
+    let (found, _) = engine.query_custom(q, |sc| {
+        let mut exprs = Vec::new();
+        for d in &q.dimensions {
+            exprs.push(sc.expr(&d.table, &d.column, d.grain)?.0);
+        }
+        let n = exprs.len();
+        let select: Vec<String> = exprs
+            .iter()
+            .enumerate()
+            .map(|(i, e)| format!("{e} AS d{i}"))
+            .collect();
+        let group: Vec<String> = (1..=n).map(|i| i.to_string()).collect();
+        Ok((
+            format!(
+                "SELECT count(*) FROM (SELECT {}{} GROUP BY {})",
+                select.join(", "),
+                sc.from_where,
+                group.join(", ")
+            ),
+            sc.params.clone(),
+        ))
+    })?;
+    res.total_rows = found
+        .first()
+        .and_then(|r| r.first())
+        .and_then(Value::as_u64)
+        .filter(|n| *n > res.rows.len() as u64);
     Ok(())
 }
 
@@ -930,6 +974,7 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
         bins: None,
         totals: None,
         compare: None,
+        total_rows: None,
     };
     let (Some(n), Some(min), Some(max), Some(q1), Some(q3)) =
         (num(0), num(1), num(2), num(3), num(4))

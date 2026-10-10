@@ -18,6 +18,7 @@
     onpickcol,
     onresult,
     onselect,
+    onwidths,
     ondragstart,
     onresizestart,
   }: {
@@ -31,6 +32,8 @@
     /** Tells the dashboard what this tile shows now (the Inspector's suggestions reuse it). */
     onresult?: (res: QueryResult | null, key: string) => void;
     onselect: () => void;
+    /** A table column was dragged to a new width (or reset with undefined). */
+    onwidths: (widths: number[] | undefined) => void;
     ondragstart: (e: PointerEvent) => void;
     onresizestart: (e: PointerEvent) => void;
   } = $props();
@@ -123,7 +126,8 @@
         {selectedCol}
         tables={app.tables}
         onpick={canPick ? (v) => onpick(v, res?.otherOf, res?.bins) : undefined}
-        onpickcol={tile.type === 'pivot' && tile.cols ? onpickcol : undefined} />
+        onpickcol={tile.type === 'pivot' && tile.cols ? onpickcol : undefined}
+        onwidths={tile.type === 'table' ? onwidths : undefined} />
     {/if}
   </div>
   {#if ignored.length || note}
