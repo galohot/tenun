@@ -51,7 +51,7 @@ fn loads_three_kinds_of_source() {
     let snap = e.snapshot();
     assert!(snap.errors.is_empty(), "{:?}", snap.errors);
     let rows = |id: &str| snap.tables.iter().find(|t| t.id == id).and_then(|t| t.rows);
-    assert_eq!(rows("s1/Orders"), Some(17016));
+    assert_eq!(rows("s1/Orders"), Some(17491));
     assert_eq!(rows("s1/Products"), Some(10));
     assert_eq!(rows("s2/stores"), Some(9));
     assert_eq!(rows("s3/customers"), Some(400));
@@ -67,20 +67,20 @@ fn joins_excel_to_csv_and_sqlite() {
     let get = |rows: &[(serde_json::Value, f64)], k: serde_json::Value| {
         rows.iter().find(|r| r.0 == k).map(|r| r.1)
     };
-    assert_eq!(get(&by_region, json!("Java")), Some(419213.0));
+    assert_eq!(get(&by_region, json!("Java")), Some(430813.0));
     assert_eq!(
         get(&by_region, json!("Bali & Nusa Tenggara")),
-        Some(146426.0)
+        Some(150526.0)
     );
-    assert_eq!(get(&by_region, json!("Sumatra")), Some(62894.0));
-    assert_eq!(get(&by_region, json!("Sulawesi")), Some(38886.0));
+    assert_eq!(get(&by_region, json!("Sumatra")), Some(64516.0));
+    assert_eq!(get(&by_region, json!("Sulawesi")), Some(39980.0));
 
     // Orders without a loyalty member keep their amount under (blank).
     let by_segment = total_by(&e, "s3/customers", "segment");
-    assert_eq!(get(&by_segment, json!("Gold")), Some(117334.0));
-    assert_eq!(get(&by_segment, serde_json::Value::Null), Some(301556.0));
+    assert_eq!(get(&by_segment, json!("Gold")), Some(119954.0));
+    assert_eq!(get(&by_segment, serde_json::Value::Null), Some(310438.0));
     let sum: f64 = by_segment.iter().map(|r| r.1).sum();
-    assert_eq!(sum, 667419.0);
+    assert_eq!(sum, 685835.0);
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn filters_cross_sources() {
             ]
         })))
         .unwrap();
-    assert_eq!(r.rows[0][0].as_f64(), Some(209096.0));
+    assert_eq!(r.rows[0][0].as_f64(), Some(220696.0));
 }
 
 #[test]

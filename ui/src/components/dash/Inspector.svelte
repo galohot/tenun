@@ -17,7 +17,7 @@
     { id: 'bar', icon: 'bar', label: 'Bar' },
     { id: 'line', icon: 'line', label: 'Line' },
     { id: 'area', icon: 'area', label: 'Area' },
-    { id: 'donut', icon: 'donut', label: 'Donut' },
+    { id: 'share', icon: 'share', label: 'Share' },
     { id: 'kpi', icon: 'kpi', label: 'Number' },
     { id: 'table', icon: 'table', label: 'Table' },
   ];
@@ -68,7 +68,7 @@
         <button
           role="radio"
           aria-checked={tile.type === t.id}
-          class:on={tile.type === t.id}
+          class:on={tile.type === t.id || (t.id === 'share' && tile.type === 'donut')}
           title={t.label}
           onclick={() => set({ type: t.id })}>
           <Icon name={t.icon} size={18} />
@@ -76,6 +76,13 @@
         </button>
       {/each}
     </div>
+    {#if tile.type === 'kpi'}
+      <div class="better" role="radiogroup" aria-label="Which change is good">
+        <span class="label">A rise is</span>
+        <button role="radio" aria-checked={(tile.better ?? 'up') === 'up'} class:on={(tile.better ?? 'up') === 'up'} onclick={() => set({ better: 'up' })}>good</button>
+        <button role="radio" aria-checked={tile.better === 'down'} class:on={tile.better === 'down'} onclick={() => set({ better: 'down' })}>bad</button>
+      </div>
+    {/if}
     {#if tile.type === 'bar'}
       <label class="check">
         <input type="checkbox" checked={!!tile.horizontal} onchange={(e) => set({ horizontal: e.currentTarget.checked })} />
@@ -124,7 +131,7 @@
   </div>
 
     <div class="sec">
-      <span class="label">{tile.type === 'kpi' ? 'Over time (optional)' : 'Group by'}</span>
+      <span class="label">{tile.type === 'kpi' ? 'Period (a date, for the comparison)' : tile.type === 'share' || tile.type === 'donut' ? 'Split into' : 'Group by'}</span>
       <FieldPicker
         mode="dim"
         table={tile.dims[0]?.table ?? null}
@@ -203,6 +210,18 @@
   .types button:hover { background: var(--hover); }
   .types button.on { border-color: var(--accent); background: var(--selected); color: var(--accent-text); }
   .types button.on :global(svg) { color: var(--accent-text); }
+  .better { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+  .better .label { margin-right: 4px; }
+  .better button {
+    height: 24px;
+    padding: 0 10px;
+    border: 1px solid var(--sep);
+    border-radius: 12px;
+    background: none;
+    font-size: 12px;
+    color: var(--text-2);
+  }
+  .better button.on { border-color: var(--accent); background: var(--selected); color: var(--accent-text); }
   .check { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-top: 4px; }
   select.field { height: 30px; }
   .grains { display: flex; padding: 2px; border-radius: 8px; background: var(--inset); }

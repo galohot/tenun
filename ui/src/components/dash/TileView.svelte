@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { api, type Cell, type QueryResult, type Tile } from '../../lib/api';
+  import type { Cell, QueryResult, Tile } from '../../lib/api';
+  import { partialNote, runTile } from '../../lib/run';
   import { app } from '../../lib/state.svelte';
   import { readColors, type Colors } from '../../lib/chart';
   import { tileTitle } from '../../lib/format';
@@ -33,7 +34,8 @@
   let colors = $state<Colors>(readColors());
 
   const q = $derived(tileQuery(tile, filters));
-  const qKey = $derived(JSON.stringify(q));
+  // The type and the comparison setting change what a number tile fetches.
+  const qKey = $derived(JSON.stringify([q, tile.type === 'kpi' ? tile.dims : null]));
 
   // Re-query when the question, the filters or the data change.
   $effect(() => {
@@ -46,9 +48,7 @@
       return;
     }
     loading = true;
-    const query = JSON.parse(key);
-    api
-      .query(query)
+    runTile($state.snapshot(tile) as Tile, $state.snapshot(filters) as DashFilter[])
       .then((r) => {
         if (key === qKey) {
           res = r;
@@ -71,6 +71,7 @@
     res ? res.ignored_filters.map((i) => appliedFilters(tile, filters)[i]).filter(Boolean) : [],
   );
   const selected = $derived(filters.find((f) => f.fromTile === tile.id)?.values ?? null);
+  const note = $derived(res && tile.type !== 'kpi' ? partialNote(res, tile.dims[0]?.grain) : null);
   const title = $derived(tileTitle(tile, app.tables));
   const canPick = $derived(tile.type !== 'kpi' && tile.dims.length > 0);
 </script>
@@ -95,9 +96,14 @@
       <TileBody {tile} {res} {colors} {selected} onpick={canPick ? onpick : undefined} />
     {/if}
   </div>
-  {#if ignored.length}
-    <footer title="This tile's table is not related to the filtered field.">
-      <Icon name="info" size={12} /> Not filtered by {ignored.map((f) => f.column).join(', ')}
+  {#if ignored.length || note}
+    <footer>
+      {#if note}<span>{note}</span>{/if}
+      {#if ignored.length}
+        <span title="This tile's table is not related to the filtered field.">
+          <Icon name="info" size={12} /> Not filtered by {ignored.map((f) => f.column).join(', ')}
+        </span>
+      {/if}
     </footer>
   {/if}
   <button class="resize" aria-label="Resize tile" onpointerdown={onresizestart}><Icon name="resize" size={14} /></button>
@@ -154,10 +160,11 @@
   .setup:hover { border-color: var(--accent); color: var(--accent-text); }
   .error { display: flex; gap: 6px; margin: 0; color: var(--danger); font-size: 12px; }
   .error :global(svg) { flex: none; margin-top: 1px; }
+  footer span { display: inline-flex; align-items: center; gap: 5px; }
   footer {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 12px;
     padding: 0 14px 8px;
     font-size: 11px;
     color: var(--text-2);

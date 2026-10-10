@@ -82,9 +82,28 @@ export interface QueryResult {
   rows: Cell[][];
   ignored_filters: number[];
   ms: number;
+  /** Number tiles only: the computed figure and its comparison. */
+  kpi?: KpiInfo;
+  /** Time charts: the last period is not over yet (data runs to `until`). */
+  partial?: { key: string; until: string };
 }
 
-export type TileType = 'kpi' | 'bar' | 'line' | 'area' | 'donut' | 'table';
+export interface KpiInfo {
+  value: number | null;
+  /** What the value covers: "September 2026", "Oct 1–14, 2026", or "All data". */
+  period: string;
+  /** What it is compared with, or null when there is nothing to compare. */
+  versus: string | null;
+  prev: number | null;
+  /** Relative change, e.g. 0.04 for +4 %. */
+  delta: number | null;
+  partial: boolean;
+  /** The last periods, oldest first, for the column chart. */
+  bars: { label: string; value: number | null }[];
+}
+
+/** `donut` is the old name of `share`; tiles saved with it render as `share`. */
+export type TileType = 'kpi' | 'bar' | 'line' | 'area' | 'share' | 'donut' | 'table';
 
 export interface Tile {
   id: string;
@@ -99,6 +118,8 @@ export interface Tile {
   /** [group by, split by] for charts; any number for tables. */
   dims: Dim[];
   horizontal?: boolean;
+  /** Number tiles: which direction of change is good. Default up. */
+  better?: 'up' | 'down';
 }
 
 export interface Dashboard {

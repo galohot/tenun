@@ -228,9 +228,9 @@
       <button class="btn primary" onclick={() => (addMenu = !addMenu)} aria-expanded={addMenu}><Icon name="plus" /> Add tile</button>
       {#if addMenu}
         <div class="menu" role="menu">
-          {#each [['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['donut', 'Donut'], ['kpi', 'Number'], ['table', 'Table']] as [t, label]}
+          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['table', 'Table']] as [t, label]}
             <button role="menuitem" onclick={() => addTile(t as TileType)}>
-              <Icon name={t === 'kpi' ? 'kpi' : t === 'table' ? 'table' : (t as 'bar')} /> {label}
+              <Icon name={t as 'kpi' | 'bar' | 'line' | 'area' | 'share' | 'table'} /> {label}
             </button>
           {/each}
         </div>

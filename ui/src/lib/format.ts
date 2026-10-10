@@ -123,6 +123,6 @@ export function tileTitle(t: Tile, tables: Table[]): string {
     return t.dims.length ? `${m} by ${t.dims.map((d) => dimLabel(d, tables)).join(' and ')}` : m;
   }
   const by = t.dims[0] && t.type !== 'kpi' ? ` by ${dimLabel(t.dims[0], tables)}` : '';
-  const split = t.dims[1] && t.type !== 'kpi' && t.type !== 'donut' ? ` and ${dimLabel(t.dims[1], tables)}` : '';
+  const split = t.dims[1] && (t.type === 'bar' || t.type === 'line' || t.type === 'area') ? ` and ${dimLabel(t.dims[1], tables)}` : '';
   return m + by + split;
 }

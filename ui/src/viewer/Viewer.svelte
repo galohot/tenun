@@ -7,6 +7,7 @@
   import { key, readColors, type Colors } from '../lib/chart';
   import { cell, dimLabel } from '../lib/format';
   import TileBody from '../components/dash/TileBody.svelte';
+  import { partialNote } from '../lib/run';
 
   const data = (window as unknown as { TENUN: ExportPayload }).TENUN;
   const ROW = 76;
@@ -100,6 +101,9 @@
                 onpick={data.cross[l.t.id] ? (v) => onpick(l.t, v) : undefined} />
             {/if}
           </div>
+          {#if r.res && l.t.type !== 'kpi' && partialNote(r.res, l.t.dims[0]?.grain)}
+            <p class="note">{partialNote(r.res, l.t.dims[0]?.grain)}</p>
+          {/if}
           {#if r.offline}<p class="note">Not filtered in this file</p>{/if}
         </article>
       {/each}

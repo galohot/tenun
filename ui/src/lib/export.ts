@@ -3,6 +3,7 @@
 // cross-filter offline by clicking (for categories with up to 30 values).
 
 import { api, type Cell, type Dashboard, type QueryResult, type Table } from './api';
+import { runTile } from './run';
 import { key, pivot } from './chart';
 import { tileTitle } from './format';
 import { tileQuery, type DashFilter } from './tiles';
@@ -47,7 +48,7 @@ export async function buildPayload(
   const base: Record<string, QueryResult> = {};
   await pool(
     tiles.map((t) => async () => {
-      base[t.id] = await api.query(tileQuery(t, filters)!);
+      base[t.id] = await runTile(t, filters);
     }),
   );
 
@@ -59,7 +60,7 @@ export async function buildPayload(
     if (src.type === 'kpi' || !src.dims[0] || !base[src.id]) continue;
     const d = src.dims[0];
     const values: Cell[] =
-      src.type === 'donut' || src.type === 'table'
+      src.type === 'share' || src.type === 'donut' || src.type === 'table'
         ? [...new Map(base[src.id].rows.map((r) => [key(r[0]), r[0]])).values()]
         : pivot(base[src.id], src).categories;
     if (!values.length || values.length > MAX_VALUES) continue;
@@ -71,7 +72,7 @@ export async function buildPayload(
       for (const t of tiles) {
         if (t.id === src.id) continue;
         jobs.push(async () => {
-          cross[src.id][key(v)][t.id] = await api.query(tileQuery(t, fs)!);
+          cross[src.id][key(v)][t.id] = await runTile(t, fs);
         });
       }
     }

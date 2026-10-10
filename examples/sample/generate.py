@@ -59,7 +59,7 @@ for cid in range(1, 401):
     customers.append((cid, f"{rnd.choice(first)} {rnd.choice(last)}", rnd.choice(segments),
                       joined.isoformat(), rnd.choice(stores)[2]))
 
-start, end = dt.date(2025, 1, 1), dt.date(2026, 9, 30)
+start, end = dt.date(2025, 1, 1), dt.date(2026, 10, 14)
 orders = []
 oid = 100000
 day = start

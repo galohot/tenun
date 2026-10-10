@@ -8,16 +8,14 @@
   let {
     option,
     horizontal = false,
-    pie = false,
     onpick,
     onresize,
   }: {
     option: EChartsCoreOption;
     horizontal?: boolean;
-    pie?: boolean;
-    /** Category index (axis charts) or data index (pie) that was clicked. */
-    onpick?: (index: number, raw?: unknown) => void;
-    onresize?: (width: number) => void;
+    /** The category position that was clicked. */
+    onpick?: (index: number) => void;
+    onresize?: (width: number, height: number) => void;
   } = $props();
 
   let el: HTMLDivElement;
@@ -28,17 +26,14 @@
     chart.setOption(option, { notMerge: true });
     const ro = new ResizeObserver(() => {
       chart?.resize();
-      onresize?.(el.clientWidth);
+      onresize?.(el.clientWidth, el.clientHeight);
     });
     ro.observe(el);
-    onresize?.(el.clientWidth);
+    onresize?.(el.clientWidth, el.clientHeight);
 
-    chart.on('click', (p) => {
-      if (pie) onpick?.(p.dataIndex, (p.data as { raw?: unknown })?.raw);
-    });
     const zr = chart.getZr();
     zr.on('click', (e) => {
-      if (pie || !chart || !onpick) return;
+      if (!chart || !onpick) return;
       const pt = [e.offsetX, e.offsetY];
       if (!chart.containPixel('grid', pt)) return;
       const v = chart.convertFromPixel('grid', pt) as number[];
@@ -46,7 +41,7 @@
       if (Number.isFinite(i) && i >= 0) onpick(i);
     });
     zr.on('mousemove', (e) => {
-      if (!chart || pie || !onpick) return;
+      if (!chart || !onpick) return;
       zr.setCursorStyle(chart.containPixel('grid', [e.offsetX, e.offsetY]) ? 'pointer' : 'default');
     });
     return () => {

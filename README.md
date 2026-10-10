@@ -35,8 +35,12 @@ every other chart filters. Save the Excel file and the dashboard updates.
   PostgreSQL and MySQL.
 - **Relationships across sources:** drag from a column to a column in the Model view. Tenun
   suggests the likely ones (`store_id` → `stores.id`) and checks them against the data.
-- **Six tile types:** number (with change and trend), bar, line, area, donut and table.
-- **Click to filter:** click a bar, a slice or a row, and every other tile filters, across sources.
+- **Six tile types:** number, bar, line, area, share of total, and table. No pies and no donuts:
+  part-to-whole is a 100 % strip with the exact shares listed under it.
+- **Honest comparisons:** a number tile says which period it covers and compares it fairly. If
+  October is only half over, it compares October 1–14 with September 1–14, not with all of
+  September. Charts draw an unfinished last period dashed or lighter, with a note.
+- **Click to filter:** click a bar, a share or a table row, and every other tile filters, across sources.
 - **Live:** saving an Excel or CSV file updates open dashboards in under a second. Databases
   refresh on an interval you choose.
 - **Export to one HTML file:** it opens offline, anywhere, and click-to-filter still works.
@@ -73,7 +77,8 @@ tenun serve sales.tenun     # opens or creates a workspace file
 
 1. Open Tenun and click **Open the sample**. It is a small coffee chain spread over three files:
    orders in Excel, stores in CSV, customers in SQLite. The files go to `Documents/Tenun Sample`.
-2. Click a store in **Amount by store**. Every other tile filters to that store.
+2. Click a store in **Amount by store**. Every other tile filters to that store. The number tiles
+   show October 1–14 against September 1–14, because the sample data ends on October 14.
 3. Open `coffee.xlsx` in Excel, change an amount, and save. The dashboard updates.
 4. Open **Model** to see how the three files are related.
 5. Click **Export** to save the dashboard as one HTML file.

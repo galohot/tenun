@@ -116,68 +116,43 @@ export interface BuildArgs {
   colors: Colors;
   /** Category values selected by a cross-filter from this tile. */
   selected: Cell[] | null;
-  /** Width in px, for choosing label density. */
+  /** Size in px, for label density and how many categories fit. */
   width: number;
+  height: number;
 }
 
-export function buildOption({ res, tile, colors: c, selected, width }: BuildArgs): EChartsCoreOption {
+export interface Built {
+  option: EChartsCoreOption;
+  /** The category behind each axis position; null for the folded "Other". */
+  categories: (Cell | undefined)[];
+}
+
+const FOLDED = '\u0000other';
+
+/** Keeps the biggest categories that fit and folds the rest into one "Other" bar. */
+function fold(p: Pivot, max: number): Pivot {
+  if (p.categories.length <= max || p.series.length !== 1) return p;
+  const keep = max - 1;
+  const values = p.series[0].values;
+  const rest = values.slice(keep).reduce<number>((s, v) => s + (v ?? 0), 0);
+  return {
+    categories: [...p.categories.slice(0, keep), FOLDED],
+    series: [{ ...p.series[0], values: [...values.slice(0, keep), rest] }],
+  };
+}
+
+export function buildOption({ res, tile, colors: c, selected, width, height }: BuildArgs): Built {
   const dim0 = res.columns[0];
   const grain = tile.dims[0]?.grain;
   const isSel = (v: Cell) => !selected || selected.some((s) => key(s) === key(v));
-  const label = (v: Cell) => cell(v, dim0.dtype, grain, true);
+  const partialKey = res.partial?.key;
+  const label = (v: Cell) =>
+    v === FOLDED ? 'Other' : cell(v, dim0.dtype, grain, true) + (partialKey !== undefined && v === partialKey ? '*' : '');
 
-  if (tile.type === 'donut') {
-    const mi = res.columns.findIndex((x) => x.role === 'measure');
-    let rows = res.rows.filter((r) => typeof r[mi] === 'number' && (r[mi] as number) > 0);
-    rows.sort((a, b) => (b[mi] as number) - (a[mi] as number));
-    let other = 0;
-    if (rows.length > MAX_SERIES) {
-      other = rows.slice(MAX_SERIES - 1).reduce((s, r) => s + (r[mi] as number), 0);
-      rows = rows.slice(0, MAX_SERIES - 1);
-    }
-    // Stable colours: by category value, not by size.
-    const order = [...rows].sort((a, b) => String(a[0]).localeCompare(String(b[0]), undefined, { numeric: true }));
-    const colorOf = new Map(order.map((r, i) => [key(r[0]), c.series[i]]));
-    const data = rows.map((r) => ({
-      name: label(r[0]),
-      value: r[mi] as number,
-      raw: r[0],
-      itemStyle: { color: colorOf.get(key(r[0])), opacity: isSel(r[0]) ? 1 : 0.28 },
-    }));
-    if (other > 0) data.push({ name: OTHER, value: other, raw: null, itemStyle: { color: c.text2, opacity: selected ? 0.28 : 0.55 } });
-    const narrow = width < 420;
-    return {
-      animationDuration: 350,
-      tooltip: { ...tooltipBase(c), trigger: 'item', valueFormatter: (v: number) => full(v) },
-      legend: {
-        type: 'scroll',
-        orient: narrow ? 'horizontal' : 'vertical',
-        [narrow ? 'bottom' : 'right']: 0,
-        top: narrow ? undefined : 'middle',
-        icon: 'circle',
-        itemWidth: 8,
-        itemHeight: 8,
-        textStyle: { color: c.text, fontSize: 12 },
-        pageTextStyle: { color: c.text2 },
-      },
-      series: [
-        {
-          type: 'pie',
-          radius: ['56%', '82%'],
-          center: narrow ? ['50%', '44%'] : ['36%', '50%'],
-          padAngle: 0.6,
-          itemStyle: { borderColor: c.surface, borderWidth: 2, borderRadius: 3 },
-          label: { show: false },
-          emphasis: { scale: false },
-          data,
-        },
-      ],
-    };
-  }
-
-  const { categories, series } = pivot(res, tile);
   const temporal = dim0.dtype === 'date' || dim0.dtype === 'datetime';
   const horizontal = tile.type === 'bar' && !!tile.horizontal;
+  const room = horizontal ? Math.floor((height - 16) / 26) : Math.floor(width / 44);
+  const { categories, series } = temporal || tile.type !== 'bar' ? pivot(res, tile) : fold(pivot(res, tile), Math.max(4, room));
   const stacked = series.length > 1 && tile.type !== 'line';
   const multi = series.length > 1;
   const valueAxis = {
@@ -202,15 +177,25 @@ export function buildOption({ res, tile, colors: c, selected, width }: BuildArgs
   };
 
   const radius = horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0];
+  // Direct labels before gridlines: when every bar carries its value, the value axis goes.
+  const labelled = tile.type === 'bar' && !multi && categories.length <= (horizontal ? 16 : Math.floor(width / 48));
+  // Name the lines at their ends only when they end far enough apart to read.
+  const ends = series.map((s) => s.values.at(-1) ?? 0).sort((a, b) => a - b);
+  const top = Math.max(1, ...series.flatMap((s) => s.values.map((v) => v ?? 0)));
+  const nameEnds =
+    tile.type === 'line' && series.length <= 4 && ends.every((v, i) => i === 0 || (v - ends[i - 1]) / top > 0.08);
   const built = series.map((s, si) => {
     const color = s.name === OTHER ? c.text2 : c.series[si % c.series.length];
     const top = si === series.length - 1;
     const data = s.values.map((v, ci) => ({
       value: v,
-      itemStyle: { opacity: isSel(categories[ci]) ? 1 : 0.28 },
+      itemStyle:
+        categories[ci] === FOLDED
+          ? { opacity: selected ? 0.28 : 1, color: c.grid }
+          : { opacity: (isSel(categories[ci]) ? 1 : 0.28) * (categories[ci] === partialKey ? 0.45 : 1) },
     }));
     if (tile.type === 'bar') {
-      return {
+      return [{
         type: 'bar',
         name: s.name,
         stack: stacked ? 'total' : undefined,
@@ -224,7 +209,7 @@ export function buildOption({ res, tile, colors: c, selected, width }: BuildArgs
         },
         // A value at the bar's end when there is one series and room for it.
         label: {
-          show: !multi && categories.length <= (horizontal ? 14 : Math.floor(width / 48)),
+          show: labelled,
           position: horizontal ? 'right' : 'top',
           color: c.text2,
           fontSize: 11,
@@ -232,9 +217,20 @@ export function buildOption({ res, tile, colors: c, selected, width }: BuildArgs
         },
         emphasis: { focus: 'none' },
         data,
-      };
+      }];
     }
-    return {
+    const lineStyle = { width: 2, color, cap: 'round', join: 'round' };
+    const itemStyle = { color, borderColor: c.surface, borderWidth: 2 };
+    const endLabel = {
+      show: categories.length > 2 && (!multi || nameEnds),
+      color: c.text2,
+      fontSize: 11,
+      formatter: multi ? () => s.name : (p: { value: number }) => compact(p.value),
+    };
+    // An unfinished last period: the line stops one point early and a dashed
+    // copy draws the final segment, so a half month never reads as a drop.
+    const unfinished = tile.type === 'line' && partialKey !== undefined && categories.at(-1) === partialKey && s.values.length > 1;
+    const main = {
       type: 'line',
       name: s.name,
       stack: stacked && tile.type === 'area' ? 'total' : undefined,
@@ -242,28 +238,37 @@ export function buildOption({ res, tile, colors: c, selected, width }: BuildArgs
       showSymbol: categories.length <= 2,
       symbol: 'circle',
       symbolSize: 8,
-      lineStyle: { width: 2, color, cap: 'round', join: 'round' },
-      itemStyle: { color, borderColor: c.surface, borderWidth: 2 },
-      areaStyle: tile.type === 'area' ? { color, opacity: multi ? 0.18 : 0.1 } : undefined,
+      lineStyle,
+      itemStyle,
+      areaStyle: tile.type === 'area' ? { color, opacity: multi ? 0.14 : 0.1 } : undefined,
       emphasis: { focus: 'none', scale: false },
       connectNulls: false,
-      data: s.values,
-      // End label: the last value of a single series.
-      endLabel: {
-        show: !multi && categories.length > 2,
-        color: c.text2,
-        fontSize: 11,
-        formatter: (p: { value: number }) => compact(p.value),
-      },
+      data: unfinished ? [...s.values.slice(0, -1), null] : s.values,
+      endLabel: unfinished ? { show: false } : endLabel,
     };
-  });
+    if (!unfinished) return [main];
+    const n = s.values.length;
+    const dashed = {
+      type: 'line',
+      name: s.name,
+      silent: true,
+      showSymbol: false,
+      lineStyle: { ...lineStyle, type: [4, 4] },
+      itemStyle,
+      tooltip: { show: false },
+      data: s.values.map((v, i) => (i >= n - 2 ? v : null)),
+      endLabel,
+    };
+    return [main, dashed];
+  }).flat();
 
   const longest = Math.max(0, ...categories.map((x) => label(x).length));
-  return {
+  const quietValue = labelled ? { ...valueAxis, axisLabel: { show: false }, splitLine: { show: false } } : valueAxis;
+  const option = {
     animationDuration: 350,
     grid: {
       left: 4,
-      right: tile.type === 'bar' && horizontal ? 40 : multi ? 12 : 44,
+      right: tile.type === 'bar' && horizontal ? 44 : nameEnds ? 72 : multi ? 12 : 44,
       top: multi ? 34 : 14,
       bottom: 4,
       containLabel: true,
@@ -290,8 +295,9 @@ export function buildOption({ res, tile, colors: c, selected, width }: BuildArgs
       },
       valueFormatter: (v: number | null) => (v === null ? '–' : full(v)),
     },
-    xAxis: horizontal ? valueAxis : { ...catAxis, axisLabel: { ...catAxis.axisLabel, rotate: !temporal && longest > 10 && categories.length > 6 ? 30 : 0 } },
-    yAxis: horizontal ? catAxis : valueAxis,
+    xAxis: horizontal ? quietValue : { ...catAxis, axisLabel: { ...catAxis.axisLabel, rotate: !temporal && longest > 10 && categories.length > 6 ? 30 : 0 } },
+    yAxis: horizontal ? catAxis : quietValue,
     series: built,
   };
+  return { option, categories: categories.map((v) => (v === FOLDED ? undefined : v)) };
 }

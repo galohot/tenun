@@ -83,6 +83,17 @@ pub fn workspace() -> Workspace {
         json!([{ "table": "s2/stores", "column": "name" }]),
     );
     by_store["horizontal"] = json!(true);
+    let mut by_segment = tile(
+        "t8",
+        "bar",
+        6,
+        6,
+        6,
+        4,
+        json!([{ "table": orders, "column": "amount", "agg": "sum" }]),
+        json!([{ "table": "s3/customers", "column": "segment" }]),
+    );
+    by_segment["horizontal"] = json!(true);
     let dashboard = json!({
         "id": "d1",
         "title": "Coffee overview",
@@ -92,13 +103,12 @@ pub fn workspace() -> Workspace {
             tile("t2", "kpi", 3, 0, 3, 2, json!([{ "table": orders, "column": null, "agg": "count" }]), month.clone()),
             tile("t3", "kpi", 6, 0, 3, 2, json!([{ "table": orders, "column": "customer_id", "agg": "count_distinct" }]), month.clone()),
             tile("t4", "kpi", 9, 0, 3, 2, json!([{ "table": orders, "column": "amount", "agg": "avg" }]), month.clone()),
-            tile("t5", "area", 0, 2, 8, 4, json!([{ "table": orders, "column": "amount", "agg": "sum" }]),
+            tile("t5", "bar", 0, 2, 8, 4, json!([{ "table": orders, "column": "amount", "agg": "sum" }]),
                  json!([{ "table": orders, "column": "date", "grain": "month" }, { "table": "s2/stores", "column": "region" }])),
-            tile("t6", "donut", 8, 2, 4, 4, json!([{ "table": orders, "column": "amount", "agg": "sum" }]),
+            tile("t6", "share", 8, 2, 4, 4, json!([{ "table": orders, "column": "amount", "agg": "sum" }]),
                  json!([{ "table": "s1/Products", "column": "category" }])),
             by_store,
-            tile("t8", "bar", 6, 6, 6, 4, json!([{ "table": orders, "column": "amount", "agg": "sum" }]),
-                 json!([{ "table": "s3/customers", "column": "segment" }])),
+            by_segment,
         ]
     });
     Workspace {
