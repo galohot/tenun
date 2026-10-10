@@ -15,7 +15,7 @@
 <meta property="og:title" content="Tenun — weave your spreadsheets and databases into one dashboard">
 <meta property="og:description" content="Local, free and open source. Excel, CSV, SQLite, PostgreSQL and MySQL in one dashboard. No server, no Docker, no account.">
 <meta property="og:image" content="https://tenun.cloud/og.png">
-<meta property="og:image:alt" content="A Tenun dashboard with number tiles, an area chart, a donut and bar charts">
+<meta property="og:image:alt" content="A Tenun dashboard with number tiles, a stacked bar chart, a share strip and bar charts">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="stylesheet" href="/style.css">
 </head>
@@ -41,7 +41,7 @@
     <p class="fine">Windows, macOS and Linux · No server, no Docker, no account · MIT or Apache-2.0</p>
     <picture class="shot">
       <source srcset="/dashboard-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/dashboard-light.webp" width="1440" height="900" alt="A Tenun dashboard: four number tiles, an area chart by month and region, a donut by category, and bar charts by store and customer segment">
+      <img src="/dashboard-light.webp" width="1440" height="900" alt="A Tenun dashboard: four number tiles, a stacked bar chart by month and region, a share strip by category, and bar charts by store and customer segment">
     </picture>
   </section>
 
@@ -52,7 +52,7 @@
     </article>
     <article>
       <h2>Click to filter everything</h2>
-      <p>Click a bar, a share or a row. Every other chart filters to it, even when its data comes from another source.</p>
+      <p>Click a bar, a share or a row. Every other chart filters to it, even when its data comes from another source. Add a filter tile for a list, a dropdown or a date range.</p>
     </article>
     <article>
       <h2>Live from your files</h2>
@@ -60,7 +60,7 @@
     </article>
     <article>
       <h2>Honest numbers</h2>
-      <p>Half of October is compared with the first half of September, not with all of it. Unfinished periods are drawn dashed and labelled. No pies, no donuts.</p>
+      <p>Half of October is compared with the first half of September, not with all of it. Unfinished periods are drawn dashed and labelled. No pies, no donuts, no gauges.</p>
     </article>
     <article>
       <h2>Good-looking by default</h2>
@@ -68,7 +68,7 @@
     </article>
     <article>
       <h2>Export one HTML file</h2>
-      <p>Send a dashboard as a single file. It opens offline in any browser, and click-to-filter still works.</p>
+      <p>Send a dashboard as a single file. It opens offline in any browser, and click-to-filter still works. You can also save a picture or a PDF, or the numbers of one tile as CSV or Excel.</p>
     </article>
   </section>
 
@@ -83,6 +83,18 @@
     </picture>
   </section>
 
+  <section class="model">
+    <div>
+      <h2>Simple by default. Advanced when you want it.</h2>
+      <p>Tenun starts with the charts an Excel user knows: bars, lines, areas, scatter, histogram, waterfall and pivot tables with totals. Keep the top 5 and group the rest as Other. Show a value as a share, a running total or a change. Add a target and a trend line. Clean a messy sheet, turn months into rows, or read a whole folder of files.</p>
+      <p style="margin-top:0.75rem">One free switch, <b>Advanced features</b>, adds heat maps, funnels, box plots, bullet charts, Sankey, calendar, cohort and Gantt charts, and small multiples. Dashboards that use them still open when the switch is off.</p>
+    </div>
+    <picture class="shot">
+      <source srcset="/more-views-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/more-views-light.webp" width="1440" height="900" alt="The More views dashboard: a region filter, a number with a target, a waterfall by month, a top 5 plus Other bar chart, a pivot table with totals, and a note" loading="lazy">
+    </picture>
+  </section>
+
   <section class="online">
     <h2>Share it online, keep the data at home</h2>
     <p>Choose <b>Publish</b> and a dashboard gets a private link on tenun.cloud. Tenun builds it on your computer and sends only the results. The cloud never connects to your files or databases, and never sees a password.</p>
@@ -91,12 +103,13 @@
       <li><b>Updates by itself</b> when the data changes, hourly or daily. <code>tenun agent</code> keeps it going on a computer that stays on.</li>
       <li><b>Never silently stale:</b> every page says when it was updated, and warns when an update is late.</li>
       <li><b>Free</b> for up to 3 dashboards.</li>
+      <li>The Publish button is hidden in this release. It comes back when tenun.cloud opens.</li>
     </ul>
   </section>
 
   <section id="download" class="download">
     <h2>Download</h2>
-    <p>Version <span data-version>0.1.0</span>. Free and open source.</p>
+    <p>Version <span data-version>0.3.0</span>. Free and open source.</p>
     <div class="platforms">
       <a class="platform" href="https://github.com/galohot/tenun/releases/latest"><strong>Windows</strong><span>64-bit installer</span></a>
       <a class="platform" href="https://github.com/galohot/tenun/releases/latest"><strong>macOS</strong><span>Apple silicon and Intel</span></a>

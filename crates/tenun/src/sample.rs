@@ -1,6 +1,6 @@
 //! The sample workspace: a small coffee chain spread over three sources (an
-//! Excel workbook, a CSV file and a SQLite database), already related, with one
-//! dashboard. The files are written to a folder the user can open and edit, so
+//! Excel workbook, a CSV file and a SQLite database), already related, with two
+//! dashboards. The files are written to a folder the user can open and edit, so
 //! saving `coffee.xlsx` in Excel shows live refresh at work.
 
 use serde_json::json;
@@ -114,6 +114,67 @@ pub fn workspace() -> Workspace {
             by_segment,
         ]
     });
+    let sum_amount = json!([{ "table": orders, "column": "amount", "agg": "sum" }]);
+    let mut top_products = tile(
+        "t10",
+        "bar",
+        0,
+        5,
+        5,
+        3,
+        sum_amount.clone(),
+        json!([{ "table": orders, "column": "product" }]),
+    );
+    top_products["horizontal"] = json!(true);
+    top_products["top"] = json!({ "n": 5, "other": true });
+    top_products["sort"] = json!({ "by": "value", "desc": true });
+    let mut by_category = tile(
+        "t11",
+        "pivot",
+        5,
+        5,
+        7,
+        3,
+        sum_amount.clone(),
+        json!([{ "table": "s1/Products", "column": "category" }]),
+    );
+    by_category["cols"] = json!({ "table": "s2/stores", "column": "region" });
+    by_category["totals"] = json!(true);
+    let mut month_steps = tile(
+        "t12",
+        "waterfall",
+        3,
+        0,
+        9,
+        5,
+        sum_amount.clone(),
+        month.clone(),
+    );
+    month_steps["title"] = json!("Revenue, month by month");
+    let mut goal = tile("t13", "kpi", 0, 3, 3, 2, sum_amount.clone(), month.clone());
+    goal["target"] = json!({ "value": 40000 });
+    let mut region_filter = tile(
+        "t14",
+        "filter",
+        0,
+        0,
+        3,
+        3,
+        json!([]),
+        json!([{ "table": "s2/stores", "column": "region" }]),
+    );
+    region_filter["filter"] = json!({ "style": "list" });
+    let mut note = tile("t15", "text", 0, 8, 12, 1, json!([]), json!([]));
+    note["text"] = json!(
+        "The bar chart keeps the 5 biggest products and adds the rest as **Other**. \
+         The table adds up every row and column. Pick a region on the left, and every tile follows."
+    );
+    let more_views = json!({
+        "id": "d2",
+        "title": "More views",
+        "refresh": 60,
+        "tiles": [region_filter, goal, month_steps, top_products, by_category, note]
+    });
     Workspace {
         name: "Coffee".into(),
         sources: vec![
@@ -144,7 +205,7 @@ pub fn workspace() -> Workspace {
             rel("r2", f(orders, "customer_id"), f("s3/customers", "id")),
             rel("r3", f(orders, "product"), f("s1/Products", "product")),
         ],
-        dashboards: vec![dashboard],
+        dashboards: vec![dashboard, more_views],
         layout: json!({ "model": {
             "s1/Orders": { "x": 0, "y": 60 },
             "s1/Products": { "x": 0, "y": 330 },
