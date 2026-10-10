@@ -92,7 +92,8 @@ const decode = (t: string): string => {
 
 /**
  * Takes the first parameter of a link that looks like a key out of the link. Returns the link
- * without it, and the name and value that were taken. The rest of the link is left as it was typed.
+ * without it, and the name and value that were taken. A later parameter of the same name goes too,
+ * so no second value stays in the link. The rest of the link is left as it was typed.
  */
 export function splitKey(raw: string): { url: string; key: { name: string; value: string } | null } {
   const t = raw.trim();
@@ -108,6 +109,7 @@ export function splitKey(raw: string): { url: string; key: { name: string; value
     const name = decode(eq < 0 ? part : part.slice(0, eq));
     const value = eq < 0 ? '' : decode(part.slice(eq + 1));
     if (!key && value && KEY_NAMES.includes(name.toLowerCase())) key = { name, value };
+    else if (key && name.toLowerCase() === key.name.toLowerCase()) continue;
     else if (part) keep.push(part);
   }
   if (!key) return { url: t, key: null };

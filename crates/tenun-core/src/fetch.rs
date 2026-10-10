@@ -26,6 +26,8 @@ const MAX_REDIRECTS: usize = 5;
 const PREVIEW_BYTES: u64 = 256 * 1024;
 /// Stands for a key value in a text that is shown.
 const HIDDEN: &str = "•••";
+/// A key shorter than this is not taken out of the data an answer holds.
+const MIN_HIDDEN: usize = 6;
 
 const NOT_DATA: &str = "That link gives a web page, not data. In Google Sheets, publish the sheet as CSV and use that link.";
 
@@ -85,6 +87,28 @@ pub fn check(url: &str) -> anyhow::Result<String> {
 
 fn is_local(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "[::1]" | "::1")
+}
+
+/// True when a host name stands for this computer, however it is written: `localhost` in any
+/// case, with a dot at the end or as `*.localhost`; an address in 127.0.0.0/8; `0.0.0.0`; `::1`,
+/// `::`; and `::ffff:127.0.0.1`. A public link must not lead Tenun to any of these (V3-D86).
+fn is_loopback(host: &str) -> bool {
+    use std::net::IpAddr;
+    let h = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    let h = h.trim_start_matches('[').trim_end_matches(']');
+    if h == "localhost" || h.ends_with(".localhost") {
+        return true;
+    }
+    match h.parse::<IpAddr>() {
+        Ok(IpAddr::V4(a)) => a.is_loopback() || a.is_unspecified(),
+        Ok(IpAddr::V6(a)) => {
+            a.is_loopback()
+                || a.is_unspecified()
+                || a.to_ipv4_mapped()
+                    .is_some_and(|v| v.is_loopback() || v.is_unspecified())
+        }
+        Err(_) => false,
+    }
 }
 
 // ---- links, by hand: no new crate ---------------------------------------------------------
@@ -319,7 +343,7 @@ impl Client {
             agent,
             key,
             home,
-            home_is_local: is_local(&host),
+            home_is_local: is_loopback(&host),
         })
     }
 
@@ -333,17 +357,39 @@ impl Client {
             .replace(&pct_encode(&k.value), HIDDEN)
     }
 
+    /// Takes the key value out of data an answer holds (an API that repeats the link it was
+    /// called with, key and all), and says if it was there. A short value is left: it would hit
+    /// ordinary text.
+    fn hide(&self, text: String) -> (String, bool) {
+        match &self.key {
+            Some(k)
+                if k.value.chars().count() >= MIN_HIDDEN
+                    && (text.contains(&k.value) || text.contains(&pct_encode(&k.value))) =>
+            {
+                (self.scrub(text), true)
+            }
+            _ => (text, false),
+        }
+    }
+
+    /// The host of a link that Tenun may request: a web link, and not an address on this computer
+    /// unless the saved link is one itself.
+    fn allowed(&self, url: &str) -> anyhow::Result<String> {
+        let host = check(url)?;
+        if is_loopback(&host) && !self.home_is_local {
+            anyhow::bail!(
+                "{} sent Tenun to an address on this computer. Tenun does not follow that.",
+                self.home.0
+            );
+        }
+        Ok(host)
+    }
+
     /// GET with the key for the home host only. Redirects are followed here, up to 5.
     fn get(&self, first: &str) -> anyhow::Result<Reply> {
         let mut url = first.trim().to_string();
         for _ in 0..=MAX_REDIRECTS {
-            let host = check(&url)?;
-            if is_local(&host) && !self.home_is_local {
-                anyhow::bail!(
-                    "{} sent Tenun to an address on this computer. Tenun does not follow that.",
-                    self.home.0
-                );
-            }
+            let host = self.allowed(&url)?;
             let key = self
                 .key
                 .as_ref()
@@ -683,7 +729,12 @@ fn collect(
         let room = MAX_BYTES - used;
         let stop_at_size = |notes: &mut Vec<String>, rows: usize| {
             notes.push(format!(
-                "Read the first {page} pages ({} rows) and stopped at 50 MB. The link has more.",
+                "Read the first {} ({} rows) and stopped at 50 MB. The link has more.",
+                if page == 1 {
+                    "page".to_string()
+                } else {
+                    format!("{page} pages")
+                },
                 thousands(rows)
             ));
         };
@@ -721,7 +772,11 @@ fn collect(
             thousands(jsonrec::MAX_COLUMNS)
         ));
     }
-    Ok((flat.to_csv(), notes))
+    let (csv, hidden) = client.hide(flat.to_csv());
+    if hidden {
+        notes.push("The key was in the data. Tenun hid it.".into());
+    }
+    Ok((csv, notes))
 }
 
 // ---- preview ------------------------------------------------------------------------------
@@ -787,12 +842,17 @@ fn preview_with(client: &Client, spec: &Spec) -> anyhow::Result<Preview> {
             let picked = jsonrec::pick(&val, spec.records).map_err(|e| anyhow::anyhow!(e))?;
             let mut flat = Flat::default();
             flat.add(picked.records);
+            let shown = |t: String| client.hide(t).0;
             Ok(Preview {
                 format: "json",
                 lists: jsonrec::lists(&val),
                 records: picked.path,
-                columns: flat.columns(),
-                rows: flat.head(5),
+                columns: flat.columns().into_iter().map(shown).collect(),
+                rows: flat
+                    .head(5)
+                    .into_iter()
+                    .map(|r| r.into_iter().map(shown).collect())
+                    .collect(),
                 total: flat.rows(),
                 pages_hint: jsonrec::pages_hint(
                     &val,
@@ -909,6 +969,108 @@ mod tests {
             t,
             format!("failed: https://h.example/a?api_key={HIDDEN} and {HIDDEN}")
         );
+    }
+
+    fn client_for(url: &'static str, value: &'static str) -> Client {
+        Client::new(&Spec {
+            url,
+            records: None,
+            pages: None,
+            key: Some(KeyArg {
+                place: KeyPlace::Header,
+                name: "X-Api-Key",
+                value,
+            }),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn the_key_goes_by_host_and_port_as_parsed_not_by_the_start_of_the_text() {
+        let home = origin_of("https://api.example.com/v1/items").unwrap();
+        assert_eq!(home, ("api.example.com".to_string(), 443));
+        // The same place, written another way: the key may go.
+        for same in [
+            "https://API.Example.COM/other",
+            "https://api.example.com:443/x?y=1",
+            "https://user:pw@api.example.com/x",
+        ] {
+            assert_eq!(origin_of(same), Some(home.clone()), "{same}");
+        }
+        // Another place, whatever the link starts with: no key.
+        for other in [
+            "https://api.example.com.evil.com/x",
+            "https://api.example.com@evil.com/x",
+            "https://evil.com#@api.example.com/x",
+            "https://api.example.com:8443/x",
+            "http://api.example.com/x",
+            "https://api.example.com./x",
+            "https://xapi.example.com/x",
+            "//evil.com/x",
+        ] {
+            assert_ne!(origin_of(other), Some(home.clone()), "{other}");
+        }
+        assert_eq!(
+            origin_of("http://[::1]:8080/a"),
+            Some(("[::1]".to_string(), 8080))
+        );
+        // A link that a page names is made complete first, so a host trick stays a host trick.
+        assert_ne!(
+            origin_of(&resolve(
+                "https://api.example.com/v1/a",
+                "//api.example.com.evil.com/x"
+            )),
+            Some(home.clone())
+        );
+        assert_eq!(
+            origin_of(&resolve("https://api.example.com/v1/a", "/@evil.com/x")),
+            Some(home)
+        );
+    }
+
+    #[test]
+    fn a_public_link_cannot_send_tenun_to_this_computer() {
+        let public = client_for("https://api.example.com/items", "s3cret-key");
+        for to in [
+            "http://127.0.0.1:4700/api/workspace",
+            "http://localhost:4700/",
+            "https://localhost/",
+            "https://LOCALHOST:8443/",
+            "https://localhost./",
+            "https://app.localhost/",
+            "https://127.0.0.2/",
+            "https://0.0.0.0/",
+            "http://[::1]:4700/",
+            "https://[::1]/",
+            "https://[::ffff:127.0.0.1]/",
+        ] {
+            assert!(public.allowed(to).is_err(), "{to} must be refused");
+        }
+        assert!(public.allowed("https://api.example.com/page2").is_ok());
+        assert!(public.allowed("https://docs.example.org/x").is_ok());
+        // A link to this computer may stay on it, and may leave it.
+        let local = client_for("http://127.0.0.1:4707/items", "s3cret-key");
+        assert!(local.allowed("http://localhost:4707/page2").is_ok());
+        assert!(local.allowed("https://api.example.com/x").is_ok());
+        // Another computer on the network is not this computer.
+        assert!(public.allowed("https://192.0.2.7/x").is_ok());
+    }
+
+    #[test]
+    fn a_key_in_the_data_is_hidden_unless_it_is_too_short_to_tell_apart() {
+        let c = client_for("https://api.example.com/items", "s3cret key");
+        let (t, hit) = c.hide("a,b\nhttps://h/x?api_key=s3cret%20key&p=2,s3cret key\n".into());
+        assert!(hit);
+        assert_eq!(
+            t,
+            format!("a,b\nhttps://h/x?api_key={HIDDEN}&p=2,{HIDDEN}\n")
+        );
+        let (t, hit) = c.hide("nothing here\n".into());
+        assert!(!hit && t == "nothing here\n");
+        // A one-letter key would hit every cell with that letter.
+        let short = client_for("https://api.example.com/items", "x");
+        let (t, hit) = short.hide("xyz\n".into());
+        assert!(!hit && t == "xyz\n");
     }
 
     #[test]

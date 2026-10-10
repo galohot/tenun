@@ -11,6 +11,7 @@
 
   const look = $derived(f.look);
   const pasted = (e: Event) => {
+    f.addressEdited();
     // A link pasted with a key in it is cleaned at once. Typing waits for the field to lose focus.
     const t = (e as InputEvent).inputType;
     if (t === 'insertFromPaste' || t === 'insertFromDrop') f.tidy();
@@ -79,7 +80,11 @@
         class="field"
         type="password"
         bind:value={f.keyValue}
-        autocomplete="off"
+        autocomplete="new-password"
+        oninput={(e) => {
+          // A value typed after Remove key means a new key, not a removal.
+          if (e.currentTarget.value) f.removeKey = false;
+        }}
         placeholder={f.stored && !f.removeKey ? 'Saved. Leave empty to keep it.' : ''} />
     </label>
     {#if f.stored}

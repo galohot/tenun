@@ -76,6 +76,21 @@ export class LinkForm {
     this.moved = `Moved ${r.key.name} out of the link. Tenun keeps keys out of the workspace file.`;
   }
 
+  /**
+   * The address was edited. What a preview showed, and the records and pages chosen from it, belong
+   * to the old address: they are dropped, so Add does not send them with the new one.
+   */
+  addressEdited() {
+    if (this.locked || (!this.look && !this.lookError && !this.records && !this.pagesTouched)) return;
+    this.#seq++;
+    this.look = null;
+    this.looking = false;
+    this.lookError = '';
+    this.records = '';
+    this.pages = { ...NO_PAGES };
+    this.pagesTouched = false;
+  }
+
   setPlace(p: KeyPlace) {
     // The starting name follows the place until the user writes their own.
     if (this.keyName.trim() === keyStart(this.place)) this.keyName = keyStart(p);

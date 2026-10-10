@@ -435,8 +435,9 @@ impl Engine {
 
     pub fn add_source(&self, req: AddSource) -> anyhow::Result<String> {
         let base = self.base_dir();
-        // A link key: its secrets entry and value, stored before the first load.
-        let mut pending_key: Option<(String, String)> = None;
+        // A link key: its secrets entry, and the value to store before the first load (none when
+        // the value stored already is meant).
+        let mut link_entry: Option<(String, Option<String>)> = None;
         let (name, kind) = match req {
             AddSource::File { path } => {
                 let abs = PathBuf::from(&path);
@@ -509,8 +510,9 @@ impl Engine {
                         if self.secrets.get(&secret).is_none_or(|v| v.is_empty()) {
                             anyhow::bail!("Type the key to send with the link.");
                         }
+                        link_entry = Some((secret, None));
                     } else {
-                        pending_key = Some((secret, k.value));
+                        link_entry = Some((secret, Some(k.value)));
                     }
                     link_key = Some(lk);
                 }
@@ -540,11 +542,14 @@ impl Engine {
             }
         };
         // The key goes into the secrets file before the first load, as a database password does.
-        // If the load fails, the entry goes back to what it was.
+        // If the load fails, the entry goes back to what it was, also when the value stored
+        // already was used: another workspace may need it.
         let mut undo_key: Option<(String, Option<String>)> = None;
-        if let Some((secret, value)) = pending_key {
+        if let Some((secret, value)) = link_entry {
             let before = self.secrets.get(&secret);
-            self.secrets.set(&secret, &value)?;
+            if let Some(v) = value {
+                self.secrets.set(&secret, &v)?;
+            }
             undo_key = Some((secret, before));
         }
         let id = {

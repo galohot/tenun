@@ -136,7 +136,9 @@ If you paste a link that has a key in it (`?api_key=...`), Tenun moves the key i
 Tenun keeps the key in its own settings file on this computer, in your user settings folder. The
 file can only be read by you. The key is **never** written to the workspace file, to the copy of the
 data, or to an exported dashboard. Someone who opens your workspace file adds their own key. A key
-goes only to the host in your link. A page link or a redirect to another host gets no key.
+goes only to the same host and port as your link. A page link or a redirect to another host gets no key. If an API
+repeats the key inside its data (for example in a link in each record), Tenun shows it as `•••` in
+the copy and in the preview.
 
 To change or remove the key later, open **Link settings** under the source in the Data view. The
 value field stays empty. Leave it empty to keep the saved key. A key that expires must be pasted

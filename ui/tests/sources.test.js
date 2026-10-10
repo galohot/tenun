@@ -70,6 +70,18 @@ test('a key in a pasted link moves out of the link', () => {
   for (const t of ['https://h.example/a', 'https://h.example/a?page=2', 'https://h.example/a?api_key=', 'https://h.example/a?monkey=1&keyword=2&tokens=3']) {
     assert.deepEqual(splitKey(t), { url: t, key: null }, t);
   }
+  // A name written with percent signs is read. A name that comes twice leaves no value in the link.
+  assert.deepEqual(splitKey('https://h.example/a?api%5Fkey=abc&x=1'), {
+    url: 'https://h.example/a?x=1',
+    key: { name: 'api_key', value: 'abc' },
+  });
+  assert.deepEqual(splitKey('https://h.example/a?key=one&x=1&KEY=two&key=three'), {
+    url: 'https://h.example/a?x=1',
+    key: { name: 'key', value: 'one' },
+  });
+  // A value with an equals sign stays whole, and a key in the fragment is not a parameter.
+  assert.deepEqual(splitKey('https://h.example/a?token=YWJj==').key, { name: 'token', value: 'YWJj==' });
+  assert.deepEqual(splitKey('https://h.example/a#token=abc'), { url: 'https://h.example/a#token=abc', key: null });
   // Spaces around the link are dropped. The first key is moved.
   assert.equal(splitKey('  https://h.example/a?key=1&token=2  ').key?.name, 'key');
   assert.equal(keyStart('header'), 'Authorization');

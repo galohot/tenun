@@ -526,6 +526,8 @@ fn text_only_tables_keep_their_header_and_odd_files_still_stack() {
 /// The key the test API accepts, and one it does not.
 const KEY: &str = "k-123";
 const WRONG: &str = "wrong-VALUE-777";
+/// A key that `/echo` accepts and then repeats in its answer.
+const ECHO: &str = "echo-key-98765";
 
 /// Every request the test API got: the whole request head, as text.
 #[derive(Clone, Default)]
@@ -576,7 +578,8 @@ fn items(ids: &[u32]) -> Value {
 /// A JSON API on this computer. Routes: `/json` (nested records), `/nd` (one object per line),
 /// `/link`, `/field`, `/cursor`, `/num`, `/numt` and `/endless` (pages in each way), `/loop` (a next
 /// link that points at itself), `/secure` and `/q` (need `KEY`), `/hop` and `/hopq` (redirect to
-/// `localhost`, another host name for the same server), `/hop-same` and `/xpage`.
+/// `localhost`, another host name for the same server), `/hop-same`, `/xpage`, `/echo` (repeats its
+/// key) and `/big` (a second page that says it is 60 MB).
 fn api() -> (String, Log) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -592,14 +595,17 @@ fn api() -> (String, Log) {
             let target = head.split_whitespace().nth(1).unwrap_or("/").to_string();
             let (path, q) = target.split_once('?').unwrap_or((&target, ""));
             let r = route(path, q, &head.to_lowercase(), port);
+            // `/big?page=2` says it is 60 MB long and sends nothing more: the size is read from the
+            // head of the answer, before the body.
+            let length = if target.starts_with("/big?page=2") {
+                60_000_000
+            } else {
+                r.body.len()
+            };
             let _ = write!(
                 s,
                 "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n{}",
-                r.status,
-                r.ctype,
-                r.body.len(),
-                r.extra,
-                r.body
+                r.status, r.ctype, length, r.extra, r.body
             );
         }
     });
@@ -682,6 +688,17 @@ fn route(path: &str, q: &str, head: &str, port: u16) -> Resp {
         "/secure" if has_key => ok(nested),
         "/q" if param(q, "api_key").as_deref() == Some(KEY) => ok(nested),
         "/secure" | "/q" => denied(),
+        // An API that repeats the link it was called with, key and all, and names a list after it.
+        "/echo" if head.contains(&format!("x-api-key: {}\r\n", ECHO.to_lowercase())) => {
+            let rows: Vec<Value> = (1..=2)
+                .map(|i| json!({ "id": i, "self": format!("https://h.example/echo?api_key={ECHO}&i={i}") }))
+                .collect();
+            let mut m = serde_json::Map::new();
+            m.insert(ECHO.to_string(), Value::Array(rows));
+            ok(Value::Object(m))
+        }
+        "/echo" => denied(),
+        "/big" => ok(json!({ "items": items(&[1, 2]), "next": "/big?page=2" })),
         "/hop" => redirect(format!("http://localhost:{port}/secure")),
         "/hopq" => redirect(format!("http://localhost:{port}/q")),
         "/hop-same" => redirect("/secure".into()),
@@ -1390,5 +1407,123 @@ fn a_preview_reads_only_the_first_page_and_saves_nothing() {
             .unwrap()
             .total,
         3
+    );
+}
+
+#[test]
+fn a_key_that_the_answer_repeats_is_hidden_in_the_copy_and_in_the_errors() {
+    let d = dir("echo");
+    let (base, _) = api();
+    let e = engine(&d);
+    // A wrong path names the lists there are. One is named after the key: the words hide it.
+    let err = e
+        .add_source(api_link(
+            format!("{base}/echo"),
+            Some("nope"),
+            None,
+            key_in(KeyPlace::Header, "X-Api-Key", ECHO),
+        ))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "There is no list at nope. Lists in this answer: ••• (2)."
+    );
+    // The records repeat the key in a link. The copy, the table and the preview hide it.
+    let id = e
+        .add_source(api_link(
+            format!("{base}/echo"),
+            None,
+            None,
+            key_in(KeyPlace::Header, "X-Api-Key", ECHO),
+        ))
+        .unwrap();
+    let t = e.catalog().table(&format!("{id}/Api")).cloned().unwrap();
+    assert_eq!(t.rows, Some(2));
+    assert_eq!(t.notes, ["The key was in the data. Tenun hid it."]);
+    assert_eq!(
+        files_holding(&d, ECHO),
+        ["secrets.json"],
+        "the value is in the secrets file only"
+    );
+    let copy =
+        std::fs::read_to_string(d.join("Books data").join(format!("link-{id}.csv"))).unwrap();
+    assert!(
+        copy.contains("https://h.example/echo?api_key=•••&i=1"),
+        "{copy}"
+    );
+    let p = e
+        .link_preview(LinkPreview {
+            url: format!("{base}/echo"),
+            records: None,
+            key: key_in(KeyPlace::Header, "X-Api-Key", ECHO),
+        })
+        .unwrap();
+    assert!(
+        !serde_json::to_string(&p)
+            .unwrap()
+            .contains(&format!("api_key={ECHO}"))
+    );
+    assert_eq!(p.rows[0][1], "https://h.example/echo?api_key=•••&i=1");
+}
+
+#[test]
+fn a_page_that_says_it_is_over_the_limit_ends_the_walk_with_a_note() {
+    let d = dir("big");
+    let (base, log) = api();
+    let e = engine(&d);
+    let id = e
+        .add_source(api_link(
+            format!("{base}/big"),
+            None,
+            Some(Paging::Field {
+                path: "next".into(),
+            }),
+            None,
+        ))
+        .unwrap();
+    assert!(e.snapshot().errors.is_empty(), "{:?}", e.snapshot().errors);
+    let t = e.catalog().table(&format!("{id}/Api")).cloned().unwrap();
+    assert_eq!(t.rows, Some(2), "what was read is kept");
+    assert_eq!(
+        t.notes,
+        ["Read the first page (2 rows) and stopped at 50 MB. The link has more."]
+    );
+    assert_eq!(log.hits("/big").len(), 2);
+}
+
+#[test]
+fn a_failed_add_leaves_the_key_that_was_stored_before() {
+    let d = dir("keep-stored");
+    let (base, _) = api();
+    // One workspace has a link with a key.
+    let first = engine(&d);
+    first
+        .add_source(api_link(
+            format!("{base}/secure"),
+            None,
+            None,
+            header_key(KEY),
+        ))
+        .unwrap();
+    // Another workspace on this computer uses the stored value for a link that then fails. The
+    // first workspace still needs the key.
+    let second = Engine::new(Secrets::new(d.join("secrets.json"))).unwrap();
+    second.replace(
+        Workspace {
+            name: "Other".into(),
+            ..Workspace::default()
+        },
+        Some(d.join("Other.tenun")),
+    );
+    let err = second
+        .add_source(api_link(format!("{base}/gone"), None, None, header_key("")))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("404"), "{err}");
+    let secrets = std::fs::read_to_string(d.join("secrets.json")).unwrap();
+    assert!(
+        secrets.contains("link://127.0.0.1/header/X-Api-Key") && secrets.contains(KEY),
+        "{secrets}"
     );
 }

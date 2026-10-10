@@ -94,13 +94,17 @@ impl Secrets {
 #[cfg(unix)]
 fn write_private(path: &std::path::Path, bytes: &[u8]) -> anyhow::Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    // Opened without truncating: a file that exists with a wider mode is made private before
+    // anything is written to it. `mode` applies only when the file is created here.
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
-        .truncate(true)
+        .truncate(false)
         .mode(0o600)
         .open(path)?;
+    f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    f.set_len(0)?;
     f.write_all(bytes)?;
     Ok(())
 }
@@ -142,6 +146,23 @@ mod tests {
         }
         s.remove(&k).unwrap();
         assert_eq!(s.get(&k), None);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_that_exists_with_a_wider_mode_is_made_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("tenun-secrets-wide-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("secrets.json");
+        std::fs::write(&file, "{}").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let s = Secrets::new(file.clone());
+        s.set("link://h/header/X", "v").unwrap();
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(s.get("link://h/header/X").as_deref(), Some("v"));
         std::fs::remove_dir_all(dir).ok();
     }
 
