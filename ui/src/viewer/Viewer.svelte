@@ -6,7 +6,10 @@
   import type { ExportPayload } from '../lib/export';
   import { key, readColors, type Colors } from '../lib/chart';
   import { cell, dateMedium, dateTimeMedium, dimLabel, OTHER_KEY, tileTitle, timeShort } from '../lib/format';
+  import Icon from '../components/Icon.svelte';
+  import FocusSheet from '../components/dash/FocusSheet.svelte';
   import TileBody from '../components/dash/TileBody.svelte';
+  import { filterText } from '../lib/filterText';
   import { partialNote } from '../lib/run';
   import { EMPTY_RESULT, isStatic } from '../lib/tiles';
 
@@ -26,6 +29,8 @@
   let width = $state(1000);
   /** `col` is a click on a pivot column header. */
   let pick = $state<{ tile: string; value: Cell; col?: boolean } | null>(null);
+  /** The tile shown large. */
+  let focusId = $state<string | null>(null);
   /** How the engine names the export's stored result for a click on a pivot column header. */
   const COL_PREFIX = '\u0001col:';
   const crossKey = (v: Cell, col?: boolean) => (col ? COL_PREFIX : '') + key(v);
@@ -125,6 +130,9 @@
       {/if}
     </div>
     <div class="chips">
+      {#each data.saved ?? [] as f}
+        <span class="chip static" title="Saved with the dashboard"><Icon name="pin" size={12} /> {filterText(f, data.tables)}</span>
+      {/each}
       {#each data.filters as f}
         <span class="chip static">{label(f.fromTile, f.op === 'not_in' ? OTHER_KEY : f.values[0], isColFilter(f))}</span>
       {/each}
@@ -153,7 +161,10 @@
           {#if (data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables)) !== ''}
             <h3>{data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables)}</h3>
           {/if}
-          <div class="body" class:bare={isStatic(l.t) && !l.t.title}>
+          {#if r.res && !isStatic(l.t) && l.t.type !== 'filter'}
+            <button class="expand" title="Open large" aria-label="Open large" onclick={() => (focusId = l.t.id)}><Icon name="expand" size={14} /></button>
+          {/if}
+          <div class="body" class:bare={(isStatic(l.t) || l.t.type === 'filter') && !l.t.title}>
             {#if r.res || isStatic(l.t)}
               <TileBody
                 tile={l.t}
@@ -169,11 +180,25 @@
           {#if r.res && l.t.type !== 'kpi' && partialNote(r.res, l.t.dims[0]?.grain)}
             <p class="note">{partialNote(r.res, l.t.dims[0]?.grain)}</p>
           {/if}
-          {#if r.offline && !isStatic(l.t)}<p class="note">Not filtered in this file</p>{/if}
+          {#if r.offline && !isStatic(l.t) && l.t.type !== 'filter'}<p class="note">Not filtered in this file</p>{/if}
         </article>
       {/each}
     {/if}
   </div>
+
+  {#if focusId && colors}
+    {@const ft = data.tiles.find((t) => t.id === focusId)}
+    {@const fr = ft ? resultFor(ft).res : undefined}
+    {#if ft && fr}
+      <FocusSheet
+        tile={ft}
+        res={fr}
+        {colors}
+        title={data.titles?.[ft.id] ?? tileTitle(ft, data.tables)}
+        tables={data.tables}
+        onclose={() => (focusId = null)} />
+    {/if}
+  {/if}
 
   <footer>
     {#if hosted}
@@ -203,7 +228,7 @@
     font-size: 12px;
     font-weight: 500;
   }
-  .chip.static { padding-right: 10px; background: var(--inset); color: var(--text-2); }
+  .chip.static { display: inline-flex; gap: 5px; padding-right: 10px; background: var(--inset); color: var(--text-2); }
   .chip button { border: 0; background: none; color: inherit; font-size: 15px; line-height: 1; padding: 0 6px; cursor: pointer; }
   .grid { position: relative; }
   .tile {
@@ -218,6 +243,25 @@
     overflow: hidden;
   }
   h3 { padding: 10px 14px 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .expand {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text-2);
+    opacity: 0;
+    cursor: pointer;
+  }
+  .tile:hover .expand, .expand:focus-visible { opacity: 1; }
+  .expand:hover { color: var(--text); background: var(--hover); }
   .body { flex: 1; min-height: 0; padding: 6px 14px 10px; }
   .body.bare { padding-top: 12px; }
   .note { margin: 0; padding: 0 14px 8px; font-size: 11px; color: var(--text-2); }

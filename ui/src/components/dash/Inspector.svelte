@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { api, DATE_PARTS, isPart, type Agg, type Grain, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileType } from '../../lib/api';
+  import { api, DATE_PARTS, isPart, type Agg, type DType, type Grain, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { aggNames, tileTitle } from '../../lib/format';
   import { defaultStack, stackableTile, stackMode } from '../../lib/charts/math';
   import { dim0Kind, SHOW_AS_LABELS, showAsOptions, withShowAs } from '../../lib/showas';
   import { advancedLocked, SHOW_ADVANCED_SWITCH } from '../../lib/tiers';
+  import { isCleared, isPeriod } from '../../lib/filters';
   import { defaultDim, defaultMeasure, dtypeOf, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, reachableFrom, type DashFilter } from '../../lib/tiles';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
@@ -15,6 +16,7 @@
     tile,
     current = null,
     filters = [],
+    dashGrain = null,
     onchange,
     onremove,
     onclose,
@@ -23,6 +25,8 @@
     /** What the tile shows now, for the previews under "Also try". */
     current?: { res: QueryResult; key: string } | null;
     filters?: DashFilter[];
+    /** The grain the dashboard sets for every tile over time; null is "Auto". */
+    dashGrain?: Grain | null;
     onchange: (t: Tile) => void;
     onremove: () => void;
     onclose: () => void;
@@ -39,6 +43,7 @@
     { id: 'histogram', icon: 'histogram', label: 'Histogram' },
     { id: 'waterfall', icon: 'waterfall', label: 'Waterfall' },
     { id: 'pivot', icon: 'pivot', label: 'Pivot' },
+    { id: 'filter', icon: 'filter', label: 'Filter' },
     { id: 'text', icon: 'text', label: 'Text' },
     { id: 'image', icon: 'image', label: 'Image' },
   ];
@@ -178,8 +183,31 @@
   const isHistogram = $derived(tile.type === 'histogram');
   const isText = $derived(tile.type === 'text');
   const isImage = $derived(tile.type === 'image');
-  // A note and a picture have no fields to pick.
-  const noFields = $derived(isText || isImage);
+  const isFilter = $derived(tile.type === 'filter');
+  // A note, a picture and a filter have no values to pick.
+  const noFields = $derived(isText || isImage || isFilter);
+  const filterStyles: { id: NonNullable<Tile['filter']>['style']; label: string; types: DType[] | null }[] = [
+    { id: 'list', label: 'List', types: null },
+    { id: 'dropdown', label: 'Dropdown', types: null },
+    { id: 'range', label: 'Range', types: ['number'] },
+    { id: 'dates', label: 'Dates', types: ['date', 'datetime'] },
+  ];
+  const filterField = $derived(tile.dims[0] ? dtypeOf(app.tables, tile.dims[0].table, tile.dims[0].column) : undefined);
+  /** The styles that suit the field: a range needs numbers and dates need a date. */
+  const styleChoices = $derived(filterStyles.filter((s) => !s.types || !filterField || s.types.includes(filterField)));
+
+  /** A new field starts with a style that suits it and nothing selected. */
+  function setFilterField(table: string, column: string | null) {
+    if (!column) return;
+    const t = dtypeOf(app.tables, table, column);
+    const style = t === 'number' ? 'range' : t === 'date' || t === 'datetime' ? 'dates' : 'list';
+    set({ dims: [{ table, column }], h: tile.h === 1 ? 3 : tile.h, filter: { style } });
+  }
+  function setFilterStyle(style: NonNullable<Tile['filter']>['style']) {
+    // The selection of one style means nothing in another. A dropdown is one row high; a list needs more.
+    const height = style === 'dropdown' ? 1 : tile.h === 1 ? 3 : tile.h;
+    set({ h: height, filter: { style, ...(style === 'list' || style === 'dropdown' ? { single: tile.filter?.single } : {}) } });
+  }
   const maxValues = $derived(tile.type === 'table' ? Infinity : isPivot ? PIVOT_MAX_MEASURES : MAX_CHART_MEASURES);
   const showSplit = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area' || tile.type === 'table' || isScatter);
   // Several values draw one series each; otherwise the series are the groups of a split.
@@ -445,6 +473,39 @@
     </div>
   {/if}
 
+  {#if isFilter}
+    <div class="sec">
+      <span class="label">Field to filter by</span>
+      <FieldPicker
+        mode="dim"
+        table={tile.dims[0]?.table ?? null}
+        column={tile.dims[0]?.column ?? null}
+        placeholder="Pick a field"
+        onchange={(t, c) => setFilterField(t, c)}
+        onclear={() => set({ dims: [], filter: { style: tile.filter?.style ?? 'list' } })} />
+      {#if tile.dims[0]}
+        <div class="grains stack" role="radiogroup" aria-label="Filter style">
+          {#each styleChoices as o}
+            <button role="radio" aria-checked={(tile.filter?.style ?? 'list') === o.id} class:on={(tile.filter?.style ?? 'list') === o.id} onclick={() => setFilterStyle(o.id)}>{o.label}</button>
+          {/each}
+        </div>
+        {#if (tile.filter?.style ?? 'list') === 'list' || tile.filter?.style === 'dropdown'}
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={!!tile.filter?.single}
+              onchange={(e) => set({ filter: { ...tile.filter!, style: tile.filter?.style ?? 'list', single: e.currentTarget.checked || undefined, values: e.currentTarget.checked ? tile.filter?.values?.slice(0, 1) : tile.filter?.values } })} />
+            Pick one value at most
+          </label>
+        {/if}
+        {#if !isCleared(tile.filter)}
+          <button class="btn plain flush" onclick={() => set({ filter: { style: tile.filter?.style ?? 'list', ...(tile.filter?.single ? { single: true } : {}) } })}>Clear the selection</button>
+        {/if}
+        <p class="hint tight">The selection is saved with the dashboard. It filters every other tile, in exported and published files too.</p>
+      {/if}
+    </div>
+  {/if}
+
   {#if !noFields}
   <div class="sec">
     <span class="label">{isScatter ? 'Across (X)' : isHistogram ? 'Number column' : 'Value'}</span>
@@ -523,6 +584,9 @@
             </button>
           {/each}
         </div>
+        {#if dashGrain && isPeriod(tile.dims[0].grain)}
+          <p class="hint tight">The dashboard shows every chart over time by {dashGrain}. Choose Auto in the toolbar to use this grouping.</p>
+        {/if}
         <!-- Parts of the date repeat every year, week or day. A number tile compares periods, so it has none. -->
         {#if tile.type !== 'kpi'}
           <div class="grains parts" role="radiogroup" aria-label="Part of the date">

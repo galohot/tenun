@@ -67,6 +67,16 @@ export interface Filter {
   values: (string | number | boolean | null)[];
 }
 
+/**
+ * A filter on a dashboard. `fromTile` is the tile it came from, which it does not filter: a click on
+ * a mark, or a filter tile's selection. A filter the dashboard saves ("Keep only", "Exclude") names
+ * no tile, so it filters them all. `label` is what a chip says when the values alone do not tell.
+ */
+export interface DashFilter extends Filter {
+  fromTile: string;
+  label?: string;
+}
+
 export interface SemanticQuery {
   measures: Measure[];
   dimensions: Dim[];
@@ -166,6 +176,21 @@ export type ShowAs =
   | 'value' | 'pct_total' | 'pct_group' | 'running' | 'moving_3' | 'moving_7' | 'moving_12'
   | 'change' | 'pct_change' | 'rank' | 'ytd';
 
+/**
+ * A filter tile: its field is `dims[0]`. `values` (list, dropdown), `range` (range: lowest and highest
+ * number; dates: first and last day, either may be null) and `preset` (dates) hold the selection. A
+ * filter with none of them keeps everything.
+ */
+export interface TileFilter {
+  style: 'list' | 'dropdown' | 'range' | 'dates';
+  /** List and dropdown: pick one value at most. */
+  single?: boolean;
+  values?: Cell[];
+  range?: [Cell, Cell];
+  /** A relative date preset, or `custom` while the two days are being picked. */
+  preset?: string;
+}
+
 /** A picture on a dashboard. */
 export interface TileImage {
   /** A data URL: PNG, JPEG or WebP, at most 1 MB. */
@@ -224,6 +249,8 @@ export interface Tile {
   showAs?: (ShowAs | null)[];
   /** Line, area and bar over time: also draw the same question one year (or one period) earlier. */
   compare?: 'prev_year' | 'prev_period' | null;
+  /** Filter tile: its style and what it has selected. */
+  filter?: TileFilter;
   /** Text tile: a small Markdown subset (see markdown.ts). */
   text?: string;
   /** Image tile. */
@@ -256,6 +283,18 @@ export interface Dashboard {
   refresh: number;
   tiles: Tile[];
   publish?: PublishSettings;
+  /** One grain for every time tile. Not set: each tile keeps its own ("Auto"). */
+  grain?: Grain | null;
+  /** Filters the dashboard keeps ("Keep only", "Exclude"). They apply to every tile. */
+  filters?: DashFilter[];
+}
+
+/** The raw rows behind a tile or one of its marks. */
+export interface RowsBehind {
+  columns: { label: string; dtype: DType }[];
+  rows: Cell[][];
+  /** How many rows match. `rows` holds the first 500. */
+  total: number;
 }
 
 export interface CloudStatus {
@@ -371,6 +410,8 @@ export const api = {
   },
   openBrowser: () => call<{ ok: boolean }>('POST', '/open-browser'),
   tile: (tile: Tile, filters: unknown[]) => call<QueryResult>('POST', '/tile', { tile, filters }),
+  /** The raw rows behind a tile; `click` is the filter a click on the mark makes. */
+  rows: (tile: Tile, filters: unknown[], click: Filter | null) => call<RowsBehind>('POST', '/rows', { tile, filters, click }),
   cloud: () => call<CloudStatus>('GET', '/cloud'),
   cloudConnect: (open: boolean) => call<{ user_code: string; url: string; expires_in: number }>('POST', '/cloud/connect', { open }),
   cloudDisconnect: () => call<{ ok: boolean }>('POST', '/cloud/disconnect', {}),

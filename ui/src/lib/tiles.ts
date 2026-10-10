@@ -1,13 +1,10 @@
 // Tile helpers: the query a tile sends, sensible defaults, and grid layout.
 
-import type { Dashboard, Dim, DType, Filter, Measure, QueryResult, SemanticQuery, Table, Tile, TileType } from './api';
+import type { Dashboard, Dim, DashFilter, DType, Measure, QueryResult, SemanticQuery, Table, Tile, TileType } from './api';
 
 export const COLS = 12;
 
-export interface DashFilter extends Filter {
-  /** The tile the click came from; it is not filtered by its own selection. */
-  fromTile: string;
-}
+export type { DashFilter } from './api';
 
 /** The most values a bar, line or area tile shows side by side. */
 export const MAX_CHART_MEASURES = 4;
@@ -18,7 +15,7 @@ export const PIVOT_MAX_MEASURES = 4;
 export const PIVOT_LIMIT = 5000;
 
 /** Tiles that show something the author typed or picked. They ask nothing and have no result. */
-export const STATIC_TYPES: readonly TileType[] = ['text', 'image', 'filter'];
+export const STATIC_TYPES: readonly TileType[] = ['text', 'image'];
 export const isStatic = (t: Tile | TileType): boolean => STATIC_TYPES.includes(typeof t === 'string' ? t : t.type);
 
 /** What a static tile is drawn from: it has no rows. */
@@ -33,7 +30,7 @@ export const hasManyValues = (tile: Tile) =>
  */
 export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | null {
   if (isStatic(tile) || (!tile.measures.length && !tile.dims.length)) return null;
-  const one = tile.type === 'kpi' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'waterfall';
+  const one = tile.type === 'kpi' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'waterfall' || tile.type === 'filter';
   const many = hasManyValues(tile);
   // A histogram has no groups: it bins one number column.
   const dims =
@@ -84,6 +81,7 @@ export function resultKey(tile: Tile, filters: DashFilter[]): string {
     tileQuery(tile, filters),
     tile.type,
     tile.type === 'kpi' ? tile.dims : null,
+    tile.type === 'filter' ? (tile.filter?.style ?? 'list') : null,
     tile.top ?? null,
     tile.bins ?? null,
     tile.totals ?? null,
@@ -134,6 +132,8 @@ export function defaultSize(type: TileType): { w: number; h: number } {
       return { w: 8, h: 5 };
     case 'text':
       return { w: 4, h: 2 };
+    case 'filter':
+      return { w: 3, h: 3 };
     case 'image':
       return { w: 4, h: 3 };
     default:
@@ -142,7 +142,7 @@ export function defaultSize(type: TileType): { w: number; h: number } {
 }
 
 /** The fewest rows a tile may be resized to: a note can be one row high. */
-export const minHeight = (type: TileType): number => (type === 'text' ? 1 : 2);
+export const minHeight = (type: TileType): number => (type === 'text' || type === 'filter' ? 1 : 2);
 
 export function newId(prefix: string) {
   return prefix + Math.random().toString(36).slice(2, 8);

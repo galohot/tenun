@@ -12,6 +12,7 @@
     onpick,
     onitem,
     onx,
+    oncontext,
     onresize,
   }: {
     option: EChartsCoreOption;
@@ -22,6 +23,8 @@
     onitem?: (series: number, index: number) => void;
     /** The value on the horizontal number axis where the chart was clicked. */
     onx?: (x: number) => void;
+    /** A right-click: the category, the dot or the number under the pointer. */
+    oncontext?: (hit: { kind: 'index'; index: number } | { kind: 'item'; series: number; index: number } | { kind: 'x'; x: number }, e: MouseEvent) => void;
     onresize?: (width: number, height: number) => void;
   } = $props();
 
@@ -53,6 +56,26 @@
       const i = Math.round(horizontal ? v[1] : v[0]);
       if (Number.isFinite(i) && i >= 0) onpick?.(i);
     });
+    if (oncontext) {
+      // The browser's own menu would cover ours, so it is switched off on the plot.
+      chart.on('contextmenu', (e) => {
+        if (onitem && e.componentType === 'series' && e.seriesIndex !== undefined && e.dataIndex !== undefined) {
+          (e.event?.event as MouseEvent | undefined)?.preventDefault();
+          oncontext({ kind: 'item', series: e.seriesIndex, index: e.dataIndex }, e.event!.event as MouseEvent);
+        }
+      });
+      zr.on('contextmenu', (e) => {
+        if (!chart || onitem) return;
+        const pt = [e.offsetX, e.offsetY];
+        if (!chart.containPixel('grid', pt)) return;
+        const native = e.event as MouseEvent;
+        native.preventDefault();
+        const v = chart.convertFromPixel('grid', pt) as number[];
+        if (onx) return oncontext({ kind: 'x', x: v[0] }, native);
+        const i = Math.round(horizontal ? v[1] : v[0]);
+        if (Number.isFinite(i) && i >= 0) oncontext({ kind: 'index', index: i }, native);
+      });
+    }
     zr.on('mousemove', (e) => {
       if (!chart || !(onpick || onx)) return;
       zr.setCursorStyle(chart.containPixel('grid', [e.offsetX, e.offsetY]) ? 'pointer' : 'default');

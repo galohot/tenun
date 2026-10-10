@@ -8,6 +8,7 @@ use crate::suggest::{self, Suggestion};
 use crate::workspace::{
     DbConn, FieldRef, Locale, Relationship, Source, SourceKind, Workspace, resolve_path, store_path,
 };
+use chrono::NaiveDate;
 use duckdb::Connection;
 use duckdb::types::Value;
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,8 @@ pub struct Engine {
     db: Mutex<Connection>,
     state: RwLock<State>,
     secrets: Secrets,
+    /// Replaces today's date for relative date filters. Tests set it; the app never does.
+    today: Mutex<Option<NaiveDate>>,
 }
 
 #[derive(Default)]
@@ -96,6 +99,25 @@ pub struct QueryResult {
     pub compare: Option<Compare>,
 }
 
+impl QueryResult {
+    /// A result with these columns and rows and none of the extras.
+    pub fn plain(columns: Vec<query::OutColumn>, rows: Vec<Vec<serde_json::Value>>) -> Self {
+        Self {
+            columns,
+            rows,
+            ignored_filters: vec![],
+            ms: 0,
+            kpi: None,
+            partial: None,
+            other: None,
+            other_of: None,
+            bins: None,
+            totals: None,
+            compare: None,
+        }
+    }
+}
+
 /// The comparison series of a time chart. `rows` have the shape of the result's rows.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Compare {
@@ -144,6 +166,7 @@ impl Engine {
             db: Mutex::new(conn),
             state: RwLock::new(State::default()),
             secrets,
+            today: Mutex::new(None),
         })
     }
 
@@ -552,10 +575,24 @@ impl Engine {
         Ok(self.db.lock().unwrap().try_clone()?)
     }
 
+    /// The day relative date filters count from: this computer's date, unless a test fixed it.
+    pub fn today(&self) -> NaiveDate {
+        self.today
+            .lock()
+            .unwrap()
+            .unwrap_or_else(query::local_today)
+    }
+
+    /// Fixes the day relative date filters count from (`None` goes back to the computer's date).
+    pub fn set_today(&self, day: Option<NaiveDate>) {
+        *self.today.lock().unwrap() = day;
+    }
+
     pub fn query(&self, q: &SemanticQuery) -> anyhow::Result<QueryResult> {
+        let today = self.today();
         let compiled = {
             let s = self.state.read().unwrap();
-            query::compile(q, &s.catalog, &s.ws.relationships)?
+            query::compile_on(q, &s.catalog, &s.ws.relationships, today)?
         };
         let start = std::time::Instant::now();
         let conn = self.conn()?;
@@ -583,9 +620,10 @@ impl Engine {
         q: &SemanticQuery,
         build: impl FnOnce(&query::Scope<'_>) -> Result<(String, Vec<Param>), query::QueryError>,
     ) -> anyhow::Result<(Vec<Vec<serde_json::Value>>, Vec<usize>)> {
+        let today = self.today();
         let (sql, params, ignored) = {
             let s = self.state.read().unwrap();
-            let sc = query::scope(q, &s.catalog, &s.ws.relationships)?;
+            let sc = query::scope_on(q, &s.catalog, &s.ws.relationships, today)?;
             let (sql, params) = build(&sc)?;
             (sql, params, sc.ignored_filters.clone())
         };

@@ -1,7 +1,7 @@
 // The snapshot a dashboard is exported or published as. Built by the Rust
 // engine (`tenun-core::snapshot`); the viewer reads it.
 
-import type { Dashboard, QueryResult, Table } from './api';
+import type { Dashboard, Grain, QueryResult, Table } from './api';
 import type { DashFilter } from './tiles';
 
 export interface ExportPayload {
@@ -18,5 +18,10 @@ export interface ExportPayload {
   base: Record<string, QueryResult>;
   /** cross[fromTile][valueKey][tile] = result with that value picked. */
   cross: Record<string, Record<string, Record<string, QueryResult>>>;
+  /** The marks that were picked when the file was made. */
   filters: DashFilter[];
+  /** Filters the dashboard keeps ("Keep only", "Exclude"). Every number in the file already has them applied. */
+  saved?: DashFilter[];
+  /** The one grain the dashboard set for every chart over time, if it set one. */
+  grain?: Grain | null;
 }

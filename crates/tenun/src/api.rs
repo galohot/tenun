@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tenun_core::engine::AddSource;
-use tenun_core::query::SemanticQuery;
+use tenun_core::query::{Filter, SemanticQuery};
 use tenun_core::snapshot::{self, DashFilter, Tile, run_tile};
 use tenun_core::workspace::{FieldRef, Locale};
 
@@ -73,6 +73,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/settings", get(get_settings).put(put_settings))
         .route("/viewer", get(viewer))
         .route("/tile", post(tile))
+        .route("/rows", post(rows))
         .route("/cloud", get(cloud_status))
         .route("/cloud/connect", post(cloud_connect))
         .route("/cloud/disconnect", post(cloud_disconnect))
@@ -383,6 +384,29 @@ async fn tile(State(s): S, Json(b): Json<TileBody>) -> R<Json<Value>> {
         blocking(&s, move |st| {
             let t: Tile = serde_json::from_value(b.tile)?;
             Ok(serde_json::to_value(run_tile(&st.engine, &t, &b.filters)?)?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct RowsBody {
+    tile: Value,
+    #[serde(default)]
+    filters: Vec<DashFilter>,
+    /// The filter a click on the mark makes (the same one the cross-filter uses). Without it the
+    /// rows are those of the whole tile.
+    #[serde(default)]
+    click: Option<Filter>,
+}
+
+/// The raw rows behind a tile or one of its marks, at most 500, with the total count.
+async fn rows(State(s): S, Json(b): Json<RowsBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let t: Tile = serde_json::from_value(b.tile)?;
+            let r = tenun_core::filters::rows_behind(&st.engine, &t, &b.filters, b.click)?;
+            Ok(serde_json::to_value(r)?)
         })
         .await?,
     ))

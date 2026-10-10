@@ -1,9 +1,10 @@
 <script lang="ts">
   // Draws one tile from its result. Used by the app and by exported files.
-  import type { Cell, QueryResult, Tile } from '../../lib/api';
+  import type { Cell, QueryResult, Tile, TileFilter } from '../../lib/api';
   import { buildOption, CHART_TYPES, type Colors } from '../../lib/chart';
   import { cell, columnHeads, OTHER_KEY, type Named } from '../../lib/format';
   import ChartView from './ChartView.svelte';
+  import FilterView from './FilterView.svelte';
   import ImageView from './ImageView.svelte';
   import KpiView from './KpiView.svelte';
   import PivotView from './PivotView.svelte';
@@ -20,6 +21,8 @@
     tables = [],
     onpick,
     onpickcol,
+    oncontext,
+    onfilter,
   }: {
     tile: Tile;
     res: QueryResult;
@@ -34,6 +37,10 @@
     onpick?: (value: Cell) => void;
     /** Pivot: a click on a column header. */
     onpickcol?: (value: Cell) => void;
+    /** A right-click on a mark: the value under the pointer. */
+    oncontext?: (value: Cell, e: MouseEvent) => void;
+    /** Filter tile, in the app: the selection changed. */
+    onfilter?: (f: TileFilter) => void;
   } = $props();
 
   let width = $state(400);
@@ -91,6 +98,8 @@
   <TextView text={tile.text ?? ''} {editing} />
 {:else if tile.type === 'image'}
   <ImageView image={tile.image} {editing} />
+{:else if tile.type === 'filter'}
+  <FilterView {tile} {res} {tables} {selected} onchange={onfilter} {onpick} />
 {:else if tile.type === 'kpi' && res.kpi}
   <KpiView kpi={res.kpi} {tile} {colors} />
 {:else if unfinished}
@@ -98,9 +107,9 @@
 {:else if res.rows.length === 0}
   <div class="none">No data for this selection.</div>
 {:else if tile.type === 'share' || tile.type === 'donut'}
-  <ShareView {res} {tile} {colors} {selected} {onpick} />
+  <ShareView {res} {tile} {colors} {selected} {onpick} {oncontext} />
 {:else if tile.type === 'pivot'}
-  <PivotView {res} {tile} {tables} {selected} {selectedCol} {onpick} {onpickcol} />
+  <PivotView {res} {tile} {tables} {selected} {selectedCol} {onpick} {onpickcol} {oncontext} />
 {:else if tile.type === 'table'}
   <div class="tablewrap">
     <table>
@@ -121,7 +130,12 @@
             class:dim={selected !== null && !selKeys.has(String(r[0]))}
             class:pick={!!onpick && tile.dims.length > 0}
             class:other={!!res.other && r[0] === OTHER_KEY}
-            onclick={() => tile.dims.length && onpick?.(r[0])}>
+            onclick={() => tile.dims.length && onpick?.(r[0])}
+            oncontextmenu={(e) => {
+              if (!oncontext || !tile.dims.length) return;
+              e.preventDefault();
+              oncontext(r[0], e);
+            }}>
             {#each r as v, i}
               <td class:num={res.columns[i].dtype === 'number'}>{v === null && res.columns[i].role === 'measure' ? '–' : cell(v, res.columns[i].dtype, tile.dims[i]?.grain, false, formatOf(i), res.columns[i].unit)}</td>
             {/each}
@@ -146,6 +160,21 @@
         option={built.option}
         horizontal={!!tile.horizontal && tile.type === 'bar'}
         onresize={(w, h) => ((width = w), (height = h))}
+        oncontext={oncontext
+          ? (hit, e) => {
+              const v =
+                hit.kind === 'index'
+                  ? built.categories[hit.index]
+                  : hit.kind === 'item'
+                    ? built.pick?.by === 'item'
+                      ? built.pick.value(hit.series, hit.index)
+                      : undefined
+                    : built.pick?.by === 'x'
+                      ? built.pick.value(hit.x)
+                      : undefined;
+              if (v !== undefined) oncontext(v, e);
+            }
+          : undefined}
         onpick={onpick && !built.pick
           ? (i) => {
               const v = built.categories[i];
