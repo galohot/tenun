@@ -4,6 +4,7 @@
   // was hit (`onitem`), and a histogram reports the number under the pointer (`onx`).
   import { onMount } from 'svelte';
   import { echarts } from '../../lib/echarts';
+  import { animates, motion } from '../../lib/motion';
   import type { EChartsCoreOption } from 'echarts/core';
 
   let {
@@ -28,12 +29,15 @@
     onresize?: (width: number, height: number) => void;
   } = $props();
 
+  /** No animation when the person asked for less motion, or while a picture of the dashboard is made. */
+  const still = (o: EChartsCoreOption): EChartsCoreOption => (animates() ? o : { ...o, animation: false });
+
   let el: HTMLDivElement;
   let chart: ReturnType<typeof echarts.init> | null = null;
 
   onMount(() => {
-    chart = echarts.init(el, null, { renderer: 'canvas' });
-    chart.setOption(option, { notMerge: true });
+    chart = echarts.init(el, null, { renderer: 'canvas', devicePixelRatio: motion.still ? 2 : undefined });
+    chart.setOption(still(option), { notMerge: true });
     const ro = new ResizeObserver(() => {
       chart?.resize();
       onresize?.(el.clientWidth, el.clientHeight);
@@ -88,7 +92,7 @@
   });
 
   $effect(() => {
-    chart?.setOption(option, { notMerge: true, lazyUpdate: true });
+    chart?.setOption(still(option), { notMerge: true, lazyUpdate: true });
   });
 </script>
 

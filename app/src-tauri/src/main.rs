@@ -103,6 +103,13 @@ fn pick(app: &tauri::AppHandle, req: PickRequest) -> Vec<PathBuf> {
             .and_then(to_path)
             .into_iter()
             .collect(),
+        PickRequest::SaveXlsx { name } => d
+            .add_filter("Excel workbook", &["xlsx"])
+            .set_file_name(format!("{name}.xlsx"))
+            .blocking_save_file()
+            .and_then(to_path)
+            .into_iter()
+            .collect(),
         PickRequest::SaveWorkspace { name } => d
             .add_filter("Tenun workspace", &["tenun"])
             .set_file_name(format!("{name}.tenun"))

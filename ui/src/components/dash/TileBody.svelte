@@ -2,7 +2,8 @@
   // Draws one tile from its result. Used by the app and by exported files.
   import type { Cell, QueryResult, Tile, TileFilter } from '../../lib/api';
   import { buildOption, CHART_TYPES, type Colors } from '../../lib/chart';
-  import { cell, columnHeads, OTHER_KEY, type Named } from '../../lib/format';
+  import { cell, columnHeads, numberFormatter, OTHER_KEY, type Named } from '../../lib/format';
+  import { chartSummary } from '../../lib/summary';
   import ChartView from './ChartView.svelte';
   import FilterView from './FilterView.svelte';
   import ImageView from './ImageView.svelte';
@@ -19,6 +20,7 @@
     selectedCol = null,
     editing = false,
     tables = [],
+    title = '',
     onpick,
     onpickcol,
     oncontext,
@@ -34,6 +36,8 @@
     editing?: boolean;
     /** For naming the values of a chart with several. */
     tables?: Named[];
+    /** The tile's name, for the sentence a screen reader gets for a chart. */
+    title?: string;
     onpick?: (value: Cell) => void;
     /** Pivot: a click on a column header. */
     onpickcol?: (value: Cell) => void;
@@ -91,6 +95,15 @@
   };
   const heads = $derived(columnHeads(res, tile, tables));
   const note = $derived(built?.note ?? null);
+  // What a screen reader gets for a chart, made from the data it shows.
+  const summary = $derived(
+    built
+      ? chartSummary(tile, res, title, {
+          label: (v, i) => cell(v, res.columns[i]?.dtype ?? 'text', tile.dims[i]?.grain),
+          value: (v, i) => numberFormatter(tile.formats?.[i - groups] ?? null, undefined, res.columns[i]?.unit).short(v),
+        })
+      : '',
+  );
   const selKeys = $derived(new Set((selected ?? []).map((v) => String(v))));
 </script>
 
@@ -155,7 +168,7 @@
   </div>
 {:else if built}
   <div class="chart">
-    <div class="plot">
+    <div class="plot" role="img" aria-label={summary}>
       <ChartView
         option={built.option}
         horizontal={!!tile.horizontal && tile.type === 'bar'}

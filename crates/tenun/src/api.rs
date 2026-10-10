@@ -1,7 +1,7 @@
 //! JSON routes under `/api`, the event socket, and the embedded UI files.
 
 use crate::settings::Settings;
-use crate::{AppState, VERSION, cloud, export, fsbrowse, sample};
+use crate::{AppState, VERSION, cloud, export, fsbrowse, sample, xlsx};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, Uri, header};
@@ -82,6 +82,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/snapshot", post(snapshot))
         .route("/export-html", post(export_html))
         .route("/export-file", post(export_file))
+        .route("/export-xlsx", post(export_xlsx))
         .route("/events", get(events))
         .route("/pick", post(pick))
         .route("/image/read", post(read_image))
@@ -443,6 +444,53 @@ async fn export_html(State(s): S, Json(b): Json<SnapBody>) -> R<Response> {
         return Ok(Json(json!({ "ok": true })).into_response());
     }
     Ok(([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response())
+}
+
+#[derive(Deserialize)]
+struct XlsxBody {
+    tile: Value,
+    #[serde(default)]
+    filters: Vec<DashFilter>,
+    /// The column names the app shows. Without them the engine's own names are used.
+    #[serde(default)]
+    headers: Vec<String>,
+    #[serde(default)]
+    title: String,
+    /// Desktop app: write the file here instead of returning it.
+    #[serde(default)]
+    path: Option<String>,
+}
+
+/// The numbers one tile shows, as an Excel file (header row, number formats, dates, total row).
+async fn export_xlsx(State(s): S, Json(b): Json<XlsxBody>) -> R<Response> {
+    let (bytes, path) = blocking(&s, move |st| {
+        let t: Tile = serde_json::from_value(b.tile.clone())?;
+        if snapshot::is_static(&t.kind) || t.kind == "filter" {
+            anyhow::bail!("This tile has no numbers to download.");
+        }
+        let res = run_tile(&st.engine, &t, &b.filters)?;
+        Ok((xlsx::build(&b.tile, &res, &b.headers, &b.title)?, b.path))
+    })
+    .await?;
+    if let Some(p) = path {
+        tokio::task::spawn_blocking(move || {
+            let mut p = PathBuf::from(p);
+            if p.extension().is_none_or(|e| e != "xlsx") {
+                p.set_extension("xlsx");
+            }
+            std::fs::write(p, bytes)
+        })
+        .await??;
+        return Ok(Json(json!({ "ok": true })).into_response());
+    }
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )],
+        bytes,
+    )
+        .into_response())
 }
 
 // ---- tenun.cloud --------------------------------------------------------------

@@ -2,10 +2,12 @@
   import { onMount, tick as nextTick, untrack } from 'svelte';
   import { api, type Bins, type Cell, type DashFilter, type Filter, type Grain, type QueryResult, type RowsBehind, type Tile, type TileFilter, type TileType } from '../lib/api';
   import { app, go } from '../lib/state.svelte';
-  import { cell, stampLabel, tileTitle } from '../lib/format';
+  import { cell, dateTimeMedium, stampLabel, tileTitle } from '../lib/format';
   import { filterText } from '../lib/filterText';
   import { canExclude, colFilter, hasPeriod, markFilter, newPinId, PERIODS, pinFilter, sameFilter, tileFilters, withGrain } from '../lib/filters';
-  import { COLS, compact, defaultSize, minHeight, newId, place } from '../lib/tiles';
+  import { COLS, compact, defaultSize, minHeight, newDashboard, newId, place } from '../lib/tiles';
+  import { phoneLayout, readingOrder } from '../lib/layout';
+  import { downloadDashboardPdf, downloadDashboardPng, type DashboardPicture } from '../lib/output';
   import { readColors } from '../lib/chart';
   import Icon, { type IconName } from './Icon.svelte';
   import TileView from './dash/TileView.svelte';
@@ -45,8 +47,14 @@
   let dragging = $state<{ id: string; dx: number; dy: number } | null>(null);
 
   const colW = $derived((width - GAP * (COLS - 1)) / COLS);
-  const tiles = $derived(preview ?? dash?.tiles ?? []);
-  const height = $derived(Math.max(0, ...tiles.map((t) => t.y + t.h)) * (ROW + GAP));
+  // On a phone the tiles stack in one column and nothing can be moved or resized.
+  const phone = $derived(app.phone);
+  const phoneRects = $derived(phone ? new Map(phoneLayout(dash?.tiles ?? [], width, ROW, GAP).map((p) => [p.t.id, p])) : null);
+  // In reading order, so Tab goes through the tiles the way a person reads them.
+  const tiles = $derived(readingOrder(preview ?? dash?.tiles ?? []));
+  const height = $derived(
+    phoneRects ? Math.max(0, ...[...phoneRects.values()].map((p) => p.y + p.h)) : Math.max(0, ...tiles.map((t) => t.y + t.h)) * (ROW + GAP),
+  );
   // Every filter a tile receives: the ones the dashboard keeps, what the filter tiles select, and the
   // marks that were clicked. A tile ignores the ones that came from itself.
   const pins = $derived(dash?.filters ?? []);
@@ -347,9 +355,57 @@
 
   const focusTile = $derived(focusId ? dash?.tiles.find((t) => t.id === focusId) : undefined);
 
+  function removeTile(id: string) {
+    filters = filters.filter((f) => f.fromTile !== id);
+    update((ts) => compact(ts.filter((x) => x.id !== id)));
+    if (selectedTile === id) selectedTile = null;
+  }
+
+  /** A copy of a tile with a new id, at the first free place of `into`. */
+  function copyOf(t: Tile, into: Tile[], title: string): Tile {
+    const at = place(into, t.w, t.h);
+    return { ...(structuredClone($state.snapshot(t)) as Tile), id: newId('t'), title, ...at };
+  }
+
+  function duplicate(id: string) {
+    const t = dash?.tiles.find((x) => x.id === id);
+    if (!dash || !t) return;
+    const copy = copyOf(t, dash.tiles, t.title ? `${t.title} copy` : '');
+    update((ts) => [...ts, copy]);
+    selectedTile = copy.id;
+  }
+
+  /** Copy a tile to another dashboard (or a new one when `to` is null). */
+  function copyTo(id: string, to: string | null) {
+    const t = dash?.tiles.find((x) => x.id === id);
+    if (!t) return;
+    let target = to ? app.dashboards.find((d) => d.id === to) : undefined;
+    if (!target) {
+      target = newDashboard(app.dashboards.length);
+      app.snap!.workspace.dashboards.push(target);
+      target = app.dashboards.find((d) => d.id === target!.id)!;
+    }
+    target.tiles = [...target.tiles, copyOf(t, target.tiles, t.title)];
+    app.saveDashboards();
+    app.toast(`Copied to ${target.title}`);
+  }
+
+  /** The arrow keys: the tile after (or before) this one in reading order gets the focus. */
+  function navTile(id: string, step: 1 | -1) {
+    const order = readingOrder(dash?.tiles ?? []);
+    const next = order[order.findIndex((t) => t.id === id) + step];
+    if (next) document.querySelector<HTMLElement>(`[data-tile="${CSS.escape(next.id)}"]`)?.focus();
+  }
+
+  /** Enter on a tile: edit it, or open it large when this is a phone or the tile cannot be edited. */
+  function openTile(id: string) {
+    if (!phone) selectedTile = id;
+    else if (results[id]) focusId = id;
+  }
+
   // Dragging and resizing work in grid units and compact as you go.
   function startDrag(e: PointerEvent, tile: Tile, mode: 'move' | 'resize') {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || phone) return;
     e.preventDefault();
     const start = { x: e.clientX, y: e.clientY };
     const orig = { ...tile };
@@ -365,7 +421,7 @@
       const next =
         mode === 'move'
           ? { ...orig, x: Math.max(0, Math.min(COLS - orig.w, orig.x + gx)), y: Math.max(0, orig.y + gy) }
-          : { ...orig, w: Math.max(2, Math.min(COLS - orig.x, orig.w + gx)), h: Math.max(minHeight(orig.type), orig.h + gy) };
+          : { ...orig, w: Math.max(2, Math.min(COLS - orig.x, orig.w + gx)), h: Math.max(minHeight(orig), orig.h + gy) };
       preview = compact(base.map((t) => (t.id === tile.id ? next : t)), tile.id);
       dragging = mode === 'move' ? { id: tile.id, dx, dy } : null;
     };
@@ -384,6 +440,8 @@
   }
 
   function px(t: Tile) {
+    const p = phoneRects?.get(t.id);
+    if (p) return { left: p.x, top: p.y, w: p.w, h: p.h };
     return {
       left: t.x * (colW + GAP),
       top: t.y * (ROW + GAP),
@@ -393,6 +451,36 @@
   }
 
   let exporting = $state<string | null>(null);
+  let exportMenu = $state<{ x: number; y: number } | null>(null);
+
+  /** Everything a picture of the dashboard needs: the tiles as they are drawn, with their results. */
+  function picture(theme: 'light' | 'dark'): DashboardPicture {
+    const shown = (dash!.tiles ?? []).map(shownOf);
+    const rs: DashboardPicture['results'] = {};
+    for (const t of shown) rs[t.id] = results[t.id]?.res ?? null;
+    return {
+      title: dash!.title,
+      subtitle: `${app.snap!.workspace.name} · ${dateTimeMedium(new Date())}`,
+      filters: allFilters.map((f) => filterText(f, app.tables)),
+      tiles: shown,
+      results: rs,
+      tables: app.tables,
+      theme,
+    };
+  }
+
+  async function exportPicture(kind: 'png' | 'pdf') {
+    if (!dash || exporting) return;
+    exporting = 'Preparing…';
+    try {
+      if (kind === 'png') await downloadDashboardPng(picture(app.theme));
+      else await downloadDashboardPdf(picture('light'));
+    } catch (e) {
+      app.error(e);
+    } finally {
+      exporting = null;
+    }
+  }
 
   async function exportHtml() {
     if (!dash || exporting) return;
@@ -442,8 +530,8 @@
 {/if}
 
 {#if dash}
-  <header class="toolbar">
-    {#if editingTitle}
+  <header class="toolbar" class:phone>
+    {#if editingTitle && !phone}
       <!-- svelte-ignore a11y_autofocus -->
       <input
         class="field title-input"
@@ -460,7 +548,7 @@
         }}
         onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
     {:else}
-      <button class="title" title="Rename" onclick={() => (editingTitle = true)}>{dash.title}</button>
+      <button class="title" title={phone ? undefined : 'Rename'} disabled={phone} onclick={() => (editingTitle = true)}>{dash.title}</button>
     {/if}
     <div class="chips">
       {#each pins as f (f.fromTile)}
@@ -518,9 +606,12 @@
         </select>
       </label>
     {/if}
-    <button class="btn plain icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo} onclick={undo}><Icon name="undo" /></button>
-    <button class="btn plain icon" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!canRedo} onclick={redo}><Icon name="redo" /></button>
-    <button class="btn plain icon" title="Refresh now" onclick={() => tick++}><Icon name="refresh" /></button>
+    {#if !phone}
+      <button class="btn plain icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo} onclick={undo}><Icon name="undo" /></button>
+      <button class="btn plain icon" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!canRedo} onclick={redo}><Icon name="redo" /></button>
+    {/if}
+    <button class="btn plain icon" title="Refresh now" aria-label="Refresh now" onclick={() => tick++}><Icon name="refresh" /></button>
+    {#if !phone}
     <button
       class="btn"
       class:live={!!dash.publish?.url}
@@ -530,9 +621,20 @@
       title={dash.publish?.error ?? (dash.publish?.url ? 'Published on tenun.cloud' : 'Share this dashboard online')}>
       <Icon name={dash.publish?.error ? 'warning' : 'globe'} /> {dash.publish?.url ? 'Published' : 'Publish'}
     </button>
-    <button class="btn" onclick={exportHtml} disabled={!dash.tiles.length || !!exporting} title="Save this dashboard as one HTML file that works offline">
+    {/if}
+    <button
+      class="btn"
+      aria-haspopup="menu"
+      aria-expanded={!!exportMenu}
+      disabled={!dash.tiles.length || !!exporting}
+      title="Save this dashboard as a web page, a picture or a PDF"
+      onclick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        exportMenu = exportMenu ? null : { x: r.right - 200, y: r.bottom + 4 };
+      }}>
       <Icon name="export" /> {exporting ?? 'Export'}
     </button>
+    {#if !phone}
     <div class="add">
       <button class="btn primary" onclick={() => (addMenu = !addMenu)} aria-expanded={addMenu}><Icon name="plus" /> Add tile</button>
       {#if addMenu}
@@ -545,7 +647,8 @@
         </div>
       {/if}
     </div>
-    <button class="btn plain icon" title="Delete dashboard" onclick={removeDashboard}><Icon name="trash" /></button>
+    <button class="btn plain icon" title="Delete dashboard" aria-label="Delete dashboard" onclick={removeDashboard}><Icon name="trash" /></button>
+    {/if}
   </header>
 
   {#each failed as src (src.id)}
@@ -557,6 +660,18 @@
       </span>
     </div>
   {/each}
+
+  {#if exportMenu}
+    <Menu
+      x={exportMenu.x}
+      y={exportMenu.y}
+      items={[
+        { label: 'Web page (HTML)', run: exportHtml },
+        { label: 'Image (PNG)', run: () => exportPicture('png') },
+        { label: 'PDF', run: () => exportPicture('pdf') },
+      ]}
+      onclose={() => (exportMenu = null)} />
+  {/if}
 
   {#if chipMenu}
     {@const from = chipMenu?.id ?? ''}
@@ -633,13 +748,20 @@
               onrows={(v, otherOf, bins) => showRows(t.id, v, otherOf, bins)}
               onfocus={() => (focusId = t.id)}
               onselect={() => (selectedTile = t.id)}
+              {phone}
+              dashboards={app.dashboards.filter((d) => d.id !== dash.id).map((d) => ({ id: d.id, title: d.title }))}
+              onduplicate={() => duplicate(t.id)}
+              oncopy={(to) => copyTo(t.id, to)}
+              onremove={() => removeTile(t.id)}
+              onnav={(step) => navTile(t.id, step)}
+              onopen={() => openTile(t.id)}
               ondragstart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'move')}
               onresizestart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'resize')} />
           </div>
         {/each}
       </div>
     </div>
-    {#if sel}
+    {#if sel && !phone}
       <Inspector
         tile={sel}
         current={results[sel.id] ?? null}
@@ -647,11 +769,7 @@
         dashGrain={dash.grain ?? null}
         onclose={() => (selectedTile = null)}
         onchange={change}
-        onremove={() => {
-          filters = filters.filter((f) => f.fromTile !== sel.id);
-          update((ts) => compact(ts.filter((x) => x.id !== sel.id)));
-          selectedTile = null;
-        }} />
+        onremove={() => removeTile(sel.id)} />
     {/if}
   </div>
 {/if}
@@ -667,6 +785,10 @@
     background: var(--surface);
     flex: none;
   }
+  .toolbar.phone { height: auto; min-height: 44px; flex-wrap: wrap; padding: 6px 10px; }
+  .toolbar.phone .spacer { display: none; }
+  .toolbar.phone .chips { flex-wrap: wrap; overflow: visible; }
+  .title:disabled { color: var(--text); cursor: default; }
   .title {
     border: 0;
     background: none;
@@ -768,6 +890,7 @@
   .menu button:hover :global(svg) { color: #fff; }
   .body { flex: 1; min-height: 0; display: flex; }
   .scroll { flex: 1; min-width: 0; overflow: auto; padding: 16px; }
+  @media (max-width: 699px) { .scroll { padding: 10px; } }
   .grid { position: relative; min-height: 100%; }
   .cell {
     position: absolute;

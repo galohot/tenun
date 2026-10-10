@@ -141,8 +141,9 @@ export function defaultSize(type: TileType): { w: number; h: number } {
   }
 }
 
-/** The fewest rows a tile may be resized to: a note can be one row high. */
-export const minHeight = (type: TileType): number => (type === 'text' || type === 'filter' ? 1 : 2);
+/** The fewest rows a tile may be resized to. A number, a note and a dropdown filter can be one row high. */
+export const minHeight = (t: Pick<Tile, 'type' | 'filter'>): number =>
+  t.type === 'kpi' || t.type === 'text' || (t.type === 'filter' && (t.filter?.style ?? 'list') === 'dropdown') ? 1 : 2;
 
 export function newId(prefix: string) {
   return prefix + Math.random().toString(36).slice(2, 8);

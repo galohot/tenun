@@ -4,6 +4,7 @@
   import type { QueryResult, Tile } from '../../lib/api';
   import type { Colors } from '../../lib/chart';
   import type { Named } from '../../lib/format';
+  import { kpiRows } from '../../lib/tabular';
   import Modal from '../Modal.svelte';
   import TileBody from './TileBody.svelte';
 
@@ -21,18 +22,7 @@
   // The same rows in a plain table. A number tile has no rows, so its bars are the table.
   const plain = $derived.by(() => {
     if (tile.type === 'kpi') {
-      const bars = res.kpi?.bars ?? [];
-      return {
-        tile: { ...tile, type: 'table' as const, dims: [], measures: tile.measures.slice(0, 1), totals: false },
-        res: {
-          ...res,
-          columns: [
-            { name: 'Period', role: 'dimension' as const, dtype: 'text' as const },
-            { name: tile.measures[0]?.column ?? 'Value', role: 'measure' as const, dtype: 'number' as const },
-          ],
-          rows: bars.map((b) => [b.label, b.value]),
-        },
-      };
+      return { tile: { ...tile, type: 'table' as const, dims: [], measures: tile.measures.slice(0, 1), totals: false }, res: kpiRows(tile, res) };
     }
     return { tile: { ...tile, type: 'table' as const, totals: false }, res };
   });
@@ -52,7 +42,7 @@
     {#if asTable && canTable}
       <TileBody tile={plain.tile} res={plain.res} {colors} selected={null} {tables} />
     {:else}
-      <TileBody {tile} {res} {colors} selected={null} {tables} />
+      <TileBody {tile} {res} {colors} selected={null} {tables} {title} />
     {/if}
   </div>
 </Modal>

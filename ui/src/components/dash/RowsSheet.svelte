@@ -2,7 +2,9 @@
   // "Show rows": the raw rows behind a tile or one mark of it, in a side sheet. Up to 500 rows.
   import type { Cell, RowsBehind } from '../../lib/api';
   import { cell } from '../../lib/format';
+  import { saveBlob } from '../../lib/download';
   import { portal } from '../../lib/portal';
+  import { csvCell, fileName } from '../../lib/tabular';
   import Icon from '../Icon.svelte';
 
   let {
@@ -48,24 +50,12 @@
     }
   }
 
-  /** One CSV cell. Text that a spreadsheet would run as a formula gets a quote in front. */
-  function csvCell(v: Cell, text: boolean): string {
-    if (v === null || v === undefined) return '';
-    let s = String(v);
-    if (text && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  }
-
   function download() {
     if (!data) return;
     const head = data.columns.map((c) => csvCell(c.label, true)).join(',');
     const body = rows.map((r) => r.map((v, i) => csvCell(v, data!.columns[i].dtype === 'text')).join(','));
     const blob = new Blob(['﻿' + [head, ...body].join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${title.replace(/[\\/:*?"<>|]/g, '_') || 'rows'}.csv`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    saveBlob(blob, fileName(title, 'csv', 'rows'));
   }
 </script>
 

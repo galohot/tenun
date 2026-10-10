@@ -34,6 +34,7 @@ flate2 = "1"
 gethostname = "1"
 thiserror.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+rust_xlsxwriter = "0.99"
 
 [dev-dependencies]
-rust_xlsxwriter = "0.99"
+calamine.workspace = true

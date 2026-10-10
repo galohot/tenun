@@ -395,7 +395,7 @@ export const api = {
   query: (q: SemanticQuery) => call<QueryResult>('POST', '/query', q),
   fs: (path?: string) => call<FsListing>('GET', `/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   pick: (
-    req: { kind: 'data_files' } | { kind: 'image' } | { kind: 'open_workspace' } | { kind: 'save_workspace' | 'save_html'; name: string },
+    req: { kind: 'data_files' } | { kind: 'image' } | { kind: 'open_workspace' } | { kind: 'save_workspace' | 'save_html' | 'save_xlsx'; name: string },
   ) =>
     call<{ paths: string[] }>('POST', '/pick', req),
   /** The picture the native dialog chose, for an image tile. */
@@ -420,6 +420,16 @@ export const api = {
   /** Writes the HTML file (desktop app) when `path` is given. */
   exportTo: (dashboard: string, filters: unknown[], path: string) =>
     call<{ ok: boolean }>('POST', '/export-html', { dashboard, filters, path }),
+  /** The Excel file of one tile. With `path` (desktop app) the server writes it there and nothing comes back. */
+  exportXlsx: async (body: { tile: Tile; filters: unknown[]; headers: string[]; title: string }, path?: string): Promise<Uint8Array> => {
+    const res = await fetch('/api/export-xlsx', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Tenun': '1' },
+      body: JSON.stringify({ ...body, path }),
+    });
+    if (!res.ok) throw new ApiError((await res.json().catch(() => null))?.error ?? res.statusText);
+    return path ? new Uint8Array() : new Uint8Array(await res.arrayBuffer());
+  },
   /** Returns the HTML file's text (browser mode). */
   exportHtml: async (dashboard: string, filters: unknown[]): Promise<string> => {
     const res = await fetch('/api/export-html', {

@@ -8,6 +8,7 @@ mod fsbrowse;
 mod guard;
 pub mod sample;
 pub mod settings;
+pub mod xlsx;
 
 use axum::Router;
 use std::net::{IpAddr, SocketAddr};
@@ -46,6 +47,9 @@ pub enum PickRequest {
         name: String,
     },
     SaveHtml {
+        name: String,
+    },
+    SaveXlsx {
         name: String,
     },
 }

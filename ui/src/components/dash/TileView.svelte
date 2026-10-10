@@ -7,6 +7,7 @@
   import { OTHER_KEY, tileTitle } from '../../lib/format';
   import { appliedFilters, EMPTY_RESULT, isStatic, resultKey, tileQuery, type DashFilter } from '../../lib/tiles';
   import Icon from '../Icon.svelte';
+  import { downloadCsv, downloadTilePng, downloadXlsx } from '../../lib/output';
   import Menu from './Menu.svelte';
   import TileBody from './TileBody.svelte';
 
@@ -24,6 +25,13 @@
     onselect,
     ondragstart,
     onresizestart,
+    phone = false,
+    dashboards = [],
+    onduplicate,
+    oncopy,
+    onremove,
+    onnav,
+    onopen,
   }: {
     tile: Tile;
     filters: DashFilter[];
@@ -43,6 +51,18 @@
     onselect: () => void;
     ondragstart: (e: PointerEvent) => void;
     onresizestart: (e: PointerEvent) => void;
+    /** A narrow screen: the editing controls are hidden. */
+    phone?: boolean;
+    /** The other dashboards of the workspace, for "Copy to dashboard". */
+    dashboards?: { id: string; title: string }[];
+    onduplicate: () => void;
+    /** Copy the tile to another dashboard, or to a new one (null). */
+    oncopy: (dashboard: string | null) => void;
+    onremove: () => void;
+    /** An arrow key on the tile: 1 for the next tile in reading order, -1 for the one before. */
+    onnav: (step: 1 | -1) => void;
+    /** Enter on the tile: edit it, or open it large on a phone. */
+    onopen: () => void;
   } = $props();
 
   let res = $state<QueryResult | null>(null);
@@ -110,38 +130,80 @@
   // Tiles with a result to open large and rows behind them.
   const hasData = $derived(!fixed && tile.type !== 'filter' && !!q && !!res && !error);
 
+  let el = $state<HTMLElement>();
+
+  async function guarded(work: () => Promise<void> | void) {
+    try {
+      await work();
+    } catch (e) {
+      app.error(e);
+    }
+  }
+  const png = () => guarded(() => downloadTilePng(el!, tile, res, app.tables, title));
+  const csv = () => guarded(() => downloadCsv(tile, res!, app.tables, title));
+  const xlsx = () => guarded(() => downloadXlsx(tile, res!, filters, app.tables, title, !!app.health?.native));
+
   // A small menu: from the "more" button (the whole tile) or a right-click (one mark).
   let menu = $state<{ x: number; y: number; mark?: { value: Cell } } | null>(null);
-  const menuItems = $derived([
-    {
-      label: 'Show rows',
-      run: () => (menu?.mark ? onrows(menu.mark.value, res?.otherOf, res?.bins) : onrows()),
-    },
-  ]);
+  const menuItems = $derived.by(() => {
+    if (menu?.mark) {
+      const value = menu.mark.value;
+      return [{ label: 'Show rows', run: () => onrows(value, res?.otherOf, res?.bins) }];
+    }
+    return [
+      { label: 'Duplicate', run: onduplicate },
+      { label: 'Copy to dashboard', sub: [...dashboards.map((d) => ({ label: d.title || 'Untitled', run: () => oncopy(d.id) })), { label: 'New dashboard', run: () => oncopy(null) }] },
+      { label: 'Download as PNG', run: png },
+      ...(hasData
+        ? [
+            { label: 'Download data', sub: [{ label: 'CSV', run: csv }, { label: 'Excel', run: xlsx }] },
+            { label: 'Show rows', run: () => onrows() },
+            { label: 'Focus', run: onfocus },
+          ]
+        : []),
+      { label: 'Remove', run: onremove },
+    ];
+  });
+
+  function onkey(e: KeyboardEvent) {
+    // Keys typed inside a control of the tile belong to that control.
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      onopen();
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      onnav(e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1);
+    }
+  }
   function more(e: MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    menu = { x: r.right - 180, y: r.bottom + 4 };
+    menu = { x: r.right - 200, y: r.bottom + 4 };
   }
 </script>
 
-<article class="tile" class:active class:bare>
-  <header role="group" aria-label="Drag to move" onpointerdown={ondragstart}>
+<!-- A tile is a stop for the keyboard: arrows go to the next and the previous tile, Enter opens it. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+<article class="tile" class:active class:bare class:phone bind:this={el} tabindex="0" data-tile={tile.id} aria-label={title || 'Tile'} onkeydown={onkey}>
+  <header role="group" aria-label={phone ? undefined : 'Drag to move'} onpointerdown={phone ? undefined : ondragstart}>
     <h3 title={title}>{title}</h3>
     {#if loading}<span class="spin" aria-label="Loading"></span>{/if}
     {#if hasData}
-      <button class="btn plain icon edit" title="Open large" aria-label="Open large" onpointerdown={(e) => e.stopPropagation()} onclick={onfocus}>
+      <button class="btn plain icon edit keep" title="Open large" aria-label="Open large" onpointerdown={(e) => e.stopPropagation()} onclick={onfocus}>
         <Icon name="expand" size={14} />
       </button>
+    {/if}
+    {#if !phone}
       <button class="btn plain icon edit" title="More" aria-label="More" aria-haspopup="menu" onpointerdown={(e) => e.stopPropagation()} onclick={more}>
         <Icon name="more" size={14} />
       </button>
+      <button class="btn plain icon edit" title="Edit tile" aria-label="Edit tile" onpointerdown={(e) => e.stopPropagation()} onclick={onselect}>
+        <Icon name="pencil" size={14} />
+      </button>
     {/if}
-    <button class="btn plain icon edit" title="Edit tile" onpointerdown={(e) => e.stopPropagation()} onclick={onselect}>
-      <Icon name="pencil" size={14} />
-    </button>
   </header>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="body" onpointerdown={bare ? (e) => !(e.target as HTMLElement).closest('a, button') && ondragstart(e) : undefined}>
+  <div class="body" onpointerdown={bare && !phone ? (e) => !(e.target as HTMLElement).closest('a, button') && ondragstart(e) : undefined}>
     {#if fixed}
       <TileBody {tile} res={EMPTY_RESULT} {colors} selected={null} editing tables={app.tables} />
     {:else if !q}
@@ -162,6 +224,7 @@
         onpick={canPick ? (v) => onpick(v, res?.otherOf, res?.bins) : undefined}
         onpickcol={tile.type === 'pivot' && tile.cols ? onpickcol : undefined}
         oncontext={canPick ? (v, e) => (menu = { x: e.clientX, y: e.clientY, mark: { value: v } }) : undefined}
+        {title}
         {onfilter} />
     {/if}
   </div>
@@ -178,7 +241,9 @@
   {#if menu}
     <Menu x={menu.x} y={menu.y} items={menuItems} onclose={() => (menu = null)} />
   {/if}
-  <button class="resize" aria-label="Resize tile" onpointerdown={onresizestart}><Icon name="resize" size={14} /></button>
+  {#if !phone}
+    <button class="resize" aria-label="Resize tile" onpointerdown={onresizestart}><Icon name="resize" size={14} /></button>
+  {/if}
 </article>
 
 <style>
@@ -193,7 +258,7 @@
     overflow: hidden;
     transition: box-shadow 120ms;
   }
-  .tile.active { box-shadow: 0 0 0 2px var(--accent); }
+  .tile.active, .tile:focus-visible { box-shadow: 0 0 0 2px var(--accent); outline: none; }
   header {
     display: flex;
     align-items: center;
@@ -214,7 +279,10 @@
     white-space: nowrap;
   }
   .edit { width: 24px; height: 24px; color: var(--text-2); opacity: 0; }
-  .tile:hover .edit, .tile.active .edit, .edit:focus-visible { opacity: 1; }
+  .tile:hover .edit, .tile.active .edit, .tile:focus-within .edit, .edit:focus-visible { opacity: 1; }
+  /* On a phone there is no pointer to hover with, so the one button left stays in view. */
+  .phone .edit.keep { opacity: 1; }
+  .phone header { cursor: default; }
   .body { flex: 1; min-height: 0; padding: 0 14px 10px; position: relative; }
   /* No title: the header shrinks to the edit button, which floats over the corner. */
   .bare header { position: absolute; top: 4px; right: 4px; z-index: 2; height: 24px; padding: 0; background: transparent; border-radius: 12px; }
@@ -261,7 +329,7 @@
     display: grid;
     place-items: center;
   }
-  .tile:hover .resize { opacity: 1; }
+  .tile:hover .resize, .resize:focus-visible { opacity: 1; }
   .spin {
     width: 12px;
     height: 12px;
