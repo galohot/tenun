@@ -190,7 +190,9 @@ export const api = {
   putLayout: (l: unknown) => call<{ ok: boolean }>('PUT', '/layout', l),
   query: (q: SemanticQuery) => call<QueryResult>('POST', '/query', q),
   fs: (path?: string) => call<FsListing>('GET', `/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
-  pick: (req: { kind: 'data_files' } | { kind: 'open_workspace' } | { kind: 'save_workspace'; name: string }) =>
+  pick: (
+    req: { kind: 'data_files' } | { kind: 'open_workspace' } | { kind: 'save_workspace' | 'save_html'; name: string },
+  ) =>
     call<{ paths: string[] }>('POST', '/pick', req),
   openBrowser: () => call<{ ok: boolean }>('POST', '/open-browser'),
   viewer: () => call<{ js: string; css: string }>('GET', '/viewer'),

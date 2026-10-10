@@ -175,7 +175,7 @@
       {nodeTypes}
       {edgeTypes}
       fitView
-      fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
+      fitViewOptions={{ padding: 0.12, maxZoom: 1.25 }}
       minZoom={0.3}
       maxZoom={1.6}
       colorMode={app.theme}

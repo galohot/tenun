@@ -90,6 +90,13 @@ fn pick(app: &tauri::AppHandle, req: PickRequest) -> Vec<PathBuf> {
             .and_then(to_path)
             .into_iter()
             .collect(),
+        PickRequest::SaveHtml { name } => d
+            .add_filter("Web page", &["html"])
+            .set_file_name(format!("{name}.html"))
+            .blocking_save_file()
+            .and_then(to_path)
+            .into_iter()
+            .collect(),
         PickRequest::SaveWorkspace { name } => d
             .add_filter("Tenun workspace", &["tenun"])
             .set_file_name(format!("{name}.tenun"))

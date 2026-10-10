@@ -23,3 +23,11 @@ tracing = "0.1"
 lto = "thin"
 codegen-units = 4
 strip = true
+
+# DuckDB is several million lines of C++. With full debug info its debug build
+# fills a CI runner's disk, so dependencies build without it.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

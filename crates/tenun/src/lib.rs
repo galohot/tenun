@@ -34,6 +34,7 @@ pub enum PickRequest {
     DataFiles,
     OpenWorkspace,
     SaveWorkspace { name: String },
+    SaveHtml { name: String },
 }
 
 /// Shows a native dialog and returns the chosen paths (empty = cancelled).

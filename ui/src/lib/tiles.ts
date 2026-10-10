@@ -12,8 +12,16 @@ export interface DashFilter extends Filter {
 export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | null {
   if (!tile.measures.length && !tile.dims.length) return null;
   const dims = tile.type === 'kpi' ? tile.dims.slice(0, 1) : tile.type === 'donut' ? tile.dims.slice(0, 1) : tile.type === 'table' ? tile.dims : tile.dims.slice(0, 2);
+  // A chart with a group but no value counts rows of the grouped table.
+  const measures = tile.measures.length
+    ? tile.type === 'table'
+      ? tile.measures
+      : tile.measures.slice(0, 1)
+    : tile.type === 'table'
+      ? []
+      : [{ table: tile.dims[0].table, column: null, agg: 'count' as const }];
   return {
-    measures: tile.measures.length ? (tile.type === 'table' ? tile.measures : tile.measures.slice(0, 1)) : [],
+    measures,
     dimensions: dims,
     filters: filters.filter((f) => f.fromTile !== tile.id).map(({ fromTile: _, ...f }) => f),
     limit: tile.type === 'table' ? 500 : tile.type === 'kpi' ? 400 : 2000,

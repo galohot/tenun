@@ -133,9 +133,9 @@
     if (!dash || exporting) return;
     let target: string | null = null;
     if (app.health?.native) {
-      const { paths } = await api.pick({ kind: 'save_workspace', name: dash.title });
+      const { paths } = await api.pick({ kind: 'save_html', name: dash.title });
       if (!paths[0]) return;
-      target = paths[0].replace(/\.tenun$/, '') + '.html';
+      target = paths[0].endsWith('.html') ? paths[0] : paths[0] + '.html';
     }
     exporting = 'Preparing…';
     try {

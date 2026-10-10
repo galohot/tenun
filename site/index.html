@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Tenun — weave your spreadsheets and databases into one dashboard</title>
+<meta name="description" content="A free, open-source dashboard app that runs on your computer. Join Excel files, CSV files and databases, click to filter every chart, and export a dashboard as one HTML file.">
+<link rel="canonical" href="https://tenun.cloud/">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://tenun.cloud/">
+<meta property="og:title" content="Tenun — weave your spreadsheets and databases into one dashboard">
+<meta property="og:description" content="Local, free and open source. Excel, CSV, SQLite, PostgreSQL and MySQL in one dashboard. No server, no Docker, no account.">
+<meta property="og:image" content="https://tenun.cloud/og.png">
+<meta property="og:image:alt" content="A Tenun dashboard with number tiles, an area chart, a donut and bar charts">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="nav">
+  <a class="brand" href="/"><img src="/icon.svg" alt="" width="28" height="28"> Tenun</a>
+  <nav>
+    <a href="#features">Features</a>
+    <a href="#download">Download</a>
+    <a href="https://github.com/galohot/tenun">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <section class="hero">
+    <h1>Weave your spreadsheets and databases into one dashboard.</h1>
+    <p class="lede">Tenun is a free dashboard app that runs on your computer. Draw a line between an Excel column and a database column, and every chart can use both.</p>
+    <div class="cta">
+      <a class="button primary" href="#download">Download</a>
+      <a class="button" href="https://github.com/galohot/tenun">View on GitHub</a>
+    </div>
+    <p class="fine">Windows, macOS and Linux · No server, no Docker, no account · MIT or Apache-2.0</p>
+    <picture class="shot">
+      <source srcset="/dashboard-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/dashboard-light.webp" width="1440" height="900" alt="A Tenun dashboard: four number tiles, an area chart by month and region, a donut by category, and bar charts by store and customer segment">
+    </picture>
+  </section>
+
+  <section id="features" class="features">
+    <article>
+      <h2>Join sources, not just tables</h2>
+      <p>Sales in Excel, stores in a CSV export, customers in PostgreSQL. Drag from a column to a column, and Tenun writes the joins. It suggests the likely links and checks them against the data.</p>
+    </article>
+    <article>
+      <h2>Click to filter everything</h2>
+      <p>Click a bar, a slice or a row. Every other chart filters to it, even when its data comes from another source.</p>
+    </article>
+    <article>
+      <h2>Live from your files</h2>
+      <p>Save the Excel file and the dashboard updates. Databases refresh on an interval you choose. Nothing is copied to a server.</p>
+    </article>
+    <article>
+      <h2>Good-looking by default</h2>
+      <p>No colour pickers, no font menus. A fixed palette checked for colour blindness, in light and dark mode. You cannot make it ugly.</p>
+    </article>
+    <article>
+      <h2>Export one HTML file</h2>
+      <p>Send a dashboard as a single file. It opens offline in any browser, and click-to-filter still works.</p>
+    </article>
+    <article>
+      <h2>Small and private</h2>
+      <p>One download. The engine is DuckDB, embedded. Databases are opened read-only. No telemetry.</p>
+    </article>
+  </section>
+
+  <section class="model">
+    <div>
+      <h2>The model is a drawing</h2>
+      <p>Each table is a card. Each relationship is a line. The dot marks the side with unique values, like an ID. If neither side is unique, Tenun refuses the link, because the totals would be counted twice.</p>
+    </div>
+    <picture class="shot">
+      <source srcset="/model-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/model-light.webp" width="1440" height="900" alt="The Model view: Orders from an Excel file linked to stores from a CSV file and customers from a SQLite file" loading="lazy">
+    </picture>
+  </section>
+
+  <section id="download" class="download">
+    <h2>Download</h2>
+    <p>Version <span data-version>0.1.0</span>. Free and open source.</p>
+    <div class="platforms">
+      <a class="platform" href="https://github.com/galohot/tenun/releases/latest"><strong>Windows</strong><span>64-bit installer</span></a>
+      <a class="platform" href="https://github.com/galohot/tenun/releases/latest"><strong>macOS</strong><span>Apple silicon and Intel</span></a>
+      <a class="platform" href="https://github.com/galohot/tenun/releases/latest"><strong>Linux</strong><span>AppImage and .deb</span></a>
+    </div>
+    <p class="fine">The apps are not code-signed yet. On macOS, right-click the app and choose Open the first time. On Windows, choose More info, then Run anyway.</p>
+    <p class="fine">Prefer the browser? Download the <code>tenun</code> command and run <code>tenun serve</code>.</p>
+  </section>
+</main>
+
+<footer>
+  <p><em>Tenun</em> is Indonesian for woven cloth. · <a href="https://github.com/galohot/tenun">Source code</a></p>
+</footer>
+</body>
+</html>

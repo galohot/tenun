@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Tenun: three warp threads, two weft threads, woven over and under. -->
+  <rect width="1024" height="1024" rx="228" fill="#0A66D8"/>
+  <g fill="none" stroke-width="96" stroke-linecap="round">
+    <path d="M352 232 V792 M512 232 V792 M672 232 V792" stroke="#FFFFFF"/>
+    <path d="M232 424 H792 M232 600 H792" stroke="#FFC24A"/>
+  </g>
+  <!-- where a warp thread passes over a weft thread -->
+  <g fill="none" stroke-linecap="butt">
+    <path d="M512 352 V496 M352 528 V672 M672 528 V672" stroke="#0A66D8" stroke-width="136"/>
+    <path d="M512 340 V508 M352 516 V684 M672 516 V684" stroke="#FFFFFF" stroke-width="96"/>
+  </g>
+</svg>
