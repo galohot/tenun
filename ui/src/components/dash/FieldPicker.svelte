@@ -2,6 +2,7 @@
   import type { DType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { typeIcon } from '../../lib/ui';
+  import { blankNote, isShown } from '../../lib/prep';
   import Icon from '../Icon.svelte';
 
   let {
@@ -32,17 +33,26 @@
 
   const current = $derived(table ? app.table(table) : undefined);
   const label = $derived(
-    !table ? '' : column === null ? `Number of ${(current?.label ?? 'rows').toLowerCase()}` : column,
+    !table
+      ? ''
+      : column === null
+        ? `Number of ${(current?.label ?? 'rows').toLowerCase()}`
+        : (current?.columns.find((c) => c.name === column)?.label ?? column),
   );
 
   const groups = $derived(
     app.tables
       .map((t) => ({
         t,
+        // A hidden column stays in the list only while this field uses it.
         cols: t.columns.filter(
           (c) =>
+            isShown(c, table === t.id && column === c.name) &&
             (!numbersOnly || c.dtype === 'number') &&
-            (!q || c.name.toLowerCase().includes(q.toLowerCase()) || t.label.toLowerCase().includes(q.toLowerCase())),
+            (!q ||
+              c.name.toLowerCase().includes(q.toLowerCase()) ||
+              c.label?.toLowerCase().includes(q.toLowerCase()) ||
+              t.label.toLowerCase().includes(q.toLowerCase())),
         ),
       }))
       .filter((g) => g.cols.length || (mode === 'measure' && !q && !numbersOnly)),
@@ -94,9 +104,10 @@
               </button>
             {/if}
             {#each g.cols as c (c.name)}
-              <button class="opt" class:on={table === g.t.id && column === c.name} onclick={() => pick(g.t.id, c.name)}>
+              <button class="opt" class:on={table === g.t.id && column === c.name} title={c.description} onclick={() => pick(g.t.id, c.name)}>
                 <Icon name={typeIcon[dim(c.dtype)]} size={12} />
-                <span>{c.name}</span>
+                <span class="nm">{c.label ?? c.name}</span>
+                {#if blankNote(c)}<span class="blank">{blankNote(c)}</span>{/if}
               </button>
             {/each}
           </div>
@@ -165,6 +176,9 @@
   .opt:hover { background: var(--accent); color: #fff; }
   .opt:hover :global(svg) { color: #fff; }
   .opt.on { font-weight: 600; }
+  .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .blank { margin-left: auto; flex: none; font-size: 11px; color: var(--text-2); }
+  .opt:hover .blank { color: #fff; }
   .nothing { margin: 8px; color: var(--text-2); font-size: 12px; }
   @keyframes pop { from { opacity: 0; transform: scale(0.98); } }
 </style>

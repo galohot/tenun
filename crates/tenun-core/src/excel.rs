@@ -5,6 +5,7 @@
 
 use calamine::{Data, Reader, open_workbook_auto};
 use chrono::{NaiveDateTime, Timelike};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,9 +46,19 @@ pub struct Sheet {
     pub name: String,
     pub columns: Vec<(String, ColType)>,
     pub rows: Vec<Vec<Cell>>,
+    /// What was detected and fixed: "Header on row 4", "Filled down Region".
+    pub notes: Vec<String>,
+    /// The row of the sheet (numbered as in Excel) that holds the column names.
+    pub header_row: Option<u32>,
+    /// Per column: the file had text and numbers (or dates) mixed in it.
+    pub mixed: Vec<bool>,
 }
 
-pub fn read_workbook(path: &Path) -> anyhow::Result<Vec<Sheet>> {
+/// Reads every sheet. `header_rows` holds the header row the user chose, by sheet name.
+pub fn read_workbook(
+    path: &Path,
+    header_rows: &BTreeMap<String, u32>,
+) -> anyhow::Result<Vec<Sheet>> {
     let mut wb = open_workbook_auto(path)
         .map_err(|e| anyhow::anyhow!("cannot open {}: {e}", path.display()))?;
     let mut out = Vec::new();
@@ -56,11 +67,15 @@ pub fn read_workbook(path: &Path) -> anyhow::Result<Vec<Sheet>> {
             Ok(r) => r,
             Err(_) => continue, // chart sheets and the like
         };
-        let grid: Vec<Vec<Cell>> = range
-            .rows()
-            .map(|row| row.iter().map(to_cell).collect())
-            .collect();
-        if let Some(sheet) = build_sheet(&name, grid) {
+        // The range starts at the first filled cell. Blank rows keep the numbering of the sheet.
+        let top = range.start().map_or(0, |(r, _)| r as usize);
+        let mut grid: Vec<Vec<Cell>> = vec![Vec::new(); top];
+        grid.extend(
+            range
+                .rows()
+                .map(|row| row.iter().map(to_cell).collect::<Vec<_>>()),
+        );
+        if let Some(sheet) = build_sheet_with(&name, grid, header_rows.get(&name).copied(), true) {
             out.push(sheet);
         }
     }
@@ -103,27 +118,218 @@ fn parse_iso(s: &str) -> Option<NaiveDateTime> {
         })
 }
 
-/// Turns a raw grid into a typed table. The header is the first row with any
-/// value; columns with neither a header nor data are dropped.
+/// Turns a raw grid into a typed table, cleaning the usual spreadsheet mess on the way (see
+/// [`build_sheet_with`]).
 pub fn build_sheet(name: &str, grid: Vec<Vec<Cell>>) -> Option<Sheet> {
-    let header_idx = grid
-        .iter()
-        .position(|r| r.iter().any(|c| *c != Cell::Null))?;
-    let header = &grid[header_idx];
-    let body: Vec<&Vec<Cell>> = grid[header_idx + 1..]
-        .iter()
-        .filter(|r| r.iter().any(|c| *c != Cell::Null))
+    build_sheet_with(name, grid, None, true)
+}
+
+/// A row with a value in at least one cell.
+fn has_value(r: &[Cell]) -> bool {
+    r.iter().any(|c| *c != Cell::Null)
+}
+
+/// A cell of a data row. A whole number that reads as a year does not count: a row of years is
+/// the heading of a group of columns.
+fn is_typed(c: &Cell) -> bool {
+    matches!(
+        c,
+        Cell::Int(_) | Cell::Float(_) | Cell::Bool(_) | Cell::Time(_)
+    ) && !is_year(c)
+}
+
+/// A whole number that reads as a year: a header like 2025 over a column of months.
+fn is_year(c: &Cell) -> bool {
+    match c {
+        Cell::Int(i) => (1900..=2200).contains(i),
+        Cell::Float(f) => f.fract() == 0.0 && (1900.0..=2200.0).contains(f),
+        Cell::Text(t) => {
+            t.len() == 4 && t.starts_with(['1', '2']) && t.bytes().all(|b| b.is_ascii_digit())
+        }
+        _ => false,
+    }
+}
+
+/// The words that start a footer row in the first column.
+fn is_total_word(t: &str) -> bool {
+    let t = t
+        .trim()
+        .trim_end_matches([':', '.'])
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    matches!(
+        t.as_str(),
+        "total"
+            | "jumlah"
+            | "subtotal"
+            | "sub total"
+            | "sub-total"
+            | "total keseluruhan"
+            | "jumlah keseluruhan"
+            | "total semua"
+    ) || t.starts_with("grand total")
+        || t.starts_with("jumlah total")
+}
+
+/// Picks the header row. It is the first row that has labels in at least half of the used
+/// columns and is followed by a row of typed data. Without one, the first row with enough
+/// labels, and failing that the first row with any value (the v1 rule).
+fn detect_header(grid: &[Vec<Cell>], first: usize) -> usize {
+    let mut used = std::collections::BTreeSet::new();
+    for r in &grid[first..] {
+        for (i, c) in r.iter().enumerate() {
+            if *c != Cell::Null {
+                used.insert(i);
+            }
+        }
+    }
+    let need = used.len().div_ceil(2).max(1);
+    let labels = |r: &[Cell]| {
+        r.iter()
+            .filter(|c| matches!(c, Cell::Text(_) | Cell::Time(_)) || is_year(c))
+            .count()
+    };
+    let candidates: Vec<usize> = (first..grid.len())
+        .filter(|&i| has_value(&grid[i]) && labels(&grid[i]) >= need)
         .collect();
+    for &i in &candidates {
+        let next = (i + 1..grid.len()).find(|&j| has_value(&grid[j]));
+        if next.is_some_and(|j| grid[j].iter().any(is_typed)) {
+            return i;
+        }
+    }
+    candidates.first().copied().unwrap_or(first)
+}
+
+/// The row right above the header when it is a group heading ("2025" over "Jan", "Feb").
+fn stacked_parent(grid: &[Vec<Cell>], h: usize) -> Option<usize> {
+    let p = h.checked_sub(1)?;
+    let (row, head) = (&grid[p], &grid[h]);
+    let filled: Vec<usize> = (0..row.len()).filter(|&i| row[i] != Cell::Null).collect();
+    if filled.is_empty() {
+        return None;
+    }
+    let only_labels = filled
+        .iter()
+        .all(|&i| matches!(row[i], Cell::Text(_)) || is_year(&row[i]));
+    // A group heading spans several columns, so it fills fewer cells than the header under it,
+    // or it is made of years and quarters. Two full rows of text are a header and its data.
+    let header_cells = head.iter().filter(|c| **c != Cell::Null).count();
+    let grouped = (filled.len() >= 2 && filled.len() < header_cells)
+        || filled
+            .iter()
+            .all(|&i| is_year(&row[i]) || is_quarter(&row[i]));
+    let over_header = filled
+        .iter()
+        .any(|&i| head.get(i).is_some_and(|c| *c != Cell::Null));
+    (only_labels && grouped && over_header).then_some(p)
+}
+
+fn is_quarter(c: &Cell) -> bool {
+    matches!(c, Cell::Text(t) if {
+        let t = t.trim().to_ascii_uppercase();
+        t.len() == 2 && t.starts_with('Q') && matches!(t.as_bytes()[1], b'1'..=b'4')
+    })
+}
+
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// Turns a raw grid into a typed table.
+///
+/// With `tidy` the sheet is cleaned: the header is found below title rows (or is the sheet row
+/// `header_row`), two stacked header rows are joined, blank header cells get a name, footer rows
+/// ("Total", a row of sums) are dropped, and a grouping column is filled down. What was done is
+/// written to `notes`. Without `tidy` the header is the first row with any value (databases).
+/// Columns with neither a header nor data are dropped.
+pub fn build_sheet_with(
+    name: &str,
+    grid: Vec<Vec<Cell>>,
+    header_row: Option<u32>,
+    tidy: bool,
+) -> Option<Sheet> {
+    let first = grid.iter().position(|r| has_value(r))?;
+    let mut notes = Vec::new();
+    let forced = header_row
+        .map(|n| n as usize)
+        .filter(|&n| tidy && n >= 1 && n <= grid.len() && has_value(&grid[n - 1]))
+        .map(|n| n - 1);
+    let h = match forced {
+        Some(h) => h,
+        None if tidy => detect_header(&grid, first),
+        None => first,
+    };
+    let parent = if tidy { stacked_parent(&grid, h) } else { None };
+    let header = &grid[h];
+
+    if tidy {
+        let top = parent.unwrap_or(h);
+        let skipped = grid[..top].iter().filter(|r| has_value(r)).count();
+        if skipped > 0 {
+            notes.push(format!(
+                "Skipped {}",
+                plural(skipped, "title row", "title rows")
+            ));
+        }
+        if h > 0 {
+            let by_you = if forced.is_some() {
+                " (set by you)"
+            } else {
+                ""
+            };
+            notes.push(format!("Header on row {}{by_you}", h + 1));
+        }
+        if parent.is_some() {
+            notes.push("Joined 2 header rows".to_string());
+        }
+    }
+
+    // The rows below the header; each knows whether a blank row came just before it.
+    let mut body: Vec<(&Vec<Cell>, bool)> = Vec::new();
+    let mut after_blank = false;
+    for r in &grid[h + 1..] {
+        if has_value(r) {
+            body.push((r, after_blank));
+            after_blank = false;
+        } else {
+            after_blank = true;
+        }
+    }
 
     let width = header
         .len()
-        .max(body.iter().map(|r| r.len()).max().unwrap_or(0));
+        .max(body.iter().map(|(r, _)| r.len()).max().unwrap_or(0));
+
+    if tidy {
+        let first_col = (0..width)
+            .find(|&i| {
+                header.get(i).is_some_and(|c| *c != Cell::Null)
+                    || parent.is_some_and(|p| grid[p].get(i).is_some_and(|c| *c != Cell::Null))
+                    || body
+                        .iter()
+                        .any(|(r, _)| r.get(i).is_some_and(|c| *c != Cell::Null))
+            })
+            .unwrap_or(0);
+        let before = body.len();
+        drop_footers(&mut body, first_col);
+        if body.len() < before {
+            notes.push(format!(
+                "Dropped {}",
+                plural(before - body.len(), "footer row", "footer rows")
+            ));
+        }
+    }
+
     let mut keep = Vec::new();
     for i in 0..width {
-        let has_header = header.get(i).is_some_and(|c| *c != Cell::Null);
+        let has_header = header.get(i).is_some_and(|c| *c != Cell::Null)
+            || parent.is_some_and(|p| grid[p].get(i).is_some_and(|c| *c != Cell::Null));
         let has_data = body
             .iter()
-            .any(|r| r.get(i).is_some_and(|c| *c != Cell::Null));
+            .any(|(r, _)| r.get(i).is_some_and(|c| *c != Cell::Null));
         if has_header || has_data {
             keep.push(i);
         }
@@ -132,13 +338,15 @@ pub fn build_sheet(name: &str, grid: Vec<Vec<Cell>>) -> Option<Sheet> {
         return None;
     }
 
+    let (raw_names, named) = header_names(&grid, h, parent, &keep, tidy);
+    if named > 0 {
+        notes.push(format!(
+            "Named {} from the column on the left",
+            plural(named, "blank header", "blank headers")
+        ));
+    }
     let mut names: Vec<String> = Vec::new();
-    for &i in &keep {
-        let raw = match header.get(i) {
-            Some(Cell::Text(s)) => s.clone(),
-            Some(Cell::Null) | None => format!("column_{}", i + 1),
-            Some(other) => cell_text(other),
-        };
+    for raw in raw_names {
         let mut n = raw.clone();
         let mut k = 2;
         while names.contains(&n) {
@@ -148,21 +356,31 @@ pub fn build_sheet(name: &str, grid: Vec<Vec<Cell>>) -> Option<Sheet> {
         names.push(n);
     }
 
-    let columns: Vec<(String, ColType)> = keep
+    // Cells of the kept columns; a grouping column is filled down.
+    let mut cells: Vec<Vec<Cell>> = body
         .iter()
-        .zip(names)
-        .map(|(&i, n)| {
-            let t = infer(body.iter().map(|r| r.get(i).unwrap_or(&Cell::Null)));
-            (n, t)
+        .map(|(r, _)| {
+            keep.iter()
+                .map(|&i| r.get(i).cloned().unwrap_or(Cell::Null))
+                .collect()
         })
         .collect();
+    if tidy && fill_down(&mut cells) {
+        notes.push(format!("Filled down {}", names[0]));
+    }
 
-    let rows = body
+    let mixed: Vec<bool> = (0..keep.len())
+        .map(|j| is_mixed(cells.iter().map(|r| &r[j])))
+        .collect();
+    let columns: Vec<(String, ColType)> = (0..keep.len())
+        .map(|j| (names[j].clone(), infer(cells.iter().map(|r| &r[j]))))
+        .collect();
+    let rows = cells
         .iter()
         .map(|r| {
-            keep.iter()
+            r.iter()
                 .zip(&columns)
-                .map(|(&i, (_, t))| coerce(r.get(i).unwrap_or(&Cell::Null), *t))
+                .map(|(c, (_, t))| coerce(c, *t))
                 .collect()
         })
         .collect();
@@ -171,7 +389,152 @@ pub fn build_sheet(name: &str, grid: Vec<Vec<Cell>>) -> Option<Sheet> {
         name: name.to_string(),
         columns,
         rows,
+        notes,
+        header_row: tidy.then_some(h as u32 + 1),
+        mixed,
     })
+}
+
+/// Removes rows that are not data: "Total" rows anywhere, the notes under the last one, and a
+/// last row of column sums.
+fn drop_footers(body: &mut Vec<(&Vec<Cell>, bool)>, first_col: usize) {
+    let is_total = |r: &[Cell]| matches!(r.get(first_col), Some(Cell::Text(t)) if is_total_word(t));
+    let filled = |r: &[Cell]| r.iter().filter(|c| **c != Cell::Null).count();
+    let width = body.iter().map(|(r, _)| r.len()).max().unwrap_or(0);
+    if let Some(last) = body.iter().rposition(|(r, _)| is_total(r)) {
+        let mut at = 0;
+        body.retain(|(r, _)| {
+            let i = at;
+            at += 1;
+            !(is_total(r) || (i > last && filled(r) * 2 <= width))
+        });
+    }
+    // A last row that only holds the sums of the rows above it.
+    if body.len() >= 3 {
+        let (last, after_blank) = body[body.len() - 1];
+        let nums: Vec<(usize, f64)> = last
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| match c {
+                Cell::Int(v) => Some((i, *v as f64)),
+                Cell::Float(v) => Some((i, *v)),
+                _ => None,
+            })
+            .collect();
+        let only_numbers = nums.len() == filled(last);
+        let sums_match = nums.iter().all(|&(i, v)| {
+            let sum: f64 = body[..body.len() - 1]
+                .iter()
+                .map(|(r, _)| match r.get(i) {
+                    Some(Cell::Int(x)) => *x as f64,
+                    Some(Cell::Float(x)) => *x,
+                    _ => 0.0,
+                })
+                .sum();
+            (v - sum).abs() <= 1e-6 * sum.abs().max(1.0)
+        });
+        let some_sum = nums.iter().any(|&(_, v)| v != 0.0);
+        if only_numbers && sums_match && some_sum && (after_blank || nums.len() >= 2) {
+            body.pop();
+        }
+    }
+}
+
+/// The column names. A stacked parent joins its child ("2025 Jan"); a blank header between
+/// filled ones takes its left neighbour's name and a number ("Q1 2"). Returns the count of
+/// blanks that got a name.
+fn header_names(
+    grid: &[Vec<Cell>],
+    h: usize,
+    parent: Option<usize>,
+    keep: &[usize],
+    tidy: bool,
+) -> (Vec<String>, usize) {
+    let text = |c: Option<&Cell>| match c {
+        Some(Cell::Null) | None => None,
+        Some(Cell::Text(s)) => Some(s.clone()),
+        Some(other) => Some(cell_text(other)),
+    };
+    let mut heads: Vec<Option<String>> = Vec::new();
+    let mut carry: Option<String> = None;
+    for &i in keep {
+        let child = text(grid[h].get(i));
+        let name = match parent {
+            Some(p) => {
+                let own = text(grid[p].get(i));
+                if own.is_some() {
+                    carry = own.clone();
+                }
+                if child.is_none() && own.is_none() {
+                    carry = None;
+                }
+                let above = own.or_else(|| carry.clone().filter(|_| child.is_some()));
+                match (above, child) {
+                    (Some(a), Some(c)) if a != c => Some(format!("{a} {c}")),
+                    (Some(a), None) => Some(a),
+                    (_, c) => c,
+                }
+            }
+            None => child,
+        };
+        heads.push(name);
+    }
+    let last_filled = heads.iter().rposition(|n| n.is_some());
+    let mut out = Vec::new();
+    let mut named = 0;
+    let mut base: Option<String> = None;
+    let mut k = 2;
+    for (j, &i) in keep.iter().enumerate() {
+        match &heads[j] {
+            Some(n) => {
+                base = Some(n.clone());
+                k = 2;
+                out.push(n.clone());
+            }
+            None => match &base {
+                Some(b) if tidy && last_filled.is_some_and(|l| l > j) => {
+                    out.push(format!("{b} {k}"));
+                    k += 1;
+                    named += 1;
+                }
+                _ => out.push(format!("column_{}", i + 1)),
+            },
+        }
+    }
+    (out, named)
+}
+
+/// Fills blank cells of the first column from the cell above, when the column is a grouping
+/// column: text, more than half blank, with a value in the first row.
+fn fill_down(cells: &mut [Vec<Cell>]) -> bool {
+    let col: Vec<&Cell> = cells.iter().map(|r| &r[0]).collect();
+    let blanks = col.iter().filter(|c| ***c == Cell::Null).count();
+    let all_text = col.iter().all(|c| matches!(c, Cell::Null | Cell::Text(_)));
+    if cells.len() < 2 || !all_text || blanks * 2 <= cells.len() || *col[0] == Cell::Null {
+        return false;
+    }
+    let mut cur = cells[0][0].clone();
+    for r in cells.iter_mut() {
+        if r[0] == Cell::Null {
+            r[0] = cur.clone();
+        } else {
+            cur = r[0].clone();
+        }
+    }
+    true
+}
+
+/// Text and numbers (or dates, or yes/no) in one column.
+fn is_mixed<'a>(cells: impl Iterator<Item = &'a Cell>) -> bool {
+    let (mut texts, mut others) = (false, false);
+    for c in cells {
+        match c {
+            Cell::Null => {}
+            Cell::Text(_) => texts = true,
+            _ => others = true,
+        }
+    }
+    texts && others
 }
 
 fn infer<'a>(cells: impl Iterator<Item = &'a Cell>) -> ColType {
@@ -334,6 +697,162 @@ mod tests {
         );
         let s = build_sheet("S", vec![vec![t("at")], vec![ts]]).unwrap();
         assert_eq!(s.columns[0].1, ColType::Timestamp);
+    }
+
+    fn n() -> Cell {
+        Cell::Null
+    }
+    fn i(v: i64) -> Cell {
+        Cell::Int(v)
+    }
+    fn names(s: &Sheet) -> Vec<&str> {
+        s.columns.iter().map(|c| c.0.as_str()).collect()
+    }
+
+    #[test]
+    fn a_title_block_two_header_rows_and_a_footer() {
+        let grid = vec![
+            vec![t("Laporan"), n(), n(), n()],
+            vec![n(), n(), n(), n()],
+            vec![t("Toko Senja"), t("Periode 2026"), n(), n()],
+            vec![n(), n(), n(), n()],
+            vec![n(), i(2025), n(), i(2026)],
+            vec![t("Region"), t("Jan"), t("Feb"), t("Jan")],
+            vec![t("North"), i(1), i(2), i(3)],
+            vec![t("South"), i(4), i(5), i(6)],
+            vec![n(), n(), n(), n()],
+            vec![t("Jumlah"), i(5), i(7), i(9)],
+        ];
+        let s = build_sheet("S", grid).unwrap();
+        assert_eq!(names(&s), ["Region", "2025 Jan", "2025 Feb", "2026 Jan"]);
+        assert_eq!(s.rows.len(), 2);
+        assert_eq!(s.header_row, Some(6));
+        assert_eq!(
+            s.notes,
+            [
+                "Skipped 2 title rows",
+                "Header on row 6",
+                "Joined 2 header rows",
+                "Dropped 1 footer row"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_blank_header_between_filled_ones_takes_the_left_name() {
+        let grid = vec![
+            vec![t("Region"), t("Q1"), n(), n(), t("Q2"), n()],
+            vec![t("A"), i(1), i(2), i(3), i(4), i(5)],
+            vec![t("B"), i(6), i(7), i(8), i(9), i(10)],
+        ];
+        let s = build_sheet("S", grid).unwrap();
+        // The last blank has no filled header after it, so it keeps the v1 name.
+        assert_eq!(
+            names(&s),
+            ["Region", "Q1", "Q1 2", "Q1 3", "Q2", "column_6"]
+        );
+        assert_eq!(
+            s.notes,
+            ["Named 2 blank headers from the column on the left"]
+        );
+    }
+
+    #[test]
+    fn a_row_of_sums_goes_but_a_look_alike_row_stays() {
+        let grid = vec![
+            vec![t("Item"), t("A"), t("B")],
+            vec![t("x"), i(1), i(2)],
+            vec![t("y"), i(3), i(4)],
+            vec![n(), n(), n()],
+            vec![n(), i(4), i(6)],
+        ];
+        let s = build_sheet("S", grid).unwrap();
+        assert_eq!(s.rows.len(), 2);
+        assert_eq!(s.notes, ["Dropped 1 footer row"]);
+        // Not the sums: it is data.
+        let grid = vec![
+            vec![t("Item"), t("A"), t("B")],
+            vec![t("x"), i(1), i(2)],
+            vec![t("y"), i(3), i(4)],
+            vec![t("z"), i(4), i(7)],
+        ];
+        assert_eq!(build_sheet("S", grid).unwrap().rows.len(), 3);
+    }
+
+    #[test]
+    fn total_rows_are_footers_only_by_their_words() {
+        let grid = vec![
+            vec![t("Item"), t("Amount")],
+            vec![t("Total Care"), i(5)],
+            vec![t("Subtotal"), i(5)],
+            vec![t("Bolt"), i(7)],
+            vec![t("Grand Total"), i(12)],
+            vec![t("Source: x"), n()],
+        ];
+        let s = build_sheet("S", grid).unwrap();
+        // Subtotal and Grand Total go, and so does the note under the last one.
+        let items: Vec<&Cell> = s.rows.iter().map(|r| &r[0]).collect();
+        assert_eq!(items, [&t("Total Care"), &t("Bolt")]);
+    }
+
+    #[test]
+    fn a_grouping_column_is_filled_down_but_a_sparse_number_column_is_not() {
+        let grid = vec![
+            vec![t("Region"), t("Item"), t("Qty")],
+            vec![t("North"), t("a"), i(1)],
+            vec![n(), t("b"), i(2)],
+            vec![n(), t("c"), i(3)],
+            vec![t("South"), t("d"), i(4)],
+            vec![n(), t("e"), i(5)],
+        ];
+        let s = build_sheet("S", grid).unwrap();
+        assert_eq!(s.rows[2][0], t("North"));
+        assert_eq!(s.rows[3][0], t("South"));
+        assert_eq!(s.rows[4][0], t("South"));
+        assert_eq!(s.notes, ["Filled down Region"]);
+        let grid = vec![
+            vec![t("Discount"), t("Item")],
+            vec![i(5), t("a")],
+            vec![n(), t("b")],
+            vec![n(), t("c")],
+        ];
+        let s = build_sheet("S", grid).unwrap();
+        assert_eq!(s.rows[1][0], Cell::Null);
+        assert!(s.notes.is_empty());
+    }
+
+    #[test]
+    fn years_can_head_number_columns_and_mixed_cells_are_flagged() {
+        let grid = vec![
+            vec![t("Region"), i(2025), i(2026), i(2027)],
+            vec![t("North"), i(1), i(2), i(3)],
+            vec![t("South"), i(4), t("n/a"), i(6)],
+        ];
+        let s = build_sheet("S", grid).unwrap();
+        assert_eq!(names(&s), ["Region", "2025", "2026", "2027"]);
+        assert!(s.notes.is_empty());
+        assert_eq!(s.mixed, [false, false, true, false]);
+    }
+
+    #[test]
+    fn the_header_row_can_be_chosen_and_databases_keep_the_first_row() {
+        let grid = vec![
+            vec![t("Date"), t("Store")],
+            vec![t("2026-01-02"), t("A")],
+            vec![t("2026-01-03"), t("B")],
+        ];
+        let s = build_sheet_with("S", grid.clone(), Some(2), true).unwrap();
+        assert_eq!(names(&s), ["2026-01-02", "A"]);
+        assert_eq!(s.rows.len(), 1);
+        // A row number outside the sheet is ignored.
+        let s = build_sheet_with("S", grid.clone(), Some(40), true).unwrap();
+        assert_eq!(names(&s), ["Date", "Store"]);
+        // No cleaning for a database: a "Total" row is data there.
+        let mut db = grid;
+        db.push(vec![t("Total"), t("x")]);
+        let s = build_sheet_with("S", db, None, false).unwrap();
+        assert_eq!(s.rows.len(), 3);
+        assert!(s.notes.is_empty());
     }
 
     #[test]

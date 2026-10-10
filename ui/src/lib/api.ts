@@ -7,6 +7,18 @@ export interface Column {
   name: string;
   dtype: DType;
   raw_type: string;
+  /** The name shown in the app (from the column override). Queries use `name`. */
+  label?: string;
+  /** Left out of the field pickers. Still there for relationships. */
+  hidden?: boolean;
+  /** A tooltip in the field pickers. */
+  description?: string;
+  /** The share of blank cells, 0–1. Not set when nothing is blank or the data is read live. */
+  blank?: number;
+  /** The file had text and numbers (or dates) mixed in this column. */
+  mixed?: boolean;
+  /** After a type override: how many cells could not be read as that type and became blank. */
+  failed?: number;
 }
 
 export interface Table {
@@ -16,6 +28,58 @@ export interface Table {
   label: string;
   columns: Column[];
   rows: number | null;
+  /** What was detected and fixed when the sheet was read: "Header on row 4", "Filled down Region". */
+  notes?: string[];
+  /** Excel: the sheet row that holds the column names. */
+  header_row?: number;
+  /** The data is local, so its columns can be re-typed and turned into rows. */
+  prep?: boolean;
+}
+
+export type DateFormat = 'auto' | 'dmy' | 'mdy';
+
+/** What the user changed about one column of a table. */
+export interface ColumnSetup {
+  label?: string;
+  dtype?: DType;
+  /** How dates written as text are read. Only with `dtype` date or datetime. */
+  date_format?: DateFormat;
+  hidden?: boolean;
+  description?: string;
+}
+
+export type Transform = { kind: 'unpivot'; keep: string[]; name: string; value: string };
+
+/** How one table is prepared. Stored in the workspace by table id. */
+export interface TableSetup {
+  /** Excel: the sheet row that holds the column names. Overrides detection. */
+  header_row?: number;
+  columns?: Record<string, ColumnSetup>;
+  transforms?: Transform[];
+}
+
+/** A wide sheet: months, quarters or years across the top. */
+export interface UnpivotPlan {
+  keep: string[];
+  columns: string[];
+  name: string;
+  value: string;
+  /** Every header has a year, so the new name column reads as a date. */
+  dates: boolean;
+}
+
+export interface Profile {
+  rows: number;
+  /** The share of blank cells, 0–1. */
+  blank: number;
+  distinct: number;
+  min?: Cell;
+  max?: Cell;
+  /** Text and yes/no columns: the 5 most common values. */
+  top?: { value: string; count: number }[];
+  /** Number and date columns: counts in 12 equal bins from min to max. */
+  histogram?: number[];
+  mixed: boolean;
 }
 
 export interface FieldRef {
@@ -276,6 +340,8 @@ export interface Workspace {
   layout: { model?: Record<string, { x: number; y: number }> } | null;
   /** How numbers and dates read. A file without it reads as English. */
   locale?: 'id' | 'en';
+  /** How each table is prepared, by table id. */
+  tables?: Record<string, TableSetup>;
 }
 
 export interface Snapshot {
@@ -348,6 +414,18 @@ export const api = {
   reloadSource: (id: string) => call<Snapshot>('POST', `/sources/${encodeURIComponent(id)}/reload`),
   preview: (id: string, limit = 200) =>
     call<{ columns: Column[]; rows: Cell[][] }>('GET', `/tables/preview?id=${encodeURIComponent(id)}&limit=${limit}`),
+  /** Sets how a table is prepared (header row, column overrides, unpivot); null clears it. */
+  setTableSetup: (table: string, setup: TableSetup | null) => call<Snapshot>('PUT', '/tables/setup', { table, setup }),
+  profile: (table: string, column: string) =>
+    call<Profile>('GET', `/profile?table=${encodeURIComponent(table)}&column=${encodeURIComponent(column)}`),
+  /** The columns of a wide sheet that could turn into rows, or null. */
+  unpivotPlan: (table: string) => call<UnpivotPlan | null>('GET', `/prep/unpivot?table=${encodeURIComponent(table)}`),
+  unpivotPreview: (table: string, keep: string[], name: string, value: string) =>
+    call<{ before: { columns: Column[]; rows: Cell[][] }; after: { columns: Column[]; rows: Cell[][] } }>(
+      'POST',
+      '/prep/unpivot/preview',
+      { table, keep, name, value },
+    ),
   addRelationship: (from: FieldRef, to: FieldRef) => call<Snapshot>('POST', '/relationships', { from, to }),
   removeRelationship: (id: string) => call<Snapshot>('DELETE', `/relationships/${encodeURIComponent(id)}`),
   suggest: () => call<Suggestion[]>('GET', '/relationships/suggest'),

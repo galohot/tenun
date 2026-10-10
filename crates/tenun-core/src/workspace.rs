@@ -3,7 +3,9 @@
 //! The file is meant to be shared and committed to git, so it never holds a
 //! password. Database passwords live in the [`crate::secrets`] store.
 
+use crate::catalog::DType;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const FILE_VERSION: u32 = 1;
@@ -68,6 +70,10 @@ pub struct Workspace {
         skip_serializing_if = "Option::is_none"
     )]
     pub locale: Option<Locale>,
+    /// How each table is prepared: header row, column overrides, unpivot. The key is the table id
+    /// (`<source id>/<table name>`). Not written until a table is set up (V3-D11).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tables: BTreeMap<String, TableSetup>,
 }
 
 impl Default for Workspace {
@@ -80,8 +86,101 @@ impl Default for Workspace {
             dashboards: Vec::new(),
             layout: serde_json::Value::Null,
             locale: None,
+            tables: BTreeMap::new(),
         }
     }
+}
+
+/// What the user changed about one table. Everything is optional; an empty setup is dropped.
+/// The raw data is never touched: the changes live in the table's view.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct TableSetup {
+    /// Excel: the row (as numbered in the sheet) that holds the column names. Overrides detection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header_row: Option<u32>,
+    /// By real column name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub columns: BTreeMap<String, ColumnSetup>,
+    /// Applied in order, before the column types.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transforms: Vec<Transform>,
+}
+
+impl TableSetup {
+    pub fn is_empty(&self) -> bool {
+        self.header_row.is_none() && self.columns.is_empty() && self.transforms.is_empty()
+    }
+
+    /// Drops overrides that say nothing, so a cleared menu leaves no trace in the file.
+    pub fn tidy(&mut self) {
+        for c in self.columns.values_mut() {
+            if c.label.as_deref().is_some_and(|s| s.trim().is_empty()) {
+                c.label = None;
+            }
+            if c.description
+                .as_deref()
+                .is_some_and(|s| s.trim().is_empty())
+            {
+                c.description = None;
+            }
+            if c.hidden == Some(false) {
+                c.hidden = None;
+            }
+            if c.dtype.is_none() {
+                c.date_format = None;
+            }
+            if c.date_format == Some(DateFormat::Auto) {
+                c.date_format = None;
+            }
+        }
+        self.columns.retain(|_, c| *c != ColumnSetup::default());
+    }
+
+    /// True when the view of the table (not only its labels) depends on this setup.
+    pub fn changes_view(&self) -> bool {
+        !self.transforms.is_empty() || self.columns.values().any(|c| c.dtype.is_some())
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ColumnSetup {
+    /// The name shown in the app. Queries keep the real name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Read the column as this type. Cells that cannot be read become blank.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dtype: Option<DType>,
+    /// How to read dates written as text. Only used with `dtype` date or datetime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date_format: Option<DateFormat>,
+    /// Out of the field pickers. Still there for relationships.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>,
+    /// A tooltip in the field pickers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DateFormat {
+    Auto,
+    /// 31/12/2026
+    Dmy,
+    /// 12/31/2026
+    Mdy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Transform {
+    /// Columns become rows: the `keep` columns stay, every other column turns into one row per
+    /// value, with its name in `name` and its value in `value`.
+    Unpivot {
+        keep: Vec<String>,
+        name: String,
+        value: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

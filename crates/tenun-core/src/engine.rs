@@ -2,16 +2,18 @@
 
 use crate::catalog::{Catalog, Column, DType, Table, ident, lit};
 use crate::excel::{self, Cell, ColType};
+use crate::prep::{self, ColInfo};
 use crate::query::{self, Param, SemanticQuery};
 use crate::secrets::Secrets;
 use crate::suggest::{self, Suggestion};
 use crate::workspace::{
-    DbConn, FieldRef, Locale, Relationship, Source, SourceKind, Workspace, resolve_path, store_path,
+    DbConn, FieldRef, Locale, Relationship, Source, SourceKind, TableSetup, Transform, Workspace,
+    resolve_path, store_path,
 };
 use duckdb::Connection;
 use duckdb::types::Value;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
 
@@ -351,6 +353,7 @@ impl Engine {
             s.ws.relationships
                 .retain(|r| !r.from.table.starts_with(&prefix) && !r.to.table.starts_with(&prefix));
             s.catalog.tables.retain(|t| t.source_id != id);
+            s.ws.tables.retain(|k, _| !k.starts_with(&prefix));
             s.errors.remove(id);
             s.loaded_at.remove(id);
         }
@@ -360,7 +363,7 @@ impl Engine {
     /// (Re)loads one source into DuckDB and refreshes its catalog entries.
     /// Returns the ids of its tables.
     pub fn load(&self, id: &str) -> Vec<String> {
-        let (src, base) = {
+        let (src, base, setups) = {
             let s = self.state.read().unwrap();
             let Some(src) = s.ws.source(id).cloned() else {
                 return Vec::new();
@@ -370,16 +373,20 @@ impl Engine {
                 s.path
                     .as_ref()
                     .and_then(|p| p.parent().map(Path::to_path_buf)),
+                setups_of(&s.ws, id),
             )
         };
         let result = {
             let db = self.db.lock().unwrap();
-            load_source(&db, &src, base.as_deref(), &self.secrets)
+            load_source(&db, &src, base.as_deref(), &self.secrets, &setups)
         };
         let mut s = self.state.write().unwrap();
         s.catalog.tables.retain(|t| t.source_id != id);
         match result {
-            Ok(tables) => {
+            Ok(mut tables) => {
+                for t in &mut tables {
+                    stamp_setup(t, s.ws.tables.get(&t.id));
+                }
                 s.errors.remove(id);
                 s.loaded_at.insert(id.to_string(), now_iso());
                 let ids = tables.iter().map(|t| t.id.clone()).collect();
@@ -645,33 +652,146 @@ impl Engine {
             .table(table_id)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("unknown table {table_id}"))?;
-        let cols: Vec<String> = table
+        preview_of(&self.conn()?, &table.sql_ref, table.columns, limit)
+    }
+
+    /// The columns of a table and how a "Turn these columns into rows" would change it, for the
+    /// preview. `None` when the table is already turned, or cannot be.
+    pub fn detect_unpivot(&self, table_id: &str) -> Option<prep::UnpivotPlan> {
+        let s = self.state.read().unwrap();
+        let t = s.catalog.table(table_id).filter(|t| t.prep)?;
+        if s.ws
+            .tables
+            .get(table_id)
+            .is_some_and(|x| !x.transforms.is_empty())
+        {
+            return None;
+        }
+        let cols: Vec<(String, DType)> = t
             .columns
             .iter()
-            .map(|c| {
-                let r = ident(&c.name);
-                match c.dtype {
-                    DType::Number if c.raw_type.to_ascii_uppercase().starts_with("DECIMAL") => {
-                        format!("CAST({r} AS DOUBLE)")
-                    }
-                    DType::Number | DType::Bool => r,
-                    DType::Date => format!("strftime({r}, '%Y-%m-%d')"),
-                    DType::DateTime => format!("strftime({r}, '%Y-%m-%d %H:%M:%S')"),
-                    DType::Text => format!("CAST({r} AS VARCHAR)"),
-                }
+            .map(|c| (c.name.clone(), c.dtype))
+            .collect();
+        prep::detect_unpivot(&cols)
+    }
+
+    /// The first rows of the table as they would read after the columns turn into rows.
+    pub fn unpivot_preview(
+        &self,
+        table_id: &str,
+        keep: Vec<String>,
+        name: String,
+        value: String,
+        limit: u32,
+    ) -> anyhow::Result<Preview> {
+        let table = self
+            .state
+            .read()
+            .unwrap()
+            .catalog
+            .table(table_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("unknown table {table_id}"))?;
+        let setup = TableSetup {
+            transforms: vec![Transform::Unpivot { keep, name, value }],
+            ..TableSetup::default()
+        };
+        let cols: Vec<ColInfo> = table
+            .columns
+            .iter()
+            .map(|c| ColInfo {
+                name: c.name.clone(),
+                dtype: c.dtype,
             })
             .collect();
-        let sql = format!(
-            "SELECT {} FROM {} LIMIT {}",
-            cols.join(", "),
-            table.sql_ref,
-            limit.clamp(1, 1000)
-        );
-        let rows = run(&self.conn()?, &sql, &[])?;
-        Ok(Preview {
-            columns: table.columns,
-            rows,
-        })
+        let plan = prep::plan_view(&table.sql_ref, &cols, &setup)
+            .ok_or_else(|| anyhow::anyhow!("There is nothing to turn into rows."))?;
+        let columns = plan
+            .columns
+            .iter()
+            .map(|c| Column::new(c.name.clone(), c.dtype, String::new()))
+            .collect();
+        preview_of(
+            &self.conn()?,
+            &format!("({}) AS \"__p\"", plan.sql),
+            columns,
+            limit,
+        )
+    }
+
+    /// What a column holds: blanks, distinct values, range, common values or a histogram.
+    pub fn profile(&self, table_id: &str, column: &str) -> anyhow::Result<prep::Profile> {
+        let (sql_ref, col) = {
+            let s = self.state.read().unwrap();
+            let t = s
+                .catalog
+                .table(table_id)
+                .ok_or_else(|| anyhow::anyhow!("unknown table {table_id}"))?;
+            let c = t
+                .column(column)
+                .ok_or_else(|| anyhow::anyhow!("{} has no column {column}", t.label))?;
+            (t.sql_ref.clone(), c.clone())
+        };
+        prep::profile(&self.conn()?, &sql_ref, &col.name, col.dtype, col.mixed)
+    }
+
+    /// Sets how one table is prepared: the header row, column overrides and the unpivot. `None`
+    /// clears them. The table's source loads again when the data changes (header row, types,
+    /// unpivot); labels, hidden flags and descriptions apply at once. Returns whether it loaded
+    /// again.
+    pub fn set_table_setup(
+        &self,
+        table_id: &str,
+        setup: Option<TableSetup>,
+    ) -> anyhow::Result<bool> {
+        let mut setup = setup.unwrap_or_default();
+        setup.tidy();
+        for t in &setup.transforms {
+            let Transform::Unpivot { name, value, .. } = t;
+            if name.trim().is_empty() || value.trim().is_empty() || name.trim() == value.trim() {
+                anyhow::bail!("Give the two new columns different names.");
+            }
+        }
+        let reload = {
+            let mut s = self.state.write().unwrap();
+            let t = s
+                .catalog
+                .table(table_id)
+                .ok_or_else(|| anyhow::anyhow!("unknown table {table_id}"))?;
+            if !t.prep && (setup.header_row.is_some() || setup.changes_view()) {
+                anyhow::bail!("This table is read live, so its columns cannot be changed here.");
+            }
+            let source_id = t.source_id.clone();
+            let retyped = |x: &TableSetup| -> BTreeMap<String, _> {
+                x.columns
+                    .iter()
+                    .filter_map(|(n, c)| Some((n.clone(), (c.dtype?, c.date_format))))
+                    .collect()
+            };
+            let old = s.ws.tables.get(table_id).cloned().unwrap_or_default();
+            let reload = old.header_row != setup.header_row
+                || old.transforms != setup.transforms
+                || retyped(&old) != retyped(&setup);
+            if setup.is_empty() {
+                s.ws.tables.remove(table_id);
+            } else {
+                s.ws.tables.insert(table_id.to_string(), setup);
+            }
+            if !reload {
+                let st = &mut *s;
+                let setup = st.ws.tables.get(table_id);
+                if let Some(t) = st.catalog.tables.iter_mut().find(|t| t.id == table_id) {
+                    stamp_setup(t, setup);
+                }
+            }
+            reload.then_some(source_id)
+        };
+        let reloaded = reload.is_some();
+        if let Some(id) = reload {
+            self.load(&id);
+        }
+        self.persist();
+        Ok(reloaded)
     }
 
     pub fn suggest(&self) -> anyhow::Result<Vec<Suggestion>> {
@@ -700,6 +820,37 @@ impl Engine {
     pub fn catalog(&self) -> Catalog {
         self.state.read().unwrap().catalog.clone()
     }
+}
+
+/// The first rows of a relation, written the way the Data view shows them.
+fn preview_of(
+    conn: &Connection,
+    from: &str,
+    columns: Vec<Column>,
+    limit: u32,
+) -> anyhow::Result<Preview> {
+    let cols: Vec<String> = columns
+        .iter()
+        .map(|c| {
+            let r = ident(&c.name);
+            match c.dtype {
+                DType::Number if c.raw_type.to_ascii_uppercase().starts_with("DECIMAL") => {
+                    format!("CAST({r} AS DOUBLE)")
+                }
+                DType::Number | DType::Bool => r,
+                DType::Date => format!("strftime({r}, '%Y-%m-%d')"),
+                DType::DateTime => format!("strftime({r}, '%Y-%m-%d %H:%M:%S')"),
+                DType::Text => format!("CAST({r} AS VARCHAR)"),
+            }
+        })
+        .collect();
+    let sql = format!(
+        "SELECT {} FROM {from} LIMIT {}",
+        cols.join(", "),
+        limit.clamp(1, 1000)
+    );
+    let rows = run(conn, &sql, &[])?;
+    Ok(Preview { columns, rows })
 }
 
 fn rebase(kind: &mut SourceKind, old: Option<&Path>, new: Option<&Path>) {
@@ -757,11 +908,138 @@ fn ensure_extension(db: &Connection, name: &str) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to install the {name} connector: {e}"))
 }
 
+/// The setups of one source's tables, by table name.
+fn setups_of(ws: &Workspace, source_id: &str) -> BTreeMap<String, TableSetup> {
+    let prefix = format!("{source_id}/");
+    ws.tables
+        .iter()
+        .filter_map(|(k, v)| Some((k.strip_prefix(&prefix)?.to_string(), v.clone())))
+        .collect()
+}
+
+/// Puts the label, hidden flag and description of the column overrides on the catalog.
+fn stamp_setup(t: &mut Table, setup: Option<&TableSetup>) {
+    for c in &mut t.columns {
+        let o = setup.and_then(|s| s.columns.get(&c.name));
+        c.label = o.and_then(|o| o.label.clone()).filter(|l| !l.is_empty());
+        c.hidden = o.is_some_and(|o| o.hidden == Some(true));
+        c.description = o
+            .and_then(|o| o.description.clone())
+            .filter(|d| !d.is_empty());
+    }
+}
+
+/// Name of the table that holds the sheet as it was read, when a view sits on top of it.
+fn raw_name(name: &str) -> String {
+    format!("__raw_{name}")
+}
+
+/// Shows what building the view found: unreadable cells, or why the changes did not apply.
+fn stamp_outcome(t: &mut Table, o: &ViewOutcome) {
+    for (col, n) in &o.failed {
+        if let Some(c) = t.columns.iter_mut().find(|c| c.name == *col) {
+            c.failed = Some(*n);
+        }
+    }
+    if let Some(p) = &o.problem {
+        t.notes.push(p.clone());
+    }
+}
+
+/// Removes a table or a view, whichever it is.
+fn drop_any(db: &Connection, qs: &str, name: &str) {
+    for kind in ["VIEW", "TABLE"] {
+        let _ = db.execute_batch(&format!("DROP {kind} IF EXISTS {qs}.{};", ident(name)));
+    }
+}
+
+/// Names of the tables and views of a schema, and whether each is a view.
+fn local_relations(db: &Connection, schema: &str) -> anyhow::Result<Vec<(String, bool)>> {
+    let mut stmt = db.prepare(
+        "SELECT table_name, table_type = 'VIEW' FROM information_schema.tables \
+         WHERE table_catalog = current_database() AND table_schema = ?",
+    )?;
+    let rows = stmt
+        .query_map([schema], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// What building the view of one table gave: how many cells each retyped column could not read,
+/// and a problem to show when the changes could not be applied.
+#[derive(Default)]
+struct ViewOutcome {
+    failed: BTreeMap<String, u64>,
+    problem: Option<String>,
+}
+
+/// Creates the view `name` over `raw`: the table with its transforms and column types applied.
+/// When the changes cannot be applied, the view shows the raw table and says why.
+fn make_view(
+    db: &Connection,
+    schema: &str,
+    name: &str,
+    raw: &str,
+    setup: &TableSetup,
+) -> ViewOutcome {
+    let qs = ident(schema);
+    let base = format!("{qs}.{}", ident(raw));
+    let create = |select: &str| {
+        db.execute_batch(&format!(
+            "CREATE OR REPLACE VIEW {qs}.{} AS {select};",
+            ident(name)
+        ))
+    };
+    let mut out = ViewOutcome::default();
+    let cols = columns_where(
+        db,
+        "current_database()",
+        &format!(
+            "table_schema = {} AND table_name = {}",
+            lit(schema),
+            lit(raw)
+        ),
+    )
+    .map(|rows| {
+        rows.into_iter()
+            .map(|(_, _, name, ty)| ColInfo {
+                name,
+                dtype: DType::from_duckdb(&ty),
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default();
+    if let Some(plan) = prep::plan_view(&base, &cols, setup) {
+        match create(&plan.sql) {
+            Ok(()) => {
+                for (col, sql) in &plan.checks {
+                    let n = run(db, sql, &[])
+                        .ok()
+                        .and_then(|r| r.first()?.first()?.as_u64())
+                        .unwrap_or(0);
+                    if n > 0 {
+                        out.failed.insert(col.clone(), n);
+                    }
+                }
+                return out;
+            }
+            Err(e) => out.problem = Some(format!("The changes could not be applied: {e}")),
+        }
+    }
+    if let Err(e) = create(&format!("SELECT * FROM {base}")) {
+        out.problem = Some(format!("{e}"));
+    }
+    out
+}
+
 fn load_source(
     db: &Connection,
     src: &Source,
     base: Option<&Path>,
     secrets: &Secrets,
+    setups: &BTreeMap<String, TableSetup>,
 ) -> anyhow::Result<Vec<Table>> {
     let schema = schema_of(&src.id);
     let qs = ident(&schema);
@@ -772,23 +1050,63 @@ fn load_source(
                 anyhow::bail!("{} is missing", abs.display());
             }
             let sheets = if matches!(src.kind, SourceKind::Excel { .. }) {
-                excel::read_workbook(&abs)?
+                let header_rows: BTreeMap<String, u32> = setups
+                    .iter()
+                    .filter_map(|(n, s)| Some((n.clone(), s.header_row?)))
+                    .collect();
+                excel::read_workbook(&abs, &header_rows)?
             } else {
                 crate::sqlite::read_database(&abs)?
             };
             db.execute_batch(&format!("CREATE SCHEMA IF NOT EXISTS {qs};"))?;
-            let mut names = Vec::new();
+            let existing = local_relations(db, &schema)?;
+            let mut expected = BTreeSet::new();
+            let mut outcomes: BTreeMap<String, ViewOutcome> = BTreeMap::new();
             for sheet in &sheets {
-                write_sheet(db, &schema, sheet)?;
-                names.push(sheet.name.clone());
+                let name = &sheet.name;
+                let setup = setups.get(name).filter(|s| s.changes_view());
+                let was = existing.iter().find(|(n, _)| n == name).map(|e| e.1);
+                if let Some(setup) = setup {
+                    // The sheet as read sits under a view that holds the changes.
+                    let raw = raw_name(name);
+                    if was == Some(false) {
+                        drop_any(db, &qs, name);
+                    }
+                    write_sheet(db, &schema, sheet, &raw)?;
+                    outcomes.insert(name.clone(), make_view(db, &schema, name, &raw, setup));
+                    expected.insert(raw);
+                } else {
+                    if was == Some(true) {
+                        drop_any(db, &qs, name);
+                    }
+                    write_sheet(db, &schema, sheet, name)?;
+                }
+                expected.insert(name.clone());
             }
-            // Sheets that were deleted from the workbook go away too.
-            for existing in local_tables(db, &schema)? {
-                if !names.contains(&existing) {
-                    db.execute_batch(&format!("DROP TABLE IF EXISTS {qs}.{};", ident(&existing)))?;
+            // Sheets that were deleted from the workbook go away too, and so do raw tables
+            // that no view needs any more.
+            for (existing, _) in &existing {
+                if !expected.contains(existing) && !existing.starts_with("__stage_") {
+                    drop_any(db, &qs, existing);
                 }
             }
-            catalog_local(db, src, &schema)
+            let mut tables = catalog_local(db, src, &schema)?;
+            for t in &mut tables {
+                let Some(sheet) = sheets.iter().find(|s| s.name == t.name) else {
+                    continue;
+                };
+                t.notes = sheet.notes.clone();
+                t.header_row = sheet.header_row;
+                for (c, (name, _)) in sheet.columns.iter().enumerate() {
+                    if let Some(col) = t.columns.iter_mut().find(|x| x.name == *name) {
+                        col.mixed = sheet.mixed.get(c).copied().unwrap_or(false);
+                    }
+                }
+                if let Some(o) = outcomes.get(&t.name) {
+                    stamp_outcome(t, o);
+                }
+            }
+            Ok(tables)
         }
         SourceKind::Csv { path } | SourceKind::Parquet { path } => {
             let abs = resolve_path(path, base);
@@ -804,12 +1122,33 @@ fn load_source(
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "data".into());
-            db.execute_batch(&format!(
-                "CREATE SCHEMA IF NOT EXISTS {qs}; CREATE OR REPLACE VIEW {qs}.{} AS SELECT * FROM {reader}({});",
-                ident(&stem),
-                lit(&abs.to_string_lossy())
-            ))?;
-            catalog_local(db, src, &schema)
+            let select = format!("SELECT * FROM {reader}({})", lit(&abs.to_string_lossy()));
+            db.execute_batch(&format!("CREATE SCHEMA IF NOT EXISTS {qs};"))?;
+            let raw = raw_name(&stem);
+            let mut outcome = None;
+            match setups.get(&stem).filter(|s| s.changes_view()) {
+                Some(setup) => {
+                    db.execute_batch(&format!(
+                        "CREATE OR REPLACE VIEW {qs}.{} AS {select};",
+                        ident(&raw)
+                    ))?;
+                    outcome = Some(make_view(db, &schema, &stem, &raw, setup));
+                }
+                None => {
+                    drop_any(db, &qs, &raw);
+                    db.execute_batch(&format!(
+                        "CREATE OR REPLACE VIEW {qs}.{} AS {select};",
+                        ident(&stem)
+                    ))?;
+                }
+            }
+            let mut tables = catalog_local(db, src, &schema)?;
+            if let Some(o) = outcome
+                && let Some(t) = tables.iter_mut().find(|t| t.name == stem)
+            {
+                stamp_outcome(t, &o);
+            }
+            Ok(tables)
         }
         SourceKind::Duckdb { path } => {
             let abs = resolve_path(path, base);
@@ -869,7 +1208,13 @@ fn conninfo(v: &str) -> String {
     format!("'{}'", v.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
-fn write_sheet(db: &Connection, schema: &str, sheet: &excel::Sheet) -> anyhow::Result<()> {
+/// Writes a sheet into the schema as the table `target`.
+fn write_sheet(
+    db: &Connection,
+    schema: &str,
+    sheet: &excel::Sheet,
+    target: &str,
+) -> anyhow::Result<()> {
     let qs = ident(schema);
     let stage = format!("__stage_{}", std::process::id());
     let stage_cols: Vec<String> = sheet
@@ -920,22 +1265,11 @@ fn write_sheet(db: &Connection, schema: &str, sheet: &excel::Sheet) -> anyhow::R
         .collect();
     db.execute_batch(&format!(
         "CREATE OR REPLACE TABLE {qs}.{} AS SELECT {} FROM {qs}.{s}; DROP TABLE {qs}.{s};",
-        ident(&sheet.name),
+        ident(target),
         select.join(", "),
         s = ident(&stage)
     ))?;
     Ok(())
-}
-
-fn local_tables(db: &Connection, schema: &str) -> anyhow::Result<Vec<String>> {
-    let mut stmt = db.prepare(
-        "SELECT table_name FROM information_schema.tables \
-         WHERE table_catalog = current_database() AND table_schema = ?",
-    )?;
-    let names = stmt
-        .query_map([schema], |r| r.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(names)
 }
 
 type ColumnRows = Vec<(String, String, String, String)>;
@@ -964,11 +1298,7 @@ fn columns_where(db: &Connection, catalog_sql: &str, filter: &str) -> anyhow::Re
 fn group(rows: ColumnRows) -> Vec<(String, String, Vec<Column>)> {
     let mut out: Vec<(String, String, Vec<Column>)> = Vec::new();
     for (schema, table, col, ty) in rows {
-        let column = Column {
-            name: col,
-            dtype: DType::from_duckdb(&ty),
-            raw_type: ty,
-        };
+        let column = Column::new(col, DType::from_duckdb(&ty), ty.clone());
         match out.last_mut() {
             Some((s, t, cols)) if *s == schema && *t == table => cols.push(column),
             _ => out.push((schema, table, vec![column])),
@@ -984,14 +1314,36 @@ fn catalog_local(db: &Connection, src: &Source, schema: &str) -> anyhow::Result<
         &format!("table_schema = {}", lit(schema)),
     )?;
     let mut tables = Vec::new();
-    for (s, name, columns) in group(rows) {
-        if name.starts_with("__stage_") {
+    for (s, name, mut columns) in group(rows) {
+        if name.starts_with("__stage_") || name.starts_with("__raw_") {
             continue;
         }
         let sql_ref = format!("{}.{}", ident(&s), ident(&name));
-        let count: i64 = db
-            .query_row(&format!("SELECT count(*) FROM {sql_ref}"), [], |r| r.get(0))
+        // One pass gives the row count and the filled cells of every column.
+        let counts = format!(
+            "SELECT count(*){} FROM {sql_ref}",
+            columns
+                .iter()
+                .map(|c| format!(", count({})", ident(&c.name)))
+                .collect::<String>()
+        );
+        let counted = run(db, &counts, &[])
+            .ok()
+            .and_then(|r| r.into_iter().next());
+        let count = counted
+            .as_ref()
+            .and_then(|r| r.first()?.as_i64())
             .unwrap_or(0);
+        if let Some(row) = &counted
+            && count > 0
+        {
+            for (i, c) in columns.iter_mut().enumerate() {
+                let filled = row.get(i + 1).and_then(|v| v.as_i64()).unwrap_or(count);
+                if filled < count {
+                    c.blank = Some((count - filled) as f64 / count as f64);
+                }
+            }
+        }
         tables.push(Table {
             id: format!("{}/{}", src.id, name),
             source_id: src.id.clone(),
@@ -1000,6 +1352,9 @@ fn catalog_local(db: &Connection, src: &Source, schema: &str) -> anyhow::Result<
             sql_ref,
             columns,
             rows: Some(count),
+            notes: Vec::new(),
+            header_row: None,
+            prep: true,
         });
     }
     Ok(tables)
@@ -1035,6 +1390,9 @@ fn catalog_attached(
             sql_ref,
             columns,
             rows,
+            notes: Vec::new(),
+            header_row: None,
+            prep: false,
         });
     }
     if tables.is_empty() {

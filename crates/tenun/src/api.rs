@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tenun_core::engine::AddSource;
 use tenun_core::query::SemanticQuery;
 use tenun_core::snapshot::{self, DashFilter, Tile, run_tile};
-use tenun_core::workspace::{FieldRef, Locale};
+use tenun_core::workspace::{FieldRef, Locale, TableSetup};
 
 type S = State<Arc<AppState>>;
 
@@ -63,6 +63,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/sources/{id}", delete(remove_source))
         .route("/sources/{id}/reload", post(reload_source))
         .route("/tables/preview", get(preview))
+        .route("/tables/setup", put(table_setup))
+        .route("/profile", get(profile))
+        .route("/prep/unpivot", get(unpivot_detect))
+        .route("/prep/unpivot/preview", post(unpivot_preview))
         .route("/relationships", post(add_rel))
         .route("/relationships/{id}", delete(remove_rel))
         .route("/relationships/suggest", get(suggest))
@@ -295,6 +299,84 @@ async fn preview(State(s): S, Query(q): Query<PreviewQ>) -> R<Json<Value>> {
             Ok(serde_json::to_value(
                 st.engine.preview(&q.id, q.limit.unwrap_or(200))?,
             )?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct SetupBody {
+    table: String,
+    /// How the table is prepared; null clears it.
+    setup: Option<TableSetup>,
+}
+
+/// Sets the header row, the column overrides and the unpivot of one table. The source loads
+/// again when the data changes, and the tiles ask again.
+async fn table_setup(State(s): S, Json(b): Json<SetupBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let table = b.table.clone();
+            if st.engine.set_table_setup(&b.table, b.setup)? {
+                st.emit(json!({ "type": "data-changed", "tables": [table] }));
+            } else {
+                st.emit(json!({ "type": "workspace-changed" }));
+            }
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct ProfileQ {
+    table: String,
+    column: String,
+}
+
+async fn profile(State(s): S, Query(q): Query<ProfileQ>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            Ok(serde_json::to_value(
+                st.engine.profile(&q.table, &q.column)?,
+            )?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct TableQ {
+    table: String,
+}
+
+/// The wide-sheet columns of a table (months across the top), or null.
+async fn unpivot_detect(State(s): S, Query(q): Query<TableQ>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            Ok(serde_json::to_value(st.engine.detect_unpivot(&q.table))?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct UnpivotBody {
+    table: String,
+    keep: Vec<String>,
+    name: String,
+    value: String,
+}
+
+/// Five rows of the table before, and five rows after its columns turn into rows.
+async fn unpivot_preview(State(s): S, Json(b): Json<UnpivotBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let before = st.engine.preview(&b.table, 5)?;
+            let after = st
+                .engine
+                .unpivot_preview(&b.table, b.keep, b.name, b.value, 5)?;
+            Ok(json!({ "before": before, "after": after }))
         })
         .await?,
     ))
