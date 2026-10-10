@@ -20,28 +20,57 @@
   const ws = $derived(app.snap!.workspace);
   const sk = (s: Suggestion) => `${s.from.table}.${s.from.column}>${s.to.table}.${s.to.column}`;
 
-  /** Positions: saved ones first; new tables go in a column per source. */
-  function layout(): Record<string, { x: number; y: number }> {
+  /**
+   * Positions: saved ones first. Unplaced tables are laid out by their links:
+   * tables that point at others (the "many" side, like order lines) on the
+   * left, the tables they point at to their right, so lines stay short and
+   * their buttons never sit on top of each other. Unlinked tables go last.
+   */
+  function layout(links: { from: FieldRef; to: FieldRef }[] = []): Record<string, { x: number; y: number }> {
     const saved = ws.layout?.model ?? {};
+    const level = new Map<string, number>(app.tables.map((t) => [t.id, 0]));
+    const linked = new Set(links.flatMap((l) => [l.from.table, l.to.table]));
+    for (let pass = 0; pass < app.tables.length; pass++) {
+      let moved = false;
+      for (const l of links) {
+        const want = (level.get(l.from.table) ?? 0) + 1;
+        if ((level.get(l.to.table) ?? 0) < want && want < app.tables.length) {
+          level.set(l.to.table, want);
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+    const last = Math.max(0, ...[...level.entries()].filter(([t]) => linked.has(t)).map(([, v]) => v));
     const out: Record<string, { x: number; y: number }> = {};
-    const bySource = new Map<string, number>();
-    const srcIndex = new Map(ws.sources.map((s, i) => [s.id, i]));
+    const nextY = new Map<number, number>();
     for (const t of app.tables) {
       if (saved[t.id]) {
         out[t.id] = saved[t.id];
         continue;
       }
-      const col = srcIndex.get(t.source_id) ?? 0;
-      const y = bySource.get(t.source_id) ?? 0;
-      out[t.id] = { x: col * 300, y };
-      bySource.set(t.source_id, y + 64 + t.columns.length * 24 + 40);
+      const col = linked.has(t.id) ? level.get(t.id)! : last + 1;
+      const y = nextY.get(col) ?? 0;
+      out[t.id] = { x: col * 320, y };
+      nextY.set(col, y + 64 + t.columns.length * 24 + 48);
     }
     return out;
   }
 
+  /** Bumped to re-fit the view after an automatic layout. */
+  let fitKey = $state(0);
+
+  /** Lays out again once suggestions arrive, unless the person already arranged the tables. */
+  function relayout() {
+    if (Object.keys(ws.layout?.model ?? {}).length) return;
+    const pos = layout([...ws.relationships, ...suggestions]);
+    nodes = nodes.map((n) => ({ ...n, position: pos[n.id] ?? n.position }));
+    fitKey++;
+  }
+
   // Rebuild nodes when the tables change; keep positions the user dragged.
   $effect(() => {
-    const pos = layout();
+    const pos = layout(ws.relationships);
     const names = new Map(ws.sources.map((s) => [s.id, s.name]));
     const linked = new Map<string, Set<string>>();
     for (const r of ws.relationships) {
@@ -104,6 +133,7 @@
     looking = true;
     try {
       suggestions = await api.suggest();
+      relayout();
       if (!suggestions.length) app.toast('No more likely relationships found.');
     } catch (e) {
       app.error(e);
@@ -169,6 +199,7 @@
         </marker>
       </defs>
     </svg>
+    {#key fitKey}
     <SvelteFlow
       bind:nodes
       bind:edges
@@ -191,6 +222,7 @@
       <Background gap={20} size={1} />
       <Controls showLock={false} />
     </SvelteFlow>
+    {/key}
     <div class="legend">
       <span><i class="solid"></i> relationship (the dot marks the side with unique values)</span>
       <span><i class="dash"></i> suggestion</span>
