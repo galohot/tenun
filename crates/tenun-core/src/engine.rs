@@ -86,6 +86,23 @@ pub struct QueryResult {
     /// Histograms: where the first bin starts and how wide every bin is.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bins: Option<Bins>,
+    /// Tables and pivots: totals computed with the same measures, so ratios and averages are
+    /// right and never a sum of cells.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub totals: Option<Totals>,
+}
+
+/// Totals of a table or pivot. Every row holds measure values only, in the order of the measures.
+/// `grand` has no groups. `rows` (pivot) has one entry per group of the row fields: the row
+/// values first, then the measures. `cols` (pivot) has one entry per column value: that value
+/// first, then the measures. `cols` is also the list of the column values, in the engine's order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Totals {
+    pub grand: Vec<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<Vec<Vec<serde_json::Value>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cols: Option<Vec<Vec<serde_json::Value>>>,
 }
 
 /// The bins of a histogram: bin `i` covers `[start + i·width, start + (i+1)·width)`.
@@ -542,6 +559,7 @@ impl Engine {
             other: None,
             other_of: None,
             bins: None,
+            totals: None,
         })
     }
 

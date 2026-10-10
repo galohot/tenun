@@ -1,19 +1,30 @@
 <script lang="ts">
-  import { DATE_PARTS, type Agg, type Grain, type Measure, type NumFormat, type Tile, type TileType } from '../../lib/api';
+  import { api, DATE_PARTS, type Agg, type Grain, type Measure, type NumFormat, type QueryResult, type Tile, type TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { aggNames, tileTitle } from '../../lib/format';
   import { stackable } from '../../lib/charts/math';
   import { advancedLocked, SHOW_ADVANCED_SWITCH } from '../../lib/tiers';
-  import { defaultDim, defaultMeasure, dtypeOf, MAX_CHART_MEASURES, reachableFrom } from '../../lib/tiles';
+  import { defaultDim, defaultMeasure, dtypeOf, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, reachableFrom, type DashFilter } from '../../lib/tiles';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
+  import Suggestions from './Suggestions.svelte';
 
   let {
     tile,
+    current = null,
+    filters = [],
     onchange,
     onremove,
     onclose,
-  }: { tile: Tile; onchange: (t: Tile) => void; onremove: () => void; onclose: () => void } = $props();
+  }: {
+    tile: Tile;
+    /** What the tile shows now, for the previews under "Also try". */
+    current?: { res: QueryResult; key: string } | null;
+    filters?: DashFilter[];
+    onchange: (t: Tile) => void;
+    onremove: () => void;
+    onclose: () => void;
+  } = $props();
 
   const types: { id: TileType; icon: IconName; label: string }[] = [
     { id: 'bar', icon: 'bar', label: 'Bar' },
@@ -25,6 +36,9 @@
     { id: 'scatter', icon: 'scatter', label: 'Scatter' },
     { id: 'histogram', icon: 'histogram', label: 'Histogram' },
     { id: 'waterfall', icon: 'waterfall', label: 'Waterfall' },
+    { id: 'pivot', icon: 'pivot', label: 'Pivot' },
+    { id: 'text', icon: 'text', label: 'Text' },
+    { id: 'image', icon: 'image', label: 'Image' },
   ];
   const stacks: { id: NonNullable<Tile['stack']>; label: string }[] = [
     { id: 'stacked', label: 'Stacked' },
@@ -88,7 +102,7 @@
       customTop = false;
     }
   });
-  const topKind = $derived(tile.type === 'bar' || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut');
+  const topKind = $derived(tile.type === 'bar' || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'pivot');
   const topChoice = $derived(!tile.top ? 'all' : customTop || !TOP_PRESETS.includes(tile.top.n) ? 'custom' : String(tile.top.n));
 
   function setTop(choice: string) {
@@ -117,7 +131,7 @@
     const isDate = dims[0] && ['date', 'datetime'].includes(dtypeOf(app.tables, dims[0].table, dims[0].column) ?? '');
     const patch: Partial<Tile> = { dims };
     // A first group-by picks a sensible chart for the field.
-    if (i === 0 && !tile.dims.length && tile.type !== 'table' && !isScatter && tile.type !== 'waterfall') {
+    if (i === 0 && !tile.dims.length && tile.type !== 'table' && tile.type !== 'pivot' && !isScatter && tile.type !== 'waterfall') {
       patch.type = isDate ? 'line' : 'bar';
       patch.horizontal = !isDate;
     }
@@ -128,11 +142,16 @@
     set({ dims: tile.dims.filter((_, j) => j !== i) });
   }
 
-  // A table takes any number of values; a bar, line or area takes up to four.
-  const manyValues = $derived(tile.type === 'table' || tile.type === 'bar' || tile.type === 'line' || tile.type === 'area');
+  // A table takes any number of values; a bar, line or area takes up to four, and so does a pivot.
+  const isPivot = $derived(tile.type === 'pivot');
+  const manyValues = $derived(tile.type === 'table' || isPivot || tile.type === 'bar' || tile.type === 'line' || tile.type === 'area');
   const isScatter = $derived(tile.type === 'scatter');
   const isHistogram = $derived(tile.type === 'histogram');
-  const maxValues = $derived(tile.type === 'table' ? Infinity : MAX_CHART_MEASURES);
+  const isText = $derived(tile.type === 'text');
+  const isImage = $derived(tile.type === 'image');
+  // A note and a picture have no fields to pick.
+  const noFields = $derived(isText || isImage);
+  const maxValues = $derived(tile.type === 'table' ? Infinity : isPivot ? PIVOT_MAX_MEASURES : MAX_CHART_MEASURES);
   const showSplit = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area' || tile.type === 'table' || isScatter);
   const stackAble = $derived(stackable(tile.measures.slice(0, MAX_CHART_MEASURES).map((x) => x.agg)));
   // Stacking needs more than one series: a split, or several values.
@@ -151,6 +170,61 @@
     set({ bins: raw.trim() !== '' && Number.isFinite(w) && w > 0 ? { width: w } : undefined });
   }
   const dimTypes = $derived(tile.dims.map((d) => dtypeOf(app.tables, d.table, d.column)));
+
+  /** A target of 0 or less, or an empty box, clears the target. */
+  function setTarget(raw: string) {
+    const v = Number(raw.replace(/\s/g, ''));
+    set({ target: raw.trim() !== '' && Number.isFinite(v) && v > 0 ? { value: v } : undefined });
+  }
+
+  // The picture of an image tile. The desktop app asks the system; a browser asks the page.
+  const MAX_IMAGE = 1_048_576;
+  let imageError = $state('');
+  let fileInput: HTMLInputElement | undefined = $state();
+
+  function readBlob(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.onerror = () => reject(new Error('That file could not be read.'));
+      r.readAsDataURL(blob);
+    });
+  }
+
+  /** Checks the size and the kind in words, then keeps the picture in the tile. */
+  async function takePicture(blob: Blob) {
+    imageError = '';
+    if (blob.size > MAX_IMAGE) {
+      imageError = 'That picture is too big. Pick one under 1 MB.';
+      return;
+    }
+    const data = await readBlob(blob);
+    if (!/^data:image\/(png|jpeg|webp);base64,/.test(data)) {
+      imageError = 'Pick a PNG, JPEG or WebP picture.';
+      return;
+    }
+    set({ image: { fit: 'contain', alt: '', ...tile.image, data } });
+  }
+
+  async function choosePicture() {
+    imageError = '';
+    try {
+      if (app.health?.native) {
+        const { paths } = await api.pick({ kind: 'image' });
+        if (paths[0]) await takePicture(await api.readImage(paths[0]));
+      } else {
+        fileInput?.click();
+      }
+    } catch (e) {
+      imageError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function onFile(e: Event & { currentTarget: HTMLInputElement }) {
+    const f = e.currentTarget.files?.[0];
+    e.currentTarget.value = '';
+    if (f) await takePicture(f).catch((err) => (imageError = String(err.message ?? err)));
+  }
 </script>
 
 {#snippet formatRow(i: number)}
@@ -220,6 +294,20 @@
         <button role="radio" aria-checked={tile.better === 'down'} class:on={tile.better === 'down'} onclick={() => set({ better: 'down' })}>bad</button>
       </div>
     {/if}
+    {#if tile.type === 'kpi'}
+      <div class="target">
+        <span class="label">Target (optional)</span>
+        <input
+          class="field"
+          type="number"
+          min="0"
+          step="any"
+          placeholder="No target"
+          aria-label="Target for this number"
+          value={tile.target?.value ?? ''}
+          onchange={(e) => setTarget(e.currentTarget.value)} />
+      </div>
+    {/if}
     {#if tile.type === 'bar'}
       <label class="check">
         <input type="checkbox" checked={!!tile.horizontal} onchange={(e) => set({ horizontal: e.currentTarget.checked })} />
@@ -228,6 +316,52 @@
     {/if}
   </div>
 
+  {#if isText}
+    <div class="sec">
+      <span class="label">Text</span>
+      <textarea
+        class="field text"
+        rows="8"
+        placeholder="# A heading&#10;Some **bold** words, a [link](https://example.com)&#10;- a list item"
+        aria-label="Text of this tile"
+        value={tile.text ?? ''}
+        oninput={(e) => set({ text: e.currentTarget.value })}></textarea>
+      <p class="hint tight">Headings start with # or ##, lists with -. Use **bold**, *italic* and [links](https://…). Anything else shows as it is.</p>
+    </div>
+  {/if}
+
+  {#if isImage}
+    <div class="sec">
+      <span class="label">Picture</span>
+      <button class="btn" onclick={choosePicture}><Icon name="image" /> {tile.image?.data ? 'Change picture' : 'Choose a picture'}</button>
+      <input bind:this={fileInput} class="hidden" type="file" accept="image/png,image/jpeg,image/webp" onchange={onFile} />
+      <p class="hint tight">PNG, JPEG or WebP, up to 1 MB.</p>
+      {#if imageError}<p class="error" role="alert"><Icon name="warning" size={13} /> {imageError}</p>{/if}
+      {#if tile.image?.data}
+        <span class="label up">Description</span>
+        <input
+          class="field"
+          placeholder="What the picture shows"
+          aria-label="Description of the picture, for screen readers"
+          value={tile.image.alt}
+          oninput={(e) => set({ image: { ...tile.image!, alt: e.currentTarget.value } })} />
+        <div class="grains stack" role="radiogroup" aria-label="How the picture fits">
+          {#each [['contain', 'Show all'], ['cover', 'Fill the tile']] as [id, label]}
+            <button
+              role="radio"
+              aria-checked={(tile.image.fit ?? 'contain') === id}
+              class:on={(tile.image.fit ?? 'contain') === id}
+              onclick={() => set({ image: { ...tile.image!, fit: id as 'contain' | 'cover' } })}>
+              {label}
+            </button>
+          {/each}
+        </div>
+        <button class="btn plain" onclick={() => set({ image: undefined })}><Icon name="trash" /> Remove picture</button>
+      {/if}
+    </div>
+  {/if}
+
+  {#if !noFields}
   <div class="sec">
     <span class="label">{isScatter ? 'Across (X)' : isHistogram ? 'Number column' : 'Value'}</span>
     <FieldPicker
@@ -292,7 +426,7 @@
 
   {#if !isHistogram}
   <div class="sec">
-      <span class="label">{tile.type === 'kpi' ? 'Period (a date, for the comparison)' : tile.type === 'share' || tile.type === 'donut' ? 'Split into' : isScatter ? 'Dot for each' : 'Group by'}</span>
+      <span class="label">{tile.type === 'kpi' ? 'Period (a date, for the comparison)' : tile.type === 'share' || tile.type === 'donut' ? 'Split into' : isScatter ? 'Dot for each' : isPivot ? 'Rows' : 'Group by'}</span>
       <FieldPicker
         mode="dim"
         table={tile.dims[0]?.table ?? null}
@@ -339,6 +473,52 @@
 
   {#if showSplit && tile.dims[0] && tile.type !== 'table' && !isScatter && tile.measures.length > 1}
     <p class="hint">Split by is off while a tile shows several values.</p>
+  {/if}
+
+  {#if isPivot}
+    {#if tile.dims[0]}
+      <div class="sec">
+        <span class="label">Then by (optional)</span>
+        {#each tile.dims.slice(1, PIVOT_MAX_ROWS) as d, k}
+          <FieldPicker mode="dim" table={d.table} column={d.column} reachable={reach} onchange={(t, c) => c && setDim(k + 1, t, c)} onclear={() => removeDim(k + 1)} />
+        {/each}
+        {#if tile.dims.length < PIVOT_MAX_ROWS}
+          <FieldPicker mode="dim" table={null} column={null} placeholder="Another row field" reachable={reach} onchange={(t, c) => c && setDim(tile.dims.length, t, c)} />
+        {/if}
+      </div>
+    {/if}
+    <div class="sec">
+      <span class="label">Columns by</span>
+      <FieldPicker
+        mode="dim"
+        table={tile.cols?.table ?? null}
+        column={tile.cols?.column ?? null}
+        placeholder="The field across the top"
+        reachable={reach}
+        onchange={(t, c) => c && set({ cols: defaultDim(app.tables, t, c) })}
+        onclear={() => set({ cols: undefined })} />
+      {#if tile.cols && ['date', 'datetime'].includes(dtypeOf(app.tables, tile.cols.table, tile.cols.column) ?? '')}
+        <div class="grains" role="radiogroup" aria-label="Date grouping of the columns">
+          {#each grains as g}
+            <button role="radio" aria-checked={tile.cols.grain === g} class:on={tile.cols.grain === g} onclick={() => set({ cols: { ...tile.cols!, grain: g } })}>{g}</button>
+          {/each}
+        </div>
+      {/if}
+      <label class="check">
+        <input type="checkbox" checked={tile.totals !== false} onchange={(e) => set({ totals: e.currentTarget.checked ? undefined : false })} />
+        Totals
+      </label>
+      <p class="hint tight">The rows are the fields above. Up to 30 columns are shown.</p>
+    </div>
+  {/if}
+
+  {#if tile.type === 'table' && tile.measures.length}
+    <div class="sec">
+      <label class="check first">
+        <input type="checkbox" checked={!!tile.totals} onchange={(e) => set({ totals: e.currentTarget.checked ? true : undefined })} />
+        Total row
+      </label>
+    </div>
   {/if}
 
   {#if hasSeries}
@@ -427,11 +607,14 @@
     </div>
   {/if}
 
+  <Suggestions {tile} {current} {filters} onapply={onchange} />
+  {/if}
+
   <div class="sec">
     <span class="label">Title</span>
     <input
       class="field"
-      placeholder={tileTitle({ ...tile, title: '' }, app.tables)}
+      placeholder={noFields ? 'Optional' : tileTitle({ ...tile, title: '' }, app.tables)}
       value={tile.title}
       oninput={(e) => set({ title: e.currentTarget.value })} />
   </div>
@@ -443,7 +626,7 @@
 
 <style>
   .insp {
-    width: 300px;
+    width: 332px;
     flex: none;
     display: flex;
     flex-direction: column;
@@ -522,4 +705,9 @@
   .check.first { margin-top: 0; }
   .grains.stack button { text-transform: none; padding: 0 4px; }
   .foot { margin-top: auto; padding-top: 8px; }
+  .target { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  textarea.field { height: auto; padding: 8px 10px; line-height: 1.4; resize: vertical; font-family: inherit; }
+  .hidden { display: none; }
+  .error { display: flex; gap: 6px; margin: 0; color: var(--danger); font-size: 12px; }
+  .error :global(svg) { flex: none; margin-top: 1px; }
 </style>

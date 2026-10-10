@@ -23,6 +23,9 @@ fn engine() -> Engine {
     e
 }
 
+/// Optional fields that later versions add to a result. The v1 fixture does not have them.
+const ADDED_SINCE_V1: &[&str] = &["elapsed"];
+
 /// Compares JSON, treating numbers as f64 within a tiny tolerance, and
 /// skipping fields that legitimately differ (timings).
 fn same(a: &Value, b: &Value, path: &str) -> Result<(), String> {
@@ -46,7 +49,8 @@ fn same(a: &Value, b: &Value, path: &str) -> Result<(), String> {
                 same(v, w, &format!("{path}.{k}"))?;
             }
             for k in y.keys() {
-                if k != "ms" && !x.contains_key(k) {
+                // Fields added after v1 may appear in the Rust output; the v1 values must not change.
+                if k != "ms" && !ADDED_SINCE_V1.contains(&k.as_str()) && !x.contains_key(k) {
                     return Err(format!("{path}.{k}: extra in Rust output"));
                 }
             }

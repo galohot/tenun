@@ -52,6 +52,11 @@ export function pctShare(x: number, loc: Locale = getLocale()): string {
   return `${L.fixedNumber(x * 100, x < 0.1 ? 1 : 0, loc)}%`;
 }
 
+/** The value as a share of its target, 0.82 → "82 %". It can pass 100. */
+export function pctOfTarget(share: number, loc: Locale = getLocale()): string {
+  return `${L.fixedNumber(share * 100, 0, loc)} %`;
+}
+
 /** A relative change, 0.042 → "4,2%" (no sign). */
 export function pctChange(delta: number, loc: Locale = getLocale()): string {
   return `${L.fixedNumber(Math.abs(delta * 100), Math.abs(delta) < 0.1 ? 1 : 0, loc)}%`;
@@ -181,12 +186,19 @@ export function dimLabel(d: Dim, tables: Named[] = []): string {
 
 export function tileTitle(t: Tile, tables: Named[]): string {
   if (t.title) return t.title;
+  // A note or a picture needs no title.
+  if (t.type === 'text' || t.type === 'image' || t.type === 'filter') return '';
   if (!t.measures.length && !t.dims.length) return 'New tile';
   let m = t.measures[0] ? measureLabel(t.measures[0], tables) : pretty(t.dims[0].column);
   // Several values: "Sales and cost by month".
   if ((t.type === 'bar' || t.type === 'line' || t.type === 'area') && t.measures.length > 1) {
     const names = t.measures.slice(0, MAX_CHART_MEASURES).map((x, i) => (i ? measureLabel(x, tables).toLowerCase() : measureLabel(x, tables)));
     m = names.length > 2 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names.join(' and ');
+  }
+  // "Revenue by category and channel": rows, then columns.
+  if (t.type === 'pivot') {
+    const fields = [...t.dims.slice(0, 3), ...(t.cols ? [t.cols] : [])].map((d) => dimLabel(d, tables));
+    return fields.length ? `${m} by ${fields.join(' and ')}` : m;
   }
   if (t.type === 'table') {
     return t.dims.length ? `${m} by ${t.dims.map((d) => dimLabel(d, tables)).join(' and ')}` : m;

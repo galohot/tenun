@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { api, type Bins, type Cell, type Tile, type TileType } from '../lib/api';
+  import { api, type Bins, type Cell, type QueryResult, type Tile, type TileType } from '../lib/api';
   import { app, go } from '../lib/state.svelte';
   import { cell, dimLabel, OTHER_KEY, stampLabel } from '../lib/format';
-  import { COLS, compact, defaultSize, newId, place, type DashFilter } from '../lib/tiles';
+  import { COLS, compact, defaultSize, minHeight, newId, place, type DashFilter } from '../lib/tiles';
   import { key } from '../lib/chart';
-  import Icon from './Icon.svelte';
+  import Icon, { type IconName } from './Icon.svelte';
   import TileView from './dash/TileView.svelte';
   import Inspector from './dash/Inspector.svelte';
   import PublishSheet from './dash/PublishSheet.svelte';
@@ -24,6 +24,8 @@
   let editingTitle = $state(false);
   let addMenu = $state(false);
   let publishing = $state(false);
+  /** What each tile shows now. The Inspector's "Also try" previews reuse the selected tile's. */
+  let results = $state.raw<Record<string, { res: QueryResult; key: string } | null>>({});
 
   /** The live layout while a drag is in progress; null otherwise. */
   let preview = $state<Tile[] | null>(null);
@@ -123,11 +125,11 @@
     app.saveDashboards();
   }
 
-  /** A change from the Inspector. Typing in the title box is one step, not one per key. */
+  /** A change from the Inspector. Typing in the title, text or description box is one step, not one per key. */
   function change(nt: Tile) {
     const old = dash?.tiles.find((x) => x.id === nt.id);
     const keys = old ? (Object.keys({ ...old, ...nt }) as (keyof Tile)[]).filter((k) => JSON.stringify(old[k]) !== JSON.stringify(nt[k])) : [];
-    update((ts) => ts.map((x) => (x.id === nt.id ? nt : x)), keys.length === 1 && keys[0] === 'title' ? `title:${nt.id}` : '');
+    update((ts) => ts.map((x) => (x.id === nt.id ? nt : x)), keys.length === 1 && ['title', 'text', 'image'].includes(keys[0]) ? `${keys[0]}:${nt.id}` : '');
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -155,7 +157,7 @@
   const usedSources = $derived.by(() => {
     const ids = new Set<string>();
     for (const t of dash?.tiles ?? []) {
-      for (const ref of [...t.measures, ...t.dims, ...(t.repeat ? [t.repeat] : [])]) {
+      for (const ref of [...t.measures, ...t.dims, ...(t.cols ? [t.cols] : []), ...(t.repeat ? [t.repeat] : [])]) {
         // A source that failed to load has no tables left, so fall back to the id prefix.
         ids.add(app.table(ref.table)?.source_id ?? ref.table.split('/')[0]);
       }
@@ -202,13 +204,29 @@
     const d = tile.dims[0];
     if (!d) return;
     const isOther = value === OTHER_KEY && !!otherOf;
-    if (mine && (isOther ? mine.op === 'not_in' : mine.op === 'in' && mine.values.length === 1 && key(mine.values[0]) === key(value))) {
+    if (mine && (isOther ? mine.op === 'not_in' : mine.op === 'in' && mine.column === d.column && mine.values.length === 1 && key(mine.values[0]) === key(value))) {
       filters = others;
     } else if (isOther) {
       filters = [...others, { table: d.table, column: d.column, grain: d.grain ?? null, op: 'not_in', values: [...otherOf], fromTile: tile.id }];
     } else {
       filters = [...others, { table: d.table, column: d.column, grain: d.grain ?? null, op: 'in', values: [value], fromTile: tile.id }];
     }
+  }
+
+  function setResult(id: string, res: QueryResult | null, key: string) {
+    // A tile with nothing to show has nothing to remember.
+    if (!res && !results[id]) return;
+    results = { ...results, [id]: res ? { res, key } : null };
+  }
+
+  /** A click on a pivot column header: filters by the column field, and a second click clears it. */
+  function pickCol(tile: Tile, value: Cell) {
+    const c = tile.cols;
+    if (!c) return;
+    const mine = filters.find((f) => f.fromTile === tile.id);
+    const others = filters.filter((f) => f.fromTile !== tile.id);
+    const same = mine && mine.table === c.table && mine.column === c.column && mine.op === 'in' && mine.values.length === 1 && key(mine.values[0]) === key(value);
+    filters = same ? others : [...others, { table: c.table, column: c.column, grain: c.grain ?? null, op: 'in', values: [value], fromTile: tile.id }];
   }
 
   function filterLabel(f: DashFilter): string {
@@ -238,7 +256,7 @@
       const next =
         mode === 'move'
           ? { ...orig, x: Math.max(0, Math.min(COLS - orig.w, orig.x + gx)), y: Math.max(0, orig.y + gy) }
-          : { ...orig, w: Math.max(2, Math.min(COLS - orig.x, orig.w + gx)), h: Math.max(2, orig.h + gy) };
+          : { ...orig, w: Math.max(2, Math.min(COLS - orig.x, orig.w + gx)), h: Math.max(minHeight(orig.type), orig.h + gy) };
       preview = compact(base.map((t) => (t.id === tile.id ? next : t)), tile.id);
       dragging = mode === 'move' ? { id: tile.id, dx, dy } : null;
     };
@@ -386,9 +404,9 @@
       <button class="btn primary" onclick={() => (addMenu = !addMenu)} aria-expanded={addMenu}><Icon name="plus" /> Add tile</button>
       {#if addMenu}
         <div class="menu" role="menu">
-          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['table', 'Table']] as [t, label]}
+          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['table', 'Table'], ['pivot', 'Pivot table'], ['text', 'Text'], ['image', 'Image']] as [t, label]}
             <button role="menuitem" onclick={() => addTile(t as TileType)}>
-              <Icon name={t as 'kpi' | 'bar' | 'line' | 'area' | 'share' | 'table'} /> {label}
+              <Icon name={t as IconName} /> {label}
             </button>
           {/each}
         </div>
@@ -451,6 +469,8 @@
               {tick}
               active={selectedTile === t.id}
               onpick={(v, otherOf, bins) => pick(t, v, otherOf, bins)}
+              onpickcol={(v) => pickCol(t, v)}
+              onresult={(r, k) => setResult(t.id, r, k)}
               onselect={() => (selectedTile = t.id)}
               ondragstart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'move')}
               onresizestart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'resize')} />
@@ -461,6 +481,8 @@
     {#if sel}
       <Inspector
         tile={sel}
+        current={results[sel.id] ?? null}
+        {filters}
         onclose={() => (selectedTile = null)}
         onchange={change}
         onremove={() => {

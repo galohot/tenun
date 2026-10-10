@@ -96,6 +96,19 @@ export interface QueryResult {
   otherOf?: Cell[];
   /** Histograms: bin `i` covers `[start + i·width, start + (i+1)·width)`. */
   bins?: Bins;
+  /** Tables with a total row, and pivots. Computed by the engine from the same measures. */
+  totals?: Totals;
+}
+
+/**
+ * Every entry holds measure values in the order of the tile's measures. `rows` entries start with
+ * the values of the row fields, `cols` entries with the column value. `cols` also lists the column
+ * values in the engine's order.
+ */
+export interface Totals {
+  grand: Cell[];
+  rows?: Cell[][];
+  cols?: Cell[][];
 }
 
 export interface Bins {
@@ -113,6 +126,8 @@ export interface KpiInfo {
   /** Relative change, e.g. 0.04 for +4 %. */
   delta: number | null;
   partial: boolean;
+  /** The share of the period that has data, 0–1. 1 for a finished period; not set for "All data". */
+  elapsed?: number;
   /** The last periods, oldest first, for the column chart. */
   bars: { label: string; value: number | null }[];
 }
@@ -135,6 +150,19 @@ export interface NumFormat {
   compact?: boolean;
   /** Multiply by 100 and add %. */
   percent?: boolean;
+}
+
+/** How a value is shown next to the others. Build 06 draws these; a total cell is blank for any but `value`. */
+export type ShowAs =
+  | 'value' | 'pct_total' | 'pct_group' | 'running' | 'moving_3' | 'moving_7' | 'moving_12'
+  | 'change' | 'pct_change' | 'rank' | 'ytd';
+
+/** A picture on a dashboard. */
+export interface TileImage {
+  /** A data URL: PNG, JPEG or WebP, at most 1 MB. */
+  data: string;
+  alt: string;
+  fit?: 'contain' | 'cover';
 }
 
 /** A reference line on a chart. `band` (value to `to`) is Advanced. */
@@ -177,6 +205,18 @@ export interface Tile {
   stack?: 'stacked' | 'side' | 'percent';
   /** Histogram: the width of a bin. Not set: the engine picks one. */
   bins?: { width?: number };
+  /** Number tiles: the goal for the period. */
+  target?: { value: number };
+  /** Table: add a total row. Pivot: totals are on unless this is false. */
+  totals?: boolean;
+  /** Pivot: the field whose values become the columns. The rows are `dims`. */
+  cols?: Dim;
+  /** How each value is shown, index-aligned with `measures`. */
+  showAs?: (ShowAs | null)[];
+  /** Text tile: a small Markdown subset (see markdown.ts). */
+  text?: string;
+  /** Image tile. */
+  image?: TileImage;
 }
 
 /** Settings of this computer (not of the workspace). */
@@ -305,9 +345,19 @@ export const api = {
   query: (q: SemanticQuery) => call<QueryResult>('POST', '/query', q),
   fs: (path?: string) => call<FsListing>('GET', `/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   pick: (
-    req: { kind: 'data_files' } | { kind: 'open_workspace' } | { kind: 'save_workspace' | 'save_html'; name: string },
+    req: { kind: 'data_files' } | { kind: 'image' } | { kind: 'open_workspace' } | { kind: 'save_workspace' | 'save_html'; name: string },
   ) =>
     call<{ paths: string[] }>('POST', '/pick', req),
+  /** The picture the native dialog chose, for an image tile. */
+  readImage: async (path: string): Promise<Blob> => {
+    const res = await fetch('/api/image/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Tenun': '1' },
+      body: JSON.stringify({ path }),
+    });
+    if (!res.ok) throw new ApiError((await res.json().catch(() => null))?.error ?? res.statusText);
+    return res.blob();
+  },
   openBrowser: () => call<{ ok: boolean }>('POST', '/open-browser'),
   tile: (tile: Tile, filters: unknown[]) => call<QueryResult>('POST', '/tile', { tile, filters }),
   cloud: () => call<CloudStatus>('GET', '/cloud'),

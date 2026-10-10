@@ -39,9 +39,15 @@ pub struct Options {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PickRequest {
     DataFiles,
+    /// A PNG, JPEG or WebP picture for an image tile.
+    Image,
     OpenWorkspace,
-    SaveWorkspace { name: String },
-    SaveHtml { name: String },
+    SaveWorkspace {
+        name: String,
+    },
+    SaveHtml {
+        name: String,
+    },
 }
 
 /// Shows a native dialog and returns the chosen paths (empty = cancelled).

@@ -87,3 +87,70 @@ pub fn list(path: Option<&str>) -> anyhow::Result<Listing> {
         places,
     })
 }
+
+/// The biggest picture an image tile keeps: 1 MB.
+pub const MAX_IMAGE_BYTES: u64 = 1_048_576;
+
+/// The type of a picture from its first bytes: PNG, JPEG or WebP. Never SVG.
+pub fn image_type(head: &[u8]) -> Option<&'static str> {
+    if head.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if head.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("image/jpeg")
+    } else if head.len() >= 12 && &head[..4] == b"RIFF" && &head[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
+/// Reads a picture for an image tile. The error says what is wrong in words.
+pub fn read_image(path: &str) -> anyhow::Result<(&'static str, Vec<u8>)> {
+    let p = Path::new(path);
+    let size = std::fs::metadata(p)
+        .map_err(|_| anyhow::anyhow!("That file could not be read."))?
+        .len();
+    if size > MAX_IMAGE_BYTES {
+        anyhow::bail!("That picture is too big. Pick one under 1 MB.");
+    }
+    let bytes = std::fs::read(p).map_err(|_| anyhow::anyhow!("That file could not be read."))?;
+    let kind =
+        image_type(&bytes).ok_or_else(|| anyhow::anyhow!("Pick a PNG, JPEG or WebP picture."))?;
+    Ok((kind, bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pictures_are_known_by_their_first_bytes() {
+        assert_eq!(image_type(b"\x89PNG\r\n\x1a\nrest"), Some("image/png"));
+        assert_eq!(image_type(&[0xff, 0xd8, 0xff, 0xe0, 0]), Some("image/jpeg"));
+        assert_eq!(image_type(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
+        assert_eq!(
+            image_type(b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>"),
+            None
+        );
+        assert_eq!(image_type(b""), None);
+    }
+
+    #[test]
+    fn a_picture_is_read_with_its_type_or_refused_in_words() {
+        let dir = std::env::temp_dir().join(format!("tenun-img-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("a.png");
+        std::fs::write(&png, b"\x89PNG\r\n\x1a\n0000").unwrap();
+        let (kind, bytes) = read_image(png.to_str().unwrap()).unwrap();
+        assert_eq!((kind, bytes.len()), ("image/png", 12));
+        let svg = dir.join("a.svg");
+        std::fs::write(&svg, b"<svg/>").unwrap();
+        let err = read_image(svg.to_str().unwrap()).unwrap_err().to_string();
+        assert!(err.contains("PNG, JPEG or WebP"), "{err}");
+        let big = dir.join("big.png");
+        std::fs::write(&big, vec![0u8; MAX_IMAGE_BYTES as usize + 1]).unwrap();
+        let err = read_image(big.to_str().unwrap()).unwrap_err().to_string();
+        assert!(err.contains("under 1 MB"), "{err}");
+        assert!(read_image(dir.join("none.png").to_str().unwrap()).is_err());
+    }
+}

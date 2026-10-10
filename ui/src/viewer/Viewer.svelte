@@ -8,6 +8,7 @@
   import { cell, dateMedium, dateTimeMedium, dimLabel, OTHER_KEY, tileTitle, timeShort } from '../lib/format';
   import TileBody from '../components/dash/TileBody.svelte';
   import { partialNote } from '../lib/run';
+  import { EMPTY_RESULT, isStatic } from '../lib/tiles';
 
   let {
     data,
@@ -23,7 +24,11 @@
   let dark = $state(matchMedia('(prefers-color-scheme: dark)').matches);
   let colors = $state<Colors | null>(null);
   let width = $state(1000);
-  let pick = $state<{ tile: string; value: Cell } | null>(null);
+  /** `col` is a click on a pivot column header. */
+  let pick = $state<{ tile: string; value: Cell; col?: boolean } | null>(null);
+  /** How the engine names the export's stored result for a click on a pivot column header. */
+  const COL_PREFIX = '\u0001col:';
+  const crossKey = (v: Cell, col?: boolean) => (col ? COL_PREFIX : '') + key(v);
 
   onMount(() => {
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => (dark = e.matches));
@@ -43,7 +48,8 @@
     return [...data.tiles]
       .sort((a, b) => a.y - b.y || a.x - b.x)
       .map((t) => {
-        const h = Math.max(2, t.type === 'kpi' ? 2 : 4) * ROW;
+        const rows = t.type === 'kpi' ? 2 : t.type === 'text' ? Math.max(1, t.h) : t.type === 'pivot' ? 5 : 4;
+        const h = rows * ROW;
         const r = { t, x: 0, y, w: width, h };
         y += h + GAP;
         return r;
@@ -53,21 +59,21 @@
 
   function resultFor(t: Tile) {
     if (!pick || pick.tile === t.id) return { res: data.base[t.id], offline: false };
-    const r = data.cross[pick.tile]?.[key(pick.value)]?.[t.id];
+    const r = data.cross[pick.tile]?.[crossKey(pick.value, pick.col)]?.[t.id];
     return r ? { res: r, offline: false } : { res: data.base[t.id], offline: true };
   }
 
-  function onpick(t: Tile, v: Cell) {
-    if (!data.cross[t.id]) return;
-    pick = pick && pick.tile === t.id && key(pick.value) === key(v) ? null : { tile: t.id, value: v };
+  function onpick(t: Tile, v: Cell, col = false) {
+    if (!data.cross[t.id]?.[crossKey(v, col)]) return;
+    pick = pick && pick.tile === t.id && !!pick.col === col && key(pick.value) === key(v) ? null : { tile: t.id, value: v, col };
   }
 
-  function label(tileId: string, v: Cell): string {
+  function label(tileId: string, v: Cell, col = false): string {
     const t = data.tiles.find((x) => x.id === tileId)!;
     // A histogram bin is a range of its number column.
     const bins = t.type === 'histogram' ? data.base[tileId]?.bins : undefined;
     const m = t.measures[0];
-    const d = bins && m?.column ? { table: m.table, column: m.column } : t.dims[0];
+    const d = col && t.cols ? t.cols : bins && m?.column ? { table: m.table, column: m.column } : t.dims[0];
     const dtype = data.tables.find((x) => x.id === d.table)?.columns.find((c) => c.name === d.column)?.dtype ?? 'text';
     const name = dimLabel(d, data.tables);
     const shown =
@@ -76,6 +82,12 @@
         : cell(v, dtype, d.grain);
     return `${name.charAt(0).toUpperCase() + name.slice(1)}: ${shown}`;
   }
+
+  /** A filter saved with the export that came from a click on a pivot column header. */
+  const isColFilter = (f: ExportPayload['filters'][number]) => {
+    const c = data.tiles.find((x) => x.id === f.fromTile)?.cols;
+    return !!c && c.table === f.table && c.column === f.column;
+  };
 
   const when = $derived(dateTimeMedium(data.generated));
 
@@ -114,11 +126,11 @@
     </div>
     <div class="chips">
       {#each data.filters as f}
-        <span class="chip static">{label(f.fromTile, f.op === 'not_in' ? OTHER_KEY : f.values[0])}</span>
+        <span class="chip static">{label(f.fromTile, f.op === 'not_in' ? OTHER_KEY : f.values[0], isColFilter(f))}</span>
       {/each}
       {#if pick}
         <span class="chip">
-          {label(pick.tile, pick.value)}
+          {label(pick.tile, pick.value, pick.col)}
           <button aria-label="Clear" onclick={() => (pick = null)}>×</button>
         </span>
       {/if}
@@ -138,22 +150,26 @@
       {#each layout as l (l.t.id)}
         {@const r = resultFor(l.t)}
         <article class="tile" style:transform="translate({l.x}px, {l.y}px)" style:width="{l.w}px" style:height="{l.h}px">
-          <h3>{data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables)}</h3>
-          <div class="body">
-            {#if r.res}
+          {#if (data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables)) !== ''}
+            <h3>{data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables)}</h3>
+          {/if}
+          <div class="body" class:bare={isStatic(l.t) && !l.t.title}>
+            {#if r.res || isStatic(l.t)}
               <TileBody
                 tile={l.t}
-                res={r.res}
+                res={r.res ?? EMPTY_RESULT}
                 {colors}
                 tables={data.tables}
-                selected={pick?.tile === l.t.id ? [pick.value] : null}
-                onpick={data.cross[l.t.id] ? (v) => onpick(l.t, v) : undefined} />
+                selected={pick?.tile === l.t.id && !pick.col ? [pick.value] : null}
+                selectedCol={pick?.tile === l.t.id && pick.col ? [pick.value] : null}
+                onpick={data.cross[l.t.id] ? (v) => onpick(l.t, v) : undefined}
+                onpickcol={data.cross[l.t.id] && l.t.cols ? (v) => onpick(l.t, v, true) : undefined} />
             {/if}
           </div>
           {#if r.res && l.t.type !== 'kpi' && partialNote(r.res, l.t.dims[0]?.grain)}
             <p class="note">{partialNote(r.res, l.t.dims[0]?.grain)}</p>
           {/if}
-          {#if r.offline}<p class="note">Not filtered in this file</p>{/if}
+          {#if r.offline && !isStatic(l.t)}<p class="note">Not filtered in this file</p>{/if}
         </article>
       {/each}
     {/if}
@@ -203,6 +219,7 @@
   }
   h3 { padding: 10px 14px 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .body { flex: 1; min-height: 0; padding: 6px 14px 10px; }
+  .body.bare { padding-top: 12px; }
   .note { margin: 0; padding: 0 14px 8px; font-size: 11px; color: var(--text-2); }
   .late {
     margin: 0 0 16px;

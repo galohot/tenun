@@ -6,7 +6,7 @@
 //! Histograms live here too: their bin width and counts are computed in one place.
 
 use crate::catalog::DType;
-use crate::engine::{Bins, Engine, QueryResult};
+use crate::engine::{Bins, Engine, QueryResult, Totals};
 use crate::query::{
     Agg, Dimension, Filter, FilterOp, Grain, Measure, OutColumn, Param, SemanticQuery, Sort,
 };
@@ -35,7 +35,8 @@ pub fn apply(
     res: &mut QueryResult,
 ) -> anyhow::Result<()> {
     densify(engine, tile, q, res);
-    top_n(engine, tile, q, res)
+    top_n(engine, tile, q, res)?;
+    totals(engine, tile, q, res)
 }
 
 /// What the first group-by column is.
@@ -272,6 +273,106 @@ pub fn top_n(
     Ok(())
 }
 
+// ---- totals ------------------------------------------------------------------
+
+/// Adds the totals of a table or pivot. They are separate queries with the same measures and
+/// filters, so a ratio or an average is computed over the rows and never summed from cells.
+///
+/// A table has `grand` when `tile.totals` is true. A pivot has `grand`, `rows` (grouped by the row
+/// fields) and `cols` (grouped by the column field) unless `tile.totals` is false. With a top N,
+/// `rows` follows the rows shown: the kept groups, and one "Other" entry for the rest. `grand` and
+/// `cols` always cover all the data, as the KPI does.
+pub fn totals(
+    engine: &Engine,
+    tile: &Tile,
+    q: &SemanticQuery,
+    res: &mut QueryResult,
+) -> anyhow::Result<()> {
+    let wanted = match tile.kind.as_str() {
+        "table" => tile.totals == Some(true),
+        "pivot" => tile.totals != Some(false),
+        _ => false,
+    };
+    if !wanted || q.measures.is_empty() {
+        return Ok(());
+    }
+    let ask = |dims: Vec<Dimension>, filters: Vec<Filter>, limit: Option<u32>| {
+        engine.query(&SemanticQuery {
+            measures: q.measures.clone(),
+            dimensions: dims,
+            filters,
+            sort: vec![],
+            limit,
+        })
+    };
+    let Some(grand) = ask(vec![], q.filters.clone(), None)?
+        .rows
+        .into_iter()
+        .next()
+    else {
+        return Ok(());
+    };
+    let mut out = Totals {
+        grand,
+        rows: None,
+        cols: None,
+    };
+    if tile.kind == "pivot"
+        && let Some(c) = &tile.cols
+        && q.dimensions.len() > 1
+    {
+        let row_dims = q.dimensions[..q.dimensions.len() - 1].to_vec();
+        let mut rows = ask(
+            row_dims.clone(),
+            q.filters.clone(),
+            Some(crate::snapshot::PIVOT_LIMIT),
+        )?
+        .rows;
+        if tile.top.is_some() {
+            // Same shape as the rows on show: the kept first groups, then "Other".
+            let kept: HashSet<String> = res
+                .rows
+                .iter()
+                .filter(|r| js_key(&r[0]) != OTHER_KEY)
+                .map(|r| js_key(&r[0]))
+                .collect();
+            rows.retain(|r| kept.contains(&js_key(&r[0])));
+            if let Some(keys) = &res.other_of {
+                let mut filters = q.filters.clone();
+                filters.push(Filter {
+                    table: row_dims[0].table.clone(),
+                    column: row_dims[0].column.clone(),
+                    grain: row_dims[0].grain,
+                    op: FilterOp::NotIn,
+                    values: keys.clone(),
+                });
+                for r in ask(
+                    row_dims[1..].to_vec(),
+                    filters,
+                    Some(crate::snapshot::PIVOT_LIMIT),
+                )?
+                .rows
+                {
+                    let mut row = vec![Value::String(OTHER_KEY.into())];
+                    row.extend(r);
+                    rows.push(row);
+                }
+            }
+        }
+        out.rows = Some(rows);
+        out.cols = Some(
+            ask(
+                vec![c.clone()],
+                q.filters.clone(),
+                Some(crate::snapshot::PIVOT_LIMIT),
+            )?
+            .rows,
+        );
+    }
+    res.totals = Some(out);
+    Ok(())
+}
+
 // ---- histogram ---------------------------------------------------------------
 
 /// The nice numbers a bin width can be: 1, 2, 2.5 or 5 times a power of ten.
@@ -397,6 +498,7 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
         other: None,
         other_of: None,
         bins: None,
+        totals: None,
     };
     let (Some(n), Some(min), Some(max), Some(q1), Some(q3)) =
         (num(0), num(1), num(2), num(3), num(4))

@@ -1,10 +1,11 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import type { Bins, Cell, QueryResult, Tile } from '../../lib/api';
   import { partialNote, runTile } from '../../lib/run';
   import { app } from '../../lib/state.svelte';
   import { readColors, type Colors } from '../../lib/chart';
   import { OTHER_KEY, tileTitle } from '../../lib/format';
-  import { appliedFilters, tileQuery, type DashFilter } from '../../lib/tiles';
+  import { appliedFilters, EMPTY_RESULT, isStatic, resultKey, tileQuery, type DashFilter } from '../../lib/tiles';
   import Icon from '../Icon.svelte';
   import TileBody from './TileBody.svelte';
 
@@ -14,6 +15,8 @@
     tick,
     active,
     onpick,
+    onpickcol,
+    onresult,
     onselect,
     ondragstart,
     onresizestart,
@@ -23,6 +26,10 @@
     tick: number;
     active: boolean;
     onpick: (value: Cell, otherOf?: Cell[], bins?: Bins) => void;
+    /** A click on a pivot column header. */
+    onpickcol: (value: Cell) => void;
+    /** Tells the dashboard what this tile shows now (the Inspector's suggestions reuse it). */
+    onresult?: (res: QueryResult | null, key: string) => void;
     onselect: () => void;
     ondragstart: (e: PointerEvent) => void;
     onresizestart: (e: PointerEvent) => void;
@@ -34,8 +41,8 @@
   let colors = $state<Colors>(readColors());
 
   const q = $derived(tileQuery(tile, filters));
-  // The type, the comparison setting, the top N and the bin width change what the server sends back.
-  const qKey = $derived(JSON.stringify([q, tile.type, tile.type === 'kpi' ? tile.dims : null, tile.top ?? null, tile.bins ?? null]));
+  const qKey = $derived(resultKey(tile, filters));
+  const fixed = $derived(isStatic(tile));
 
   // Re-query when the question, the filters or the data change.
   $effect(() => {
@@ -47,6 +54,7 @@
     if (!q) {
       res = null;
       error = '';
+      untrack(() => onresult?.(null, ''));
       return;
     }
     loading = true;
@@ -55,6 +63,7 @@
         if (key === qKey) {
           res = r;
           error = '';
+          onresult?.(r, key);
         }
       })
       .catch((e) => {
@@ -74,16 +83,19 @@
   );
   // A click on "Other" is a not_in filter; the tile shows it as the Other group being picked.
   // A click on a histogram bin is a range; the tile shows the bin that starts it.
-  const selected = $derived.by(() => {
-    const f = filters.find((x) => x.fromTile === tile.id);
-    return f ? (f.op === 'not_in' ? [OTHER_KEY] : f.op === 'range' ? f.values.slice(0, 1) : f.values) : null;
-  });
+  const mine = $derived(filters.find((x) => x.fromTile === tile.id));
+  // On a pivot, a click on a column header filters by the column field instead of the first row field.
+  const onCol = $derived(tile.type === 'pivot' && !!mine && !!tile.cols && mine.table === tile.cols.table && mine.column === tile.cols.column);
+  const selected = $derived(mine && !onCol ? (mine.op === 'not_in' ? [OTHER_KEY] : mine.op === 'range' ? mine.values.slice(0, 1) : mine.values) : null);
+  const selectedCol = $derived(mine && onCol ? mine.values : null);
   const note = $derived(res && tile.type !== 'kpi' ? partialNote(res, tile.dims[0]?.grain) : null);
   const title = $derived(tileTitle(tile, app.tables));
+  // A note or a picture with no title has no header, so the whole tile drags.
+  const bare = $derived(fixed && !title);
   const canPick = $derived(tile.type === 'histogram' ? tile.measures.length > 0 : tile.type !== 'kpi' && tile.dims.length > 0);
 </script>
 
-<article class="tile" class:active>
+<article class="tile" class:active class:bare>
   <header role="group" aria-label="Drag to move" onpointerdown={ondragstart}>
     <h3 title={title}>{title}</h3>
     {#if loading}<span class="spin" aria-label="Loading"></span>{/if}
@@ -91,8 +103,11 @@
       <Icon name="pencil" size={14} />
     </button>
   </header>
-  <div class="body">
-    {#if !q}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="body" onpointerdown={bare ? (e) => !(e.target as HTMLElement).closest('a, button') && ondragstart(e) : undefined}>
+    {#if fixed}
+      <TileBody {tile} res={EMPTY_RESULT} {colors} selected={null} editing tables={app.tables} />
+    {:else if !q}
       <button class="setup" onclick={onselect}>
         <Icon name="plus" />
         Choose what to show
@@ -100,7 +115,15 @@
     {:else if error}
       <p class="error"><Icon name="warning" size={14} /> {error}</p>
     {:else if res}
-      <TileBody {tile} {res} {colors} {selected} tables={app.tables} onpick={canPick ? (v) => onpick(v, res?.otherOf, res?.bins) : undefined} />
+      <TileBody
+        {tile}
+        {res}
+        {colors}
+        {selected}
+        {selectedCol}
+        tables={app.tables}
+        onpick={canPick ? (v) => onpick(v, res?.otherOf, res?.bins) : undefined}
+        onpickcol={tile.type === 'pivot' && tile.cols ? onpickcol : undefined} />
     {/if}
   </div>
   {#if ignored.length || note}
@@ -151,6 +174,10 @@
   .edit { width: 24px; height: 24px; color: var(--text-2); opacity: 0; }
   .tile:hover .edit, .tile.active .edit, .edit:focus-visible { opacity: 1; }
   .body { flex: 1; min-height: 0; padding: 0 14px 10px; position: relative; }
+  /* No title: the header shrinks to the edit button, which floats over the corner. */
+  .bare header { position: absolute; top: 4px; right: 4px; z-index: 2; height: 24px; padding: 0; background: var(--surface); border-radius: 12px; }
+  .bare h3 { display: none; }
+  .bare .body { padding-top: 12px; cursor: grab; }
   .setup {
     width: 100%;
     height: 100%;

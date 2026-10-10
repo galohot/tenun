@@ -30,6 +30,17 @@ pub struct Tile {
     pub top: Option<TopN>,
     #[serde(default)]
     pub bins: Option<TileBins>,
+    /// Tables: add a total row. Pivots have totals unless this is `false`.
+    #[serde(default)]
+    pub totals: Option<bool>,
+    /// Pivot: the field whose values become the columns.
+    #[serde(default)]
+    pub cols: Option<Dimension>,
+}
+
+/// Tiles that show something the user typed or picked, not a query: they have no result.
+pub fn is_static(kind: &str) -> bool {
+    matches!(kind, "text" | "image" | "filter")
 }
 
 /// Histogram options. No width means the engine picks one.
@@ -82,6 +93,10 @@ pub struct KpiInfo {
     pub delta: Option<f64>,
     pub partial: bool,
     pub bars: Vec<Bar>,
+    /// The share of the period that has data, 0 to 1: days up to the last day with data, over
+    /// the days of the period. 1 for a finished period. Absent for "All data".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -97,6 +112,12 @@ pub struct Partial {
 }
 
 const MAX_CROSS_VALUES: usize = 30;
+/// A pivot reads up to this many rows, and its row and column totals up to the same.
+pub(crate) const PIVOT_LIMIT: u32 = 5000;
+const PIVOT_MAX_ROWS: usize = 3;
+const PIVOT_MAX_MEASURES: usize = 4;
+/// The key of a pivot column click in the offline cross-filter map of an export.
+const COL_PREFIX: &str = "\u{1}col:";
 
 fn own_excluded(tile: &Tile, filters: &[DashFilter]) -> Vec<Filter> {
     filters
@@ -116,10 +137,10 @@ fn count_rows(table: &str) -> Measure {
 
 /// The question a tile asks; `None` when it has nothing to ask yet.
 pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> {
-    if tile.measures.is_empty() && tile.dims.is_empty() {
+    let kind = tile.kind.as_str();
+    if is_static(kind) || (tile.measures.is_empty() && tile.dims.is_empty()) {
         return None;
     }
-    let kind = tile.kind.as_str();
     let one = matches!(kind, "kpi" | "share" | "donut");
     // Bar, line and area take up to four values side by side. Then there is no split.
     let many = matches!(kind, "bar" | "line" | "area") && tile.measures.len() > 1;
@@ -129,6 +150,14 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
         vec![]
     } else if kind == "table" {
         tile.dims.clone()
+    } else if kind == "pivot" {
+        // Rows first, then the column field.
+        tile.dims
+            .iter()
+            .take(PIVOT_MAX_ROWS)
+            .chain(tile.cols.iter())
+            .cloned()
+            .collect()
     } else if many {
         tile.dims.iter().take(1).cloned().collect()
     } else {
@@ -138,6 +167,12 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
     let measures = if !tile.measures.is_empty() {
         if kind == "table" {
             tile.measures.clone()
+        } else if kind == "pivot" {
+            tile.measures
+                .iter()
+                .take(PIVOT_MAX_MEASURES)
+                .cloned()
+                .collect()
         } else if many {
             tile.measures
                 .iter()
@@ -153,12 +188,14 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
     } else if kind == "table" {
         vec![]
     } else {
-        vec![count_rows(&tile.dims[0].table)]
+        vec![count_rows(&dims.first().unwrap_or(&tile.dims[0]).table)]
     };
     // Output columns are the dimensions, then the measures.
     let mut sort = vec![];
+    // A pivot keeps the engine's order: its rows and columns are not one list to sort.
     if let Some(s) = &tile.sort
         && !dims.is_empty()
+        && kind != "pivot"
     {
         match s.by {
             SortBy::Value if !measures.is_empty() => sort.push(Sort {
@@ -179,6 +216,7 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
         sort,
         limit: Some(match kind {
             "table" => 500,
+            "pivot" => PIVOT_LIMIT,
             "kpi" => 400,
             _ => 2000,
         }),
@@ -287,6 +325,7 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
         delta: None,
         partial: false,
         bars: vec![],
+        elapsed: None,
     };
 
     // A number over time needs a date grouped by a grain; anything else is a plain total.
@@ -330,6 +369,14 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
     let max_day = max_raw.as_deref().and_then(parse_day).unwrap_or(end);
     let partial = max_day < end && g != Grain::Day;
     let prev_start = add_grain(start, g, -1);
+    // Days with data over days in the period. The data runs up to its last day, so the days
+    // between are counted even when no row falls on them (a quiet Sunday is not a missing day).
+    let elapsed = if partial {
+        let days = (end - start).num_days() + 1;
+        (((max_day - start).num_days() + 1) as f64 / days as f64).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
 
     let (prev, period, versus) = if partial {
         // Compare the same number of days: Oct 1–14 against Sep 1–14.
@@ -391,6 +438,7 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
         delta,
         partial,
         bars,
+        elapsed: Some(elapsed),
     });
     Ok(res)
 }
@@ -568,14 +616,15 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
     let mut raw_kept = Vec::new();
     for raw in raw_tiles {
         let t: Tile = serde_json::from_value(raw.clone())?;
-        if tile_query(&t, filters).is_some() {
+        // A text or image tile has no result, but the export and the viewer draw it.
+        if is_static(&t.kind) || tile_query(&t, filters).is_some() {
             tiles.push(t);
             raw_kept.push(raw);
         }
     }
 
     let mut base: BTreeMap<String, QueryResult> = BTreeMap::new();
-    for t in &tiles {
+    for t in tiles.iter().filter(|t| !is_static(&t.kind)) {
         base.insert(t.id.clone(), run_tile(engine, t, filters)?);
     }
 
@@ -591,6 +640,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         };
         // What a click on each mark filters by: a group of the first dimension, or for a
         // histogram the range of the bin.
+        let mut groups: Vec<Vec<(Value, Filter)>> = vec![];
         let choices: Vec<(Value, Filter)> = if src.kind == "histogram" {
             let (Some(m), Some(bins)) = (
                 src.measures.first().filter(|m| m.column.is_some()),
@@ -641,30 +691,61 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                 })
                 .collect()
         };
+        groups.push(choices);
+        // A click on a pivot column header filters by the column field. Its key starts with
+        // `COL_PREFIX`, so it can never collide with a value of the first row field.
+        if let (true, Some(c)) = (src.kind == "pivot", &src.cols) {
+            let at = src.dims.len().min(PIVOT_MAX_ROWS);
+            let mut seen = HashSet::new();
+            groups.push(
+                res.rows
+                    .iter()
+                    .filter_map(|r| r.get(at).cloned())
+                    .filter(|v| seen.insert(js_key(v)))
+                    .map(|v| {
+                        (
+                            Value::String(format!("{COL_PREFIX}{}", js_key(&v))),
+                            Filter {
+                                table: c.table.clone(),
+                                column: c.column.clone(),
+                                grain: c.grain,
+                                op: FilterOp::In,
+                                values: vec![v],
+                            },
+                        )
+                    })
+                    .collect(),
+            );
+        }
         let cap = if src.kind == "histogram" {
             shape::AUTO_MAX_BINS
         } else {
             MAX_CROSS_VALUES
         };
-        if choices.is_empty() || choices.len() > cap {
-            continue;
-        }
-        let per_value = cross.entry(src.id.clone()).or_default();
-        for (v, filter) in choices {
-            let mut fs: Vec<DashFilter> = filters
-                .iter()
-                .filter(|f| f.from_tile != src.id)
-                .cloned()
-                .collect();
-            fs.push(DashFilter {
-                filter,
-                from_tile: src.id.clone(),
-            });
-            let mut per_tile = BTreeMap::new();
-            for t in tiles.iter().filter(|t| t.id != src.id) {
-                per_tile.insert(t.id.clone(), run_tile(engine, t, &fs)?);
+        for choices in groups {
+            if choices.is_empty() || choices.len() > cap {
+                continue;
             }
-            per_value.insert(js_key(&v), per_tile);
+            let per_value = cross.entry(src.id.clone()).or_default();
+            for (v, filter) in choices {
+                let mut fs: Vec<DashFilter> = filters
+                    .iter()
+                    .filter(|f| f.from_tile != src.id)
+                    .cloned()
+                    .collect();
+                fs.push(DashFilter {
+                    filter,
+                    from_tile: src.id.clone(),
+                });
+                let mut per_tile = BTreeMap::new();
+                for t in tiles
+                    .iter()
+                    .filter(|t| t.id != src.id && !is_static(&t.kind))
+                {
+                    per_tile.insert(t.id.clone(), run_tile(engine, t, &fs)?);
+                }
+                per_value.insert(js_key(&v), per_tile);
+            }
         }
     }
 

@@ -83,6 +83,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/export-file", post(export_file))
         .route("/events", get(events))
         .route("/pick", post(pick))
+        .route("/image/read", post(read_image))
         .route("/open-browser", post(open_browser))
 }
 
@@ -105,6 +106,18 @@ async fn pick(State(s): S, Json(req): Json<crate::PickRequest>) -> R<Json<Value>
     Ok(Json(json!({
         "paths": paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>()
     })))
+}
+
+#[derive(Deserialize)]
+struct ImagePath {
+    path: String,
+}
+
+/// The bytes of a picture the native dialog chose, for an image tile. PNG, JPEG or WebP, 1 MB at most.
+async fn read_image(Json(b): Json<ImagePath>) -> R<Response> {
+    let (kind, bytes) =
+        tokio::task::spawn_blocking(move || fsbrowse::read_image(&b.path)).await??;
+    Ok(([(header::CONTENT_TYPE, kind)], bytes).into_response())
 }
 
 async fn open_browser(State(s): S) -> R<Json<Value>> {

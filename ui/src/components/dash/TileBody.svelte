@@ -4,24 +4,36 @@
   import { buildOption, CHART_TYPES, type Colors } from '../../lib/chart';
   import { cell, OTHER_KEY, type Named } from '../../lib/format';
   import ChartView from './ChartView.svelte';
+  import ImageView from './ImageView.svelte';
   import KpiView from './KpiView.svelte';
+  import PivotView from './PivotView.svelte';
   import ShareView from './ShareView.svelte';
+  import TextView from './TextView.svelte';
 
   let {
     tile,
     res,
     colors,
     selected,
+    selectedCol = null,
+    editing = false,
     tables = [],
     onpick,
+    onpickcol,
   }: {
     tile: Tile;
     res: QueryResult;
     colors: Colors;
     selected: Cell[] | null;
+    /** Pivot: the column values picked by a click on a column header. */
+    selectedCol?: Cell[] | null;
+    /** In the app, an empty note or picture says how to fill it. In an exported file it stays empty. */
+    editing?: boolean;
     /** For naming the values of a chart with several. */
     tables?: Named[];
     onpick?: (value: Cell) => void;
+    /** Pivot: a click on a column header. */
+    onpickcol?: (value: Cell) => void;
   } = $props();
 
   let width = $state(400);
@@ -54,11 +66,23 @@
   // The format of a value column: the columns are the groups, then the values.
   const groups = $derived(res.columns.filter((c) => c.role === 'dimension').length);
   const formatOf = (i: number) => (res.columns[i]?.role === 'measure' ? (tile.formats?.[i - groups] ?? null) : null);
+  // The total row of a table: the engine's own numbers. A value shown another way has no total.
+  const totalRow = $derived(tile.type === 'table' && tile.totals && groups > 0 && res.totals ? res.totals.grand : null);
+  const totalCell = (i: number) => {
+    const j = i - groups;
+    const v = totalRow?.[j];
+    if (j < 0 || v === null || v === undefined || (!!tile.showAs?.[j] && tile.showAs[j] !== 'value')) return '';
+    return cell(v, res.columns[i].dtype, null, false, formatOf(i));
+  };
   const note = $derived(built?.note ?? null);
   const selKeys = $derived(new Set((selected ?? []).map((v) => String(v))));
 </script>
 
-{#if tile.type === 'kpi' && res.kpi}
+{#if tile.type === 'text'}
+  <TextView text={tile.text ?? ''} {editing} />
+{:else if tile.type === 'image'}
+  <ImageView image={tile.image} {editing} />
+{:else if tile.type === 'kpi' && res.kpi}
   <KpiView kpi={res.kpi} {tile} {colors} />
 {:else if unfinished}
   <div class="none">A scatter chart needs two values and a field to draw one dot for each.</div>
@@ -66,6 +90,8 @@
   <div class="none">No data for this selection.</div>
 {:else if tile.type === 'share' || tile.type === 'donut'}
   <ShareView {res} {tile} {colors} {selected} {onpick} />
+{:else if tile.type === 'pivot'}
+  <PivotView {res} {tile} {selected} {selectedCol} {onpick} {onpickcol} />
 {:else if tile.type === 'table'}
   <div class="tablewrap">
     <table>
@@ -93,6 +119,15 @@
           </tr>
         {/each}
       </tbody>
+      {#if totalRow}
+        <tfoot>
+          <tr>
+            {#each res.columns as c, i}
+              <td class:num={c.dtype === 'number'}>{i === 0 ? 'Total' : totalCell(i)}</td>
+            {/each}
+          </tr>
+        </tfoot>
+      {/if}
     </table>
   </div>
 {:else if built}
@@ -148,4 +183,5 @@
   tr.pick:hover td { background: var(--window); }
   tr.dim td { opacity: 0.4; }
   tr.other td { color: var(--text-2); }
+  tfoot td { position: sticky; bottom: 0; background: var(--surface); font-weight: 600; border-top: 1px solid var(--sep-strong); border-bottom: 0; }
 </style>

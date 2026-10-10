@@ -84,6 +84,12 @@ fn pick(app: &tauri::AppHandle, req: PickRequest) -> Vec<PathBuf> {
             .into_iter()
             .filter_map(to_path)
             .collect(),
+        PickRequest::Image => d
+            .add_filter("Picture", &["png", "jpg", "jpeg", "webp"])
+            .blocking_pick_file()
+            .and_then(to_path)
+            .into_iter()
+            .collect(),
         PickRequest::OpenWorkspace => d
             .add_filter("Tenun workspace", &["tenun"])
             .blocking_pick_file()

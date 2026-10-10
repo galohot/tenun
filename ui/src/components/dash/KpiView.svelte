@@ -3,7 +3,9 @@
   // shows where the period sits among the last twelve.
   import type { KpiInfo, Tile } from '../../lib/api';
   import type { Colors } from '../../lib/chart';
-  import { compact, pctChange, tip } from '../../lib/format';
+  import { compact, pctChange, pctOfTarget, tip } from '../../lib/format';
+  import { targetInfo } from '../../lib/kpi';
+  import Icon from '../Icon.svelte';
 
   let { kpi, tile, colors }: { kpi: KpiInfo; tile: Tile; colors: Colors } = $props();
 
@@ -11,8 +13,14 @@
   let w = $state(300);
   let h = $state(120);
 
-  const showBars = $derived(kpi.bars.length > 2 && w >= 200);
-  const size = $derived(Math.round(Math.max(26, Math.min(48, Math.min(w / 8.5, h / 2.4)))));
+  // A target adds a line, so the figure gets a little smaller to leave room for it.
+  const target = $derived(tile.target?.value ?? null);
+  const goal = $derived(targetInfo(kpi.value, target, kpi.elapsed, tile.better ?? 'up'));
+  // Only a period that is not over has a pace: the value so far, scaled up to the whole period.
+  const pace = $derived(goal && goal.projected !== null ? (goal.onTrack ? 'on pace' : 'behind pace') : '');
+  // With a target there are two more lines of text, so the history waits for a wider tile.
+  const showBars = $derived(kpi.bars.length > 2 && w >= (goal ? 420 : 200));
+  const size = $derived(Math.round(Math.max(26, Math.min(48, Math.min(w / 8.5, h / (goal ? 3.3 : 2.4))))));
 
   // Under half a percent is "about the same", not a trend.
   const tone = $derived.by(() => {
@@ -59,6 +67,15 @@
         {/if}
       </div>
     {/if}
+    {#if goal && target !== null}
+      <div class="goal" title={goal.projected === null ? '' : `At this pace the period ends near ${tip(goal.projected, fmt)}.`}>
+        <span class="status {goal.onTrack ? 'good' : 'bad'}">
+          <Icon name={goal.onTrack ? 'check' : 'warning'} size={12} />
+          {goal.onTrack ? 'On track' : 'Behind'}
+        </span>
+        <span class="muted">Target {compact(target, fmt)} · {pctOfTarget(goal.share)} of target{pace ? ` · ${pace}` : ''}</span>
+      </div>
+    {/if}
   </div>
   {#if showBars}
     <svg class="bars" viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="The last {kpi.bars.length} periods">
@@ -94,6 +111,24 @@
   .delta.good { color: var(--success); }
   .delta.bad { color: var(--danger); }
   .delta.flat { color: var(--text-2); }
+  .goal { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; font-size: 12px; margin-top: 4px; overflow: hidden; }
+  .goal .muted { line-height: 1.35; }
+  /* The status is an icon and a word. The colour only backs them up. */
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 20px;
+    padding: 0 7px 0 5px;
+    border-radius: 10px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .status.good { background: color-mix(in srgb, var(--success) 16%, var(--surface)); }
+  .status.good :global(svg) { color: var(--success); }
+  .status.bad { background: color-mix(in srgb, var(--danger) 14%, var(--surface)); }
+  .status.bad :global(svg) { color: var(--danger); }
   /* The history fills the rest of the tile, top to bottom. */
   .bars { flex: 1; min-width: 60px; height: 100%; max-height: 120px; display: block; }
 </style>

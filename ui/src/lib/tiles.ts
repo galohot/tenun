@@ -1,6 +1,6 @@
 // Tile helpers: the query a tile sends, sensible defaults, and grid layout.
 
-import type { Dashboard, Dim, DType, Filter, Measure, SemanticQuery, Table, Tile, TileType } from './api';
+import type { Dashboard, Dim, DType, Filter, Measure, QueryResult, SemanticQuery, Table, Tile, TileType } from './api';
 
 export const COLS = 12;
 
@@ -12,6 +12,18 @@ export interface DashFilter extends Filter {
 /** The most values a bar, line or area tile shows side by side. */
 export const MAX_CHART_MEASURES = 4;
 
+/** A pivot reads up to this many row fields and values; its column field is one more. Same as the engine. */
+export const PIVOT_MAX_ROWS = 3;
+export const PIVOT_MAX_MEASURES = 4;
+export const PIVOT_LIMIT = 5000;
+
+/** Tiles that show something the author typed or picked. They ask nothing and have no result. */
+export const STATIC_TYPES: readonly TileType[] = ['text', 'image', 'filter'];
+export const isStatic = (t: Tile | TileType): boolean => STATIC_TYPES.includes(typeof t === 'string' ? t : t.type);
+
+/** What a static tile is drawn from: it has no rows. */
+export const EMPTY_RESULT: QueryResult = { columns: [], rows: [], ignored_filters: [], ms: 0 };
+
 export const hasManyValues = (tile: Tile) =>
   (tile.type === 'bar' || tile.type === 'line' || tile.type === 'area') && tile.measures.length > 1;
 
@@ -20,26 +32,37 @@ export const hasManyValues = (tile: Tile) =>
  * decides when a tile must ask again, so keep the two the same.
  */
 export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | null {
-  if (!tile.measures.length && !tile.dims.length) return null;
+  if (isStatic(tile) || (!tile.measures.length && !tile.dims.length)) return null;
   const one = tile.type === 'kpi' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'waterfall';
   const many = hasManyValues(tile);
   // A histogram has no groups: it bins one number column.
   const dims =
-    tile.type === 'histogram' ? [] : one || many ? tile.dims.slice(0, 1) : tile.type === 'table' ? tile.dims : tile.dims.slice(0, 2);
+    tile.type === 'histogram'
+      ? []
+      : tile.type === 'pivot'
+        ? [...tile.dims.slice(0, PIVOT_MAX_ROWS), ...(tile.cols ? [tile.cols] : [])] // rows, then columns
+        : one || many
+          ? tile.dims.slice(0, 1)
+          : tile.type === 'table'
+            ? tile.dims
+            : tile.dims.slice(0, 2);
   // A chart with a group but no value counts rows of the grouped table.
   const measures = tile.measures.length
     ? tile.type === 'table'
       ? tile.measures
-      : many
-        ? tile.measures.slice(0, MAX_CHART_MEASURES)
-        : tile.type === 'scatter'
-          ? tile.measures.slice(0, 2) // across and up
-          : tile.measures.slice(0, 1)
+      : tile.type === 'pivot'
+        ? tile.measures.slice(0, PIVOT_MAX_MEASURES)
+        : many
+          ? tile.measures.slice(0, MAX_CHART_MEASURES)
+          : tile.type === 'scatter'
+            ? tile.measures.slice(0, 2) // across and up
+            : tile.measures.slice(0, 1)
     : tile.type === 'table'
       ? []
       : [{ table: tile.dims[0].table, column: null, agg: 'count' as const }];
   const sort: { by: number; desc: boolean }[] = [];
-  if (dims.length && tile.sort) {
+  // A pivot keeps the engine's order: its rows and columns are not one list to sort.
+  if (dims.length && tile.sort && tile.type !== 'pivot') {
     if (tile.sort.by === 'value' && measures.length) sort.push({ by: dims.length, desc: tile.sort.desc ?? true });
     else if (tile.sort.by === 'label') sort.push({ by: 0, desc: tile.sort.desc ?? false });
   }
@@ -48,8 +71,24 @@ export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | nu
     dimensions: dims,
     filters: filters.filter((f) => f.fromTile !== tile.id).map(({ fromTile: _, ...f }) => f),
     sort,
-    limit: tile.type === 'table' ? 500 : tile.type === 'kpi' ? 400 : 2000,
+    limit: tile.type === 'table' ? 500 : tile.type === 'pivot' ? PIVOT_LIMIT : tile.type === 'kpi' ? 400 : 2000,
   };
+}
+
+/**
+ * What a tile's result depends on. The type, the comparison setting, the top N, the bin width, the
+ * totals and the column field change what the server sends back, beside the question itself.
+ */
+export function resultKey(tile: Tile, filters: DashFilter[]): string {
+  return JSON.stringify([
+    tileQuery(tile, filters),
+    tile.type,
+    tile.type === 'kpi' ? tile.dims : null,
+    tile.top ?? null,
+    tile.bins ?? null,
+    tile.totals ?? null,
+    tile.cols ?? null,
+  ]);
 }
 
 /** The filter list a tile actually received (its own selection excluded). */
@@ -89,10 +128,19 @@ export function defaultSize(type: TileType): { w: number; h: number } {
       return { w: 4, h: 4 };
     case 'table':
       return { w: 6, h: 4 };
+    case 'pivot':
+      return { w: 8, h: 5 };
+    case 'text':
+      return { w: 4, h: 2 };
+    case 'image':
+      return { w: 4, h: 3 };
     default:
       return { w: 6, h: 4 };
   }
 }
+
+/** The fewest rows a tile may be resized to: a note can be one row high. */
+export const minHeight = (type: TileType): number => (type === 'text' ? 1 : 2);
 
 export function newId(prefix: string) {
   return prefix + Math.random().toString(36).slice(2, 8);
