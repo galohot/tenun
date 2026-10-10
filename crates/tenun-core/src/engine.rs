@@ -10,8 +10,8 @@ use crate::query::{self, Param, SemanticQuery};
 use crate::secrets::Secrets;
 use crate::suggest::{self, Suggestion};
 use crate::workspace::{
-    DEFAULT_PATTERN, DbConn, Every, FieldRef, Locale, Relationship, Source, SourceKind, TableSetup,
-    Transform, Workspace, resolve_path, store_path,
+    DEFAULT_PATTERN, DbConn, Every, FieldRef, KeyPlace, LinkKey, Locale, Paging, Relationship,
+    Source, SourceKind, TableSetup, Transform, Workspace, resolve_path, store_path,
 };
 use chrono::NaiveDate;
 use duckdb::Connection;
@@ -54,7 +54,49 @@ pub struct Snapshot {
     /// Source id → when it last loaded without error (ISO 8601, UTC). Kept
     /// out of the source itself so it never reaches the `.tenun` file.
     pub loaded_at: BTreeMap<String, String>,
+    /// The web links whose key has a value stored on this computer (their ids). The value itself
+    /// never leaves the secrets file.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub link_keys: BTreeSet<String>,
     pub dirty: bool,
+}
+
+/// A key as the Add sheet sends it. The value is not part of the `Debug` text.
+#[derive(Deserialize)]
+pub struct KeyIn {
+    pub place: KeyPlace,
+    pub name: String,
+    /// Empty: use the value that is stored already, if there is one.
+    #[serde(default)]
+    pub value: String,
+}
+
+impl std::fmt::Debug for KeyIn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyIn")
+            .field("place", &self.place)
+            .field("name", &self.name)
+            .field("value", &"•••")
+            .finish()
+    }
+}
+
+/// What a change of link settings does with the key.
+#[derive(Debug)]
+pub enum KeyEdit {
+    Keep,
+    Remove,
+    Set(KeyIn),
+}
+
+/// A look at the first page of a web link, before it is added.
+#[derive(Debug, Deserialize)]
+pub struct LinkPreview {
+    pub url: String,
+    #[serde(default)]
+    pub records: Option<String>,
+    #[serde(default)]
+    pub key: Option<KeyIn>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,13 +110,19 @@ pub enum AddSource {
         #[serde(default)]
         pattern: Option<String>,
     },
-    /// A CSV file on the web (https only).
+    /// CSV or JSON data on the web (https only).
     Url {
         url: String,
         #[serde(default)]
         every: Every,
         #[serde(default)]
         name: Option<String>,
+        #[serde(default)]
+        records: Option<String>,
+        #[serde(default)]
+        pages: Option<Paging>,
+        #[serde(default)]
+        key: Option<KeyIn>,
     },
     Postgres {
         #[serde(flatten)]
@@ -263,6 +311,16 @@ impl Engine {
             tables: s.catalog.tables.clone(),
             errors: s.errors.clone(),
             loaded_at: s.loaded_at.clone(),
+            link_keys: s
+                .ws
+                .sources
+                .iter()
+                .filter(|x| {
+                    link_secret(&x.kind)
+                        .is_some_and(|id| self.secrets.get(&id).is_some_and(|v| !v.is_empty()))
+                })
+                .map(|x| x.id.clone())
+                .collect(),
             dirty: s.dirty,
         }
     }
@@ -377,6 +435,8 @@ impl Engine {
 
     pub fn add_source(&self, req: AddSource) -> anyhow::Result<String> {
         let base = self.base_dir();
+        // A link key: its secrets entry and value, stored before the first load.
+        let mut pending_key: Option<(String, String)> = None;
         let (name, kind) = match req {
             AddSource::File { path } => {
                 let abs = PathBuf::from(&path);
@@ -425,17 +485,43 @@ impl Engine {
                     },
                 )
             }
-            AddSource::Url { url, every, name } => {
+            AddSource::Url {
+                url,
+                every,
+                name,
+                records,
+                pages,
+                key,
+            } => {
                 let host = fetch::check(&url)?;
                 let name = name
                     .map(|n| n.trim().to_string())
                     .filter(|n| !n.is_empty())
-                    .unwrap_or(host);
+                    .unwrap_or_else(|| host.clone());
+                let mut link_key = None;
+                if let Some(k) = key.filter(|k| !k.name.trim().is_empty()) {
+                    let lk = LinkKey {
+                        place: k.place,
+                        name: k.name.trim().to_string(),
+                    };
+                    let secret = Secrets::link_key(&host, lk.place, &lk.name);
+                    if k.value.is_empty() {
+                        if self.secrets.get(&secret).is_none_or(|v| v.is_empty()) {
+                            anyhow::bail!("Type the key to send with the link.");
+                        }
+                    } else {
+                        pending_key = Some((secret, k.value));
+                    }
+                    link_key = Some(lk);
+                }
                 (
                     name,
                     SourceKind::Url {
                         url: url.trim().to_string(),
                         every,
+                        records: clean(records),
+                        pages,
+                        key: link_key,
                     },
                 )
             }
@@ -453,6 +539,14 @@ impl Engine {
                 (conn.database.clone(), SourceKind::Mysql(conn))
             }
         };
+        // The key goes into the secrets file before the first load, as a database password does.
+        // If the load fails, the entry goes back to what it was.
+        let mut undo_key: Option<(String, Option<String>)> = None;
+        if let Some((secret, value)) = pending_key {
+            let before = self.secrets.get(&secret);
+            self.secrets.set(&secret, &value)?;
+            undo_key = Some((secret, before));
+        }
         let id = {
             let mut s = self.state.write().unwrap();
             if let Some(existing) = s.ws.sources.iter().find(|x| x.kind == kind) {
@@ -471,6 +565,12 @@ impl Engine {
         if let Some(e) = err {
             // A source that fails on first add is removed again: the user sees the error.
             self.remove_source(&id);
+            if let Some((secret, before)) = undo_key {
+                let _ = match before {
+                    Some(v) => self.secrets.set(&secret, &v),
+                    None => self.secrets.remove(&secret),
+                };
+            }
             anyhow::bail!(e);
         }
         self.persist();
@@ -481,15 +581,28 @@ impl Engine {
         drop_source(&self.db.lock().unwrap(), id);
         {
             let mut s = self.state.write().unwrap();
-            // The downloaded copy of a CSV link is Tenun's own file, so it goes with the source.
+            // The downloaded copy of a web link is Tenun's own file, so it goes with the source.
+            let secret = s.ws.source(id).and_then(|x| link_secret(&x.kind));
             if s.ws
                 .source(id)
                 .is_some_and(|x| matches!(x.kind, SourceKind::Url { .. }))
             {
-                let _ = std::fs::remove_file(cache_file(s.path.as_deref(), id));
+                let cache = cache_file(s.path.as_deref(), id);
+                let _ = std::fs::remove_file(&cache);
+                let _ = std::fs::remove_file(notes_file(&cache));
             }
             s.fetched.remove(id);
             s.ws.sources.retain(|x| x.id != id);
+            // The key goes too, unless another link to that host uses it.
+            if let Some(secret) = secret
+                && !s
+                    .ws
+                    .sources
+                    .iter()
+                    .any(|x| link_secret(&x.kind).as_deref() == Some(secret.as_str()))
+            {
+                let _ = self.secrets.remove(&secret);
+            }
             let prefix = format!("{id}/");
             s.ws.relationships
                 .retain(|r| !r.from.table.starts_with(&prefix) && !r.to.table.starts_with(&prefix));
@@ -531,7 +644,7 @@ impl Engine {
         // and the error is shown beside the source.
         let mut fetch_error = None;
         let mut fetched = false;
-        if let SourceKind::Url { url, every } = &src.kind {
+        if let SourceKind::Url { every, .. } = &src.kind {
             let fresh = cached_at.is_some_and(|t| {
                 every
                     .secs()
@@ -539,7 +652,7 @@ impl Engine {
             });
             if fetch || !fresh {
                 fetched = true;
-                if let Err(e) = fetch::download(url, &cache) {
+                if let Err(e) = self.fetch_link(&src.kind, &cache) {
                     fetch_error = Some(friendly(&e));
                 }
             }
@@ -685,11 +798,158 @@ impl Engine {
                 .map(|x| &mut x.kind)
             {
                 Some(SourceKind::Url { every: e, .. }) => *e = every,
-                _ => anyhow::bail!("{id} is not a CSV link"),
+                _ => anyhow::bail!("{id} is not a web link"),
             }
         }
         self.persist();
         Ok(())
+    }
+
+    /// Fetches a web link into its cache file, with the key stored for it. The notes of the fetch
+    /// (for example "the link has more pages") are kept beside the cache.
+    fn fetch_link(&self, kind: &SourceKind, cache: &Path) -> anyhow::Result<()> {
+        let SourceKind::Url {
+            url,
+            records,
+            pages,
+            key,
+            ..
+        } = kind
+        else {
+            return Ok(());
+        };
+        let value = link_secret(kind)
+            .and_then(|id| self.secrets.get(&id))
+            .filter(|v| !v.is_empty());
+        let spec = fetch::Spec {
+            url,
+            records: records.as_deref(),
+            pages: pages.as_ref(),
+            key: key
+                .as_ref()
+                .zip(value.as_deref())
+                .map(|(k, v)| fetch::KeyArg {
+                    place: k.place,
+                    name: &k.name,
+                    value: v,
+                }),
+        };
+        let notes = fetch::download(&spec, cache)?;
+        write_notes(cache, &notes);
+        Ok(())
+    }
+
+    /// Looks at the first page of a web link: what format it is, which lists of records it holds,
+    /// the first rows, and how its pages seem to follow each other. Nothing is saved: not the
+    /// copy, and not the key. A key with no value uses the stored one, if there is one.
+    pub fn link_preview(&self, req: LinkPreview) -> anyhow::Result<fetch::Preview> {
+        let host = fetch::check(&req.url)?;
+        let key = req.key.filter(|k| !k.name.trim().is_empty());
+        let value = key.as_ref().map(|k| {
+            if k.value.is_empty() {
+                self.secrets
+                    .get(&Secrets::link_key(&host, k.place, k.name.trim()))
+                    .unwrap_or_default()
+            } else {
+                k.value.clone()
+            }
+        });
+        let spec = fetch::Spec {
+            url: &req.url,
+            records: req.records.as_deref(),
+            pages: None,
+            key: key
+                .as_ref()
+                .zip(value.as_deref())
+                .map(|(k, v)| fetch::KeyArg {
+                    place: k.place,
+                    name: k.name.trim(),
+                    value: v,
+                }),
+        };
+        fetch::preview(&spec)
+    }
+
+    /// Changes where a web link finds its records, how it reads its pages and which key it sends,
+    /// and fetches it again. A fetch that fails keeps the last copy and shows its error beside the
+    /// source, as for any link (V3-D56). Returns the ids of its tables.
+    pub fn set_link(
+        &self,
+        id: &str,
+        records: Option<String>,
+        pages: Option<Paging>,
+        key: KeyEdit,
+    ) -> anyhow::Result<Vec<String>> {
+        let (url, old) = {
+            let s = self.state.read().unwrap();
+            match s.ws.source(id).map(|x| &x.kind) {
+                Some(SourceKind::Url { url, key, .. }) => (url.clone(), key.clone()),
+                _ => anyhow::bail!("{id} is not a web link"),
+            }
+        };
+        let host = fetch::check(&url)?;
+        let old_secret = old
+            .as_ref()
+            .map(|k| Secrets::link_key(&host, k.place, &k.name));
+        let stored = |secret: &str| self.secrets.get(secret).filter(|v| !v.is_empty());
+        let (new_key, new_value) = match key {
+            KeyEdit::Keep => (old, None),
+            KeyEdit::Remove => (None, None),
+            KeyEdit::Set(k) => {
+                let name = k.name.trim().to_string();
+                if name.is_empty() {
+                    anyhow::bail!("Type a name for the key.");
+                }
+                let lk = LinkKey {
+                    place: k.place,
+                    name,
+                };
+                let secret = Secrets::link_key(&host, lk.place, &lk.name);
+                // No value: keep what is stored, here or under the old name.
+                let value = if k.value.is_empty() {
+                    stored(&secret)
+                        .or_else(|| old_secret.as_deref().and_then(stored))
+                        .ok_or_else(|| anyhow::anyhow!("Type the key to send with the link."))?
+                } else {
+                    k.value
+                };
+                (Some(lk), Some((secret, value)))
+            }
+        };
+        if let Some((secret, value)) = new_value {
+            self.secrets.set(&secret, &value)?;
+        }
+        {
+            let mut s = self.state.write().unwrap();
+            let Some(SourceKind::Url {
+                records: r,
+                pages: p,
+                key: k,
+                ..
+            }) =
+                s.ws.sources
+                    .iter_mut()
+                    .find(|x| x.id == id)
+                    .map(|x| &mut x.kind)
+            else {
+                anyhow::bail!("{id} is not a web link");
+            };
+            *r = clean(records);
+            *p = pages;
+            *k = new_key;
+            // The old entry goes, unless another link to that host still uses it.
+            if let Some(old) = old_secret
+                && !s
+                    .ws
+                    .sources
+                    .iter()
+                    .any(|x| link_secret(&x.kind).as_deref() == Some(old.as_str()))
+            {
+                let _ = self.secrets.remove(&old);
+            }
+        }
+        self.persist();
+        Ok(self.load(id))
     }
 
     /// Writes a pasted table as a CSV file in the data folder next to the workspace file
@@ -1216,6 +1476,48 @@ fn cache_file(workspace_file: Option<&Path>, id: &str) -> PathBuf {
     }
 }
 
+/// The note file that goes with a link's cache: what the last fetch had to say about the table.
+fn notes_file(cache: &Path) -> PathBuf {
+    cache.with_extension("notes")
+}
+
+fn write_notes(cache: &Path, notes: &[String]) {
+    let file = notes_file(cache);
+    if notes.is_empty() {
+        let _ = std::fs::remove_file(file);
+    } else {
+        let _ = std::fs::write(file, notes.join("\n"));
+    }
+}
+
+fn read_notes(cache: &Path) -> Vec<String> {
+    std::fs::read_to_string(notes_file(cache))
+        .map(|t| {
+            t.lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The secrets entry of a link's key, when the link has one.
+fn link_secret(kind: &SourceKind) -> Option<String> {
+    let SourceKind::Url {
+        url, key: Some(k), ..
+    } = kind
+    else {
+        return None;
+    };
+    let host = fetch::check(url).ok()?;
+    Some(Secrets::link_key(&host, k.place, &k.name))
+}
+
+/// A setting typed by a person: trimmed, and nothing when empty.
+fn clean(v: Option<String>) -> Option<String> {
+    v.map(|x| x.trim().to_string()).filter(|x| !x.is_empty())
+}
+
 /// True when a CSV link should be fetched again. A link never fetched is due.
 pub fn url_due(every: Every, last: Option<SystemTime>, now: SystemTime) -> bool {
     let Some(secs) = every.secs() else {
@@ -1506,6 +1808,10 @@ fn load_source(
             let outcome = make_table(db, &schema, &name, &select, setups)?;
             let mut tables = catalog_local(db, src, &schema)?;
             stamp_table_outcome(&mut tables, &name, outcome);
+            // What the fetch had to say: more pages than were read, columns left out.
+            if let Some(t) = tables.iter_mut().find(|t| t.name == name) {
+                t.notes.extend(read_notes(cache));
+            }
             Ok(tables)
         }
         SourceKind::Folder { path, pattern } => {

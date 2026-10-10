@@ -33,8 +33,8 @@ every other chart filters. Save the Excel file and the dashboard updates.
 
 - **Sources:** Excel (`.xlsx`, `.xlsm`, `.xls`, `.ods`), CSV and TSV, Parquet, SQLite, DuckDB,
   PostgreSQL and MySQL. Also a folder of CSV and Excel files (they stack into one table with a
-  `file` column), a table pasted from the clipboard, and a CSV link such as a Google Sheet
-  published to the web (https only, fetched again every 15 minutes, hour or day).
+  `file` column), a table pasted from the clipboard, and a web link to CSV or JSON data, such as a
+  published Google Sheet or an API (https only, fetched again every 15 minutes, hour or day).
 - **Relationships across sources:** drag from a column to a column in the Model view. Tenun
   suggests the likely ones (`store_id` → `stores.id`) and checks them against the data.
 - **Charts:** number, bar, line, area, share of total and table. Also stacked, side-by-side and

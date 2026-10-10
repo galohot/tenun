@@ -14,8 +14,9 @@ more output, and an **Advanced features** switch. The switch is free. It builds 
 - **Data prep:** Tenun finds the header row, skips title and total rows, fills down grouped cells
   and turns months-as-columns into rows. You can rename, retype and hide columns, and see a
   profile of each column.
-- **New sources:** a folder of files, a table pasted from the clipboard, and a CSV link (for
-  example a Google Sheet published to the web).
+- **New sources:** a folder of files, a table pasted from the clipboard, and a web link to CSV or
+  JSON data (for example a Google Sheet published to the web, or an API with pages and a key; the
+  key stays outside the workspace file).
 - **Filters:** filter tiles with a list, dropdown, number range or date range. Text filters.
   **Keep only** and **Exclude**. **Show rows** lists the data behind a bar. One time grain for the
   whole dashboard. Focus a tile.

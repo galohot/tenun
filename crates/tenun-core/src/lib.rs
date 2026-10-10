@@ -7,6 +7,7 @@ pub mod excel;
 pub mod fetch;
 pub mod filters;
 pub mod folder;
+pub mod jsonrec;
 pub mod paste;
 pub mod prep;
 pub mod query;

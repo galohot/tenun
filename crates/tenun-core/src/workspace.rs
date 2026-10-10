@@ -220,14 +220,62 @@ pub enum SourceKind {
         #[serde(default = "default_pattern")]
         pattern: String,
     },
-    /// A CSV file on the web, fetched into a cache file next to the workspace.
+    /// CSV or JSON data on the web, fetched into a CSV cache file next to the workspace. The key
+    /// holds only the place and the name: its value is kept outside the file ([`crate::secrets`]).
     Url {
         url: String,
         #[serde(default)]
         every: Every,
+        /// JSON: where the list of records sits, like `data.items` or `result.0.rows`. `.` is the
+        /// answer itself. Empty: Tenun picks the longest list.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        records: Option<String>,
+        /// JSON: how to reach the next page. Empty: one page.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pages: Option<Paging>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<LinkKey>,
     },
     Postgres(DbConn),
     Mysql(DbConn),
+}
+
+/// How a JSON link finds its next page.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "by", rename_all = "lowercase")]
+pub enum Paging {
+    /// The `Link` header with `rel="next"`.
+    Link,
+    /// A field of the answer that holds the next link, complete or relative.
+    Field { path: String },
+    /// A field that holds a token. The token goes back as the link parameter `param`.
+    Cursor { path: String, param: String },
+    /// A page number in the link parameter `param`. It starts at the number in the link, or 1.
+    Page { param: String },
+}
+
+/// Where a link sends its key.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum KeyPlace {
+    Header,
+    Query,
+}
+
+impl KeyPlace {
+    pub fn label(self) -> &'static str {
+        match self {
+            KeyPlace::Header => "header",
+            KeyPlace::Query => "query",
+        }
+    }
+}
+
+/// The place and name of a link's key. The value is never part of the workspace.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LinkKey {
+    pub place: KeyPlace,
+    pub name: String,
 }
 
 /// The file name patterns a new folder source reads.
@@ -237,7 +285,7 @@ fn default_pattern() -> String {
     DEFAULT_PATTERN.into()
 }
 
-/// How often a CSV link is fetched again.
+/// How often a web link is fetched again.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Every {
@@ -449,6 +497,50 @@ mod tests {
         ));
         let back: Workspace = serde_json::from_str(&serde_json::to_string(&ws).unwrap()).unwrap();
         assert_eq!(ws, back);
+    }
+
+    #[test]
+    fn a_json_link_keeps_its_settings_and_an_old_link_is_written_as_before() {
+        // An old link has none of the new fields and is written back without them.
+        let old = r#"{"id":"s1","name":"web","kind":"url","url":"https://example.com/a.csv","every":"hourly"}"#;
+        let src: Source = serde_json::from_str(old).unwrap();
+        assert_eq!(serde_json::to_string(&src).unwrap(), old);
+        // The new fields round-trip. The key holds a place and a name, never a value.
+        let text = r#"{"id":"s2","name":"api","kind":"url","url":"https://example.com/items","every":"daily","records":"data.items","pages":{"by":"cursor","path":"next_cursor","param":"cursor"},"key":{"place":"header","name":"Authorization"}}"#;
+        let src: Source = serde_json::from_str(text).unwrap();
+        let SourceKind::Url {
+            records,
+            pages,
+            key,
+            ..
+        } = &src.kind
+        else {
+            panic!("a link");
+        };
+        assert_eq!(records.as_deref(), Some("data.items"));
+        assert_eq!(
+            pages,
+            &Some(Paging::Cursor {
+                path: "next_cursor".into(),
+                param: "cursor".into()
+            })
+        );
+        assert_eq!(
+            key,
+            &Some(LinkKey {
+                place: KeyPlace::Header,
+                name: "Authorization".into()
+            })
+        );
+        assert_eq!(serde_json::to_string(&src).unwrap(), text);
+        for p in [
+            r#"{"by":"link"}"#,
+            r#"{"by":"field","path":"paging.next"}"#,
+            r#"{"by":"page","param":"page"}"#,
+        ] {
+            let paging: Paging = serde_json::from_str(p).unwrap();
+            assert_eq!(serde_json::to_string(&paging).unwrap(), p);
+        }
     }
 
     #[test]

@@ -1,11 +1,11 @@
-//! Database passwords, kept outside the `.tenun` file.
+//! Database passwords and web link keys, kept outside the `.tenun` file.
 //!
 //! Stored like `~/.pgpass`: one JSON file in the user's config folder, readable
 //! only by the user (mode 0600 on Unix). The key is the connection itself
 //! (`kind://user@host:port/db`), so two workspaces that use the same database
 //! share one entry and a shared `.tenun` file never carries a password.
 
-use crate::workspace::DbConn;
+use crate::workspace::{DbConn, KeyPlace};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -46,6 +46,16 @@ impl Secrets {
         )
     }
 
+    /// The entry of a web link's key: the host it goes to, where it is sent and its name. Two
+    /// links to one host that use the same key share one entry.
+    pub fn link_key(host: &str, place: KeyPlace, name: &str) -> String {
+        format!(
+            "link://{}/{}/{name}",
+            host.to_ascii_lowercase(),
+            place.label()
+        )
+    }
+
     fn read(&self) -> BTreeMap<String, String> {
         std::fs::read_to_string(&self.path)
             .ok()
@@ -60,10 +70,23 @@ impl Secrets {
     pub fn set(&self, key: &str, password: &str) -> anyhow::Result<()> {
         let mut all = self.read();
         all.insert(key.to_string(), password.to_string());
+        self.write(&all)
+    }
+
+    /// Deletes an entry. Nothing happens when there is none.
+    pub fn remove(&self, key: &str) -> anyhow::Result<()> {
+        let mut all = self.read();
+        if all.remove(key).is_some() {
+            self.write(&all)?;
+        }
+        Ok(())
+    }
+
+    fn write(&self, all: &BTreeMap<String, String>) -> anyhow::Result<()> {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let text = serde_json::to_string_pretty(&all)?;
+        let text = serde_json::to_string_pretty(all)?;
         write_private(&self.path, text.as_bytes())
     }
 }
@@ -117,6 +140,20 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+        s.remove(&k).unwrap();
+        assert_eq!(s.get(&k), None);
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_link_key_is_named_by_host_place_and_name() {
+        assert_eq!(
+            Secrets::link_key("API.Example.com", KeyPlace::Header, "Authorization"),
+            "link://api.example.com/header/Authorization"
+        );
+        assert_eq!(
+            Secrets::link_key("h", KeyPlace::Query, "api_key"),
+            "link://h/query/api_key"
+        );
     }
 }

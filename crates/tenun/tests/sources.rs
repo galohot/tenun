@@ -1,18 +1,21 @@
-//! Data prep II: a folder of files, a pasted table and a CSV link.
+//! Data prep II: a folder of files, a pasted table, a CSV link, and the web link that reads JSON
+//! with pages and a key (build 15).
 
 use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tenun_core::Engine;
 use tenun_core::catalog::DType;
-use tenun_core::engine::AddSource;
+use tenun_core::engine::{AddSource, KeyEdit, KeyIn, LinkPreview};
 use tenun_core::query::SemanticQuery;
 use tenun_core::secrets::Secrets;
-use tenun_core::workspace::{ColumnSetup, Every, SourceKind, TableSetup, Workspace};
+use tenun_core::workspace::{
+    ColumnSetup, Every, KeyPlace, Paging, SourceKind, TableSetup, Workspace,
+};
 
 fn dir(tag: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("tenun-src-{tag}-{}", std::process::id()));
@@ -262,6 +265,9 @@ fn link(url: String, every: Every) -> AddSource {
         url,
         every,
         name: Some("Cities".into()),
+        records: None,
+        pages: None,
+        key: None,
     }
 }
 
@@ -301,7 +307,7 @@ fn a_csv_link_loads_and_a_404_is_a_source_error() {
         .add_source(link(format!("{base}/page"), Every::Daily))
         .unwrap_err()
         .to_string();
-    assert!(err.contains("not CSV"), "{err}");
+    assert!(err.contains("a web page, not data"), "{err}");
     let err = e
         .add_source(link(format!("{base}/huge"), Every::Daily))
         .unwrap_err()
@@ -368,6 +374,9 @@ fn a_link_that_fails_later_keeps_its_last_copy_and_shows_the_error() {
         ws.sources[0].kind = SourceKind::Url {
             url: format!("{base}/gone"),
             every: Every::Manual,
+            records: None,
+            pages: None,
+            key: None,
         };
         e.replace(ws, Some(d.join("Books.tenun")));
     }
@@ -510,4 +519,876 @@ fn text_only_tables_keep_their_header_and_odd_files_still_stack() {
     let names: Vec<_> = t.columns.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, ["file", "file 2", "code"]);
     assert_eq!(t.rows, Some(3));
+}
+
+// ---- the web link reads JSON (build 15) ----------------------------------------------------
+
+/// The key the test API accepts, and one it does not.
+const KEY: &str = "k-123";
+const WRONG: &str = "wrong-VALUE-777";
+
+/// Every request the test API got: the whole request head, as text.
+#[derive(Clone, Default)]
+struct Log(Arc<Mutex<Vec<String>>>);
+
+impl Log {
+    /// The requests whose first line starts with `GET <prefix>`.
+    fn hits(&self, prefix: &str) -> Vec<String> {
+        let all = self.0.lock().unwrap();
+        all.iter()
+            .filter(|h| h.starts_with(&format!("GET {prefix}")))
+            .cloned()
+            .collect()
+    }
+}
+
+fn param(query: &str, name: &str) -> Option<String> {
+    query
+        .split('&')
+        .find_map(|kv| kv.strip_prefix(&format!("{name}=")).map(str::to_string))
+}
+
+struct Resp {
+    status: &'static str,
+    ctype: &'static str,
+    /// Extra header lines, each ending in a line break.
+    extra: String,
+    body: String,
+}
+
+fn ok(v: Value) -> Resp {
+    Resp {
+        status: "200 OK",
+        ctype: "application/json",
+        extra: String::new(),
+        body: v.to_string(),
+    }
+}
+
+fn items(ids: &[u32]) -> Value {
+    Value::Array(
+        ids.iter()
+            .map(|i| json!({ "id": i, "name": format!("n{i}") }))
+            .collect(),
+    )
+}
+
+/// A JSON API on this computer. Routes: `/json` (nested records), `/nd` (one object per line),
+/// `/link`, `/field`, `/cursor`, `/num`, `/numt` and `/endless` (pages in each way), `/loop` (a next
+/// link that points at itself), `/secure` and `/q` (need `KEY`), `/hop` and `/hopq` (redirect to
+/// `localhost`, another host name for the same server), `/hop-same` and `/xpage`.
+fn api() -> (String, Log) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let log = Log::default();
+    let l = log.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).unwrap_or(0);
+            let head = String::from_utf8_lossy(&buf[..n]).to_string();
+            l.0.lock().unwrap().push(head.clone());
+            let target = head.split_whitespace().nth(1).unwrap_or("/").to_string();
+            let (path, q) = target.split_once('?').unwrap_or((&target, ""));
+            let r = route(path, q, &head.to_lowercase(), port);
+            let _ = write!(
+                s,
+                "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n{}",
+                r.status,
+                r.ctype,
+                r.body.len(),
+                r.extra,
+                r.body
+            );
+        }
+    });
+    (format!("http://127.0.0.1:{port}"), log)
+}
+
+fn route(path: &str, q: &str, head: &str, port: u16) -> Resp {
+    let page: u32 = param(q, "page").and_then(|p| p.parse().ok()).unwrap_or(1);
+    let two = |p: u32| items(&[2 * p - 1, 2 * p]);
+    let nested = json!({
+        "meta": { "total": 3 },
+        "errors": [{ "e": "x" }],
+        "data": { "items": [
+            { "id": 1, "name": "Ann", "owner": { "city": "Jakarta" }, "tags": ["a", "b"] },
+            { "id": 2, "name": "Bo", "owner": { "city": "Bandung" }, "tags": [] },
+            { "id": 3, "name": "Cy", "owner": null, "extra": true }
+        ] }
+    });
+    let has_key = head.contains(&format!("x-api-key: {KEY}\r\n"))
+        || head.contains(&format!("x-token: {KEY}\r\n"))
+        || head.contains(&format!("authorization: bearer {KEY}\r\n"));
+    let denied = || Resp {
+        status: "401 Unauthorized",
+        ctype: "application/json",
+        extra: String::new(),
+        body: r#"{"error":"no key"}"#.into(),
+    };
+    let redirect = |to: String| Resp {
+        status: "302 Found",
+        ctype: "text/plain",
+        extra: format!("Location: {to}\r\n"),
+        body: String::new(),
+    };
+    match path {
+        "/json" => ok(nested),
+        "/nd" => Resp {
+            status: "200 OK",
+            ctype: "application/x-ndjson",
+            extra: String::new(),
+            body: "{\"id\":1,\"name\":\"a\"}\n{\"id\":2,\"name\":\"b\",\"x\":9}\n\n{\"id\":3}\n"
+                .into(),
+        },
+        // Three pages of two records, the next one named in the Link header (relative).
+        "/link" => {
+            let mut r = ok(two(page));
+            if page < 3 {
+                r.extra = format!("Link: </link?page={}>; rel=\"next\"\r\n", page + 1);
+            }
+            r
+        }
+        "/field" => {
+            let next = if page < 3 {
+                json!(format!("/field?page={}", page + 1))
+            } else {
+                Value::Null
+            };
+            ok(json!({ "items": two(page), "paging": { "next": next } }))
+        }
+        "/cursor" => {
+            let at: u32 = param(q, "cursor")
+                .and_then(|c| c.trim_start_matches('t').parse().ok())
+                .unwrap_or(0);
+            let next = if at < 2 {
+                json!(format!("t{}", at + 1))
+            } else {
+                Value::Null
+            };
+            ok(json!({ "rows": two(at + 1), "next_cursor": next }))
+        }
+        // Two pages, then an empty one.
+        "/num" => ok(json!({ "items": if page <= 2 { two(page) } else { json!([]) } })),
+        // The World Bank shape. Past the last page the server answers with an error message.
+        "/numt" if page <= 2 => ok(json!([{ "page": page, "pages": 2, "per_page": 2 }, two(page)])),
+        "/numt" => ok(json!([{ "message": [{ "id": "175", "key": "Invalid format" }] }])),
+        "/endless" => ok(json!({
+            "items": items(&[page]),
+            "next": format!("/endless?page={}", page + 1)
+        })),
+        "/loop" => ok(json!({ "items": items(&[1]), "next": "/loop" })),
+        "/secure" if has_key => ok(nested),
+        "/q" if param(q, "api_key").as_deref() == Some(KEY) => ok(nested),
+        "/secure" | "/q" => denied(),
+        "/hop" => redirect(format!("http://localhost:{port}/secure")),
+        "/hopq" => redirect(format!("http://localhost:{port}/q")),
+        "/hop-same" => redirect("/secure".into()),
+        "/xpage" => {
+            ok(json!({ "items": items(&[1]), "next": format!("http://localhost:{port}/xpage2") }))
+        }
+        "/xpage2" => ok(json!({ "items": items(&[2]), "next": null })),
+        "/html" => Resp {
+            status: "200 OK",
+            ctype: "text/html",
+            extra: String::new(),
+            body: "<html>Sign in</html>".into(),
+        },
+        _ => Resp {
+            status: "404 Not Found",
+            ctype: "text/plain",
+            extra: String::new(),
+            body: "nothing here".into(),
+        },
+    }
+}
+
+fn api_link(
+    url: String,
+    records: Option<&str>,
+    pages: Option<Paging>,
+    key: Option<KeyIn>,
+) -> AddSource {
+    AddSource::Url {
+        url,
+        every: Every::Manual,
+        name: Some("Api".into()),
+        records: records.map(str::to_string),
+        pages,
+        key,
+    }
+}
+
+fn key_in(place: KeyPlace, name: &str, value: &str) -> Option<KeyIn> {
+    Some(KeyIn {
+        place,
+        name: name.into(),
+        value: value.into(),
+    })
+}
+
+fn header_key(value: &str) -> Option<KeyIn> {
+    key_in(KeyPlace::Header, "X-Api-Key", value)
+}
+
+fn sum_of(e: &Engine, id: &str, column: &str) -> f64 {
+    ask(
+        e,
+        json!({ "measures": [{ "table": format!("{id}/Api"), "column": column, "agg": "sum" }] }),
+    )[0][0]
+        .as_f64()
+        .unwrap()
+}
+
+/// Every file under `dir` that holds `needle`.
+fn files_holding(dir: &Path, needle: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for entry in std::fs::read_dir(&d).unwrap().flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                todo.push(p);
+            } else if std::fs::read(&p)
+                .unwrap()
+                .windows(needle.len())
+                .any(|w| w == needle.as_bytes())
+            {
+                found.push(p.file_name().unwrap().to_string_lossy().into_owned());
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn a_json_link_loads_the_longest_list_or_the_named_one_and_so_does_ndjson() {
+    let d = dir("json");
+    let (base, _) = api();
+    let e = engine(&d);
+    // No path: the longest list of objects, data.items, not the small errors list.
+    let id = e
+        .add_source(api_link(format!("{base}/json"), None, None, None))
+        .unwrap();
+    let snap = e.snapshot();
+    assert!(snap.errors.is_empty(), "{:?}", snap.errors);
+    let t = &snap.tables[0];
+    assert_eq!(t.id, format!("{id}/Api"));
+    let cols: Vec<_> = t.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(cols, ["id", "name", "owner.city", "tags", "extra"]);
+    assert_eq!(t.rows, Some(3));
+    assert_eq!(sum_of(&e, &id, "id"), 6.0);
+    // The copy is a CSV file, like any link (V3-D80).
+    assert!(
+        d.join("Books data")
+            .join(format!("link-{id}.csv"))
+            .is_file()
+    );
+    // A link with no new setting is saved as before: no records, pages or key.
+    let text = std::fs::read_to_string(d.join("Books.tenun")).unwrap();
+    assert!(!text.contains("records") && !text.contains("pages") && !text.contains("\"key\""));
+
+    // A named path picks that list, and is saved.
+    let id2 = e
+        .add_source(api_link(format!("{base}/json"), Some("errors"), None, None))
+        .unwrap();
+    assert_eq!(
+        e.catalog().table(&format!("{id2}/Api")).unwrap().rows,
+        Some(1)
+    );
+    assert!(
+        std::fs::read_to_string(d.join("Books.tenun"))
+            .unwrap()
+            .contains("\"records\": \"errors\"")
+    );
+    // A path that is not there fails in words and names the lists there are.
+    let err = e
+        .add_source(api_link(
+            format!("{base}/json"),
+            Some("data.rows"),
+            None,
+            None,
+        ))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "There is no list at data.rows. Lists in this answer: data.items (3), errors (1)."
+    );
+    assert_eq!(
+        e.snapshot().workspace.sources.len(),
+        2,
+        "nothing was left behind"
+    );
+
+    // One object per line.
+    let nd = e
+        .add_source(api_link(format!("{base}/nd"), None, None, None))
+        .unwrap();
+    let t = e.catalog().table(&format!("{nd}/Api")).cloned().unwrap();
+    let cols: Vec<_> = t.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(cols, ["id", "name", "x"]);
+    assert_eq!(t.rows, Some(3));
+    // A web page is refused with the new words.
+    let err = e
+        .add_source(api_link(format!("{base}/html"), None, None, None))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "That link gives a web page, not data. In Google Sheets, publish the sheet as CSV and use that link."
+    );
+}
+
+#[test]
+fn pages_follow_a_link_header_a_field_a_cursor_and_a_page_number() {
+    let d = dir("pages");
+    let (base, log) = api();
+    let e = engine(&d);
+    let add = |path: &str, pages: Paging| {
+        let id = e
+            .add_source(api_link(format!("{base}{path}"), None, Some(pages), None))
+            .unwrap();
+        assert!(e.snapshot().errors.is_empty(), "{:?}", e.snapshot().errors);
+        id
+    };
+    // The Link header, with a relative address: 3 pages of 2 records.
+    let id = add("/link", Paging::Link);
+    assert_eq!(
+        e.catalog().table(&format!("{id}/Api")).unwrap().rows,
+        Some(6)
+    );
+    assert_eq!(sum_of(&e, &id, "id"), 21.0);
+    assert_eq!(log.hits("/link").len(), 3);
+    // A field with a relative next link, that is null on the last page.
+    let id = add(
+        "/field",
+        Paging::Field {
+            path: "paging.next".into(),
+        },
+    );
+    assert_eq!(
+        e.catalog().table(&format!("{id}/Api")).unwrap().rows,
+        Some(6)
+    );
+    assert_eq!(log.hits("/field").len(), 3);
+    // A cursor goes back as a link parameter.
+    let id = add(
+        "/cursor",
+        Paging::Cursor {
+            path: "next_cursor".into(),
+            param: "cursor".into(),
+        },
+    );
+    assert_eq!(
+        e.catalog().table(&format!("{id}/Api")).unwrap().rows,
+        Some(6)
+    );
+    assert_eq!(sum_of(&e, &id, "id"), 21.0);
+    assert!(log.hits("/cursor?cursor=t2")[0].contains("/cursor?cursor=t2"));
+    // A page number goes up until a page has no records.
+    let id = add(
+        "/num",
+        Paging::Page {
+            param: "page".into(),
+        },
+    );
+    assert_eq!(
+        e.catalog().table(&format!("{id}/Api")).unwrap().rows,
+        Some(4)
+    );
+    assert_eq!(
+        log.hits("/num").len(),
+        3,
+        "the empty page is the last request"
+    );
+    // A next link that names a link already read ends the walk.
+    let id = add(
+        "/loop",
+        Paging::Field {
+            path: "next".into(),
+        },
+    );
+    assert_eq!(
+        e.catalog().table(&format!("{id}/Api")).unwrap().rows,
+        Some(1)
+    );
+    assert_eq!(log.hits("/loop").len(), 1);
+}
+
+#[test]
+fn a_page_number_stops_at_the_last_page_the_answer_names_and_starts_at_the_link() {
+    let d = dir("pages-total");
+    let (base, log) = api();
+    let e = engine(&d);
+    // The World Bank shape: [meta, [records]]. The answer says there are 2 pages, so a third
+    // request (which the server would answer with an error message) is never sent.
+    let id = e
+        .add_source(api_link(
+            format!("{base}/numt"),
+            None,
+            Some(Paging::Page {
+                param: "page".into(),
+            }),
+            None,
+        ))
+        .unwrap();
+    assert_eq!(
+        e.catalog().table(&format!("{id}/Api")).unwrap().rows,
+        Some(4)
+    );
+    assert_eq!(log.hits("/numt").len(), 2);
+    assert!(log.hits("/numt")[0].starts_with("GET /numt?page=1 "));
+    // The number in the link is where it starts.
+    let id = e
+        .add_source(api_link(
+            format!("{base}/numt?page=2"),
+            None,
+            Some(Paging::Page {
+                param: "page".into(),
+            }),
+            None,
+        ))
+        .unwrap();
+    assert_eq!(
+        e.catalog().table(&format!("{id}/Api")).unwrap().rows,
+        Some(2)
+    );
+}
+
+#[test]
+fn two_hundred_pages_are_kept_with_a_note_and_the_table_loads() {
+    let d = dir("cap");
+    let (base, log) = api();
+    let e = engine(&d);
+    let id = e
+        .add_source(api_link(
+            format!("{base}/endless"),
+            None,
+            Some(Paging::Field {
+                path: "next".into(),
+            }),
+            None,
+        ))
+        .unwrap();
+    assert!(e.snapshot().errors.is_empty(), "{:?}", e.snapshot().errors);
+    let t = e.catalog().table(&format!("{id}/Api")).cloned().unwrap();
+    assert_eq!(t.rows, Some(200));
+    assert_eq!(log.hits("/endless").len(), 200);
+    assert_eq!(
+        t.notes,
+        ["Read the first 200 pages (200 rows). The link has more."]
+    );
+    // The note is kept with the copy: it is still there when the workspace is opened again.
+    let ws = e.snapshot().workspace;
+    e.replace(ws, Some(d.join("Books.tenun")));
+    let t = e.catalog().table(&format!("{id}/Api")).cloned().unwrap();
+    assert_eq!(t.notes.len(), 1, "{:?}", t.notes);
+    assert_eq!(log.hits("/endless").len(), 200, "opening did not fetch");
+    // Removing the source removes the note file with the copy.
+    e.remove_source(&id);
+    assert!(
+        !d.join("Books data")
+            .join(format!("link-{id}.notes"))
+            .exists()
+    );
+}
+
+#[test]
+fn a_header_key_is_sent_and_kept_out_of_every_file() {
+    let d = dir("hkey");
+    let (base, log) = api();
+    let e = engine(&d);
+    // Without the key the server says 401, and the words say what to do.
+    let err = e
+        .add_source(api_link(format!("{base}/secure"), None, None, None))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("answered 401 Unauthorized"), "{err}");
+    assert!(
+        err.ends_with("The link needs a key, or the key is wrong. Open Link settings to add it."),
+        "{err}"
+    );
+    // A wrong key fails the same way, shows nothing of the key, and leaves no entry behind.
+    let err = e
+        .add_source(api_link(
+            format!("{base}/secure"),
+            None,
+            None,
+            header_key(WRONG),
+        ))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("401") && !err.contains(WRONG), "{err}");
+    assert!(
+        std::fs::read_to_string(d.join("secrets.json")).is_ok_and(|t| !t.contains(WRONG)),
+        "a failed add must not keep its key"
+    );
+    // A connection that fails does not show the key either.
+    let err = e
+        .add_source(api_link(
+            "http://127.0.0.1:1/secure?x=1".into(),
+            None,
+            None,
+            header_key(WRONG),
+        ))
+        .unwrap_err()
+        .to_string();
+    assert!(!err.contains(WRONG), "{err}");
+
+    // The right key loads the records.
+    let id = e
+        .add_source(api_link(
+            format!("{base}/secure"),
+            None,
+            None,
+            header_key(KEY),
+        ))
+        .unwrap();
+    let snap = e.snapshot();
+    assert!(snap.errors.is_empty(), "{:?}", snap.errors);
+    assert_eq!(snap.tables[0].rows, Some(3));
+    assert!(
+        log.hits("/secure")
+            .last()
+            .unwrap()
+            .to_lowercase()
+            .contains("x-api-key: k-123")
+    );
+    // The workspace file holds the place and the name, and not the value.
+    let text = std::fs::read_to_string(d.join("Books.tenun")).unwrap();
+    assert!(
+        text.contains("\"place\": \"header\"") && text.contains("\"name\": \"X-Api-Key\""),
+        "{text}"
+    );
+    // The value sits in the secrets file, under the host, the place and the name, and nowhere else:
+    // not the workspace file, not the copy, not the answer of /api/workspace.
+    let secrets = std::fs::read_to_string(d.join("secrets.json")).unwrap();
+    assert!(secrets.contains("link://127.0.0.1/header/X-Api-Key") && secrets.contains(KEY));
+    assert_eq!(files_holding(&d, KEY), ["secrets.json"]);
+    let wire = serde_json::to_string(&snap).unwrap();
+    assert!(!wire.contains(KEY), "{wire}");
+    assert!(wire.contains("\"link_keys\":[\"") && wire.contains(&id));
+    // The key stays out of a debug print of the request, too.
+    assert!(!format!("{:?}", header_key(KEY).unwrap()).contains(KEY));
+    // A reload sends it again; the Authorization header works as well.
+    let before = log.hits("/secure").len();
+    e.load(&id);
+    assert!(e.snapshot().errors.is_empty());
+    assert_eq!(log.hits("/secure").len(), before + 1);
+    assert!(
+        log.hits("/secure")
+            .last()
+            .unwrap()
+            .to_lowercase()
+            .contains("x-api-key: k-123")
+    );
+    let id2 = e
+        .add_source(api_link(
+            format!("{base}/secure?v=2"),
+            None,
+            None,
+            key_in(KeyPlace::Header, "Authorization", &format!("Bearer {KEY}")),
+        ))
+        .unwrap();
+    assert!(e.snapshot().errors.is_empty());
+    assert_eq!(
+        e.catalog().table(&format!("{id2}/Api")).unwrap().rows,
+        Some(3)
+    );
+    // Opening the workspace on another computer: the file has no value, so the link needs one.
+    let other = engine(&dir("hkey-other"));
+    let mut ws = e.snapshot().workspace;
+    ws.sources.truncate(1);
+    other.replace(ws, Some(d.join("Books.tenun")));
+    other.load(&id);
+    let snap = other.snapshot();
+    assert!(snap.errors[&id].contains("401"), "{:?}", snap.errors);
+    assert!(snap.link_keys.is_empty(), "no value is stored there");
+}
+
+#[test]
+fn a_query_key_is_set_in_the_link_and_never_saved_in_it() {
+    let d = dir("qkey");
+    let (base, log) = api();
+    let e = engine(&d);
+    // The link already has a parameter of that name: the key replaces it.
+    let id = e
+        .add_source(api_link(
+            format!("{base}/q?api_key=old&x=1"),
+            None,
+            None,
+            key_in(KeyPlace::Query, "api_key", KEY),
+        ))
+        .unwrap();
+    assert!(e.snapshot().errors.is_empty(), "{:?}", e.snapshot().errors);
+    assert_eq!(
+        e.catalog().table(&format!("{id}/Api")).unwrap().rows,
+        Some(3)
+    );
+    assert!(log.hits("/q")[0].starts_with(&format!("GET /q?api_key={KEY}&x=1 ")));
+    let text = std::fs::read_to_string(d.join("Books.tenun")).unwrap();
+    assert!(text.contains(&format!("\"url\": \"{base}/q?api_key=old&x=1\"")));
+    assert_eq!(files_holding(&d, KEY), ["secrets.json"]);
+    assert!(
+        std::fs::read_to_string(d.join("secrets.json"))
+            .unwrap()
+            .contains("link://127.0.0.1/query/api_key")
+    );
+}
+
+#[test]
+fn the_key_goes_only_to_the_host_of_the_saved_link() {
+    let d = dir("otherhost");
+    let (base, log) = api();
+    let e = engine(&d);
+    // The server answers /hop with a redirect to http://localhost:<port>/secure: the same server
+    // under another host name. The second request must arrive without the key.
+    let err = e
+        .add_source(api_link(format!("{base}/hop"), None, None, header_key(KEY)))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("401"), "{err}");
+    assert!(
+        log.hits("/hop")[0]
+            .to_lowercase()
+            .contains("x-api-key: k-123")
+    );
+    let second = log.hits("/secure");
+    assert_eq!(second.len(), 1);
+    assert!(
+        second[0].to_lowercase().contains("host: localhost:"),
+        "{}",
+        second[0]
+    );
+    assert!(
+        !second[0].to_lowercase().contains("x-api-key"),
+        "{}",
+        second[0]
+    );
+    // The same for a key in the link.
+    let err = e
+        .add_source(api_link(
+            format!("{base}/hopq"),
+            None,
+            None,
+            key_in(KeyPlace::Query, "api_key", KEY),
+        ))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("401") && !err.contains(KEY), "{err}");
+    assert!(log.hits("/hopq")[0].contains(&format!("api_key={KEY}")));
+    assert!(
+        !log.hits("/q")[0].contains("api_key"),
+        "{}",
+        log.hits("/q")[0]
+    );
+    // A redirect inside the same host keeps the key.
+    let id = e
+        .add_source(api_link(
+            format!("{base}/hop-same"),
+            None,
+            None,
+            header_key(KEY),
+        ))
+        .unwrap();
+    assert_eq!(
+        e.catalog().table(&format!("{id}/Api")).unwrap().rows,
+        Some(3)
+    );
+    // A page link to another host gets no key either, and the page is still read.
+    let id = e
+        .add_source(api_link(
+            format!("{base}/xpage"),
+            None,
+            Some(Paging::Field {
+                path: "next".into(),
+            }),
+            header_key(KEY),
+        ))
+        .unwrap();
+    assert_eq!(
+        e.catalog().table(&format!("{id}/Api")).unwrap().rows,
+        Some(2)
+    );
+    assert!(
+        log.hits("/xpage")[0]
+            .to_lowercase()
+            .contains("x-api-key: k-123")
+    );
+    let page2 = &log.hits("/xpage2")[0];
+    assert!(
+        page2.to_lowercase().contains("host: localhost:")
+            && !page2.to_lowercase().contains("x-api-key")
+    );
+}
+
+#[test]
+fn link_settings_change_the_records_and_the_key_and_the_secret_follows() {
+    let d = dir("settings");
+    let (base, _) = api();
+    let e = engine(&d);
+    let id = e
+        .add_source(api_link(
+            format!("{base}/secure"),
+            None,
+            None,
+            header_key(KEY),
+        ))
+        .unwrap();
+    let rows = |e: &Engine| e.catalog().table(&format!("{id}/Api")).unwrap().rows;
+    assert_eq!(rows(&e), Some(3));
+    // A new records path fetches again.
+    e.set_link(&id, Some("errors".into()), None, KeyEdit::Keep)
+        .unwrap();
+    assert_eq!(rows(&e), Some(1));
+    // A key with no value keeps the stored value.
+    e.set_link(
+        &id,
+        Some("data.items".into()),
+        None,
+        KeyEdit::Set(header_key("").unwrap()),
+    )
+    .unwrap();
+    assert!(e.snapshot().errors.is_empty(), "{:?}", e.snapshot().errors);
+    assert_eq!(rows(&e), Some(3));
+    // A new name with no value takes the stored value along, and the old entry goes.
+    e.set_link(
+        &id,
+        None,
+        None,
+        KeyEdit::Set(key_in(KeyPlace::Header, "X-Token", "").unwrap()),
+    )
+    .unwrap();
+    assert!(e.snapshot().errors.is_empty(), "{:?}", e.snapshot().errors);
+    let secrets = std::fs::read_to_string(d.join("secrets.json")).unwrap();
+    assert!(secrets.contains("link://127.0.0.1/header/X-Token") && !secrets.contains("X-Api-Key"));
+    assert_eq!(files_holding(&d, KEY), ["secrets.json"]);
+    // `key: null` removes the key and deletes its secret. The fetch then fails with the words for
+    // a missing key, and the last copy is still there.
+    e.set_link(&id, None, None, KeyEdit::Remove).unwrap();
+    let snap = e.snapshot();
+    assert!(snap.errors[&id].contains("401"), "{:?}", snap.errors);
+    assert_eq!(rows(&e), Some(3), "the last copy is still read");
+    assert!(snap.link_keys.is_empty());
+    assert!(files_holding(&d, KEY).is_empty());
+    assert!(
+        !std::fs::read_to_string(d.join("secrets.json"))
+            .unwrap()
+            .contains("link://")
+    );
+    let text = std::fs::read_to_string(d.join("Books.tenun")).unwrap();
+    assert!(!text.contains("\"key\""), "{text}");
+    // The settings of a source that is not a web link are refused.
+    assert!(e.set_link("s99", None, None, KeyEdit::Keep).is_err());
+}
+
+#[test]
+fn a_removed_link_takes_its_key_unless_another_link_still_uses_it() {
+    let d = dir("remove-key");
+    let (base, _) = api();
+    let e = engine(&d);
+    let a = e
+        .add_source(api_link(
+            format!("{base}/secure"),
+            None,
+            None,
+            header_key(KEY),
+        ))
+        .unwrap();
+    let b = e
+        .add_source(api_link(
+            format!("{base}/secure?v=2"),
+            None,
+            None,
+            header_key(""),
+        ))
+        .unwrap();
+    assert!(e.snapshot().errors.is_empty(), "{:?}", e.snapshot().errors);
+    // The second link had no value of its own: it used the stored one.
+    e.remove_source(&a);
+    assert!(
+        std::fs::read_to_string(d.join("secrets.json"))
+            .unwrap()
+            .contains(KEY)
+    );
+    e.remove_source(&b);
+    assert!(
+        !std::fs::read_to_string(d.join("secrets.json"))
+            .unwrap()
+            .contains(KEY)
+    );
+}
+
+#[test]
+fn a_preview_reads_only_the_first_page_and_saves_nothing() {
+    let d = dir("preview");
+    let (base, _) = api();
+    let (csv_base, _) = serve();
+    let e = engine(&d);
+    let look = |url: String, records: Option<&str>, key: Option<KeyIn>| {
+        e.link_preview(LinkPreview {
+            url,
+            records: records.map(str::to_string),
+            key,
+        })
+    };
+    let p = look(format!("{base}/json"), None, None).unwrap();
+    assert_eq!(p.format, "json");
+    let lists: Vec<_> = p.lists.iter().map(|l| (l.path.as_str(), l.rows)).collect();
+    assert_eq!(lists, [("data.items", 3), ("errors", 1)]);
+    assert_eq!(p.records, "data.items");
+    assert_eq!(p.columns, ["id", "name", "owner.city", "tags", "extra"]);
+    assert_eq!((p.total, p.rows.len()), (3, 3));
+    assert_eq!(p.rows[0], ["1", "Ann", "Jakarta", "[\"a\",\"b\"]", ""]);
+    assert_eq!(p.pages_hint, "");
+    // Another list, by its path.
+    assert_eq!(
+        look(format!("{base}/json"), Some("errors"), None)
+            .unwrap()
+            .columns,
+        ["e"]
+    );
+    // The way to the next page, in each of its forms.
+    let hint = |path: &str| {
+        look(format!("{base}{path}"), None, None)
+            .unwrap()
+            .pages_hint
+    };
+    assert_eq!(hint("/link"), "link");
+    assert_eq!(hint("/field"), "field:paging.next");
+    assert_eq!(hint("/cursor"), "cursor:next_cursor");
+    assert_eq!(hint("/numt"), "page");
+    assert_eq!(hint("/num?page=1"), "page");
+    // A CSV link shows its first rows too.
+    let p = look(format!("{csv_base}/ok"), None, None).unwrap();
+    assert_eq!((p.format, p.pages_hint.as_str()), ("csv", ""));
+    assert_eq!(p.columns, ["city", "sales"]);
+    assert_eq!(p.rows, [["Jakarta", "10"], ["Bandung", "5"]]);
+    assert!(look(format!("{base}/html"), None, None).is_err());
+    // A key is used for the look and not kept: no copy, no entry.
+    let p = look(format!("{base}/secure"), None, header_key(KEY)).unwrap();
+    assert_eq!(p.total, 3);
+    let err = look(format!("{base}/secure"), None, header_key(WRONG))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("401") && !err.contains(WRONG), "{err}");
+    assert!(files_holding(&d, KEY).is_empty());
+    assert!(!d.join("Books data").exists());
+    assert!(e.snapshot().workspace.sources.is_empty());
+    // After the link is added, a look with no value uses the stored one.
+    e.add_source(api_link(
+        format!("{base}/secure"),
+        None,
+        None,
+        header_key(KEY),
+    ))
+    .unwrap();
+    assert_eq!(
+        look(format!("{base}/secure"), None, header_key(""))
+            .unwrap()
+            .total,
+        3
+    );
 }

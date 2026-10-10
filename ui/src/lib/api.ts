@@ -93,8 +93,40 @@ export interface Relationship {
   to: FieldRef;
 }
 
-/** How often a CSV link is fetched again. */
+/** How often a web link is fetched again. */
 export type UrlEvery = '15min' | 'hourly' | 'daily' | 'manual';
+
+/** Where a link sends its key. */
+export type KeyPlace = 'header' | 'query';
+
+/** The place and name of a link's key. The value is kept in the secrets file and never comes back. */
+export interface LinkKey {
+  place: KeyPlace;
+  name: string;
+}
+
+/** How a JSON link finds its next page. */
+export type Paging =
+  | { by: 'link' }
+  | { by: 'field'; path: string }
+  | { by: 'cursor'; path: string; param: string }
+  | { by: 'page'; param: string };
+
+/** What the Add sheet shows after a look at the first page of a link. */
+export interface LinkLook {
+  format: 'csv' | 'json';
+  /** JSON: every list of records in the answer. `.` is the answer itself. */
+  lists: { path: string; rows: number }[];
+  /** JSON: the list that was read. */
+  records: string;
+  columns: string[];
+  /** The first 5 rows. */
+  rows: string[][];
+  /** Rows on the first page. */
+  total: number;
+  /** `link`, `field:<path>`, `cursor:<path>`, `page`, or empty. */
+  pages_hint: string;
+}
 
 export interface PastePreview {
   columns: string[];
@@ -110,9 +142,15 @@ export interface Source {
   path?: string;
   /** Folder: the file name patterns, separated by `;`. */
   pattern?: string;
-  /** CSV link. */
+  /** Web link. */
   url?: string;
   every?: UrlEvery;
+  /** JSON link: where the list of records sits. Empty: Tenun picks. */
+  records?: string;
+  /** JSON link: how the next page is found. Empty: one page. */
+  pages?: Paging;
+  /** JSON link: where the key goes and what it is called. */
+  key?: LinkKey;
   host?: string;
   database?: string;
 }
@@ -446,6 +484,8 @@ export interface Snapshot {
   errors: Record<string, string>;
   /** Source id → when it last loaded without error (ISO 8601, UTC). */
   loaded_at?: Record<string, string>;
+  /** Ids of the web links whose key has a value on this computer. */
+  link_keys?: string[];
   dirty: boolean;
 }
 
@@ -468,6 +508,19 @@ export interface FsListing {
   parent: string | null;
   entries: { name: string; path: string; dir: boolean; size: number; supported: boolean }[];
   places: { name: string; path: string }[];
+}
+
+/** A key as the sheet sends it. */
+export interface KeyIn extends LinkKey {
+  /** Empty: use the value that is stored already, if there is one. */
+  value: string;
+}
+
+/** The optional settings of a web link when it is added. */
+export interface LinkSettings {
+  records?: string;
+  pages?: Paging | null;
+  key?: KeyIn | null;
 }
 
 export class ApiError extends Error {}
@@ -521,8 +574,33 @@ export const api = {
   addFile: (path: string) => call<Snapshot & { added: string }>('POST', '/sources', { kind: 'file', path }),
   addFolder: (path: string, pattern?: string) =>
     call<Snapshot & { added: string }>('POST', '/sources', { kind: 'folder', path, pattern: pattern || null }),
-  addUrl: (url: string, every: UrlEvery, name?: string) =>
-    call<Snapshot & { added: string }>('POST', '/sources', { kind: 'url', url, every, name: name || null }),
+  addUrl: (url: string, every: UrlEvery, name?: string, link: LinkSettings = {}) =>
+    call<Snapshot & { added: string }>('POST', '/sources', {
+      kind: 'url',
+      url,
+      every,
+      name: name || null,
+      records: link.records || null,
+      pages: link.pages ?? null,
+      key: link.key ?? null,
+    }),
+  /** The first page of a web link: its format, the lists of records, the first rows. Saves nothing. */
+  linkPreview: (req: { url: string; records?: string; key?: KeyIn | null }) =>
+    call<LinkLook>('POST', '/link/preview', {
+      url: req.url,
+      records: req.records || null,
+      key: req.key ?? null,
+    }),
+  /**
+   * Changes the records, the pages and the key of a web link, and fetches it again. Leave `key` out
+   * to keep the key as it is; `null` removes it. A key with no value keeps the value that is stored.
+   */
+  setLink: (id: string, body: { records?: string; pages?: Paging | null; key?: KeyIn | null }) =>
+    call<Snapshot>('PUT', `/sources/${encodeURIComponent(id)}/link`, {
+      records: body.records || null,
+      pages: body.pages ?? null,
+      ...(body.key === undefined ? {} : { key: body.key }),
+    }),
   setUrlEvery: (id: string, every: UrlEvery) =>
     call<Snapshot>('PUT', `/sources/${encodeURIComponent(id)}/every`, { every }),
   /** The name, the first rows and the size of a pasted table. Fails when the text is not a table. */

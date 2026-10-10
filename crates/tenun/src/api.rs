@@ -13,11 +13,11 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tenun_core::engine::AddSource;
+use tenun_core::engine::{AddSource, KeyEdit, KeyIn, LinkPreview};
 use tenun_core::paste;
 use tenun_core::query::{Filter, SemanticQuery};
 use tenun_core::snapshot::{self, DashFilter, Tile, run_tile};
-use tenun_core::workspace::{Every, FieldRef, Locale, TableSetup};
+use tenun_core::workspace::{Every, FieldRef, Locale, Paging, TableSetup};
 
 type S = State<Arc<AppState>>;
 
@@ -64,6 +64,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/sources/{id}", delete(remove_source))
         .route("/sources/{id}/reload", post(reload_source))
         .route("/sources/{id}/every", put(source_every))
+        .route("/sources/{id}/link", put(source_link))
+        .route("/link/preview", post(link_preview))
         .route("/paste/preview", post(paste_preview))
         .route("/paste", post(paste_add))
         .route("/tables/preview", get(preview))
@@ -298,7 +300,7 @@ struct EveryBody {
     every: Every,
 }
 
-/// How often a CSV link is fetched again.
+/// How often a web link is fetched again.
 async fn source_every(
     State(s): S,
     Path(id): Path<String>,
@@ -309,6 +311,60 @@ async fn source_every(
             st.engine.set_url_every(&id, b.every)?;
             st.emit(json!({ "type": "workspace-changed" }));
             Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct LinkBody {
+    /// Where the list of records sits in a JSON answer; empty lets Tenun pick.
+    #[serde(default)]
+    records: Option<String>,
+    #[serde(default)]
+    pages: Option<Paging>,
+    /// Left out: the key stays as it is. `null`: the key and its stored value are removed. An
+    /// object: the key is set; with no value the stored value stays.
+    #[serde(default, deserialize_with = "set_or_null")]
+    key: Option<Option<KeyIn>>,
+}
+
+/// Tells a field that is `null` from a field that is not there.
+fn set_or_null<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
+}
+
+/// Changes where a web link finds its records, how it follows pages and which key it sends, then
+/// fetches it again. The stored key value is never sent back.
+async fn source_link(
+    State(s): S,
+    Path(id): Path<String>,
+    Json(b): Json<LinkBody>,
+) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let key = match b.key {
+                None => KeyEdit::Keep,
+                Some(None) => KeyEdit::Remove,
+                Some(Some(k)) => KeyEdit::Set(k),
+            };
+            let tables = st.engine.set_link(&id, b.records, b.pages, key)?;
+            st.emit(json!({ "type": "data-changed", "sources": [id], "tables": tables }));
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+/// A look at the first page of a web link. Nothing is saved, not the data and not the key.
+async fn link_preview(State(s): S, Json(b): Json<LinkPreview>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            Ok(serde_json::to_value(st.engine.link_preview(b)?)?)
         })
         .await?,
     ))
@@ -813,4 +869,25 @@ pub async fn static_file(uri: Uri) -> Response {
         file.data.into_owned(),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_link_change_tells_a_missing_key_from_a_null_key() {
+        // Left out: the key stays. Null: the key goes. An object: the key is set.
+        let keep: LinkBody = serde_json::from_str(r#"{"records":"data.items"}"#).unwrap();
+        assert!(keep.key.is_none());
+        let remove: LinkBody = serde_json::from_str(r#"{"records":null,"key":null}"#).unwrap();
+        assert!(matches!(remove.key, Some(None)));
+        let set: LinkBody =
+            serde_json::from_str(r#"{"key":{"place":"header","name":"X-Api-Key"}}"#).unwrap();
+        let Some(Some(k)) = set.key else {
+            panic!("a key");
+        };
+        // No value means: keep the value that is stored.
+        assert_eq!((k.name.as_str(), k.value.as_str()), ("X-Api-Key", ""));
+    }
 }

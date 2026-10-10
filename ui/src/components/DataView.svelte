@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type Cell, type Column, type Profile, type TableSetup, type UnpivotPlan, type UrlEvery } from '../lib/api';
+  import { api, type Cell, type Column, type Profile, type Source, type TableSetup, type UnpivotPlan, type UrlEvery } from '../lib/api';
   import { typeIcon } from '../lib/ui';
   import { app, go } from '../lib/state.svelte';
   import { cell, full } from '../lib/format';
@@ -10,6 +10,7 @@
   import ProfileCard from './data/ProfileCard.svelte';
   import UnpivotSheet from './data/UnpivotSheet.svelte';
   import PasteSheet from './data/PasteSheet.svelte';
+  import LinkSettings from './data/LinkSettings.svelte';
 
   let { tableId }: { tableId?: string } = $props();
 
@@ -41,7 +42,7 @@
     sqlite: 'SQLite',
     duckdb: 'DuckDB',
     folder: 'Folder',
-    url: 'CSV link',
+    url: 'Web link',
     postgres: 'PostgreSQL',
     mysql: 'MySQL',
   };
@@ -60,6 +61,9 @@
   async function setEvery(id: string, every: UrlEvery) {
     await app.run(null, () => api.setUrlEvery(id, every));
   }
+
+  // Link settings (build 15): the records, the pages and the key of a web link.
+  let linkSource = $state<Source | null>(null);
 
   // --- Paste a table (build 09) -------------------------------------------------------------
   // The paste event carries the text in the browser and in the desktop window. Where a window does
@@ -217,6 +221,7 @@
               <select class="every" aria-label="Refresh" value={s.every ?? 'hourly'} onchange={(e) => setEvery(s.id, e.currentTarget.value as UrlEvery)}>
                 {#each EVERY_CHOICES as c}<option value={c.value}>{c.label}</option>{/each}
               </select>
+              <button class="linkbtn" onclick={() => (linkSource = s)}>Link settings</button>
             </p>
           {:else if s.kind === 'folder'}
             <p class="srcline" title={s.path}>Reads {s.pattern}</p>
@@ -368,6 +373,10 @@
   <PasteSheet text={pasted} onclose={() => (pasted = null)} />
 {/if}
 
+{#if linkSource}
+  <LinkSettings source={linkSource} onclose={() => (linkSource = null)} />
+{/if}
+
 {#if unpivotOpen && plan && table}
   <UnpivotSheet tableId={table.id} {plan} onapply={turnIntoRows} onclose={() => (unpivotOpen = false)} />
 {/if}
@@ -425,6 +434,8 @@
   .srcline { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 6px 4px 28px; color: var(--text-2); font-size: 11px; }
   .every { height: 24px; max-width: 170px; padding: 0 6px; border: 1px solid var(--sep-strong); border-radius: 5px; background: var(--inset); color: var(--text); font-size: 11px; }
   .every:focus { outline: none; border-color: var(--focus); }
+  .linkbtn { border: 0; background: none; padding: 0; color: var(--accent-text); font-size: 11px; cursor: pointer; }
+  .linkbtn:hover { text-decoration: underline; }
   .err { display: flex; gap: 6px; margin: 4px 6px 6px; color: var(--danger); font-size: 12px; }
   .detail { min-width: 0; display: flex; flex-direction: column; padding: 20px 24px; gap: 12px; overflow: hidden; }
   .head { display: flex; align-items: flex-start; gap: 16px; }

@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { api, type UrlEvery } from '../lib/api';
-  import { DEFAULT_PATTERN, EVERY_CHOICES, linkProblem } from '../lib/sources';
+  import { api } from '../lib/api';
+  import { LinkForm } from '../lib/linkform.svelte';
+  import { DEFAULT_PATTERN } from '../lib/sources';
   import { app, go } from '../lib/state.svelte';
   import Icon from './Icon.svelte';
+  import LinkFields from './LinkFields.svelte';
   import Modal from './Modal.svelte';
   import FileBrowser from './FileBrowser.svelte';
 
@@ -22,11 +24,8 @@
   let browsingFolder = $state(false);
   let folder = $state('');
   let pattern = $state(DEFAULT_PATTERN);
-  // A CSV link.
-  let url = $state('');
-  let every = $state<UrlEvery>('hourly');
-  let linkName = $state('');
-  const problem = $derived(linkProblem(url));
+  // A web link to CSV or JSON data.
+  const link = new LinkForm();
 
   async function addFiles(paths: string[]) {
     let last: string | undefined;
@@ -80,9 +79,10 @@
 
   async function addLink(e: SubmitEvent) {
     e.preventDefault();
+    link.tidy();
     let added = '';
     const ok = await app.run('Fetching the link…', async () => {
-      const r = await api.addUrl(url.trim(), every, linkName.trim());
+      const r = await api.addUrl(link.url.trim(), link.every, link.name.trim(), link.settings());
       added = r.added;
       return r;
     });
@@ -161,28 +161,7 @@
     </form>
   {:else if tab === 'link'}
     <form class="db" id="linkform" onsubmit={addLink}>
-      <label class="stack">
-        <span class="label">A CSV link (for example a Google Sheet published to the web)</span>
-        <input class="field" type="url" bind:value={url} placeholder="https://" autocomplete="off" required />
-        {#if problem}<span class="help bad">{problem}</span>{/if}
-      </label>
-      <p class="note">
-        <Icon name="info" size={14} />
-        In Google Sheets, open File, then Share, then Publish to the web. Pick the sheet, choose Comma-separated values
-        (.csv), press Publish and copy the link.
-      </p>
-      <div class="grid2">
-        <label class="stack">
-          <span class="label">Name</span>
-          <input class="field" bind:value={linkName} placeholder="Optional" />
-        </label>
-        <label class="stack">
-          <span class="label">Refresh</span>
-          <select class="field" bind:value={every}>
-            {#each EVERY_CHOICES as c}<option value={c.value}>{c.label}</option>{/each}
-          </select>
-        </label>
-      </div>
+      <LinkFields f={link} />
       <p class="note">
         <Icon name="info" size={14} />
         Tenun downloads the link and keeps a copy next to your workspace. It sends no cookies, and reads up to 50 MB.
@@ -221,7 +200,7 @@
       <button class="btn primary" type="submit" form="folderform" disabled={!!app.busy || !folder}>{app.busy ?? 'Add folder'}</button>
     {:else if tab === 'link'}
       <button class="btn" onclick={onclose}>Cancel</button>
-      <button class="btn primary" type="submit" form="linkform" disabled={!!app.busy || !url.trim() || !!problem}>{app.busy ?? 'Add link'}</button>
+      <button class="btn primary" type="submit" form="linkform" disabled={!!app.busy || !link.url.trim() || !!link.problem}>{app.busy ?? 'Add link'}</button>
     {:else}
       <button class="btn" onclick={onclose}>Close</button>
     {/if}
@@ -281,8 +260,6 @@
   .grid .wide:nth-child(5), .grid .wide:nth-child(6) { grid-column: span 2; }
   .stack { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
   .help { color: var(--text-2); font-size: 12px; }
-  .help.bad { color: var(--danger); }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-top: 12px; }
   .note { display: flex; gap: 8px; margin: 14px 0 0; color: var(--text-2); font-size: 12px; }
   .note :global(svg) { margin-top: 1px; }
 </style>
