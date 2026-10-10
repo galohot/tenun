@@ -3,12 +3,15 @@
 //! the app, exported files, published dashboards and the headless agent agree; the UI only draws.
 
 use crate::catalog::DType;
-use crate::engine::{Engine, QueryResult, Repeat};
-use crate::query::{Dimension, Filter, FilterOp, OutColumn, SemanticQuery};
+use crate::engine::{Engine, Pair, QueryResult, Repeat};
+use crate::query::{
+    Agg, Dimension, Filter, FilterOp, Grain, Measure, OutColumn, SemanticQuery, Sort, Unit,
+};
 use crate::shape::{Dim0, Layout, OTHER_KEY, classify, cmp_key};
-use crate::snapshot::{SortBy, Tile, TopN, js_key};
+use crate::snapshot::{SortBy, Tile, TopN, add_grain, count_rows, iso, js_key, parse_day};
+use chrono::{Datelike, Duration, NaiveDate};
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// A small-multiples tile draws at most this many charts. The rest are counted ("and 5 more").
 pub const MAX_CHARTS: usize = 12;
@@ -18,6 +21,22 @@ pub const MAX_BOX_GROUPS: usize = 40;
 pub const MAX_OUTLIERS: usize = 50;
 /// A repeat field is read for up to this many values, to find the charts.
 const REPEAT_READ: u32 = 5000;
+/// A Sankey chart has two or three stages.
+pub const SANKEY_STAGES: usize = 3;
+/// A stage of a Sankey chart shows at most this many nodes, "Other" included.
+pub const MAX_NODES: usize = 25;
+/// Links are read for up to this many pairs of nodes between two stages.
+const SANKEY_LINKS: u32 = 5000;
+/// A Gantt chart draws at most this many rows.
+pub const MAX_GANTT_ROWS: u32 = 100;
+/// A compare chart draws at most this many rows, the ones with the biggest gap.
+pub const MAX_COMPARE_ROWS: usize = 40;
+/// A trend column draws this many periods.
+pub const SPARK_POINTS: usize = 12;
+/// A cohort grid shows the latest cohorts, this many at most.
+pub const MAX_COHORTS: usize = 36;
+/// A cohort grid follows each cohort for this many periods after its first.
+pub const MAX_COHORT_OFFSET: i64 = 24;
 
 /// Does this tile ask for small multiples? Only a bar, line or area with a group has them.
 pub fn repeats(tile: &Tile) -> bool {
@@ -442,5 +461,614 @@ pub fn boxplot(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
         repeat: None,
         real: None,
         outliers: Some(outliers),
+        sparks: None,
+        pair: None,
     })
+}
+
+// ---- compare: dumbbell and slope --------------------------------------------------------
+
+/// A compare chart with one value reads two periods of its second field. They are the periods
+/// the user picked (`tile.periods`), or the latest two. The question is cut to them. Returns the
+/// two periods in the order of the two value columns; `None` when the chart compares two values.
+pub fn compare_periods(
+    engine: &Engine,
+    tile: &Tile,
+    q: &mut SemanticQuery,
+    wide: &[Filter],
+) -> anyhow::Result<Option<Vec<Value>>> {
+    if tile.measures.len() >= 2 || q.dimensions.len() < 2 {
+        return Ok(None);
+    }
+    let d = q.dimensions[1].clone();
+    let chosen: Vec<Value> = match &tile.periods {
+        Some(p) if p.len() == 2 => p.clone(),
+        _ => {
+            let all = engine.query(&SemanticQuery {
+                measures: q.measures.clone(),
+                dimensions: vec![d.clone()],
+                filters: wide.to_vec(),
+                sort: vec![],
+                limit: Some(REPEAT_READ),
+            })?;
+            let mut keys: Vec<Value> = all
+                .rows
+                .iter()
+                .filter(|r| !r[0].is_null())
+                .map(|r| r[0].clone())
+                .collect();
+            keys.sort_by(cmp_key);
+            let from = keys.len().saturating_sub(2);
+            keys.split_off(from)
+        }
+    };
+    q.filters.push(Filter {
+        table: d.table,
+        column: d.column,
+        grain: d.grain,
+        op: FilterOp::In,
+        values: chosen.clone(),
+    });
+    Ok(Some(chosen))
+}
+
+/// Puts the rows of a compare chart in the shape `[group, first, second]`: the rows already have it
+/// for two values, and one value over two periods is turned into it. Then it orders the rows by the
+/// size of the gap, biggest first (or as the tile sorts them), and keeps the first
+/// [`MAX_COMPARE_ROWS`]; `total_rows` says how many there were.
+pub fn compare_pairs(
+    tile: &Tile,
+    q: &SemanticQuery,
+    res: &mut QueryResult,
+    periods: Option<Vec<Value>>,
+) {
+    if let Some(p) = periods {
+        if q.dimensions.len() != 2 || res.rows.iter().any(|r| r.len() != 3) {
+            return;
+        }
+        let mut at: HashMap<String, usize> = HashMap::new();
+        let mut out: Vec<Vec<Value>> = Vec::new();
+        for r in &res.rows {
+            let i = *at.entry(js_key(&r[0])).or_insert_with(|| {
+                out.push(vec![r[0].clone(), Value::Null, Value::Null]);
+                out.len() - 1
+            });
+            if let Some(slot) = p.iter().position(|x| js_key(x) == js_key(&r[1])) {
+                out[i][1 + slot] = r[2].clone();
+            }
+        }
+        let value = res.columns[2].clone();
+        let name = |v: Option<&Value>| v.map(js_key).unwrap_or_default();
+        res.columns = vec![
+            res.columns[0].clone(),
+            OutColumn {
+                name: name(p.first()),
+                ..value.clone()
+            },
+            OutColumn {
+                name: name(p.get(1)),
+                ..value
+            },
+        ];
+        res.rows = out;
+        res.pair = Some(Pair { periods: Some(p) });
+    }
+    if res.rows.iter().any(|r| r.len() != 3) {
+        return;
+    }
+    let num = |v: &Value| v.as_f64().filter(|x| x.is_finite());
+    let gap = |r: &Vec<Value>| match (num(&r[1]), num(&r[2])) {
+        (Some(a), Some(b)) => Some((b - a).abs()),
+        _ => None,
+    };
+    match tile.sort.as_ref().map(|s| (s.by, s.desc)) {
+        Some((SortBy::Label, desc)) => {
+            res.rows.sort_by(|a, b| cmp_key(&a[0], &b[0]));
+            if desc == Some(true) {
+                res.rows.reverse();
+            }
+        }
+        Some((SortBy::Value, desc)) => {
+            res.rows.sort_by(|a, b| {
+                let o = num(&b[1])
+                    .unwrap_or(f64::NEG_INFINITY)
+                    .total_cmp(&num(&a[1]).unwrap_or(f64::NEG_INFINITY));
+                if desc == Some(false) { o.reverse() } else { o }
+            });
+        }
+        // The default: the biggest gap first, rows with a missing value last.
+        _ => res.rows.sort_by(|a, b| {
+            gap(b)
+                .unwrap_or(-1.0)
+                .total_cmp(&gap(a).unwrap_or(-1.0))
+                .then_with(|| cmp_key(&a[0], &b[0]))
+        }),
+    }
+    if res.rows.len() > MAX_COMPARE_ROWS {
+        res.total_rows = Some(res.rows.len() as u64);
+        res.rows.truncate(MAX_COMPARE_ROWS);
+    }
+}
+
+// ---- calendar ----------------------------------------------------------------------------
+
+/// The first day of the month `n` months before the month of `d`.
+fn month_start(d: NaiveDate, back: u32) -> NaiveDate {
+    let first = NaiveDate::from_ymd_opt(d.year(), d.month(), 1).unwrap_or(d);
+    first
+        .checked_sub_months(chrono::Months::new(back))
+        .unwrap_or(first)
+}
+
+/// A calendar shows the last 12 months that have data: the month of the latest day, and the 11
+/// before it. The days come back in time order. A day with no date has no place on a calendar.
+pub fn calendar_window(res: &mut QueryResult) {
+    let latest = res
+        .rows
+        .iter()
+        .filter_map(|r| r.first().and_then(Value::as_str).and_then(parse_day))
+        .max();
+    let Some(latest) = latest else {
+        res.rows.clear();
+        return;
+    };
+    let start = iso(month_start(latest, 11));
+    res.rows.retain(|r| {
+        r.first()
+            .and_then(Value::as_str)
+            .is_some_and(|d| d.get(..10).is_some_and(|d| d >= start.as_str()))
+    });
+    res.rows.sort_by(|a, b| cmp_key(&a[0], &b[0]));
+}
+
+// ---- Sankey ------------------------------------------------------------------------------
+
+/// Sankey data. For each pair of neighbouring stages it reads the value of every pair of nodes,
+/// and gives links as rows `[stage, from, to, value]`: `stage` is the index of the stage the link
+/// starts at. Each stage keeps its biggest nodes (24, so with "Other" there are 25 at most) and the
+/// rest fold into one "Other" node (key `OTHER_KEY`); links that meet there add up. A link with no
+/// value, or a value of zero or less, has nothing to draw and is left out.
+pub fn sankey(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Result<QueryResult> {
+    let stages: Vec<&Dimension> = tile.dims.iter().take(SANKEY_STAGES).collect();
+    if stages.len() < 2 {
+        anyhow::bail!("A Sankey chart needs two or three fields, one for each stage.");
+    }
+    let m = tile
+        .measures
+        .first()
+        .cloned()
+        .unwrap_or_else(|| count_rows(&stages[0].table));
+    let start = std::time::Instant::now();
+    let mut links: Vec<(usize, Value, Value, f64)> = Vec::new();
+    let mut ignored = vec![];
+    let mut value_col = None;
+    for i in 0..stages.len() - 1 {
+        let r = engine.query(&SemanticQuery {
+            measures: vec![m.clone()],
+            dimensions: vec![stages[i].clone(), stages[i + 1].clone()],
+            filters: filters.to_vec(),
+            sort: vec![Sort { by: 2, desc: true }],
+            limit: Some(SANKEY_LINKS),
+        })?;
+        if i == 0 {
+            ignored = r.ignored_filters.clone();
+            value_col = r.columns.get(2).cloned();
+        }
+        for row in r.rows {
+            if let Some(v) = row
+                .get(2)
+                .and_then(Value::as_f64)
+                .filter(|v| *v > 0.0 && v.is_finite())
+            {
+                links.push((i, row[0].clone(), row[1].clone(), v));
+            }
+        }
+    }
+    // What passes through each node: what leaves a first-stage node, what arrives at the others.
+    let mut totals: Vec<HashMap<String, f64>> = vec![HashMap::new(); stages.len()];
+    for (i, from, to, v) in &links {
+        if *i == 0 {
+            *totals[0].entry(js_key(from)).or_default() += v;
+        }
+        *totals[i + 1].entry(js_key(to)).or_default() += v;
+    }
+    // The nodes that stay, for each stage. The rest are "Other".
+    let kept: Vec<HashSet<String>> = totals
+        .iter()
+        .map(|t| {
+            let mut ranked: Vec<(&String, &f64)> = t.iter().collect();
+            ranked.sort_by(|a, b| b.1.total_cmp(a.1).then_with(|| a.0.cmp(b.0)));
+            if ranked.len() > MAX_NODES {
+                ranked.truncate(MAX_NODES - 1);
+            }
+            ranked.into_iter().map(|(k, _)| k.clone()).collect()
+        })
+        .collect();
+    let mut folded = false;
+    let mut name = |stage: usize, v: &Value| -> Value {
+        if kept[stage].contains(&js_key(v)) {
+            v.clone()
+        } else {
+            folded = true;
+            Value::String(OTHER_KEY.into())
+        }
+    };
+    let mut merged: BTreeMap<(usize, String, String), (Value, Value, f64)> = BTreeMap::new();
+    for (i, from, to, v) in &links {
+        let (a, b) = (name(*i, from), name(i + 1, to));
+        let e = merged
+            .entry((*i, js_key(&a), js_key(&b)))
+            .or_insert((a, b, 0.0));
+        e.2 += v;
+    }
+    let mut rows: Vec<(usize, Value, Value, f64)> = merged
+        .into_iter()
+        .map(|((i, ..), (a, b, v))| (i, a, b, v))
+        .collect();
+    rows.sort_by(|x, y| {
+        x.0.cmp(&y.0)
+            .then_with(|| y.3.total_cmp(&x.3))
+            .then_with(|| js_key(&x.1).cmp(&js_key(&y.1)))
+            .then_with(|| js_key(&x.2).cmp(&js_key(&y.2)))
+    });
+    let dim = |name: &str, dtype| OutColumn {
+        name: name.into(),
+        role: "dimension".into(),
+        dtype,
+        unit: None,
+    };
+    let mut res = QueryResult::new(
+        vec![
+            dim("Stage", DType::Number),
+            dim("From", DType::Text),
+            dim("To", DType::Text),
+            value_col.unwrap_or(OutColumn {
+                name: "Value".into(),
+                role: "measure".into(),
+                dtype: DType::Number,
+                unit: None,
+            }),
+        ],
+        rows.into_iter()
+            .map(|(i, a, b, v)| vec![json!(i), a, b, json!(v)])
+            .collect(),
+    );
+    res.ignored_filters = ignored;
+    res.other = folded.then_some(true);
+    res.ms = start.elapsed().as_millis();
+    Ok(res)
+}
+
+// ---- cohort grid -------------------------------------------------------------------------
+
+/// How many periods of size `g` lie between two period starts: 0 for the same period.
+pub fn cohort_offset(from: NaiveDate, to: NaiveDate, g: Grain) -> i64 {
+    let months =
+        i64::from(to.year() - from.year()) * 12 + i64::from(to.month()) - i64::from(from.month());
+    match g {
+        Grain::Year => i64::from(to.year() - from.year()),
+        Grain::Quarter => months.div_euclid(3),
+        Grain::Month => months,
+        Grain::Week => (to - from).num_days().div_euclid(7),
+        _ => (to - from).num_days(),
+    }
+}
+
+/// Cohort data. The entity is the column of `measures[0]` (for example `customer_id`), the event
+/// date is the field of `dims[0]` at a grain. An entity belongs to the cohort of its first period
+/// with an event. Rows are `[cohort, periods since the cohort started, value, size]`: `value` is the
+/// share of the cohort that has an event in that period (0 to 1), or, when `measures[1]` is set,
+/// the sum of that column over the events of the cohort in that period. `size` is the number of
+/// entities in the cohort. A cohort has a row for each period from its start to the last period
+/// with data, also when nobody was active (0), and none after that. The latest 36 cohorts are kept,
+/// and 24 periods after each.
+pub fn cohort(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Result<QueryResult> {
+    let ent = tile
+        .measures
+        .first()
+        .filter(|m| m.column.is_some())
+        .ok_or_else(|| {
+            anyhow::anyhow!("Pick the column that names who or what to follow, like customer_id.")
+        })?;
+    let ent_col = ent.column.clone().unwrap_or_default();
+    let d = tile
+        .dims
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Pick the date of the events, like the order date."))?;
+    let Dim0::Period(grain) = classify(engine, d) else {
+        anyhow::bail!(
+            "The cohort date must be a date grouped by day, week, month, quarter or year."
+        );
+    };
+    let amount = tile.measures.get(1);
+    let mut measures = vec![Measure {
+        table: ent.table.clone(),
+        column: Some(ent_col.clone()),
+        agg: Agg::Count,
+        per: None,
+    }];
+    measures.extend(amount.cloned());
+    let q = SemanticQuery {
+        measures,
+        dimensions: vec![d.clone()],
+        filters: filters.to_vec(),
+        sort: vec![],
+        limit: None,
+    };
+    let start = std::time::Instant::now();
+    let (found, ignored) = engine.query_custom(&q, |sc| {
+        let (e, _) = sc.expr(&ent.table, &ent_col, None)?;
+        let (p, _) = sc.expr(&d.table, &d.column, d.grain)?;
+        let x = match amount.and_then(|a| a.column.as_deref().map(|c| (a, c))) {
+            Some((a, c)) => format!("CAST({} AS DOUBLE)", sc.expr(&a.table, c, None)?.0),
+            None => "1".to_string(),
+        };
+        Ok((
+            format!(
+                "WITH ev AS (SELECT {e} AS ent, {p} AS per, {x} AS x{}), \
+                 fp AS (SELECT ent, min(per) AS c FROM ev \
+                 WHERE ent IS NOT NULL AND per IS NOT NULL GROUP BY ent) \
+                 SELECT fp.c, ev.per, CAST(count(DISTINCT ev.ent) AS DOUBLE), \
+                 CAST(sum(ev.x) AS DOUBLE) FROM ev JOIN fp ON ev.ent = fp.ent \
+                 WHERE ev.per IS NOT NULL GROUP BY fp.c, ev.per",
+                sc.from_where
+            ),
+            sc.params.clone(),
+        ))
+    })?;
+    let mut cells: Vec<(NaiveDate, NaiveDate, f64, f64)> = Vec::new();
+    for r in &found {
+        let day = |i: usize| r.get(i).and_then(Value::as_str).and_then(parse_day);
+        if let (Some(c), Some(p)) = (day(0), day(1)) {
+            let num = |i: usize| r.get(i).and_then(Value::as_f64).unwrap_or(0.0);
+            cells.push((c, p, num(2), num(3)));
+        }
+    }
+    let last = cells.iter().map(|c| c.1).max();
+    let mut cohorts: Vec<NaiveDate> = cells.iter().map(|c| c.0).collect();
+    cohorts.sort();
+    cohorts.dedup();
+    let from = cohorts.len().saturating_sub(MAX_COHORTS);
+    let cohorts = &cohorts[from..];
+    let by: HashMap<(NaiveDate, i64), (f64, f64)> = cells
+        .iter()
+        .map(|(c, p, n, s)| ((*c, cohort_offset(*c, *p, grain)), (*n, *s)))
+        .collect();
+    let sum_mode = amount.is_some();
+    let mut rows = Vec::new();
+    if let Some(last) = last {
+        for c in cohorts {
+            let size = by.get(&(*c, 0)).map_or(0.0, |v| v.0);
+            let reach = cohort_offset(*c, last, grain).min(MAX_COHORT_OFFSET);
+            for k in 0..=reach {
+                let (n, s) = by.get(&(*c, k)).copied().unwrap_or((0.0, 0.0));
+                let value = if sum_mode {
+                    s
+                } else if size > 0.0 {
+                    n / size
+                } else {
+                    0.0
+                };
+                rows.push(vec![json!(iso(*c)), json!(k), json!(value), json!(size)]);
+            }
+        }
+    }
+    let col = |name: &str, role: &str, dtype: DType, unit: Option<Unit>| OutColumn {
+        name: name.into(),
+        role: role.into(),
+        dtype,
+        unit,
+    };
+    let mut res = QueryResult::new(
+        vec![
+            col("Cohort", "dimension", DType::Date, None),
+            col("Periods since the start", "dimension", DType::Number, None),
+            col(
+                if sum_mode { "Total" } else { "Active" },
+                "measure",
+                DType::Number,
+                (!sum_mode).then_some(Unit::Percent),
+            ),
+            col("Size", "measure", DType::Number, None),
+        ],
+        rows,
+    );
+    res.ignored_filters = ignored;
+    res.ms = start.elapsed().as_millis();
+    Ok(res)
+}
+
+// ---- trend column ------------------------------------------------------------------------
+
+/// The key of a table row in `res.sparks`: the values of its groups, joined by a unit separator.
+pub fn spark_key(groups: &[Value]) -> String {
+    groups.iter().map(js_key).collect::<Vec<_>>().join("\u{1f}")
+}
+
+/// The first day of the period of grain `g` that holds `d`. Weeks start on Monday.
+pub fn period_start(d: NaiveDate, g: Grain) -> NaiveDate {
+    match g {
+        Grain::Year => NaiveDate::from_ymd_opt(d.year(), 1, 1),
+        Grain::Quarter => NaiveDate::from_ymd_opt(d.year(), d.month0() / 3 * 3 + 1, 1),
+        Grain::Month => NaiveDate::from_ymd_opt(d.year(), d.month(), 1),
+        Grain::Week => Some(d - Duration::days(i64::from(d.weekday().num_days_from_monday()))),
+        _ => Some(d),
+    }
+    .unwrap_or(d)
+}
+
+/// A table with a trend column (`tile.spark`) gets, for each of its rows, the first value over the
+/// last 12 periods of the date field that are over: the period of the latest date counts only when
+/// the data reaches its last day, so a month that has just begun does not draw as a drop. Periods with no
+/// rows are 0 for sums and counts and gaps for every other kind of value, the way a time chart
+/// fills them. The rows of the table are the ones asked for; the "Other" row of a top N has none.
+pub fn sparks(
+    engine: &Engine,
+    tile: &Tile,
+    q: &SemanticQuery,
+    res: &mut QueryResult,
+) -> anyhow::Result<()> {
+    let (Some(sd), Some(m0)) = (tile.spark.as_ref(), q.measures.first()) else {
+        return Ok(());
+    };
+    if tile.kind != "table" || q.dimensions.is_empty() || res.rows.is_empty() {
+        return Ok(());
+    }
+    let grain = sd.grain.filter(|g| !g.is_part()).unwrap_or(Grain::Month);
+    let nd = q.dimensions.len();
+    let latest = engine.query(&SemanticQuery {
+        measures: vec![Measure {
+            table: sd.table.clone(),
+            column: Some(sd.column.clone()),
+            agg: Agg::Max,
+            per: None,
+        }],
+        dimensions: vec![],
+        filters: q.filters.clone(),
+        sort: vec![],
+        limit: None,
+    })?;
+    let Some(max_day) = latest
+        .rows
+        .first()
+        .and_then(|r| r.first())
+        .and_then(Value::as_str)
+        .and_then(parse_day)
+    else {
+        return Ok(());
+    };
+    // The period of the latest date is left out while it is not over (the same rule as a time chart).
+    let mut last = period_start(max_day, grain);
+    if grain != Grain::Day && max_day < add_grain(last, grain, 1) - Duration::days(1) {
+        last = add_grain(last, grain, -1);
+    }
+    let first = add_grain(last, grain, 1 - SPARK_POINTS as i32);
+    let periods: Vec<String> = (0..SPARK_POINTS as i32)
+        .map(|i| iso(add_grain(first, grain, i)))
+        .collect();
+    // Only the rows on show are read: the first group of the table, in the values shown.
+    let shown: Vec<Value> = {
+        let mut seen = HashSet::new();
+        res.rows
+            .iter()
+            .map(|r| r[0].clone())
+            .filter(|v| js_key(v) != OTHER_KEY && seen.insert(js_key(v)))
+            .collect()
+    };
+    let mut filters = q.filters.clone();
+    filters.push(Filter {
+        table: q.dimensions[0].table.clone(),
+        column: q.dimensions[0].column.clone(),
+        grain: q.dimensions[0].grain,
+        op: FilterOp::In,
+        values: shown,
+    });
+    filters.push(Filter {
+        table: sd.table.clone(),
+        column: sd.column.clone(),
+        grain: None,
+        op: FilterOp::Gte,
+        values: vec![json!(iso(first))],
+    });
+    let mut dims = q.dimensions.clone();
+    dims.push(Dimension {
+        grain: Some(grain),
+        ..sd.clone()
+    });
+    let found = engine.query(&SemanticQuery {
+        measures: vec![m0.clone()],
+        dimensions: dims,
+        filters,
+        sort: vec![],
+        limit: Some(10_000),
+    })?;
+    // Nothing happened is 0 for a sum or a count and a gap for the rest.
+    let empty = if matches!(m0.agg, Agg::Sum | Agg::Count | Agg::CountDistinct) && m0.per.is_none()
+    {
+        Some(0.0)
+    } else {
+        None
+    };
+    let mut lines: BTreeMap<String, Vec<Option<f64>>> = BTreeMap::new();
+    for r in &res.rows {
+        if js_key(&r[0]) != OTHER_KEY {
+            lines.insert(spark_key(&r[..nd]), vec![empty; SPARK_POINTS]);
+        }
+    }
+    for r in &found.rows {
+        let key = spark_key(&r[..nd]);
+        let at = r
+            .get(nd)
+            .and_then(Value::as_str)
+            .and_then(|p| periods.iter().position(|x| p.get(..10) == Some(x.as_str())));
+        if let (Some(line), Some(i)) = (lines.get_mut(&key), at) {
+            line[i] = r.get(nd + 1).and_then(Value::as_f64);
+        }
+    }
+    res.sparks = Some(lines);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn d(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn cohort_offsets_count_whole_periods() {
+        let m = |a, b| cohort_offset(d(a), d(b), Grain::Month);
+        assert_eq!(m("2026-01-01", "2026-01-01"), 0);
+        assert_eq!(m("2026-01-01", "2026-03-01"), 2);
+        // Across a year end.
+        assert_eq!(m("2025-11-01", "2026-02-01"), 3);
+        assert_eq!(
+            cohort_offset(d("2025-10-01"), d("2026-04-01"), Grain::Quarter),
+            2
+        );
+        assert_eq!(
+            cohort_offset(d("2024-01-01"), d("2026-01-01"), Grain::Year),
+            2
+        );
+        assert_eq!(
+            cohort_offset(d("2026-01-05"), d("2026-01-26"), Grain::Week),
+            3
+        );
+        assert_eq!(
+            cohort_offset(d("2026-01-05"), d("2026-01-08"), Grain::Day),
+            3
+        );
+    }
+
+    #[test]
+    fn period_starts() {
+        assert_eq!(period_start(d("2026-05-17"), Grain::Month), d("2026-05-01"));
+        assert_eq!(
+            period_start(d("2026-05-17"), Grain::Quarter),
+            d("2026-04-01")
+        );
+        assert_eq!(period_start(d("2026-05-17"), Grain::Year), d("2026-01-01"));
+        // 17 May 2026 is a Sunday: its week began on Monday 11 May.
+        assert_eq!(period_start(d("2026-05-17"), Grain::Week), d("2026-05-11"));
+    }
+
+    #[test]
+    fn spark_keys_join_the_groups() {
+        assert_eq!(spark_key(&[json!("A")]), "A");
+        assert_eq!(spark_key(&[json!("A"), json!(2)]), "A\u{1f}2");
+    }
+
+    #[test]
+    fn the_calendar_keeps_twelve_months() {
+        let mut res = QueryResult::new(vec![], vec![]);
+        res.rows = ["2026-03-20", "2025-04-02", "2025-03-31", "2025-06-15"]
+            .iter()
+            .map(|d| vec![json!(d), json!(1)])
+            .collect();
+        calendar_window(&mut res);
+        let days: Vec<&str> = res.rows.iter().map(|r| r[0].as_str().unwrap()).collect();
+        assert_eq!(days, ["2025-04-02", "2025-06-15", "2026-03-20"]);
+    }
 }

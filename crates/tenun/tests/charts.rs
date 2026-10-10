@@ -221,20 +221,28 @@ fn clicking_a_bin_filters_the_other_tiles_offline() {
 }
 
 #[test]
-fn scatter_asks_for_two_values_and_two_groups() {
+fn scatter_asks_for_two_values_a_third_for_the_size_and_two_groups() {
     let e = engine("scatter");
     let amount = json!({ "table": "s1/sales", "column": "amount", "agg": "sum" });
     let cost = json!({ "table": "s1/sales", "column": "cost", "agg": "sum" });
     let by = json!([{ "table": "s1/sales", "column": "product" }, { "table": "s1/sales", "column": "region" }]);
-    let t = tile("scatter", json!([amount, cost, amount]), by, json!({}));
+    // Two values: across and up. A third (build 13) sets the size of the dot; a fourth is not asked for.
+    let two = tile("scatter", json!([amount, cost]), by.clone(), json!({}));
+    assert_eq!(tile_query(&two, &[]).unwrap().measures.len(), 2);
+    let t = tile(
+        "scatter",
+        json!([amount, cost, amount, cost]),
+        by,
+        json!({}),
+    );
     let q = tile_query(&t, &[]).unwrap();
     assert_eq!(
         (q.measures.len(), q.dimensions.len(), q.limit),
-        (2, 2, Some(2000))
+        (3, 2, Some(2000))
     );
     let r = run(&e, &t);
-    // Columns: dot, colour, x, y. Arabica in the North sold 100 + 200 at a cost of 40 + 80.
-    assert_eq!(r.columns.len(), 4);
+    // Columns: dot, colour, x, y, size. Arabica in the North sold 100 + 200 at a cost of 40 + 80.
+    assert_eq!(r.columns.len(), 5);
     let arabica = r.rows.iter().find(|row| row[0] == "Arabica").unwrap();
     assert_eq!(
         (

@@ -5,7 +5,7 @@
   import { barScale, barSpan, barStyle, goodBad } from '../../lib/cells';
   import { cell, columnHeads, resultDim0, type Named } from '../../lib/format';
   import { effectiveShowAs } from '../../lib/showas';
-  import { MAX_PIVOT_ROWS, pivotModel } from '../../lib/pivot';
+  import { groupKeys, isExpandable, MAX_PIVOT_ROWS, pivotModel, pivotTree, visibleNodes } from '../../lib/pivot';
 
   let {
     res,
@@ -77,11 +77,50 @@
     for (let k = 0; k <= i; k++) if (key(m.rows[r].raw[k]) !== key(m.rows[r - 1].raw[k])) return true;
     return false;
   };
+  // Expandable groups (Advanced): the first row fields open and close. A closed group shows its subtotal.
+  const expandable = $derived(!!tile.expand && isExpandable(m));
+  const tree = $derived(expandable ? pivotTree(m) : []);
+  let closed = $state<Set<string>>(new Set());
+  const shown = $derived(expandable ? visibleNodes(tree, closed) : []);
+  function toggle(k: string) {
+    const next = new Set(closed);
+    if (!next.delete(k)) next.add(k);
+    closed = next;
+  }
+  const rowFields = $derived(Array.from({ length: m.nRows }, (_, i) => i));
   const rowSel = (raw: Cell[]) => selected === null || selected.some((s) => key(s) === key(raw[0]));
   const colSel = (raw: Cell) => selectedCol === null || selectedCol.some((s) => key(s) === key(raw));
 </script>
 
+{#snippet dataCells(cells: (Cell[] | null)[], rowTotal: Cell[] | null, bold: boolean)}
+  {#each cells as c, ci}
+    {#each values as j}
+      {@const verdict = verdictOf(c?.[j], j)}
+      <td
+        class="num"
+        class:strong={bold}
+        class:dim={!colSel(m.cols[ci].raw)}
+        class:empty={blank(c?.[j])}
+        class:good={verdict?.tone === 'good'}
+        class:bad={verdict?.tone === 'bad'}
+        style={barOf(c?.[j], j) || undefined}
+        title={verdict ? `${verdict.word} ${lineText(j)}` : undefined}>
+        {#if verdict}<span class="glyph" role="img" aria-label={verdict.word.toLowerCase()}>{verdict.glyph}</span>{/if}{show(c?.[j], j)}
+      </td>
+    {/each}
+  {/each}
+  {#if hasRowTotals}
+    {#each values as j}<td class="num strong">{total(rowTotal, j)}</td>{/each}
+  {/if}
+{/snippet}
+
 <div class="pivot">
+  {#if expandable}
+    <div class="tools">
+      <button class="link" onclick={() => (closed = new Set())}>Open all</button>
+      <button class="link" onclick={() => (closed = new Set(groupKeys(tree)))}>Close all</button>
+    </div>
+  {/if}
   <div class="scroll">
     <table>
       <thead>
@@ -113,6 +152,38 @@
         {/if}
       </thead>
       <tbody>
+        {#if expandable}
+          {#each shown as n (n.group ? `g${n.group.key}` : `r${n.row?.key}`)}
+            {#if n.group}
+              {@const g = n.group}
+              <tr class="group" class:dim={!rowSel(g.raw)} class:pick={!!onpick}>
+                {#each rowFields as i}
+                  <th class="rowhead" class:first={i === 0} scope="row" colspan={i === g.depth ? m.nRows - g.depth : 1} hidden={i > g.depth}>
+                    {#if i === g.depth}
+                      <button class="twisty" aria-expanded={!closed.has(g.key)} aria-label="{closed.has(g.key) ? 'Open' : 'Close'} {rowLabel(g.raw[g.depth], g.depth)}" onclick={() => toggle(g.key)}>
+                        <span class="chev" class:shut={closed.has(g.key)} aria-hidden="true">▾</span>
+                      </button>
+                      {#if onpick && g.depth === 0}
+                        <button class="name" onclick={() => onpick?.(g.raw[0])} title="Filter the other tiles to this row">{rowLabel(g.raw[g.depth], g.depth)}</button>
+                      {:else}
+                        {rowLabel(g.raw[g.depth], g.depth)}
+                      {/if}
+                    {/if}
+                  </th>
+                {/each}
+                {@render dataCells(g.cells, g.total, true)}
+              </tr>
+            {:else if n.row}
+              {@const r = n.row}
+              <tr class:dim={!rowSel(r.raw)}>
+                {#each r.raw as v, i}
+                  <th class="rowhead" class:first={i === 0} scope="row">{#if i === m.nRows - 1}{rowLabel(v, i)}{/if}</th>
+                {/each}
+                {@render dataCells(r.cells, r.total, false)}
+              </tr>
+            {/if}
+          {/each}
+        {:else}
         {#each m.rows as r, ri}
           <tr class:dim={!rowSel(r.raw)} class:pick={!!onpick}>
             {#each r.raw as v, i}
@@ -126,26 +197,10 @@
                 {/if}
               </th>
             {/each}
-            {#each r.cells as c, ci}
-              {#each values as j}
-                {@const verdict = verdictOf(c?.[j], j)}
-                <td
-                  class="num"
-                  class:dim={!colSel(m.cols[ci].raw)}
-                  class:empty={blank(c?.[j])}
-                  class:good={verdict?.tone === 'good'}
-                  class:bad={verdict?.tone === 'bad'}
-                  style={barOf(c?.[j], j) || undefined}
-                  title={verdict ? `${verdict.word} ${lineText(j)}` : undefined}>
-                  {#if verdict}<span class="glyph" role="img" aria-label={verdict.word.toLowerCase()}>{verdict.glyph}</span>{/if}{show(c?.[j], j)}
-                </td>
-              {/each}
-            {/each}
-            {#if hasRowTotals}
-              {#each values as j}<td class="num strong">{total(r.total, j)}</td>{/each}
-            {/if}
+            {@render dataCells(r.cells, r.total, false)}
           </tr>
         {/each}
+        {/if}
       </tbody>
       {#if hasTotalRow}
         <tfoot>
@@ -176,6 +231,15 @@
   .pivot { height: 100%; display: flex; flex-direction: column; }
   .scroll { flex: 1; min-height: 0; overflow: auto; margin: 0 -14px; }
   .note { flex: none; margin: 4px 0 0; font-size: 11px; color: var(--text-2); }
+  .tools { flex: none; display: flex; gap: 12px; justify-content: flex-end; margin: 0 0 4px; }
+  .tools .link { border: 0; background: none; padding: 0; font-size: 11px; color: var(--accent-text); }
+  .tools .link:hover { text-decoration: underline; }
+  tr.group th, tr.group td { font-weight: 600; background: var(--window); }
+  .twisty { border: 0; background: none; padding: 0 4px 0 0; width: 18px; color: var(--text-2); }
+  .chev { display: inline-block; transition: transform 0.12s; }
+  .chev.shut { transform: rotate(-90deg); }
+  .rowhead .name { border: 0; background: none; padding: 0; font-weight: 600; text-align: left; }
+  .rowhead .name:hover { text-decoration: underline; }
   table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12px; }
   th, td { padding: 5px 12px; border-bottom: 1px solid var(--sep); white-space: nowrap; background: var(--surface); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; }

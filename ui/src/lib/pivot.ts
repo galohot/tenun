@@ -36,6 +36,26 @@ export interface PivotModel {
   /** [column] → measure totals of that column; null where unknown. */
   colTotals: (Cell[] | null)[];
   grand: Cell[] | null;
+  /** Expandable pivot: the subtotal of each group of the row fields, by the group's values. Empty when the engine sent none. */
+  groups: Map<string, PivotGroup>;
+}
+
+/** A group of rows that share their first `depth + 1` row values, with its subtotals. */
+export interface PivotGroup {
+  /** 0 for the first row field. A group is never at the last row field: that is a row. */
+  depth: number;
+  raw: Cell[];
+  key: string;
+  /** [column][value]; null where the group has no data under that column. */
+  cells: (Cell[] | null)[];
+  total: Cell[] | null;
+}
+
+/** The rows of a pivot as a tree: groups of the first row fields, with the rows at the leaves. */
+export interface PivotNode {
+  group: PivotGroup | null;
+  row: PivotModel['rows'][number] | null;
+  children: PivotNode[];
 }
 
 const naturalOrder = (a: Cell, b: Cell): number => {
@@ -81,11 +101,33 @@ export function pivotModel(res: QueryResult, tile: Pick<Tile, 'cols'>): PivotMod
     entry.cells.set(keyOf(col), values);
     byRow.set(k, entry);
   }
+  // An entry of the row totals with fewer row values than a row is the total of a group.
   const rowTotals = new Map<string, Cell[]>();
-  for (const t of totals?.rows ?? []) rowTotals.set(tupleKey(t.slice(0, nRows)), t.slice(nRows));
+  const groupTotal = new Map<string, { raw: Cell[]; total: Cell[] }>();
+  const leafLen = nRows + nValues;
+  for (const t of totals?.rows ?? []) {
+    if (t.length === leafLen) rowTotals.set(tupleKey(t.slice(0, nRows)), t.slice(nRows));
+    else if (t.length - nValues >= 1 && t.length - nValues < nRows) {
+      const p = t.length - nValues;
+      groupTotal.set(tupleKey(t.slice(0, p)), { raw: t.slice(0, p), total: t.slice(p) });
+    }
+  }
+  // The cells of a group: its values over each column.
+  const groupCells = new Map<string, Map<string, Cell[]>>();
+  for (const t of totals?.groups ?? []) {
+    const p = t.length - 1 - nValues;
+    if (p < 1 || p >= nRows) continue;
+    const k = tupleKey(t.slice(0, p));
+    const m = groupCells.get(k) ?? new Map<string, Cell[]>();
+    m.set(keyOf(t[p]), t.slice(p + 1));
+    groupCells.set(k, m);
+  }
   let order = [...byRow.keys()];
   if (totals?.rows) {
-    const wanted = totals.rows.map((t) => tupleKey(t.slice(0, nRows))).filter((k) => byRow.has(k));
+    const wanted = totals.rows
+      .filter((t) => t.length === leafLen)
+      .map((t) => tupleKey(t.slice(0, nRows)))
+      .filter((k) => byRow.has(k));
     const rest = order.filter((k) => !wanted.includes(k));
     order = [...wanted, ...rest];
   }
@@ -124,5 +166,65 @@ export function pivotModel(res: QueryResult, tile: Pick<Tile, 'cols'>): PivotMod
     }),
     colTotals: cols.map((c) => colTotalOf.get(c.key) ?? null),
     grand: totals?.grand ?? null,
+    groups: new Map(
+      [...groupTotal].map(([k, g]) => [
+        k,
+        {
+          depth: g.raw.length - 1,
+          raw: g.raw,
+          key: k,
+          // With no column field the group's total is its one cell.
+          cells: hasCols ? cols.map((c) => groupCells.get(k)?.get(c.key) ?? null) : [g.total],
+          total: hasCols ? g.total : null,
+        },
+      ]),
+    ),
   };
+}
+
+/** Can the groups of this pivot open and close? It needs two or more row fields and the subtotals of their groups. */
+export const isExpandable = (m: PivotModel): boolean => m.nRows >= 2 && m.groups.size > 0;
+
+/**
+ * The rows as a tree. Rows that share their first values sit under one group, in the order the
+ * rows first appear, so the groups keep the engine's order (biggest first).
+ */
+export function pivotTree(m: PivotModel): PivotNode[] {
+  const root: PivotNode[] = [];
+  const seen = new Map<string, PivotNode>();
+  for (const r of m.rows) {
+    let level = root;
+    for (let d = 0; d < m.nRows - 1; d++) {
+      const prefix = r.raw.slice(0, d + 1);
+      const k = tupleKey(prefix);
+      let node = seen.get(k);
+      if (!node) {
+        const group = m.groups.get(k) ?? { depth: d, raw: prefix, key: k, cells: m.cols.map(() => null), total: null };
+        node = { group, row: null, children: [] };
+        seen.set(k, node);
+        level.push(node);
+      }
+      level = node.children;
+    }
+    level.push({ group: null, row: r, children: [] });
+  }
+  return root;
+}
+
+/** The rows to draw: every group, and the rows and groups under it unless it is closed. */
+export function visibleNodes(tree: readonly PivotNode[], closed: ReadonlySet<string>): PivotNode[] {
+  const out: PivotNode[] = [];
+  const walk = (nodes: readonly PivotNode[]) => {
+    for (const n of nodes) {
+      out.push(n);
+      if (n.group && !closed.has(n.group.key)) walk(n.children);
+    }
+  };
+  walk(tree);
+  return out;
+}
+
+/** The keys of every group in the tree, to close them all at once. */
+export function groupKeys(tree: readonly PivotNode[]): string[] {
+  return tree.flatMap((n) => (n.group ? [n.group.key, ...groupKeys(n.children)] : []));
 }

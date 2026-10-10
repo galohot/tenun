@@ -22,7 +22,7 @@
     /** The category position that was clicked. */
     onpick?: (index: number) => void;
     /** The series and the position in it of a dot that was clicked. */
-    onitem?: (series: number, index: number) => void;
+    onitem?: (series: number, index: number, type?: string) => void;
     /** The value on the horizontal number axis where the chart was clicked. */
     onx?: (x: number) => void;
     onresize?: (width: number, height: number) => void;
@@ -44,7 +44,7 @@
     const zr = chart.getZr();
     if (onitem) {
       chart.on('click', (e) => {
-        if (e.componentType === 'series' && e.seriesIndex !== undefined && e.dataIndex !== undefined) onitem(e.seriesIndex, e.dataIndex);
+        if (e.componentType === 'series' && e.seriesIndex !== undefined && e.dataIndex !== undefined) onitem(e.seriesIndex, e.dataIndex, e.dataType);
       });
     }
     // The plot a point falls in, or -1.

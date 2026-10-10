@@ -25,10 +25,11 @@
   let colors = $state<Colors | null>(null);
   let width = $state(1000);
   /** `col` is a click on a pivot column header. */
-  let pick = $state<{ tile: string; value: Cell; col?: boolean } | null>(null);
-  /** How the engine names the export's stored result for a click on a pivot column header. */
+  let pick = $state<{ tile: string; value: Cell; col?: boolean; stage?: number } | null>(null);
+  /** How the engine names the export's stored result for a click on a pivot column header, or on a Sankey node of a stage. */
   const COL_PREFIX = '\u0001col:';
-  const crossKey = (v: Cell, col?: boolean) => (col ? COL_PREFIX : '') + key(v);
+  const STAGE_PREFIX = '\u0002stage:';
+  const crossKey = (v: Cell, col?: boolean, stage?: number) => (stage !== undefined ? `${STAGE_PREFIX}${stage}:` : col ? COL_PREFIX : '') + key(v);
 
   onMount(() => {
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => (dark = e.matches));
@@ -48,7 +49,16 @@
     return [...data.tiles]
       .sort((a, b) => a.y - b.y || a.x - b.x)
       .map((t) => {
-        const rows = t.type === 'kpi' ? 2 : t.type === 'text' ? Math.max(1, t.h) : t.type === 'pivot' || t.type === 'heatmap' || t.type === 'funnel' ? 5 : 4;
+        const rows =
+          t.type === 'kpi'
+            ? 2
+            : t.type === 'text'
+              ? Math.max(1, t.h)
+              : t.type === 'calendar'
+                ? 3
+                : ['pivot', 'heatmap', 'funnel', 'sankey', 'cohort', 'gantt', 'compare'].includes(t.type)
+                  ? 5
+                  : 4;
         const h = rows * ROW;
         const r = { t, x: 0, y, w: width, h };
         y += h + GAP;
@@ -59,21 +69,21 @@
 
   function resultFor(t: Tile) {
     if (!pick || pick.tile === t.id) return { res: data.base[t.id], offline: false };
-    const r = data.cross[pick.tile]?.[crossKey(pick.value, pick.col)]?.[t.id];
+    const r = data.cross[pick.tile]?.[crossKey(pick.value, pick.col, pick.stage)]?.[t.id];
     return r ? { res: r, offline: false } : { res: data.base[t.id], offline: true };
   }
 
-  function onpick(t: Tile, v: Cell, col = false) {
-    if (!data.cross[t.id]?.[crossKey(v, col)]) return;
-    pick = pick && pick.tile === t.id && !!pick.col === col && key(pick.value) === key(v) ? null : { tile: t.id, value: v, col };
+  function onpick(t: Tile, v: Cell, col = false, stage?: number) {
+    if (!data.cross[t.id]?.[crossKey(v, col, stage)]) return;
+    pick = pick && pick.tile === t.id && !!pick.col === col && pick.stage === stage && key(pick.value) === key(v) ? null : { tile: t.id, value: v, col, stage };
   }
 
-  function label(tileId: string, v: Cell, col = false): string {
+  function label(tileId: string, v: Cell, col = false, stage = 0): string {
     const t = data.tiles.find((x) => x.id === tileId)!;
     // A histogram bin is a range of its number column.
     const bins = t.type === 'histogram' ? data.base[tileId]?.bins : undefined;
     const m = t.measures[0];
-    const d = col && t.cols ? t.cols : bins && m?.column ? { table: m.table, column: m.column } : t.dims[0];
+    const d = col && t.cols ? t.cols : bins && m?.column ? { table: m.table, column: m.column } : (t.dims[stage] ?? t.dims[0]);
     const dtype = data.tables.find((x) => x.id === d.table)?.columns.find((c) => c.name === d.column)?.dtype ?? 'text';
     const name = dimLabel(d, data.tables);
     const shown =
@@ -87,6 +97,13 @@
   const isColFilter = (f: ExportPayload['filters'][number]) => {
     const c = data.tiles.find((x) => x.id === f.fromTile)?.cols;
     return !!c && c.table === f.table && c.column === f.column;
+  };
+
+  /** The stage of a Sankey node a saved filter came from; 0 for every other tile. */
+  const stageOf = (f: ExportPayload['filters'][number]) => {
+    const t = data.tiles.find((x) => x.id === f.fromTile);
+    const i = t?.type === 'sankey' ? t.dims.findIndex((d) => d.table === f.table && d.column === f.column) : 0;
+    return Math.max(0, i);
   };
 
   const when = $derived(dateTimeMedium(data.generated));
@@ -126,11 +143,11 @@
     </div>
     <div class="chips">
       {#each data.filters as f}
-        <span class="chip static">{label(f.fromTile, f.op === 'not_in' ? OTHER_KEY : f.values[0], isColFilter(f))}</span>
+        <span class="chip static">{label(f.fromTile, f.op === 'not_in' ? OTHER_KEY : f.values[0], isColFilter(f), stageOf(f))}</span>
       {/each}
       {#if pick}
         <span class="chip">
-          {label(pick.tile, pick.value, pick.col)}
+          {label(pick.tile, pick.value, pick.col, pick.stage)}
           <button aria-label="Clear" onclick={() => (pick = null)}>×</button>
         </span>
       {/if}
@@ -162,7 +179,8 @@
                 tables={data.tables}
                 selected={pick?.tile === l.t.id && !pick.col ? [pick.value] : null}
                 selectedCol={pick?.tile === l.t.id && pick.col ? [pick.value] : null}
-                onpick={data.cross[l.t.id] ? (v) => onpick(l.t, v) : undefined}
+                selectedStage={pick?.tile === l.t.id && !pick.col ? (pick.stage ?? null) : null}
+                onpick={data.cross[l.t.id] ? (v, stage) => onpick(l.t, v, false, stage) : undefined}
                 onpickcol={data.cross[l.t.id] && l.t.cols ? (v) => onpick(l.t, v, true) : undefined} />
             {/if}
           </div>

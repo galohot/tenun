@@ -50,6 +50,16 @@ pub struct Tile {
     /// Several values on one chart: together (default), in separate panels or indexed.
     #[serde(default)]
     pub layout: Option<shape::Layout>,
+    /// Compare chart with one value: the two periods (values of the second field) to compare.
+    /// Not set: the latest two.
+    #[serde(default)]
+    pub periods: Option<Vec<Value>>,
+    /// Table: add a trend column. The field gives the periods, one line for each row.
+    #[serde(default)]
+    pub spark: Option<Dimension>,
+    /// Pivot: groups of the row fields open and close, with a subtotal for each group.
+    #[serde(default)]
+    pub expand: Option<bool>,
 }
 
 /// Tiles that show something the user typed or picked, not a query: they have no result.
@@ -138,6 +148,8 @@ const PIVOT_MAX_ROWS: usize = 3;
 const PIVOT_MAX_MEASURES: usize = 4;
 /// The key of a pivot column click in the offline cross-filter map of an export.
 const COL_PREFIX: &str = "\u{1}col:";
+/// The key of a click on a Sankey node in the offline cross-filter map: the stage, then the value.
+pub const STAGE_PREFIX: &str = "\u{2}stage:";
 
 fn own_excluded(tile: &Tile, filters: &[DashFilter]) -> Vec<Filter> {
     filters
@@ -147,7 +159,7 @@ fn own_excluded(tile: &Tile, filters: &[DashFilter]) -> Vec<Filter> {
         .collect()
 }
 
-fn count_rows(table: &str) -> Measure {
+pub(crate) fn count_rows(table: &str) -> Measure {
     Measure {
         table: table.to_string(),
         column: None,
@@ -163,13 +175,39 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
         return None;
     }
     let one = matches!(kind, "kpi" | "share" | "donut" | "funnel" | "box");
+    // A compare chart with one value reads two periods of its second field.
+    let periods = kind == "compare" && tile.measures.len() < 2;
     // Small multiples: the group, then the field that makes one chart for each of its values.
     let repeating = advanced::repeats(tile);
     // Bar, line and area take up to four values side by side. Then there is no split.
     let many = matches!(kind, "bar" | "line" | "area") && tile.measures.len() > 1 && !repeating;
     let pivotish = matches!(kind, "pivot" | "heatmap");
-    let dims: Vec<Dimension> = if one || kind == "waterfall" {
+    let dims: Vec<Dimension> = if one || matches!(kind, "waterfall" | "bullet" | "gantt" | "cohort")
+    {
         tile.dims.iter().take(1).cloned().collect()
+    } else if kind == "calendar" {
+        // One cell for each day, whatever grain the field was saved with.
+        tile.dims
+            .iter()
+            .take(1)
+            .cloned()
+            .map(|mut d| {
+                d.grain = Some(Grain::Day);
+                d
+            })
+            .collect()
+    } else if kind == "sankey" {
+        tile.dims
+            .iter()
+            .take(advanced::SANKEY_STAGES)
+            .cloned()
+            .collect()
+    } else if kind == "compare" {
+        tile.dims
+            .iter()
+            .take(if periods { 2 } else { 1 })
+            .cloned()
+            .collect()
     } else if kind == "histogram" {
         vec![]
     } else if kind == "table" {
@@ -211,7 +249,11 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
                 .cloned()
                 .collect()
         } else if kind == "scatter" {
-            // Across and up: two values for each dot.
+            // Across and up, and a third value for the size of the dot.
+            tile.measures.iter().take(3).cloned().collect()
+        } else if matches!(kind, "bullet" | "gantt" | "cohort") || (kind == "compare" && !periods) {
+            // Bullet: the value, then its target. Gantt: start, then end. Cohort: the entity, then a
+            // value to add up. Compare: the two values.
             tile.measures.iter().take(2).cloned().collect()
         } else {
             vec![tile.measures[0].clone()]
@@ -229,10 +271,14 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
         .sort
         .as_ref()
         .map(|s| (s.by, s.desc))
-        .or_else(|| (kind == "funnel").then_some((SortBy::Value, None)));
+        .or_else(|| (kind == "funnel").then_some((SortBy::Value, None)))
+        // A Gantt chart starts with the task that starts first.
+        .or_else(|| (kind == "gantt").then_some((SortBy::Value, Some(false))));
+    // A compare chart is ordered by the engine afterwards. A calendar keeps its days in time order.
     if let Some((by, desc)) = by
         && !dims.is_empty()
         && !pivotish
+        && !matches!(kind, "compare" | "calendar" | "sankey")
     {
         match by {
             SortBy::Value if !measures.is_empty() => sort.push(Sort {
@@ -246,6 +292,10 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
             _ => {}
         }
     }
+    // A calendar reads the latest days first and cuts them to the last 12 months afterwards.
+    if kind == "calendar" {
+        sort = vec![Sort { by: 0, desc: true }];
+    }
     Some(SemanticQuery {
         measures,
         dimensions: dims,
@@ -254,7 +304,8 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
         limit: Some(match kind {
             "table" => 500,
             "pivot" | "heatmap" => PIVOT_LIMIT,
-            "kpi" => 400,
+            "kpi" | "calendar" => 400,
+            "gantt" => advanced::MAX_GANTT_ROWS,
             _ => 2000,
         }),
     })
@@ -276,6 +327,12 @@ pub fn run_tile(
     }
     if tile.kind == "box" {
         return advanced::boxplot(engine, tile, &own_excluded(tile, filters));
+    }
+    if tile.kind == "sankey" {
+        return advanced::sankey(engine, tile, &own_excluded(tile, filters));
+    }
+    if tile.kind == "cohort" {
+        return advanced::cohort(engine, tile, &own_excluded(tile, filters));
     }
     let mut q =
         tile_query(tile, filters).ok_or_else(|| anyhow::anyhow!("the tile has no fields yet"))?;
@@ -309,11 +366,23 @@ pub fn run_tile(
             });
         }
     }
+    let pair = if tile.kind == "compare" {
+        advanced::compare_periods(engine, tile, &mut q, &wide)?
+    } else {
+        None
+    };
     let mut res = engine.query(&q)?;
     res.repeat = repeat;
+    if tile.kind == "compare" {
+        advanced::compare_pairs(tile, &q, &mut res, pair);
+    }
+    if tile.kind == "calendar" {
+        advanced::calendar_window(&mut res);
+    }
     // Fill gaps and cut to the top N first, so the unfinished-period check below
     // still sees the real last period.
     shape::apply(engine, tile, &q, &wide, &mut res)?;
+    advanced::sparks(engine, tile, &q, &mut res)?;
     let d = match tile.dims.first() {
         Some(d)
             if d.grain.is_some_and(|g| !g.is_part())
@@ -705,7 +774,8 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
     let mut cross: BTreeMap<String, BTreeMap<String, BTreeMap<String, QueryResult>>> =
         BTreeMap::new();
     for src in &tiles {
-        if src.kind == "kpi" {
+        // A cohort row is not a value of any field, so a click on it has nothing to filter by.
+        if matches!(src.kind.as_str(), "kpi" | "cohort") {
             continue;
         }
         let Some(res) = base.get(&src.id) else {
@@ -738,8 +808,47 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                     ))
                 })
                 .collect()
+        } else if src.kind == "sankey" {
+            // Every node is a value of the field of its stage. The key says which stage.
+            let mut seen = HashSet::new();
+            let mut out = Vec::new();
+            for r in &res.rows {
+                let (Some(stage), Some(from), Some(to)) = (
+                    r.first().and_then(Value::as_u64),
+                    r.get(1).cloned(),
+                    r.get(2).cloned(),
+                ) else {
+                    continue;
+                };
+                for (at, v) in [(stage as usize, from), (stage as usize + 1, to)] {
+                    let Some(d) = src.dims.get(at) else { continue };
+                    if js_key(&v) == shape::OTHER_KEY {
+                        continue;
+                    }
+                    let key = format!("{STAGE_PREFIX}{at}:{}", js_key(&v));
+                    if seen.insert(key.clone()) {
+                        out.push((
+                            Value::String(key),
+                            Filter {
+                                table: d.table.clone(),
+                                column: d.column.clone(),
+                                grain: d.grain,
+                                op: FilterOp::In,
+                                values: vec![v],
+                            },
+                        ));
+                    }
+                }
+            }
+            out
         } else {
             let Some(d) = src.dims.first() else { continue };
+            // A calendar is always read by day.
+            let grain = if src.kind == "calendar" {
+                Some(Grain::Day)
+            } else {
+                d.grain
+            };
             let mut seen = HashSet::new();
             res.rows
                 .iter()
@@ -756,7 +865,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                         Filter {
                             table: d.table.clone(),
                             column: d.column.clone(),
-                            grain: d.grain,
+                            grain,
                             op,
                             values,
                         },
@@ -796,6 +905,8 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         }
         let cap = if src.kind == "histogram" {
             shape::AUTO_MAX_BINS
+        } else if src.kind == "sankey" {
+            advanced::SANKEY_STAGES * advanced::MAX_NODES
         } else {
             MAX_CROSS_VALUES
         };
@@ -836,6 +947,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                         .chain(m.per.as_ref().map(|p| p.table.as_str()))
                 })
                 .chain(t.dims.iter().map(|d| d.table.as_str()))
+                .chain(t.spark.iter().map(|d| d.table.as_str()))
         })
         .collect();
     let tables: Vec<Value> = engine

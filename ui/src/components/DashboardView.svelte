@@ -5,7 +5,7 @@
   import { cell, dimLabel, OTHER_KEY, stampLabel } from '../lib/format';
   import { COLS, compact, defaultSize, minHeight, newId, place, type DashFilter } from '../lib/tiles';
   import { key } from '../lib/chart';
-  import { advancedOn } from '../lib/tiers';
+  import { advancedOn, ganttOffered as hasTwoDates } from '../lib/tiers';
   import Icon, { type IconName } from './Icon.svelte';
   import TileView from './dash/TileView.svelte';
   import Inspector from './dash/Inspector.svelte';
@@ -195,7 +195,7 @@
   }
 
   /** `otherOf` comes with a click on the "Other" group of a top N: everything except those groups. */
-  function pick(tile: Tile, value: Cell, otherOf?: Cell[], bins?: Bins) {
+  function pick(tile: Tile, value: Cell, otherOf?: Cell[], bins?: Bins, stage?: number) {
     const mine = filters.find((f) => f.fromTile === tile.id);
     const others = filters.filter((f) => f.fromTile !== tile.id);
     // A histogram bin filters its column to the range of the bin. The edges are the engine's own numbers.
@@ -207,15 +207,18 @@
       filters = same ? others : [...others, { table: m.table, column: m.column, grain: null, op: 'range', values: [value, hi], fromTile: tile.id }];
       return;
     }
-    const d = tile.dims[0];
+    // A Sankey node is a value of the field of its stage; every other tile filters by its first field.
+    const d = tile.type === 'sankey' && stage !== undefined ? tile.dims[stage] : tile.dims[0];
     if (!d) return;
+    // A calendar is always read by day.
+    const grain = tile.type === 'calendar' ? 'day' : (d.grain ?? null);
     const isOther = value === OTHER_KEY && !!otherOf;
-    if (mine && (isOther ? mine.op === 'not_in' : mine.op === 'in' && mine.column === d.column && mine.values.length === 1 && key(mine.values[0]) === key(value))) {
+    if (mine && (isOther ? mine.op === 'not_in' : mine.op === 'in' && mine.table === d.table && mine.column === d.column && mine.values.length === 1 && key(mine.values[0]) === key(value))) {
       filters = others;
     } else if (isOther) {
-      filters = [...others, { table: d.table, column: d.column, grain: d.grain ?? null, op: 'not_in', values: [...otherOf], fromTile: tile.id }];
+      filters = [...others, { table: d.table, column: d.column, grain, op: 'not_in', values: [...otherOf], fromTile: tile.id }];
     } else {
-      filters = [...others, { table: d.table, column: d.column, grain: d.grain ?? null, op: 'in', values: [value], fromTile: tile.id }];
+      filters = [...others, { table: d.table, column: d.column, grain, op: 'in', values: [value], fromTile: tile.id }];
     }
   }
 
@@ -410,9 +413,9 @@
       <button class="btn primary" onclick={() => (addMenu = !addMenu)} aria-expanded={addMenu}><Icon name="plus" /> Add tile</button>
       {#if addMenu}
         <div class="menu" role="menu">
-          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['table', 'Table'], ['pivot', 'Pivot table'], ['text', 'Text'], ['image', 'Image'], ...(advanced ? [['heatmap', 'Heat map'], ['funnel', 'Funnel'], ['box', 'Box plot']] : [])] as [t, label]}
+          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['table', 'Table'], ['pivot', 'Pivot table'], ['text', 'Text'], ['image', 'Image'], ...(advanced ? [['heatmap', 'Heat map'], ['funnel', 'Funnel'], ['box', 'Box plot'], ['bullet', 'Bullet chart'], ['compare', 'Compare two values'], ['sankey', 'Sankey'], ['calendar', 'Calendar heat map'], ['cohort', 'Cohort grid'], ...(hasTwoDates(app.tables) ? [['gantt', 'Gantt chart']] : [])] : [])] as [t, label]}
             <button role="menuitem" onclick={() => addTile(t as TileType)}>
-              <Icon name={t as IconName} /> {label}
+              <Icon name={(t === 'calendar' ? 'calendarheat' : t) as IconName} /> {label}
             </button>
           {/each}
         </div>
@@ -474,7 +477,7 @@
               {filters}
               {tick}
               active={selectedTile === t.id}
-              onpick={(v, otherOf, bins) => pick(t, v, otherOf, bins)}
+              onpick={(v, otherOf, bins, stage) => pick(t, v, otherOf, bins, stage)}
               onpickcol={(v) => pickCol(t, v)}
               onresult={(r, k) => setResult(t.id, r, k)}
               onselect={() => (selectedTile = t.id)}

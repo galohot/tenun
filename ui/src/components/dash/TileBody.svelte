@@ -4,9 +4,13 @@
   import { buildOption, CHART_TYPES, type Colors } from '../../lib/chart';
   import { barScale, barSpan, barStyle, goodBad } from '../../lib/cells';
   import { cell, columnHeads, full, OTHER_KEY, resultDim0, type Named } from '../../lib/format';
+  import { sparkKey, sparkPath, SPARK_H, SPARK_W } from '../../lib/charts/spark';
   import { effectiveShowAs } from '../../lib/showas';
   import { isRepeated } from '../../lib/tiles';
+  import BulletView from './BulletView.svelte';
+  import CalendarView from './CalendarView.svelte';
   import ChartView from './ChartView.svelte';
+  import CohortView from './CohortView.svelte';
   import FunnelView from './FunnelView.svelte';
   import HeatmapView from './HeatmapView.svelte';
   import ImageView from './ImageView.svelte';
@@ -22,6 +26,7 @@
     colors,
     selected,
     selectedCol = null,
+    selectedStage = null,
     editing = false,
     tables = [],
     onpick,
@@ -35,11 +40,13 @@
     selected: Cell[] | null;
     /** Pivot: the column values picked by a click on a column header. */
     selectedCol?: Cell[] | null;
+    /** Sankey: the stage (the index of the field in the tile) the selected node belongs to. */
+    selectedStage?: number | null;
     /** In the app, an empty note or picture says how to fill it. In an exported file it stays empty. */
     editing?: boolean;
     /** For naming the values of a chart with several. */
     tables?: Named[];
-    onpick?: (value: Cell) => void;
+    onpick?: (value: Cell, stage?: number) => void;
     /** Pivot: a click on a column header. */
     onpickcol?: (value: Cell) => void;
     /** Table: the column widths after a drag on a heading, or undefined after a double click (back to automatic). */
@@ -48,6 +55,8 @@
     onlayout?: (layout: 'panels') => void;
   } = $props();
 
+  /** The pixels each row of a compare or Gantt chart needs. */
+  const ROW_PX = 26;
   let width = $state(400);
   let height = $state(240);
 
@@ -63,12 +72,23 @@
       return 'A heat map needs a value, a field for the rows and a field for the columns.';
     }
     if (tile.type === 'funnel' && !tile.dims.length) return 'A funnel needs a field that names its stages.';
+    if (tile.type === 'compare' && (!tile.dims.length || (tile.measures.length < 2 && tile.dims.length < 2))) {
+      return 'A compare chart needs a field for its rows, and two values, or one value and a second field to take two periods from.';
+    }
+    if (tile.type === 'sankey' && tile.dims.length < 2) return 'A Sankey chart needs two or three fields, one for each stage.';
+    if (tile.type === 'calendar' && !tile.dims.length) return 'A calendar needs a date column.';
+    if (tile.type === 'cohort' && (!tile.measures.length || !tile.dims.length)) {
+      return 'A cohort grid needs the column that names who to follow, like a customer, and the date of their events.';
+    }
+    if (tile.type === 'gantt' && (tile.dims.length < 1 || tile.measures.length < 2)) {
+      return 'A Gantt chart needs a field that names each row, a start date and an end date.';
+    }
     return null;
   });
   const unfinished = $derived(missing !== null);
   // Small multiples draw a chart for each value of a field (Advanced).
   const multiples = $derived(isRepeated(tile) && !!res.repeat);
-  const built = $derived(isChart && !unfinished && !multiples ? buildOption({ res, tile, colors, selected, width, height, tables }) : null);
+  const built = $derived(isChart && !unfinished && !multiples ? buildOption({ res, tile, colors, selected, selectedStage, width, height, tables }) : null);
 
   // Table: click a header to sort.
   let sortBy = $state<number | null>(null);
@@ -101,6 +121,15 @@
     return cell(v, res.columns[i].dtype, null, false, formatOf(i));
   };
   const heads = $derived(columnHeads(res, tile, tables));
+  // A trend column (Advanced): one small line for each row, from the engine's `sparks`.
+  const sparks = $derived(tile.type === 'table' ? (res.sparks ?? null) : null);
+  const sparkOf = (r: Cell[]) => {
+    const values = sparks?.[sparkKey(r.slice(0, groups))];
+    if (!values) return null;
+    const nums = values.filter((v): v is number => typeof v === 'number');
+    const say = (v: number | undefined) => (v === undefined ? '' : cell(v, 'number', null, true, tile.formats?.[0]));
+    return { ...sparkPath(values), words: nums.length ? `Last ${values.length} periods, from ${say(nums[0])} to ${say(nums.at(-1))}` : 'No data in the last periods' };
+  };
   const showText = (v: Cell, i: number) =>
     v === null && res.columns[i].role === 'measure' ? '–' : cell(v, res.columns[i].dtype, tile.dims[i]?.grain, false, formatOf(i), res.columns[i].unit);
 
@@ -201,6 +230,12 @@
   <HeatmapView {res} {tile} {colors} {tables} {selected} {selectedCol} {onpick} {onpickcol} />
 {:else if tile.type === 'funnel'}
   <FunnelView {res} {tile} {colors} {selected} {onpick} />
+{:else if tile.type === 'bullet'}
+  <BulletView {res} {tile} {selected} {tables} {onpick} />
+{:else if tile.type === 'calendar'}
+  <CalendarView {res} {tile} {colors} {selected} {onpick} />
+{:else if tile.type === 'cohort'}
+  <CohortView {res} {tile} {colors} />
 {:else if multiples}
   <SmallMultiples {res} {tile} {colors} {selected} {tables} {onpick} />
 {:else if tile.type === 'table'}
@@ -228,6 +263,7 @@
                   ondblclick={resetWidths}></span>
               </th>
             {/each}
+            {#if sparks}<th class="trend" scope="col"><span>Trend</span></th>{/if}
           </tr>
         </thead>
         <tbody>
@@ -248,6 +284,18 @@
                   {#if verdict}<span class="glyph" role="img" aria-label={verdict.word.toLowerCase()}>{verdict.glyph}</span>{/if}{showText(v, i)}
                 </td>
               {/each}
+              {#if sparks}
+                {@const sp = sparkOf(r)}
+                <td class="trend">
+                  {#if sp?.d}
+                    <svg width={SPARK_W} height={SPARK_H} viewBox="0 0 {SPARK_W} {SPARK_H}" role="img" aria-label={sp.words}>
+                      <title>{sp.words}</title>
+                      <path d={sp.d} fill="none" stroke={colors.series[0]} stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                      {#if sp.last}<circle cx={sp.last.x} cy={sp.last.y} r="2.5" fill={colors.series[0]} stroke={colors.surface} stroke-width="1" />{/if}
+                    </svg>
+                  {/if}
+                </td>
+              {/if}
             </tr>
           {/each}
         </tbody>
@@ -257,6 +305,7 @@
               {#each res.columns as c, i}
                 <td class:num={c.dtype === 'number'}>{i === 0 ? 'Total' : totalCell(i)}</td>
               {/each}
+              {#if sparks}<td class="trend"></td>{/if}
             </tr>
           </tfoot>
         {/if}
@@ -267,7 +316,8 @@
   </div>
 {:else if built}
   <div class="chart">
-    <div class="plot">
+    <div class="plot" class:scroll={!!built.rows}>
+     <div class="inner" style:height={built.rows ? `max(100%, ${built.rows * ROW_PX + 44}px)` : '100%'}>
       <ChartView
         option={built.option}
         horizontal={built.horizontal ?? (!!tile.horizontal && tile.type === 'bar')}
@@ -280,9 +330,9 @@
             }
           : undefined}
         onitem={onpick && built.pick?.by === 'item'
-          ? (si, i) => {
-              const v = built.pick?.by === 'item' ? built.pick.value(si, i) : undefined;
-              if (v !== undefined) onpick?.(v);
+          ? (si, i, type) => {
+              const v = built.pick?.by === 'item' ? built.pick.value(si, i, type) : undefined;
+              if (v !== undefined) onpick?.(v, built.pick?.by === 'item' ? built.pick.stage?.(si, i, type) : undefined);
             }
           : undefined}
         onx={onpick && built.pick?.by === 'x'
@@ -291,7 +341,17 @@
               if (v !== undefined) onpick?.(v);
             }
           : undefined} />
+     </div>
     </div>
+    {#if built.sizeLegend}
+      <div class="size-legend" role="group" aria-label="What the size of a dot means: {built.sizeLegend.title}">
+        <span>Size: {built.sizeLegend.title}</span>
+        {#each built.sizeLegend.items as it}
+          <svg width={it.size + 2} height={it.size + 2} aria-hidden="true"><circle cx={(it.size + 2) / 2} cy={(it.size + 2) / 2} r={it.size / 2} fill="none" stroke="var(--text-2)" stroke-width="1.2" /></svg>
+          <span class="n">{it.label}</span>
+        {/each}
+      </div>
+    {/if}
     {#if note}
       <p class="size-note">
         {note}
@@ -306,6 +366,12 @@
 <style>
   .chart { height: 100%; display: flex; flex-direction: column; }
   .plot { flex: 1; min-height: 0; }
+  .plot.scroll { overflow-y: auto; margin-right: -6px; padding-right: 6px; }
+  .size-legend { flex: none; display: flex; align-items: center; gap: 6px; margin: 4px 0 0; font-size: 11px; color: var(--text-2); }
+  .size-legend .n { margin-right: 6px; font-variant-numeric: tabular-nums; }
+  th.trend span { padding: 6px 14px; display: block; }
+  td.trend { width: 96px; padding-top: 2px; padding-bottom: 2px; }
+  td.trend svg { display: block; }
   .size-note { flex: none; margin: 4px 0 0; font-size: 11px; color: var(--text-2); }
   .size-note .link { border: 0; background: none; padding: 0; margin-left: 4px; font-size: 11px; color: var(--accent-text); }
   .size-note .link:hover { text-decoration: underline; }

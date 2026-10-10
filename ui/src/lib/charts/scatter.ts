@@ -3,6 +3,7 @@
 
 import type { Cell } from '../api';
 import { cell, getLocale, measureLabel, numberFormatter } from '../format';
+import { bubbleSamples, bubbleSize } from './bubble';
 import { axisCommon, esc, key, OTHER, slotsFor, tooltipBase, type BuildArgs, type Built } from './common';
 import { axisSpan, levelMarkLine, resolveLevels, wantsTrend, type Level } from './guides';
 import { fitAt, trendFit, trendSentence } from './lines';
@@ -23,8 +24,17 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
   const yName = tile.measures[1] ? measureLabel(tile.measures[1], tables) : (res.columns[yi]?.name ?? '');
   const isSel = (v: Cell) => !selected || selected.some((s) => key(s) === key(v));
 
-  // Dots with a missing value cannot be placed.
+  // A third value sets the size of the dot (Advanced): its area follows the value.
+  const si = nd + 2;
+  const sized = !!tile.measures[2] && res.columns.length > si;
+  const fs = numberFormatter(tile.formats?.[2], loc);
+  const sizeName = tile.measures[2] ? measureLabel(tile.measures[2], tables) : '';
+  const sizeOf = (r: Cell[]) => (typeof r[si] === 'number' ? (r[si] as number) : null);
+
+  // Dots with a missing value cannot be placed. With sizes, the big dots are drawn first so small ones stay in view.
   const rows = res.rows.filter((r) => typeof r[xi] === 'number' && typeof r[yi] === 'number');
+  const sizeMax = sized ? Math.max(0, ...rows.map((r) => sizeOf(r) ?? 0)) : 0;
+  if (sized) rows.sort((a, b) => (sizeOf(b) ?? -1) - (sizeOf(a) ?? -1));
 
   // Colour groups: the seven most common stay, the rest become one grey "Other".
   // The colour follows the group, not its place in the list: the tile remembers the slot each group
@@ -50,7 +60,7 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
   const hasOther = ranked.length > kept.length;
   if (hasOther) groups.push({ name: OTHER, color: c.text2 });
 
-  type Dot = { value: [number, number]; name: string; group: string; itemStyle: { opacity: number } };
+  type Dot = { value: [number, number]; name: string; group: string; size: number | null; symbolSize?: number; itemStyle: { opacity: number } };
   const data: Dot[][] = groups.map(() => []);
   const dots: Cell[][] = groups.map(() => []);
   for (const r of rows) {
@@ -59,7 +69,9 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
       value: [r[xi] as number, r[yi] as number],
       name: cell(r[0], res.columns[0].dtype, tile.dims[0]?.grain),
       group: groups[gi].name,
-      itemStyle: { opacity: isSel(r[0]) ? 1 : 0.28 },
+      size: sized ? sizeOf(r) : null,
+      ...(sized ? { symbolSize: bubbleSize(sizeOf(r), sizeMax) } : {}),
+      itemStyle: { opacity: isSel(r[0]) ? (sized ? 0.85 : 1) : 0.28 },
     });
     dots[gi].push(r[0]);
   }
@@ -146,7 +158,8 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
       trigger: 'item',
       formatter: (p: { data: Dot }) =>
         `<b>${esc(p.data.name)}</b>${p.data.group ? `<br/>${esc(p.data.group)}` : ''}` +
-        `<br/>${esc(xName)}: ${esc(fx.tip(p.data.value[0]))}<br/>${esc(yName)}: ${esc(fy.tip(p.data.value[1]))}`,
+        `<br/>${esc(xName)}: ${esc(fx.tip(p.data.value[0]))}<br/>${esc(yName)}: ${esc(fy.tip(p.data.value[1]))}` +
+        (sized ? `<br/>${esc(sizeName)}: ${p.data.size === null ? '–' : esc(fs.tip(p.data.size))}` : ''),
     },
     xAxis: axis(xName, xFar, fx, true),
     yAxis: axis(yName, yFar, fy, false),
@@ -171,10 +184,12 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
   const notes = [];
   if (xFar || yFar) notes.push('Axes do not start at zero.');
   if (res.rows.length >= DOT_LIMIT) notes.push(`Only the first ${DOT_LIMIT.toLocaleString('en-US')} dots are shown.`);
+  const samples = bubbleSamples(sizeMax);
   return {
     option,
     categories: [],
     pick: { by: 'item', value: (series, index) => dots[series]?.[index] },
     note: notes.join(' ') || null,
+    sizeLegend: samples.length ? { title: sizeName, items: samples.map((v) => ({ size: bubbleSize(v, sizeMax), label: fs.short(v) })) } : undefined,
   };
 }

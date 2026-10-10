@@ -108,6 +108,45 @@ pub struct QueryResult {
     /// Box plots: the outlier dots, `[group, value]`, at most 50 for each group.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outliers: Option<Vec<Vec<serde_json::Value>>>,
+    /// Tables with a trend column (`tile.spark`): for each row key, the last 12 periods of the first
+    /// value. The key is the group values of the row joined by `\u{1f}` (`advanced::spark_key`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sparks: Option<std::collections::BTreeMap<String, Vec<Option<f64>>>>,
+    /// Compare charts: what the two value columns stand for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pair: Option<Pair>,
+}
+
+/// A compare chart with one value reads two periods of a field. `periods` are those two values, in
+/// the order of the two value columns of the rows. Not set when the chart compares two values.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Pair {
+    pub periods: Option<Vec<serde_json::Value>>,
+}
+
+impl QueryResult {
+    /// A result with these columns and rows, and none of the extras.
+    pub fn new(columns: Vec<query::OutColumn>, rows: Vec<Vec<serde_json::Value>>) -> Self {
+        QueryResult {
+            columns,
+            rows,
+            ignored_filters: vec![],
+            ms: 0,
+            kpi: None,
+            partial: None,
+            other: None,
+            other_of: None,
+            bins: None,
+            totals: None,
+            compare: None,
+            total_rows: None,
+            repeat: None,
+            real: None,
+            outliers: None,
+            sparks: None,
+            pair: None,
+        }
+    }
 }
 
 /// The charts of a small-multiples tile.
@@ -137,6 +176,11 @@ pub struct Totals {
     pub rows: Option<Vec<Vec<serde_json::Value>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cols: Option<Vec<Vec<serde_json::Value>>>,
+    /// Expandable pivot (`tile.expand`): the cells of each group of the row fields, over each column.
+    /// An entry is the group values (the first 1 to n-1 row fields), the column value, then the
+    /// measures. The totals of a group are in `rows`, as entries with fewer row values than a row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<Vec<serde_json::Value>>>,
 }
 
 /// The bins of a histogram: bin `i` covers `[start + i·width, start + (i+1)·width)`.
@@ -599,6 +643,8 @@ impl Engine {
             repeat: None,
             real: None,
             outliers: None,
+            sparks: None,
+            pair: None,
         })
     }
 

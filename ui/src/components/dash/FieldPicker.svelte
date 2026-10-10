@@ -11,6 +11,7 @@
     placeholder = 'Choose a field',
     reachable,
     numbersOnly = false,
+    datesOnly = false,
     onchange,
     onclear,
   }: {
@@ -22,6 +23,8 @@
     reachable?: Set<string> | null;
     /** Lists number columns only, and no row count (a histogram bins a column of numbers). */
     numbersOnly?: boolean;
+    /** Lists date columns only, and no row count (a Gantt chart reads a start and an end date). */
+    datesOnly?: boolean;
     onchange: (table: string, column: string | null) => void;
     onclear?: () => void;
   } = $props();
@@ -42,10 +45,11 @@
         cols: t.columns.filter(
           (c) =>
             (!numbersOnly || c.dtype === 'number') &&
+            (!datesOnly || c.dtype === 'date' || c.dtype === 'datetime') &&
             (!q || c.name.toLowerCase().includes(q.toLowerCase()) || t.label.toLowerCase().includes(q.toLowerCase())),
         ),
       }))
-      .filter((g) => g.cols.length || (mode === 'measure' && !q && !numbersOnly)),
+      .filter((g) => g.cols.length || (mode === 'measure' && !q && !numbersOnly && !datesOnly)),
   );
 
   function pick(t: string, c: string | null) {
@@ -88,7 +92,7 @@
               <Icon name="table" size={12} />{g.t.label}
               {#if far}<span class="note">not related</span>{/if}
             </div>
-            {#if mode === 'measure' && !q && !numbersOnly}
+            {#if mode === 'measure' && !q && !numbersOnly && !datesOnly}
               <button class="opt" onclick={() => pick(g.t.id, null)}>
                 <Icon name="hash" size={12} /> Number of {g.t.label.toLowerCase()}
               </button>

@@ -20,8 +20,8 @@ export const ADVANCED_TYPES: readonly TileType[] = [
   'gantt',
 ];
 
-/** The types in the second group of the picker, "More charts". The rest of ADVANCED_TYPES come in build 13. */
-export const MORE_CHARTS: readonly TileType[] = ['heatmap', 'funnel', 'box'];
+/** The types in the second group of the picker, "More charts". */
+export const MORE_CHARTS: readonly TileType[] = ['heatmap', 'funnel', 'box', 'bullet', 'compare', 'sankey', 'calendar', 'cohort', 'gantt'];
 
 /** True when the tile needs an Advanced feature to look or behave as it does. */
 export function usesAdvanced(tile: Tile): boolean {
@@ -34,9 +34,17 @@ export function usesAdvanced(tile: Tile): boolean {
     tile.sort?.by === 'manual' ||
     tile.measures.some((m) => m.agg === 'stdev' || m.agg === 'variance') ||
     !!tile.lines?.some((l) => l.kind === 'band') ||
-    // A third measure on a scatter sets the dot size (build 13).
-    (tile.type === 'scatter' && tile.measures.length > 2)
+    // A third measure on a scatter sets the dot size.
+    (tile.type === 'scatter' && tile.measures.length > 2) ||
+    // A trend column in a table, and groups that open and close in a pivot.
+    !!tile.spark ||
+    !!tile.expand
   );
+}
+
+/** A Gantt chart needs a start and an end, so it is offered when some table has two date columns. */
+export function ganttOffered(tables: readonly { columns: readonly { dtype: string }[] }[]): boolean {
+  return tables.some((t) => t.columns.filter((c) => c.dtype === 'date' || c.dtype === 'datetime').length >= 2);
 }
 
 export function advancedOn(): boolean {

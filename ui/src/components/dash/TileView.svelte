@@ -28,7 +28,7 @@
     filters: DashFilter[];
     tick: number;
     active: boolean;
-    onpick: (value: Cell, otherOf?: Cell[], bins?: Bins) => void;
+    onpick: (value: Cell, otherOf?: Cell[], bins?: Bins, stage?: number) => void;
     /** A click on a pivot column header. */
     onpickcol: (value: Cell) => void;
     /** Tells the dashboard what this tile shows now (the Inspector's suggestions reuse it). */
@@ -95,11 +95,17 @@
   const onCol = $derived(isPivotLike(tile.type) && !!mine && !!tile.cols && mine.table === tile.cols.table && mine.column === tile.cols.column);
   const selected = $derived(mine && !onCol ? (mine.op === 'not_in' ? [OTHER_KEY] : mine.op === 'range' ? mine.values.slice(0, 1) : mine.values) : null);
   const selectedCol = $derived(mine && onCol ? mine.values : null);
+  // On a Sankey chart a click names a node: a value of the field of its stage.
+  const selectedStage = $derived.by(() => {
+    if (tile.type !== 'sankey' || !mine) return null;
+    const i = tile.dims.findIndex((d) => d.table === mine.table && d.column === mine.column);
+    return i < 0 ? null : i;
+  });
   const note = $derived(res && tile.type !== 'kpi' ? partialNote(res, tile.dims[0]?.grain) : null);
   const title = $derived(tileTitle(tile, app.tables));
   // A note or a picture with no title has no header, so the whole tile drags.
   const bare = $derived(fixed && !title);
-  const canPick = $derived(tile.type === 'histogram' ? tile.measures.length > 0 : tile.type !== 'kpi' && tile.dims.length > 0);
+  const canPick = $derived(tile.type === 'histogram' ? tile.measures.length > 0 : tile.type !== 'kpi' && tile.type !== 'cohort' && tile.dims.length > 0);
 </script>
 
 <article class="tile" class:active class:bare>
@@ -128,8 +134,9 @@
         {colors}
         {selected}
         {selectedCol}
+        {selectedStage}
         tables={app.tables}
-        onpick={canPick ? (v) => onpick(v, res?.otherOf, res?.bins) : undefined}
+        onpick={canPick ? (v, stage) => onpick(v, res?.otherOf, res?.bins, stage) : undefined}
         onpickcol={isPivotLike(tile.type) && tile.cols ? onpickcol : undefined}
         onwidths={tile.type === 'table' ? onwidths : undefined}
         onlayout={advancedOn() ? onlayout : undefined} />

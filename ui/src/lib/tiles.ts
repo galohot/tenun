@@ -16,6 +16,8 @@ export const MAX_CHART_MEASURES = 4;
 export const PIVOT_MAX_ROWS = 3;
 export const PIVOT_MAX_MEASURES = 4;
 export const PIVOT_LIMIT = 5000;
+/** A Gantt chart draws at most this many rows. Same as the engine. */
+export const MAX_GANTT_ROWS = 100;
 
 /** Tiles that show something the author typed or picked. They ask nothing and have no result. */
 export const STATIC_TYPES: readonly TileType[] = ['text', 'image', 'filter'];
@@ -40,49 +42,62 @@ export const isPivotLike = (type: TileType) => type === 'pivot' || type === 'hea
  */
 export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | null {
   if (isStatic(tile) || (!tile.measures.length && !tile.dims.length)) return null;
-  const one = ['kpi', 'share', 'donut', 'waterfall', 'funnel', 'box'].includes(tile.type);
+  const one = ['kpi', 'share', 'donut', 'waterfall', 'funnel', 'box', 'bullet', 'gantt', 'cohort'].includes(tile.type);
   const many = hasManyValues(tile);
-  // A histogram has no groups: it bins one number column. A heat map has one row field.
-  const dims =
-    tile.type === 'histogram'
-      ? []
-      : isPivotLike(tile.type)
-        ? [...tile.dims.slice(0, tile.type === 'heatmap' ? 1 : PIVOT_MAX_ROWS), ...(tile.cols ? [tile.cols] : [])] // rows, then columns
-        : isRepeated(tile)
-          ? [tile.dims[0], tile.repeat!] // the group, then the field that makes a chart for each of its values
-          : one || many
-            ? tile.dims.slice(0, 1)
-            : tile.type === 'table'
-              ? tile.dims
-              : tile.dims.slice(0, 2);
+  // A compare chart with one value reads two periods of its second field.
+  const periods = tile.type === 'compare' && tile.measures.length < 2;
+  const dims = ((): Dim[] => {
+    // A histogram has no groups: it bins one number column.
+    if (tile.type === 'histogram') return [];
+    // A calendar has one cell for each day, whatever grain the field was saved with.
+    if (tile.type === 'calendar') return tile.dims.slice(0, 1).map((d) => ({ ...d, grain: 'day' as const }));
+    if (tile.type === 'sankey') return tile.dims.slice(0, 3); // the stages
+    if (tile.type === 'compare') return tile.dims.slice(0, periods ? 2 : 1);
+    // A heat map has one row field.
+    if (isPivotLike(tile.type)) return [...tile.dims.slice(0, tile.type === 'heatmap' ? 1 : PIVOT_MAX_ROWS), ...(tile.cols ? [tile.cols] : [])]; // rows, then columns
+    // The group, then the field that makes a chart for each of its values.
+    if (isRepeated(tile)) return [tile.dims[0], tile.repeat!];
+    if (one || many) return tile.dims.slice(0, 1);
+    return tile.type === 'table' ? tile.dims : tile.dims.slice(0, 2);
+  })();
   // A chart with a group but no value counts rows of the grouped table.
-  const measures = tile.measures.length
-    ? tile.type === 'table'
-      ? tile.measures
-      : tile.type === 'pivot'
-        ? tile.measures.slice(0, PIVOT_MAX_MEASURES)
-        : many
-          ? tile.measures.slice(0, MAX_CHART_MEASURES)
-          : tile.type === 'scatter'
-            ? tile.measures.slice(0, 2) // across and up
-            : tile.measures.slice(0, 1)
-    : tile.type === 'table'
-      ? []
-      : [{ table: tile.dims[0].table, column: null, agg: 'count' as const }];
+  const measures = ((): Measure[] => {
+    if (!tile.measures.length) return tile.type === 'table' ? [] : [{ table: tile.dims[0].table, column: null, agg: 'count' as const }];
+    if (tile.type === 'table') return tile.measures;
+    if (tile.type === 'pivot') return tile.measures.slice(0, PIVOT_MAX_MEASURES);
+    if (many) return tile.measures.slice(0, MAX_CHART_MEASURES);
+    // Across and up, and a third value for the size of the dot.
+    if (tile.type === 'scatter') return tile.measures.slice(0, 3);
+    // Bullet: the value, then its target. Gantt: start, then end. Cohort: the entity, then a value to add up. Compare: the two values.
+    if (['bullet', 'gantt', 'cohort'].includes(tile.type) || (tile.type === 'compare' && !periods)) return tile.measures.slice(0, 2);
+    return tile.measures.slice(0, 1);
+  })();
   const sort: { by: number; desc: boolean }[] = [];
   // A pivot keeps the engine's order: its rows and columns are not one list to sort. A funnel
-  // with no chosen order puts the biggest stage first.
-  const by = tile.sort ?? (tile.type === 'funnel' ? { by: 'value' as const } : undefined);
-  if (dims.length && by && !isPivotLike(tile.type)) {
+  // with no chosen order puts the biggest stage first, and a Gantt chart the task that starts first.
+  // A compare chart is ordered by the engine, and a calendar keeps its days in time order.
+  const by = tile.sort ?? (tile.type === 'funnel' ? { by: 'value' as const } : tile.type === 'gantt' ? { by: 'value' as const, desc: false } : undefined);
+  if (dims.length && by && !isPivotLike(tile.type) && !['compare', 'calendar', 'sankey'].includes(tile.type)) {
     if (by.by === 'value' && measures.length) sort.push({ by: dims.length, desc: by.desc ?? true });
     else if (by.by === 'label') sort.push({ by: 0, desc: by.desc ?? false });
   }
+  // A calendar reads the latest days first and the engine cuts them to the last 12 months.
+  if (tile.type === 'calendar') sort.push({ by: 0, desc: true });
   return {
     measures,
     dimensions: dims,
     filters: filters.filter((f) => f.fromTile !== tile.id).map(({ fromTile: _, ...f }) => f),
     sort,
-    limit: tile.type === 'table' ? 500 : isPivotLike(tile.type) ? PIVOT_LIMIT : tile.type === 'kpi' ? 400 : 2000,
+    limit:
+      tile.type === 'table'
+        ? 500
+        : isPivotLike(tile.type)
+          ? PIVOT_LIMIT
+          : tile.type === 'kpi' || tile.type === 'calendar'
+            ? 400
+            : tile.type === 'gantt'
+              ? MAX_GANTT_ROWS
+              : 2000,
   };
 }
 
@@ -104,6 +119,9 @@ export function resultKey(tile: Tile, filters: DashFilter[]): string {
     tile.repeat ?? null,
     tile.layout ?? null,
     tile.sort ?? null,
+    tile.periods ?? null,
+    tile.spark ?? null,
+    tile.expand ?? null,
   ]);
 }
 
@@ -149,6 +167,16 @@ export function defaultSize(type: TileType): { w: number; h: number } {
       return { w: 8, h: 5 };
     case 'funnel':
       return { w: 6, h: 5 };
+    case 'bullet':
+      return { w: 6, h: 4 };
+    case 'compare':
+      return { w: 6, h: 5 };
+    case 'sankey':
+    case 'cohort':
+    case 'gantt':
+      return { w: 8, h: 5 };
+    case 'calendar':
+      return { w: 12, h: 3 };
     case 'text':
       return { w: 4, h: 2 };
     case 'image':

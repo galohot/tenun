@@ -163,6 +163,8 @@ export interface BuildArgs {
   tables?: Named[];
   /** Small multiples: keep every bar of a chart; the charts share a scale and nothing may fold into "Other". */
   noFold?: boolean;
+  /** Sankey: the stage (index of the field in the tile) the selection belongs to. */
+  selectedStage?: number | null;
 }
 
 export interface Built {
@@ -174,7 +176,13 @@ export interface Built {
    * looked up in `categories`. `item`: the dot or bar that was hit. `x`: a point on a number axis.
    */
   pick?:
-    | { by: 'item'; value: (series: number, index: number) => Cell | undefined }
+    | {
+        by: 'item';
+        /** `type` is ECharts' `dataType` of the mark ("node" or "edge" on a Sankey chart). */
+        value: (series: number, index: number, type?: string) => Cell | undefined;
+        /** Sankey: which field of the tile the value belongs to (a node is a value of the field of its stage). */
+        stage?: (series: number, index: number, type?: string) => number | undefined;
+      }
     | { by: 'x'; value: (x: number) => Cell | undefined };
   /** A line under the chart that says what the reader might misread. */
   note?: string | null;
@@ -184,6 +192,10 @@ export interface Built {
   grids?: number;
   /** The categories run down the side (horizontal bars, box plots). Not set: read it from the tile. */
   horizontal?: boolean;
+  /** How many rows run down the side, when the chart needs room for each (compare, Gantt). The tile scrolls when they do not fit. */
+  rows?: number;
+  /** Scatter with a third value: three sample dots that show what size means. */
+  sizeLegend?: { title: string; items: { size: number; label: string }[] };
 }
 
 /** Escapes a value from the data before it goes into tooltip HTML. */

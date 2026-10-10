@@ -32,7 +32,7 @@ export function suggestTypes(tile: Tile, tables: Pick<Table, 'id' | 'columns'>[]
   const add = (type: TileType, change: Partial<Tile> = {}) => {
     if (out.some((s) => s.type === type) || type === tile.type || (type === 'share' && tile.type === 'donut')) return;
     // A preview is a plain chart: Advanced layouts (small multiples, panels, indexed, combo) stay with the tile.
-    out.push({ type, variant: { ...tile, repeat: undefined, ownScale: undefined, layout: undefined, mix: undefined, ...change, type } });
+    out.push({ type, variant: { ...tile, repeat: undefined, ownScale: undefined, layout: undefined, mix: undefined, periods: undefined, spark: undefined, expand: undefined, ...change, type } });
   };
   const d0: Dim | undefined = tile.dims[0];
   const d1: Dim | undefined = tile.dims[1];
@@ -42,7 +42,8 @@ export function suggestTypes(tile: Tile, tables: Pick<Table, 'id' | 'columns'>[]
   const hasValue = tile.measures.length > 0;
   const group = (d: DType | undefined) => d === 'text' || d === 'bool';
   // Tiles with no fields to suit, and tiles that are not charts of fields, get nothing.
-  if (['text', 'image', 'filter'].includes(tile.type) || (!hasValue && !d0)) return out;
+  // Notes, pictures and the Advanced charts of build 13 read their fields in their own way; they get no previews.
+  if (['text', 'image', 'filter', 'bullet', 'compare', 'sankey', 'calendar', 'cohort', 'gantt'].includes(tile.type) || (!hasValue && !d0)) return out;
 
   if (d0 && isDate(t0)) {
     for (const type of ['line', 'area', 'bar'] as const) add(type, { horizontal: false });

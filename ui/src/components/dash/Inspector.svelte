@@ -1,17 +1,18 @@
 <script lang="ts">
-  import { api, DATE_PARTS, isPart, type Agg, type CondFormat, type Grain, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileLine, type TileType } from '../../lib/api';
+  import { api, DATE_PARTS, isPart, type Agg, type Cell, type CondFormat, type Dim, type Grain, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileLine, type TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { aggNames, cell, measureLabel, OTHER_KEY, tileTitle } from '../../lib/format';
   import { isChange } from '../../lib/cells';
   import { MAX_LINES } from '../../lib/charts/lines';
   import { defaultStack, sameUnit, stackableTile, stackMode } from '../../lib/charts/math';
   import { dim0Kind, effectiveShowAs, SHOW_AS_LABELS, showAsOptions, withShowAs } from '../../lib/showas';
-  import { ADVANCED_TYPES, advancedLocked, advancedOn, MORE_CHARTS, SHOW_ADVANCED_SWITCH } from '../../lib/tiers';
+  import { ADVANCED_TYPES, advancedLocked, advancedOn, ganttOffered as hasTwoDates, MORE_CHARTS, SHOW_ADVANCED_SWITCH } from '../../lib/tiers';
   import { defaultDim, defaultMeasure, dtypeOf, isRepeated, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, reachableFrom, type DashFilter } from '../../lib/tiles';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
   import Suggestions from './Suggestions.svelte';
   import { normalisePicture } from '../../lib/image';
+  import { MAX_BANDS } from '../../lib/charts/bullet';
 
   let {
     tile,
@@ -45,11 +46,20 @@
     { id: 'image', icon: 'image', label: 'Image' },
   ];
   // The second group of the picker, shown while Advanced is on (build 12).
-  const moreTypes: { id: TileType; icon: IconName; label: string }[] = [
+  const moreAll = ([
     { id: 'heatmap', icon: 'heatmap', label: 'Heat map' },
     { id: 'funnel', icon: 'funnel', label: 'Funnel' },
     { id: 'box', icon: 'box', label: 'Box plot' },
-  ].filter((t) => MORE_CHARTS.includes(t.id as TileType)) as { id: TileType; icon: IconName; label: string }[];
+    { id: 'bullet', icon: 'bullet', label: 'Bullet' },
+    { id: 'compare', icon: 'compare', label: 'Compare' },
+    { id: 'sankey', icon: 'sankey', label: 'Sankey' },
+    { id: 'calendar', icon: 'calendarheat', label: 'Calendar' },
+    { id: 'cohort', icon: 'cohort', label: 'Cohort' },
+    { id: 'gantt', icon: 'gantt', label: 'Gantt' },
+  ] as { id: TileType; icon: IconName; label: string }[]).filter((t) => MORE_CHARTS.includes(t.id));
+  // A Gantt chart needs a start and an end, so it is offered when some table has two date columns.
+  const ganttOffered = $derived(hasTwoDates(app.tables));
+  const moreTypes = $derived(moreAll.filter((t) => t.id !== 'gantt' || ganttOffered || tile.type === 'gantt'));
   const stacks: { id: NonNullable<Tile['stack']>; label: string }[] = [
     { id: 'stacked', label: 'Stacked' },
     { id: 'side', label: 'Side by side' },
@@ -70,6 +80,19 @@
   const funnelSorts: typeof sorts = [
     { id: 'auto', label: 'Biggest first' },
     { id: 'value-asc', label: 'Smallest first', sort: { by: 'value', desc: false } },
+    { id: 'label-asc', label: 'A → Z', sort: { by: 'label', desc: false } },
+    { id: 'label-desc', label: 'Z → A', sort: { by: 'label', desc: true } },
+  ];
+  const ganttSorts: typeof sorts = [
+    { id: 'auto', label: 'Earliest start first' },
+    { id: 'value-desc', label: 'Latest start first', sort: { by: 'value', desc: true } },
+    { id: 'label-asc', label: 'A → Z', sort: { by: 'label', desc: false } },
+    { id: 'label-desc', label: 'Z → A', sort: { by: 'label', desc: true } },
+  ];
+  const compareSorts: typeof sorts = [
+    { id: 'auto', label: 'Biggest gap first' },
+    { id: 'value-desc', label: 'Highest first value', sort: { by: 'value', desc: true } },
+    { id: 'value-asc', label: 'Lowest first value', sort: { by: 'value', desc: false } },
     { id: 'label-asc', label: 'A → Z', sort: { by: 'label', desc: false } },
     { id: 'label-desc', label: 'Z → A', sort: { by: 'label', desc: true } },
   ];
@@ -134,6 +157,16 @@
   const isHeat = $derived(tile.type === 'heatmap');
   const isFunnel = $derived(tile.type === 'funnel');
   const isBox = $derived(tile.type === 'box');
+  const isBullet = $derived(tile.type === 'bullet');
+  const isCompare = $derived(tile.type === 'compare');
+  const isSankey = $derived(tile.type === 'sankey');
+  const isCalendar = $derived(tile.type === 'calendar');
+  const isCohort = $derived(tile.type === 'cohort');
+  const isGantt = $derived(tile.type === 'gantt');
+  // A compare chart with one value reads two periods of a second field.
+  const periodsMode = $derived(isCompare && tile.measures.length < 2);
+  // Their values are fixed by the chart: a start and an end date, or the entity to follow.
+  const plainValue = $derived(isGantt || isCohort);
 
   const m = $derived(tile.measures[0]);
   const rels = $derived(app.snap!.workspace.relationships);
@@ -150,7 +183,8 @@
             'count', 'count_distinct',
           ]
         : ['count', 'count_distinct', 'min', 'max'];
-  const aggs = $derived(aggsOf(m));
+  // A Sankey chart adds links together, so it takes a sum or a count.
+  const aggs = $derived(isSankey ? aggsOf(m).filter((a) => a === 'sum' || a === 'count') : aggsOf(m));
 
   function set(patch: Partial<Tile>) {
     onchange({ ...tile, ...patch });
@@ -167,7 +201,7 @@
       dividing = null;
     }
   });
-  const topKind = $derived(tile.type === 'bar' || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'pivot' || isHeat);
+  const topKind = $derived(tile.type === 'bar' || isBullet || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'pivot' || isHeat);
   const topChoice = $derived(!tile.top ? 'all' : customTop || !TOP_PRESETS.includes(tile.top.n) ? 'custom' : String(tile.top.n));
 
   function setTop(choice: string) {
@@ -187,10 +221,10 @@
     if (tile.sort.by === 'manual') return 'manual';
     const id = `${tile.sort.by}-${(tile.sort.desc ?? tile.sort.by === 'value') ? 'desc' : 'asc'}`;
     // What a funnel and a box plot do when nothing is chosen is their first choice.
-    return (isFunnel && id === 'value-desc') || (isBox && id === 'label-asc') ? 'auto' : id;
+    return (isFunnel && id === 'value-desc') || (isBox && id === 'label-asc') || (isGantt && id === 'value-asc') ? 'auto' : id;
   });
   const sortChoices = $derived([
-    ...(isFunnel ? funnelSorts : isBox ? boxSorts : sorts),
+    ...(isFunnel ? funnelSorts : isBox ? boxSorts : isGantt ? ganttSorts : isCompare ? compareSorts : sorts),
     // Dragging the groups into an order is Advanced; a tile that has one keeps showing it.
     ...(advanced || tile.sort?.by === 'manual' ? [{ id: 'manual', label: 'Manual order' }] : []),
   ] as typeof sorts);
@@ -199,9 +233,11 @@
     const dims = [...tile.dims];
     dims[i] = defaultDim(app.tables, table, column);
     const isDate = dims[0] && ['date', 'datetime'].includes(dtypeOf(app.tables, dims[0].table, dims[0].column) ?? '');
+    // A calendar has one square for each day.
+    if (i === 0 && isCalendar && dims[0]) dims[0] = { ...dims[0], grain: 'day' };
     const patch: Partial<Tile> = { dims };
-    // A first group-by picks a sensible chart for the field.
-    if (i === 0 && !tile.dims.length && tile.type !== 'table' && tile.type !== 'pivot' && !isScatter && tile.type !== 'waterfall') {
+    // A first group-by picks a sensible chart for the field. A chart that was chosen by name keeps its type.
+    if (i === 0 && !tile.dims.length && ['bar', 'line', 'area', 'share', 'donut', 'kpi'].includes(tile.type)) {
       patch.type = isDate ? 'line' : 'bar';
       patch.horizontal = !isDate;
     }
@@ -311,6 +347,88 @@
     const w = Number(raw);
     set({ bins: raw.trim() !== '' && Number.isFinite(w) && w > 0 ? { width: w } : undefined });
   }
+  // ---- Advanced (build 13) ----
+
+  /** A new type keeps the fields that suit it. A Gantt chart and a cohort grid read other kinds of fields than the rest. */
+  function pickType(id: TileType) {
+    if (id === 'gantt' && !(tile.measures.length === 2 && tile.measures[0].agg === 'min' && tile.measures[1].agg === 'max')) {
+      return set({ type: id, measures: [], sort: undefined });
+    }
+    if (id === 'cohort' && tile.type !== 'cohort') return set({ type: id, measures: [], sort: undefined, top: undefined });
+    if (id === 'calendar' && tile.dims[0]) return set({ type: id, dims: [{ ...tile.dims[0], grain: 'day' }, ...tile.dims.slice(1)] });
+    set({ type: id });
+  }
+
+  /** A start or an end date for a Gantt chart: the earliest start and the latest end of each row. */
+  function setDateValue(i: number, table: string, column: string | null) {
+    if (column === null) return;
+    const ms = [...tile.measures];
+    ms[i] = { table, column, agg: i === 0 ? 'min' : 'max' };
+    set({ measures: ms });
+  }
+
+  /** The column that names who to follow in a cohort grid. It is counted by its different values. */
+  function setEntity(table: string, column: string | null) {
+    if (column === null) return;
+    set({ measures: [{ table, column, agg: 'count_distinct' }, ...tile.measures.slice(1)] });
+  }
+
+  /** The value a cohort adds up instead of the share that is active. */
+  function setCohortSum(table: string, column: string | null) {
+    if (!tile.measures[0]) return;
+    set({ measures: [tile.measures[0], { table, column, agg: 'sum' }] });
+  }
+
+  // The periods a compare chart can take: every value of its second field, oldest first.
+  let periodChoices = $state<Cell[]>([]);
+  let periodsFor = '';
+  $effect(() => {
+    const d = periodsMode ? tile.dims[1] : undefined;
+    const id = d ? `${d.table}|${d.column}|${d.grain ?? ''}` : '';
+    if (id === periodsFor) return;
+    periodsFor = id;
+    periodChoices = [];
+    if (!d) return;
+    api
+      .query({ measures: [{ table: d.table, column: null, agg: 'count' }], dimensions: [d], limit: 400 })
+      .then((r) => {
+        if (periodsFor !== id) return;
+        const vs = r.rows.map((x) => x[0]).filter((v) => v !== null);
+        periodChoices = vs.sort((a, b) => (typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { numeric: true })));
+      })
+      .catch(() => (periodChoices = []));
+  });
+  const dim1Type = $derived(tile.dims[1] ? dtypeOf(app.tables, tile.dims[1].table, tile.dims[1].column) : undefined);
+  const periodText = (v: Cell) => cell(v, dim1Type ?? 'text', tile.dims[1]?.grain);
+  /** The two periods on show: the saved ones, or the two the engine took. */
+  const periodsNow = $derived<Cell[]>(tile.periods?.length === 2 ? tile.periods : (current?.res.pair?.periods ?? []));
+  function setPeriod(i: 0 | 1, raw: string) {
+    const pick = periodChoices.find((v) => String(v) === raw);
+    if (pick === undefined) return;
+    const next = [periodsNow[0] ?? periodChoices.at(-2) ?? pick, periodsNow[1] ?? periodChoices.at(-1) ?? pick];
+    next[i] = pick;
+    set({ periods: next });
+  }
+
+  // A trend column in a table: the date columns it can take its periods from, the same table first.
+  const sparkDates = $derived.by(() => {
+    if (!m) return [] as { table: string; column: string }[];
+    const out: { table: string; column: string }[] = [];
+    const ids = [m.table, ...app.tables.map((t) => t.id).filter((id) => id !== m.table)];
+    for (const id of ids) {
+      const t = app.table(id);
+      if (!t || !reach?.has(id)) continue;
+      for (const c of t.columns) if (c.dtype === 'date' || c.dtype === 'datetime') out.push({ table: id, column: c.name });
+    }
+    return out;
+  });
+  const SPARK_GRAINS: Grain[] = ['day', 'week', 'month', 'quarter', 'year'];
+  function setSpark(on: boolean) {
+    if (!on) return set({ spark: undefined });
+    const first = sparkDates[0];
+    if (first) set({ spark: { ...first, grain: 'month' } });
+  }
+
   // ---- Advanced (build 12) ----
 
   /** The groups on screen, in the order they have now: the choices for a manual order. */
@@ -379,10 +497,12 @@
   let bandTo = $state('');
   let bandLabel = $state('');
   const bands = $derived((tile.lines ?? []).filter((l) => l.kind === 'band'));
+  // A tile has up to four lines; a bullet chart has up to three bands.
+  const bandLimit = $derived(isBullet ? MAX_BANDS : MAX_LINES);
 
   function addBand() {
     const [a, b] = [Number(bandFrom.replace(/\s/g, '')), Number(bandTo.replace(/\s/g, ''))];
-    if (bandFrom.trim() === '' || bandTo.trim() === '' || !Number.isFinite(a) || !Number.isFinite(b) || a === b || bands.length >= MAX_LINES) return;
+    if (bandFrom.trim() === '' || bandTo.trim() === '' || !Number.isFinite(a) || !Number.isFinite(b) || a === b || bands.length >= bandLimit) return;
     const label = bandLabel.trim();
     set({ lines: [...(tile.lines ?? []), { kind: 'band', value: Math.min(a, b), to: Math.max(a, b), ...(label ? { label } : {}) }] });
     askBand = false;
@@ -566,6 +686,29 @@
   {@render formatRow(i)}
 {/snippet}
 
+{#snippet bandsUi()}
+      <span class="label sub">Bands</span>
+      {#each bands as b}
+        <div class="linerow">
+          <span>{b.label?.trim() || 'Band'} {cell(b.value ?? 0, 'number', null, false, tile.formats?.[0])} to {cell(b.to ?? 0, 'number', null, false, tile.formats?.[0])}</span>
+          <button class="btn plain icon" aria-label="Remove band" onclick={() => set({ lines: (tile.lines ?? []).filter((l) => l !== b) })}><Icon name="x" size={12} /></button>
+        </div>
+      {/each}
+      {#if askBand}
+        <div class="targetform">
+          <input class="field" type="number" step="any" placeholder="From" aria-label="Band from" bind:value={bandFrom} />
+          <input class="field" type="number" step="any" placeholder="To" aria-label="Band to" bind:value={bandTo} />
+          <input class="field" placeholder="Name (optional)" aria-label="Name of the band" bind:value={bandLabel} />
+          <div class="row">
+            <button class="btn small" disabled={bandFrom.trim() === '' || bandTo.trim() === ''} onclick={addBand}>Add band</button>
+            <button class="link" onclick={() => (askBand = false)}>Cancel</button>
+          </div>
+        </div>
+      {:else if bands.length < bandLimit}
+        <button class="link" onclick={() => (askBand = true)}>Add band…</button>
+      {/if}
+{/snippet}
+
 <aside class="insp">
   <header>
     <h3>Tile</h3>
@@ -591,7 +734,7 @@
           aria-checked={tile.type === t.id}
           class:on={tile.type === t.id || (t.id === 'share' && tile.type === 'donut')}
           title={t.label}
-          onclick={() => set({ type: t.id })}>
+          onclick={() => pickType(t.id)}>
           <Icon name={t.icon} size={18} />
           <span>{t.label}</span>
         </button>
@@ -601,14 +744,14 @@
       <span class="label up">More charts</span>
       <div class="types" role="radiogroup" aria-label="More chart types">
         {#each moreTypes as t}
-          <button role="radio" aria-checked={tile.type === t.id} class:on={tile.type === t.id} title={t.label} onclick={() => set({ type: t.id })}>
+          <button role="radio" aria-checked={tile.type === t.id} class:on={tile.type === t.id} title={t.label} onclick={() => pickType(t.id)}>
             <Icon name={t.icon} size={18} />
             <span>{t.label}</span>
           </button>
         {/each}
       </div>
     {/if}
-    {#if tile.type === 'kpi' || tile.type === 'waterfall'}
+    {#if tile.type === 'kpi' || tile.type === 'waterfall' || periodsMode}
       <div class="better" role="radiogroup" aria-label="Which change is good">
         <span class="label">A rise is</span>
         <button role="radio" aria-checked={(tile.better ?? 'up') === 'up'} class:on={(tile.better ?? 'up') === 'up'} onclick={() => set({ better: 'up' })}>good</button>
@@ -684,15 +827,19 @@
 
   {#if !noFields && !lockedType}
   <div class="sec">
-    <span class="label">{isScatter ? 'Across (X)' : numberOnly ? 'Number column' : 'Value'}</span>
+    <span class="label">{isScatter ? 'Across (X)' : isGantt ? 'Start date' : isCohort ? 'Who to follow' : isCompare ? 'First value' : isBullet ? 'Value' : numberOnly ? 'Number column' : 'Value'}</span>
     <FieldPicker
       mode="measure"
       table={m?.table ?? null}
       column={m?.column ?? null}
-      placeholder={numberOnly ? 'A column of numbers' : 'What to measure'}
+      placeholder={isGantt ? 'The column the work starts in' : isCohort ? 'A column like customer_id' : numberOnly ? 'A column of numbers' : 'What to measure'}
       numbersOnly={numberOnly}
-      onchange={(t, c) => swapField(0, t, c)} />
-    {#if m}
+      datesOnly={isGantt}
+      onchange={(t, c) => (isGantt ? setDateValue(0, t, c) : isCohort ? setEntity(t, c) : swapField(0, t, c))} />
+    {#if m && isCohort}
+      <p class="hint tight">Each different value in this column is one customer, user or item. It joins the cohort of the first period it appears in.</p>
+    {/if}
+    {#if m && !plainValue}
       <!-- A histogram and a box plot read every row of the column, so there is nothing to add up. -->
       {#if !numberOnly}
         <select class="field" value={m.agg} onchange={(e) => set({ measures: [{ ...m, agg: e.currentTarget.value as Agg }, ...tile.measures.slice(1)] })}>
@@ -712,11 +859,100 @@
         onchange={(t, c) => swapField(1, t, c)}
         onclear={() => removeMeasure(1)} />
       {#if tile.measures[1]}
-        <select class="field" value={tile.measures[1].agg} onchange={(e) => set({ measures: [m, { ...tile.measures[1], agg: e.currentTarget.value as Agg }] })}>
+        <select class="field" value={tile.measures[1].agg} onchange={(e) => set({ measures: [m, { ...tile.measures[1], agg: e.currentTarget.value as Agg }, ...tile.measures.slice(2)] })}>
           {#each aggsOf(tile.measures[1]) as a}<option value={a}>{aggNames[a]}</option>{/each}
         </select>
         {@render valueRows(1)}
       {/if}
+      <!-- A third value sets the area of each dot (Advanced). -->
+      {#if tile.measures[1] && (advanced || tile.measures[2])}
+        <span class="label up">Size (optional)</span>
+        <FieldPicker
+          mode="measure"
+          table={tile.measures[2]?.table ?? null}
+          column={tile.measures[2]?.column ?? null}
+          placeholder="Make the dots bigger for more"
+          reachable={reach}
+          onchange={(t, c) => set({ measures: [m, tile.measures[1], defaultMeasure(app.tables, t, c)] })}
+          onclear={() => removeMeasure(2)} />
+        {#if tile.measures[2]}
+          <select class="field" aria-label="How to add up the size" value={tile.measures[2].agg} onchange={(e) => set({ measures: [m, tile.measures[1], { ...tile.measures[2], agg: e.currentTarget.value as Agg }] })}>
+            {#each aggsOf(tile.measures[2]) as a}<option value={a}>{aggNames[a]}</option>{/each}
+          </select>
+          {@render valueRows(2)}
+        {/if}
+      {/if}
+    {/if}
+    {#if isBullet && m}
+      <span class="label up">Target (optional)</span>
+      <FieldPicker
+        mode="measure"
+        table={tile.measures[1]?.table ?? null}
+        column={tile.measures[1]?.column ?? null}
+        placeholder="A value that holds the target"
+        reachable={reach}
+        onchange={(t, c) => set({ measures: [m, defaultMeasure(app.tables, t, c)], target: undefined })}
+        onclear={() => removeMeasure(1)} />
+      {#if tile.measures[1]}
+        <select class="field" aria-label="How to add up the target" value={tile.measures[1].agg} onchange={(e) => set({ measures: [m, { ...tile.measures[1], agg: e.currentTarget.value as Agg }] })}>
+          {#each aggsOf(tile.measures[1]) as a}<option value={a}>{aggNames[a]}</option>{/each}
+        </select>
+      {:else}
+        <input
+          class="field"
+          type="number"
+          min="0"
+          step="any"
+          placeholder="Or type one target for every bar"
+          aria-label="One target for every bar"
+          value={tile.target?.value ?? ''}
+          onchange={(e) => setTarget(e.currentTarget.value)} />
+      {/if}
+      <p class="hint tight">The thin bar is the value and the tick is the target. Add bands below for poor, fair and good.</p>
+    {/if}
+    {#if isCompare && m}
+      <span class="label up">Second value (optional)</span>
+      <FieldPicker
+        mode="measure"
+        table={tile.measures[1]?.table ?? null}
+        column={tile.measures[1]?.column ?? null}
+        placeholder="A second value, or compare two periods"
+        reachable={reach}
+        onchange={(t, c) => set({ measures: [m, defaultMeasure(app.tables, t, c)] })}
+        onclear={() => removeMeasure(1)} />
+      {#if tile.measures[1]}
+        <select class="field" aria-label="How to add up the second value" value={tile.measures[1].agg} onchange={(e) => set({ measures: [m, { ...tile.measures[1], agg: e.currentTarget.value as Agg }] })}>
+          {#each aggsOf(tile.measures[1]) as a}<option value={a}>{aggNames[a]}</option>{/each}
+        </select>
+        <p class="hint tight">Two dots for each row, joined by a line. The biggest gap comes first.</p>
+      {:else}
+        <p class="hint tight">With one value, pick a date below and two of its periods. Each row then draws as a line from the first to the second.</p>
+      {/if}
+    {/if}
+    {#if isGantt && m}
+      <span class="label up">End date</span>
+      <FieldPicker
+        mode="measure"
+        table={tile.measures[1]?.table ?? null}
+        column={tile.measures[1]?.column ?? null}
+        placeholder="The column the work ends in"
+        datesOnly
+        reachable={reach}
+        onchange={(t, c) => setDateValue(1, t, c)}
+        onclear={() => removeMeasure(1)} />
+      <p class="hint tight">Each row is a bar from its earliest start to its latest end. The first 100 rows are drawn.</p>
+    {/if}
+    {#if isCohort && m}
+      <span class="label up">Add up a value instead (optional)</span>
+      <FieldPicker
+        mode="measure"
+        table={tile.measures[1]?.table ?? null}
+        column={tile.measures[1]?.column ?? null}
+        placeholder="Show a total, not a share"
+        numbersOnly
+        reachable={reach}
+        onchange={setCohortSum}
+        onclear={() => removeMeasure(1)} />
     {/if}
     {#if manyValues}
       {#each tile.measures.slice(1) as extra, k}
@@ -743,16 +979,16 @@
 
   {#if !isHistogram}
   <div class="sec">
-      <span class="label">{tile.type === 'kpi' ? 'Period (a date, for the comparison)' : tile.type === 'share' || tile.type === 'donut' ? 'Split into' : isScatter ? 'Dot for each' : pivotLike ? 'Rows' : isFunnel ? 'Stages' : isBox ? 'Group by (optional)' : 'Group by'}</span>
+      <span class="label">{tile.type === 'kpi' ? 'Period (a date, for the comparison)' : tile.type === 'share' || tile.type === 'donut' ? 'Split into' : isScatter ? 'Dot for each' : pivotLike ? 'Rows' : isFunnel ? 'Stages' : isBox || isBullet ? 'Group by (optional)' : isGantt ? 'Name of each row' : isCalendar ? 'Date (one square for each day)' : isCohort ? 'Date of each event' : isSankey ? 'First stage' : isCompare ? 'Row for each' : 'Group by'}</span>
       <FieldPicker
         mode="dim"
         table={tile.dims[0]?.table ?? null}
         column={tile.dims[0]?.column ?? null}
-        placeholder={tile.type === 'kpi' ? 'A date, for the trend' : isScatter ? 'One dot for each of these' : isFunnel ? 'The steps, like visit and sale' : isBox ? 'One box for each of these' : 'Category or date'}
+        placeholder={tile.type === 'kpi' ? 'A date, for the trend' : isScatter ? 'One dot for each of these' : isFunnel ? 'The steps, like visit and sale' : isBox ? 'One box for each of these' : isBullet ? 'One bar for each of these' : isGantt ? 'A task, a project or an id' : isCalendar || isCohort ? 'A date column' : isSankey ? 'Where it starts, like a channel' : 'Category or date'}
         reachable={reach}
         onchange={(t, c) => c && setDim(0, t, c)}
         onclear={() => removeDim(0)} />
-      {#if tile.dims[0] && (dimTypes[0] === 'date' || dimTypes[0] === 'datetime')}
+      {#if tile.dims[0] && (dimTypes[0] === 'date' || dimTypes[0] === 'datetime') && !isCalendar && !isGantt}
         <div class="grains" role="radiogroup" aria-label="Date grouping">
           {#each grains as g}
             <button role="radio" aria-checked={tile.dims[0].grain === g} class:on={tile.dims[0].grain === g} onclick={() => set({ dims: [{ ...tile.dims[0], grain: g }, ...tile.dims.slice(1)] })}>
@@ -761,7 +997,7 @@
           {/each}
         </div>
         <!-- Parts of the date repeat every year, week or day. A number tile compares periods, so it has none. -->
-        {#if tile.type !== 'kpi'}
+        {#if tile.type !== 'kpi' && !isCohort}
           <div class="grains parts" role="radiogroup" aria-label="Part of the date">
             {#each DATE_PARTS.filter((g) => g !== 'hour' || dimTypes[0] === 'datetime') as g}
               <button role="radio" aria-checked={tile.dims[0].grain === g} class:on={tile.dims[0].grain === g} onclick={() => set({ dims: [{ ...tile.dims[0], grain: g }, ...tile.dims.slice(1)] })}>
@@ -785,6 +1021,56 @@
     </div>
   {:else if tile.compare && compareType}
     <p class="hint">Comparing needs one value, a date with a grain and no split.</p>
+  {/if}
+
+  {#if isSankey && tile.dims[0]}
+    <div class="sec">
+      <span class="label">Next stages</span>
+      {#each tile.dims.slice(1, 3) as d, k}
+        <FieldPicker mode="dim" table={d.table} column={d.column} reachable={reach} onchange={(t, c) => c && setDim(k + 1, t, c)} onclear={() => removeDim(k + 1)} />
+      {/each}
+      {#if tile.dims.length < 3}
+        <FieldPicker
+          mode="dim"
+          table={null}
+          column={null}
+          placeholder={tile.dims.length < 2 ? 'Where it goes next, like a category' : 'A third stage (optional)'}
+          reachable={reach}
+          onchange={(t, c) => c && setDim(tile.dims.length, t, c)} />
+      {/if}
+      <p class="hint tight">A band is as wide as its value. A stage shows 25 nodes at most; the smallest are added up as Other.</p>
+    </div>
+  {/if}
+
+  {#if periodsMode && tile.dims[0]}
+    <div class="sec">
+      <span class="label">Periods from</span>
+      <FieldPicker
+        mode="dim"
+        table={tile.dims[1]?.table ?? null}
+        column={tile.dims[1]?.column ?? null}
+        placeholder="A date, like the year"
+        reachable={reach}
+        onchange={(t, c) => c && set({ dims: [tile.dims[0], defaultDim(app.tables, t, c)], periods: undefined })}
+        onclear={() => set({ dims: tile.dims.slice(0, 1), periods: undefined })} />
+      {#if tile.dims[1] && (dim1Type === 'date' || dim1Type === 'datetime')}
+        <div class="grains" role="radiogroup" aria-label="Date grouping of the periods">
+          {#each grains as g}
+            <button role="radio" aria-checked={tile.dims[1].grain === g} class:on={tile.dims[1].grain === g} onclick={() => set({ dims: [tile.dims[0], { ...tile.dims[1], grain: g }], periods: undefined })}>{g}</button>
+          {/each}
+        </div>
+      {/if}
+      {#if tile.dims[1] && periodChoices.length}
+        <div class="pair">
+          {#each [0, 1] as i}
+            <select class="field" aria-label={i === 0 ? 'First period' : 'Second period'} value={String(periodsNow[i] ?? '')} onchange={(e) => setPeriod(i as 0 | 1, e.currentTarget.value)}>
+              {#each periodChoices as v}<option value={String(v)}>{periodText(v)}</option>{/each}
+            </select>
+          {/each}
+        </div>
+        <p class="hint tight">Not picked: the latest two. A row that rose is good news, unless you set a rise as bad.</p>
+      {/if}
+    </div>
   {/if}
 
   {#if showSplit && tile.dims[0] && !repeated && (tile.type === 'table' || isScatter || tile.measures.length < 2)}
@@ -842,6 +1128,14 @@
           <input type="checkbox" checked={tile.totals !== false} onchange={(e) => set({ totals: e.currentTarget.checked ? undefined : false })} />
           Totals
         </label>
+        <!-- Groups of the first row fields open and close, each with a subtotal (Advanced). -->
+        {#if tile.dims.length >= 2 && (advanced || tile.expand)}
+          <label class="check">
+            <input type="checkbox" checked={!!tile.expand} disabled={tile.totals === false} onchange={(e) => set({ expand: e.currentTarget.checked ? true : undefined })} />
+            Open and close groups
+          </label>
+          <p class="hint tight">{tile.totals === false ? 'Turn Totals on to open and close groups.' : 'Each group of the first fields gets a subtotal row with an arrow.'}</p>
+        {/if}
         <p class="hint tight">The rows are the fields above. Up to 30 columns are shown.</p>
       {:else}
         <p class="hint tight">Each cell is shaded by its number, from light to dark. Up to 30 columns are shown.</p>
@@ -855,6 +1149,28 @@
         <input type="checkbox" checked={!!tile.totals} onchange={(e) => set({ totals: e.currentTarget.checked ? true : undefined })} />
         Total row
       </label>
+      <!-- One small line for each row, over the last 12 periods (Advanced). -->
+      {#if tile.dims.length && (advanced || tile.spark) && (sparkDates.length || tile.spark)}
+        <label class="check">
+          <input type="checkbox" checked={!!tile.spark} onchange={(e) => setSpark(e.currentTarget.checked)} />
+          Trend column
+        </label>
+        {#if tile.spark}
+          <FieldPicker
+            mode="dim"
+            table={tile.spark.table}
+            column={tile.spark.column}
+            datesOnly
+            reachable={reach}
+            onchange={(t, c) => c && set({ spark: { table: t, column: c, grain: tile.spark?.grain ?? 'month' } })} />
+          <div class="grains" role="radiogroup" aria-label="Period of the trend">
+            {#each SPARK_GRAINS as g}
+              <button role="radio" aria-checked={(tile.spark.grain ?? 'month') === g} class:on={(tile.spark.grain ?? 'month') === g} onclick={() => set({ spark: { ...tile.spark!, grain: g } })}>{g}</button>
+            {/each}
+          </div>
+          <p class="hint tight">Each row gets a line of its first value over the last 12 periods that are over.</p>
+        {/if}
+      {/if}
     </div>
   {/if}
 
@@ -972,7 +1288,7 @@
     </div>
   {/if}
 
-  {#if (tile.type === 'bar' || tile.type === 'table' || tile.type === 'waterfall' || isFunnel || isBox) && tile.dims[0]}
+  {#if (tile.type === 'bar' || tile.type === 'table' || tile.type === 'waterfall' || isFunnel || isBox || isBullet || isGantt || isCompare) && tile.dims[0]}
     <div class="sec">
       <span class="label">Sort</span>
       <select class="field" aria-label="Sort" value={sortId} onchange={(e) => pickSort(e.currentTarget.value)}>
@@ -1002,6 +1318,13 @@
         </ul>
         {#if !manualList.length}<p class="hint tight">The groups show here once the tile has data.</p>{/if}
       {/if}
+    </div>
+  {/if}
+
+  {#if advanced && isBullet}
+    <div class="sec adv">
+      <span class="label">Advanced</span>
+      {@render bandsUi()}
     </div>
   {/if}
 
@@ -1065,26 +1388,7 @@
         <p class="hint tight">Up to 12 charts, the biggest first. They share one scale, so the sizes can be compared.{tile.measures.length > 1 ? ' Only the first value is shown.' : ''}</p>
       {/if}
 
-      <span class="label sub">Bands</span>
-      {#each bands as b}
-        <div class="linerow">
-          <span>{b.label?.trim() || 'Band'} {cell(b.value ?? 0, 'number', null, false, tile.formats?.[0])} to {cell(b.to ?? 0, 'number', null, false, tile.formats?.[0])}</span>
-          <button class="btn plain icon" aria-label="Remove band" onclick={() => set({ lines: (tile.lines ?? []).filter((l) => l !== b) })}><Icon name="x" size={12} /></button>
-        </div>
-      {/each}
-      {#if askBand}
-        <div class="targetform">
-          <input class="field" type="number" step="any" placeholder="From" aria-label="Band from" bind:value={bandFrom} />
-          <input class="field" type="number" step="any" placeholder="To" aria-label="Band to" bind:value={bandTo} />
-          <input class="field" placeholder="Name (optional)" aria-label="Name of the band" bind:value={bandLabel} />
-          <div class="row">
-            <button class="btn small" disabled={bandFrom.trim() === '' || bandTo.trim() === ''} onclick={addBand}>Add band</button>
-            <button class="link" onclick={() => (askBand = false)}>Cancel</button>
-          </div>
-        </div>
-      {:else if bands.length < MAX_LINES}
-        <button class="link" onclick={() => (askBand = true)}>Add band…</button>
-      {/if}
+      {@render bandsUi()}
     </div>
   {/if}
 

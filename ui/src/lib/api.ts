@@ -115,6 +115,10 @@ export interface QueryResult {
   real?: Cell[][];
   /** Box plots: the outlier dots, `[group, value]`. The rows are `[group, min, q1, median, q3, max, lower whisker, upper whisker, count]`. */
   outliers?: Cell[][];
+  /** Tables with a trend column: for each row key (`sparkKey`), the last 12 periods of the first value. */
+  sparks?: Record<string, (number | null)[]>;
+  /** Compare charts over two periods: the two periods, in the order of the two value columns. */
+  pair?: { periods: Cell[] | null };
 }
 
 /**
@@ -124,8 +128,11 @@ export interface QueryResult {
  */
 export interface Totals {
   grand: Cell[];
+  /** A pivot with groups that open and close adds one entry for each group: fewer row values than a row has. */
   rows?: Cell[][];
   cols?: Cell[][];
+  /** Expandable pivot: the cells of each group over each column. The group values, the column value, then the measures. */
+  groups?: Cell[][];
 }
 
 export interface Bins {
@@ -238,6 +245,12 @@ export interface Tile {
   layout?: 'together' | 'panels' | 'indexed';
   /** Bars plus a line, index-aligned with measures (Advanced). */
   mix?: ('bar' | 'line')[];
+  /** Compare two periods: the two values of the second field to compare. Not set: the latest two. */
+  periods?: Cell[];
+  /** Table (Advanced): a trend column. The field gives the periods. */
+  spark?: Dim;
+  /** Pivot (Advanced): the groups of the row fields open and close, with a subtotal for each. */
+  expand?: boolean;
   /** Bars and areas with a split or several values: pile them up, put them side by side, or fill the height. */
   stack?: 'stacked' | 'side' | 'percent';
   /** Histogram: the width of a bin. Not set: the engine picks one. */

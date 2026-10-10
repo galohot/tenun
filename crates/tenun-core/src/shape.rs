@@ -153,7 +153,10 @@ fn part_range(g: Grain) -> (i32, i32) {
 /// fill their whole range. A result that would pass 5,000 rows is left alone, and
 /// so is a chart sorted by value, because its groups are not in time order.
 pub fn densify(engine: &Engine, tile: &Tile, q: &SemanticQuery, res: &mut QueryResult) {
-    if !matches!(tile.kind.as_str(), "bar" | "line" | "area" | "waterfall") {
+    if !matches!(
+        tile.kind.as_str(),
+        "bar" | "line" | "area" | "waterfall" | "calendar"
+    ) {
         return;
     }
     let sort = tile.sort.as_ref();
@@ -286,7 +289,7 @@ pub fn top_n(
     };
     if !matches!(
         tile.kind.as_str(),
-        "bar" | "table" | "share" | "donut" | "pivot" | "heatmap"
+        "bar" | "table" | "share" | "donut" | "pivot" | "heatmap" | "bullet"
     ) {
         return Ok(());
     }
@@ -394,58 +397,91 @@ pub fn totals(
         grand,
         rows: None,
         cols: None,
+        groups: None,
     };
-    if matches!(tile.kind.as_str(), "pivot" | "heatmap")
-        && let Some(c) = &tile.cols
-        && q.dimensions.len() > 1
-    {
-        let row_dims = q.dimensions[..q.dimensions.len() - 1].to_vec();
-        let mut rows = ask(
-            row_dims.clone(),
-            wide.to_vec(),
-            Some(crate::snapshot::PIVOT_LIMIT),
-        )?
-        .rows;
-        if tile.top.is_some() {
-            // Same shape as the rows on show: the kept first groups, then "Other".
-            let kept: HashSet<String> = res
-                .rows
-                .iter()
-                .filter(|r| js_key(&r[0]) != OTHER_KEY)
-                .map(|r| js_key(&r[0]))
-                .collect();
-            rows.retain(|r| kept.contains(&js_key(&r[0])));
-            if let Some(keys) = &res.other_of {
-                let mut filters = wide.to_vec();
-                filters.push(Filter {
-                    table: row_dims[0].table.clone(),
-                    column: row_dims[0].column.clone(),
-                    grain: row_dims[0].grain,
-                    op: FilterOp::NotIn,
-                    values: keys.clone(),
-                });
-                for r in ask(
-                    row_dims[1..].to_vec(),
-                    filters,
-                    Some(crate::snapshot::PIVOT_LIMIT),
-                )?
-                .rows
-                {
-                    let mut row = vec![Value::String(OTHER_KEY.into())];
-                    row.extend(r);
-                    rows.push(row);
-                }
-            }
-        }
-        out.rows = Some(rows);
-        out.cols = Some(
-            ask(
-                vec![c.clone()],
+    let pivotish = matches!(tile.kind.as_str(), "pivot" | "heatmap");
+    let col = tile.cols.as_ref().filter(|_| q.dimensions.len() > 1);
+    // An expandable pivot with no column field still needs the subtotal of each group.
+    let groups_only = tile.kind == "pivot" && tile.expand == Some(true) && col.is_none();
+    if pivotish && (col.is_some() || groups_only) {
+        let row_dims = if col.is_some() {
+            q.dimensions[..q.dimensions.len() - 1].to_vec()
+        } else {
+            q.dimensions.clone()
+        };
+        // The totals of the groups follow the rows on show: with a top N, the kept first groups,
+        // then one "Other" entry for the rest.
+        let kept: HashSet<String> = res
+            .rows
+            .iter()
+            .filter(|r| js_key(&r[0]) != OTHER_KEY)
+            .map(|r| js_key(&r[0]))
+            .collect();
+        let follow = |dims: Vec<Dimension>| -> anyhow::Result<Vec<Vec<Value>>> {
+            let mut rows = ask(
+                dims.clone(),
                 wide.to_vec(),
                 Some(crate::snapshot::PIVOT_LIMIT),
             )?
-            .rows,
-        );
+            .rows;
+            if tile.top.is_some() {
+                rows.retain(|r| kept.contains(&js_key(&r[0])));
+                if let Some(keys) = &res.other_of {
+                    let mut filters = wide.to_vec();
+                    filters.push(Filter {
+                        table: row_dims[0].table.clone(),
+                        column: row_dims[0].column.clone(),
+                        grain: row_dims[0].grain,
+                        op: FilterOp::NotIn,
+                        values: keys.clone(),
+                    });
+                    for r in ask(
+                        dims[1..].to_vec(),
+                        filters,
+                        Some(crate::snapshot::PIVOT_LIMIT),
+                    )?
+                    .rows
+                    {
+                        let mut row = vec![Value::String(OTHER_KEY.into())];
+                        row.extend(r);
+                        rows.push(row);
+                    }
+                }
+            }
+            Ok(rows)
+        };
+        let mut rows = if col.is_some() {
+            follow(row_dims.clone())?
+        } else {
+            vec![]
+        };
+        let mut groups = None;
+        // An expandable pivot also gets a subtotal for each group: every prefix of the row fields,
+        // alone (its total, in `rows`) and over each column (its cells, in `groups`).
+        if tile.expand == Some(true) && tile.kind == "pivot" && row_dims.len() > 1 {
+            let mut cells = Vec::new();
+            for p in 1..row_dims.len() {
+                rows.extend(follow(row_dims[..p].to_vec())?);
+                if let Some(c) = col {
+                    let mut with_col = row_dims[..p].to_vec();
+                    with_col.push(c.clone());
+                    cells.extend(follow(with_col)?);
+                }
+            }
+            groups = col.map(|_| cells);
+        }
+        out.rows = Some(rows);
+        out.groups = groups;
+        if let Some(c) = col {
+            out.cols = Some(
+                ask(
+                    vec![c.clone()],
+                    wide.to_vec(),
+                    Some(crate::snapshot::PIVOT_LIMIT),
+                )?
+                .rows,
+            );
+        }
     }
     res.totals = Some(out);
     Ok(())
@@ -1005,6 +1041,8 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
         repeat: None,
         real: None,
         outliers: None,
+        sparks: None,
+        pair: None,
     };
     let (Some(n), Some(min), Some(max), Some(q1), Some(q3)) =
         (num(0), num(1), num(2), num(3), num(4))
