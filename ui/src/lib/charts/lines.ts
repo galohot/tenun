@@ -161,20 +161,23 @@ export function placeLevelLabels(values: number[], lo: number, hi: number, lengt
 
 /**
  * The same for upright lines, whose names sit side by side along the top. A name is `size` px wide
- * and centred on its line; one that would touch another is left out, the leftmost first to stay.
+ * and centred on its line. It goes in the first row ('above'); when that is taken it goes in a second
+ * row ('below') and only when both are taken is it left out. The leftmost line chooses first.
+ * `overhang` is the room in px beyond each end of the plot where a name may reach.
  */
-export function placeUprightLabels(values: number[], lo: number, hi: number, length: number, size: (i: number) => number): Place[] {
+export function placeUprightLabels(values: number[], lo: number, hi: number, length: number, size: (i: number) => number, overhang = 0): Place[] {
   const span = hi - lo || 1;
   const x = (v: number) => ((v - lo) / span) * length;
-  const taken: [number, number][] = [];
+  const rows: [number, number][][] = [[], []];
   const out: Place[] = values.map(() => 'hide');
   [...values.keys()]
     .sort((i, j) => values[i] - values[j])
     .forEach((i) => {
       const [a, b] = [x(values[i]) - size(i) / 2, x(values[i]) + size(i) / 2];
-      if (a >= -1 && b <= length + 1 && taken.every(([c, d]) => b <= c || a >= d)) {
-        taken.push([a, b]);
-        out[i] = 'above';
+      const row = a >= -1 - overhang && b <= length + 1 + overhang ? rows.findIndex((taken) => taken.every(([c, d]) => b <= c || a >= d)) : -1;
+      if (row >= 0) {
+        rows[row].push([a, b]);
+        out[i] = row === 0 ? 'above' : 'below';
       }
     });
   return out;

@@ -139,7 +139,7 @@
   const kind = $derived(resultDim0(res, tile));
   const verdictOf = (v: Cell, i: number) => {
     const cond = condOf(i);
-    return cond?.kind === 'goodbad' ? goodBad(typeof v === 'number' ? v : null, cond, effectiveShowAs(tile, i - groups, kind)) : null;
+    return cond?.kind === 'goodbad' ? goodBad(typeof v === 'number' ? v : null, cond, effectiveShowAs(tile, i - groups, kind), showText(v, i), lineText(i)) : null;
   };
   /** The line a verdict is read against, for the tooltip: "Above 100". */
   const lineText = (i: number) => {

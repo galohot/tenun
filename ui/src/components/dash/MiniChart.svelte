@@ -1,9 +1,9 @@
 <script lang="ts">
   // One chart of a small-multiples tile. It measures itself, so the number of labels and bars fits
   // its own size, and it takes the scale the other charts share.
-  import type { Cell, QueryResult, Tile } from '../../lib/api';
+  import { isPart, type Cell, type QueryResult, type Tile } from '../../lib/api';
   import { buildOption, type Colors } from '../../lib/chart';
-  import { withScale } from '../../lib/charts/small';
+  import { fitToCell, withScale } from '../../lib/charts/small';
   import type { Named } from '../../lib/format';
   import { OTHER_KEY } from '../../lib/format';
   import ChartView from './ChartView.svelte';
@@ -31,7 +31,8 @@
   let height = $state(110);
   const horizontal = $derived(tile.type === 'bar' && !!tile.horizontal);
   const built = $derived(buildOption({ res, tile, colors, selected, width, height, tables, noFold: true }));
-  const option = $derived(withScale(built.option, scale, horizontal));
+  const dates = $derived(res.columns[0]?.dtype === 'date' || res.columns[0]?.dtype === 'datetime' || isPart(tile.dims[0]?.grain));
+  const option = $derived(fitToCell(withScale(built.option, scale, horizontal), dates, horizontal));
 </script>
 
 <ChartView

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use tenun_core::Engine;
 use tenun_core::engine::QueryResult;
 use tenun_core::secrets::Secrets;
-use tenun_core::snapshot::{self, Tile, run_tile, tile_query};
+use tenun_core::snapshot::{self, DashFilter, Tile, run_tile, tile_query};
 use tenun_core::workspace::{Source, SourceKind, Workspace};
 
 // Six customers. Jan: c1 c2 c3. Feb: c4 c5 join. Mar: c6 joins. Last month with data is March.
@@ -21,7 +21,7 @@ c5,2026-02-20,Web,Coffee,paid,10
 c1,2026-03-04,Shop,Coffee,paid,60
 c3,2026-03-09,Web,Tea,paid,20
 c4,2026-03-15,Web,Coffee,paid,90
-c6,2026-03-30,Shop,Tea,refunded,5
+c6,2026-03-31,Shop,Tea,refunded,5
 ";
 
 const REGIONS: &str = "region,actual,target
@@ -421,6 +421,31 @@ fn cohort_share_of_each_cohort_that_is_active() {
     assert_eq!(at("2026-03-01", 1), None);
     assert_eq!(at("2026-01-01", 3), None);
     assert_eq!(r.rows.len(), 3 + 2 + 1);
+}
+
+#[test]
+fn cohort_leaves_out_a_period_that_is_not_over() {
+    let e = engine("cohortpart");
+    let t = tile(
+        "cohort",
+        json!([m("s1/orders", "customer", "count_distinct")]),
+        json!([by("s1/orders", "date", "month")]),
+        json!({}),
+    );
+    // The data now ends on 2026-03-15, in the middle of March: March is not a period yet.
+    let upto = DashFilter {
+        filter: serde_json::from_value(json!({
+            "table": "s1/orders", "column": "date", "op": "lte", "values": ["2026-03-15"]
+        }))
+        .unwrap(),
+        from_tile: "other".into(),
+    };
+    let r = run_tile(&e, &t, &[upto]).unwrap();
+    let cohorts: Vec<&str> = r.rows.iter().map(|x| text(&x[0])).collect();
+    assert!(cohorts.iter().all(|c| *c != "2026-03-01"), "{cohorts:?}");
+    // January has offsets 0 and 1 (not 2); February has offset 0 only.
+    assert_eq!(r.rows.len(), 2 + 1);
+    assert!(r.rows.iter().all(|x| x[1].as_u64().unwrap() <= 1));
 }
 
 #[test]

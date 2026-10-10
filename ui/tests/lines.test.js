@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fitAt, fitWords, placeLevelLabels, placeUprightLabels, shownSeries, statOf, stepWord, trendFit, trendSentence, usableValues } from '../src/lib/charts/lines.ts';
-import { barScale, barSpan, barStyle, goodBad } from '../src/lib/cells.ts';
+import { barScale, barSpan, barStyle, goodBad, readsAsLine } from '../src/lib/cells.ts';
 
 const OTHER = '\u0000other';
 const close = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} is not ${b}`);
@@ -96,7 +96,8 @@ test('level names never sit on each other', () => {
 
 test('upright level names keep apart along the top', () => {
   assert.deepEqual(placeUprightLabels([10, 90], 0, 100, 400, () => 80), ['above', 'above']);
-  assert.deepEqual(placeUprightLabels([50, 55], 0, 100, 400, () => 80), ['above', 'hide']);
+  assert.deepEqual(placeUprightLabels([50, 55], 0, 100, 400, () => 80), ['above', 'below']);
+  assert.deepEqual(placeUprightLabels([50, 55, 52], 0, 100, 400, () => 80), ['above', 'hide', 'below']);
 });
 
 test('data bars start at zero and run left for negatives', () => {
@@ -127,4 +128,15 @@ test('good and bad come with a glyph, against the threshold', () => {
   assert.equal(goodBad(-5, { kind: 'goodbad', threshold: -100 }, 'change').tone, 'bad');
   // No threshold: against 0.
   assert.equal(goodBad(-1, { kind: 'goodbad' }).tone, 'bad');
+});
+
+test('good-bad: a value that is written as the line has no verdict', () => {
+  const cond = { kind: 'goodbad' };
+  // -0.04 % written as "0%" is on the line; written as "-0.04%" it is below it.
+  assert.equal(goodBad(-0.0004, cond, 'pct_change', '0%', '0%'), null);
+  assert.equal(goodBad(-0.0004, cond, 'pct_change', '-0.04%', '0%')?.glyph, '▼');
+  assert.equal(goodBad(100.2, { kind: 'goodbad', threshold: 100 }, null, '100', '100'), null);
+  assert.equal(goodBad(100.2, { kind: 'goodbad', threshold: 100 }, null, '100.2', '100')?.glyph, '▲');
+  assert.equal(readsAsLine('−0.0%', 0, '0%'), true);
+  assert.equal(readsAsLine('0.1%', 0, '0%'), false);
 });

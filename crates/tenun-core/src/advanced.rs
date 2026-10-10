@@ -760,7 +760,8 @@ pub fn cohort_offset(from: NaiveDate, to: NaiveDate, g: Grain) -> i64 {
 /// share of the cohort that has an event in that period (0 to 1), or, when `measures[1]` is set,
 /// the sum of that column over the events of the cohort in that period. `size` is the number of
 /// entities in the cohort. A cohort has a row for each period from its start to the last period
-/// with data, also when nobody was active (0), and none after that. The latest 36 cohorts are kept,
+/// with data, also when nobody was active (0), and none after that. A period the data does not
+/// reach the end of is left out, and a cohort that starts in it. The latest 36 cohorts are kept,
 /// and 24 periods after each.
 pub fn cohort(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Result<QueryResult> {
     let ent = tile
@@ -824,7 +825,19 @@ pub fn cohort(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resul
             cells.push((c, p, num(2), num(3)));
         }
     }
-    let last = cells.iter().map(|c| c.1).max();
+    // The last period counts only when the data reaches its last day (the rule of `sparks`): a month
+    // that has just begun would draw as a drop. Each cohort then ends one period earlier, and a cohort
+    // that starts in that period is left out.
+    let mut last = cells.iter().map(|c| c.1).max();
+    if let (Some(l), Some(max_day)) = (last, latest_day(engine, d, filters))
+        && grain != Grain::Day
+        && max_day < add_grain(l, grain, 1) - Duration::days(1)
+    {
+        last = Some(add_grain(l, grain, -1));
+    }
+    if let Some(l) = last {
+        cells.retain(|c| c.0 <= l && c.1 <= l);
+    }
     let mut cohorts: Vec<NaiveDate> = cells.iter().map(|c| c.0).collect();
     cohorts.sort();
     cohorts.dedup();
@@ -897,6 +910,30 @@ pub fn period_start(d: NaiveDate, g: Grain) -> NaiveDate {
     .unwrap_or(d)
 }
 
+/// The latest day of a date field under the filters, or None when there is no date.
+fn latest_day(engine: &Engine, field: &Dimension, filters: &[Filter]) -> Option<NaiveDate> {
+    let latest = engine
+        .query(&SemanticQuery {
+            measures: vec![Measure {
+                table: field.table.clone(),
+                column: Some(field.column.clone()),
+                agg: Agg::Max,
+                per: None,
+            }],
+            dimensions: vec![],
+            filters: filters.to_vec(),
+            sort: vec![],
+            limit: None,
+        })
+        .ok()?;
+    latest
+        .rows
+        .first()
+        .and_then(|r| r.first())
+        .and_then(Value::as_str)
+        .and_then(parse_day)
+}
+
 /// A table with a trend column (`tile.spark`) gets, for each of its rows, the first value over the
 /// last 12 periods of the date field that are over: the period of the latest date counts only when
 /// the data reaches its last day, so a month that has just begun does not draw as a drop. Periods with no
@@ -916,25 +953,7 @@ pub fn sparks(
     }
     let grain = sd.grain.filter(|g| !g.is_part()).unwrap_or(Grain::Month);
     let nd = q.dimensions.len();
-    let latest = engine.query(&SemanticQuery {
-        measures: vec![Measure {
-            table: sd.table.clone(),
-            column: Some(sd.column.clone()),
-            agg: Agg::Max,
-            per: None,
-        }],
-        dimensions: vec![],
-        filters: q.filters.clone(),
-        sort: vec![],
-        limit: None,
-    })?;
-    let Some(max_day) = latest
-        .rows
-        .first()
-        .and_then(|r| r.first())
-        .and_then(Value::as_str)
-        .and_then(parse_day)
-    else {
+    let Some(max_day) = latest_day(engine, sd, &q.filters) else {
         return Ok(());
     };
     // The period of the latest date is left out while it is not over (the same rule as a time chart).

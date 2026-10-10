@@ -4,7 +4,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { heatRange, heatStep, inkFor, contrast } from '../src/lib/charts/heat.ts';
 import { funnelShape } from '../src/lib/charts/funnel.ts';
-import { chartColumns, niceUp, sharedScale, splitCharts } from '../src/lib/charts/small.ts';
+import { readFileSync } from 'node:fs';
+import { chartColumns, fitToCell, niceUp, sharedScale, splitCharts } from '../src/lib/charts/small.ts';
 import { sameUnit } from '../src/lib/charts/math.ts';
 
 test('heat map: steps are equal slices of the range', () => {
@@ -102,4 +103,26 @@ test('combo: only values with one unit and one kind of aggregate may share an ax
   assert.equal(sameUnit({ measures: [m('id', 'count'), m(null, 'count')] }), true);
   assert.equal(sameUnit({ measures: [m(null, 'count'), m('revenue')] }), false);
   assert.equal(sameUnit({ measures: [m('revenue')] }), true);
+});
+
+test('small multiples: a chart uses its whole cell, and a category axis loses its crowded labels', () => {
+  const option = {
+    grid: { left: 4, right: 72, top: 14, containLabel: true },
+    xAxis: { type: 'category', axisLabel: { show: true, rotate: 30 } },
+    yAxis: { type: 'value' },
+  };
+  const cat = fitToCell(option, false, false);
+  assert.equal(cat.grid.right, 8);
+  assert.equal(cat.xAxis.axisLabel.show, false);
+  // A date axis keeps its labels. On a bar chart on its side the labels of the y axis go.
+  assert.equal(fitToCell(option, true, false).xAxis.axisLabel.show, true);
+  const side = fitToCell({ ...option, yAxis: { type: 'category', axisLabel: { show: true } } }, false, true);
+  assert.equal(side.yAxis.axisLabel.show, false);
+});
+
+test('the chart library has the parts the value labels need', () => {
+  // Without these two, a line draws no lowest and highest label and no label ever hides for touching another.
+  const src = readFileSync(new URL('../src/lib/echarts.ts', import.meta.url), 'utf8');
+  assert.match(src, /MarkPointComponent,\n/);
+  assert.match(src, /LabelLayout,\n/);
 });

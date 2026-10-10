@@ -5,7 +5,7 @@ import type { Cell } from '../api';
 import { cell, getLocale, measureLabel, numberFormatter } from '../format';
 import { bubbleSamples, bubbleSize } from './bubble';
 import { axisCommon, esc, key, OTHER, slotsFor, tooltipBase, type BuildArgs, type Built } from './common';
-import { axisSpan, levelMarkLine, resolveLevels, wantsTrend, type Level } from './guides';
+import { axisSpan, levelMarkLine, NAME_ROW, needsSecondRow, resolveLevels, wantsTrend, type Level } from './guides';
 import { fitAt, trendFit, trendSentence } from './lines';
 import { farFromZero } from './math';
 
@@ -100,7 +100,10 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
   const shortOf = (axis: 'x' | 'y', n: number) => (axis === 'x' ? fx : fy).short(n);
   const top = multi ? 56 : 30;
   const [plotW, plotH] = [width - 60, height - top - 40];
-  const across = levelMarkLine(levelsOf('x'), 'xAxis', axisSpan(xs, levelsOf('x').map((l) => l.value), !xFar, plotW), c, shortOf);
+  const acrossSpan = axisSpan(xs, levelsOf('x').map((l) => l.value), !xFar, plotW);
+  const across = levelMarkLine(levelsOf('x'), 'xAxis', acrossSpan, c, shortOf);
+  // Names of upright lines that do not fit side by side go in a second row.
+  const gridTop = top + (needsSecondRow(levelsOf('x'), 'xAxis', acrossSpan, shortOf) ? NAME_ROW : 0);
   const up = levelMarkLine(levelsOf('y'), 'yAxis', axisSpan(ys, levelsOf('y').map((l) => l.value), !yFar, plotH), c, shortOf);
   const markLine = across || up ? { ...(up ?? across!), data: [...(up?.data ?? []), ...(across?.data ?? [])] } : null;
   // The trend line is a straight line through the dots (least squares on across and up).
@@ -140,7 +143,7 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
 
   const option = {
     animationDuration: 350,
-    grid: { left: 4, right: 16, top, bottom: 22, containLabel: true },
+    grid: { left: 4, right: 16, top: gridTop, bottom: 22, containLabel: true },
     legend: multi
       ? {
           type: 'scroll',

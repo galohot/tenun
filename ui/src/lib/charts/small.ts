@@ -70,3 +70,19 @@ export function withScale<T extends object>(option: T, scale: { min: number; max
   const fixed = { ...one, min: scale.min, max: scale.max, ...(scale.interval ? { interval: scale.interval } : {}) };
   return { ...option, [key]: Array.isArray(axis) ? [fixed, ...axis.slice(1)] : fixed };
 }
+
+/**
+ * Lets a small chart use its whole cell. The chart builder leaves room on the right for the name of a
+ * line and under the axis for long labels; a cell has neither. A date axis keeps its labels (the
+ * builder hides the ones that touch). The labels of a category axis are rotated and crowded in a cell
+ * this small, so they go and the shared order stands in for them. `horizontal` is a bar chart on its side.
+ */
+export function fitToCell<T extends object>(option: T, dates: boolean, horizontal: boolean): T {
+  const o = option as Record<string, unknown>;
+  const grid = (o.grid ?? {}) as Record<string, unknown>;
+  const key = horizontal ? 'yAxis' : 'xAxis';
+  const axis = o[key] as Record<string, unknown> | Record<string, unknown>[] | undefined;
+  const bare = (a: Record<string, unknown>) => ({ ...a, axisLabel: { ...((a.axisLabel ?? {}) as object), show: false } });
+  const fixed = dates || !axis ? axis : Array.isArray(axis) ? axis.map(bare) : bare(axis);
+  return { ...option, grid: { ...grid, left: 4, right: 8, top: 8 }, ...(fixed ? { [key]: fixed } : {}) };
+}

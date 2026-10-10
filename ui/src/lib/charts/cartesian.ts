@@ -17,7 +17,7 @@ import {
   type BuildArgs,
   type Built,
 } from './common';
-import { axisSpan, levelMarkLine, resolveLevels, wantsTrend } from './guides';
+import { axisSpan, levelMarkLine, NAME_ROW, needsSecondRow, resolveLevels, wantsTrend, widestName } from './guides';
 import { fitAt, MAX_LINES, shownSeries, stepWord, trendFit, trendSentence, usableValues } from './lines';
 import { normalizeShares, sameUnit, stackMode } from './math';
 
@@ -119,6 +119,10 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   // Direct labels before gridlines: when every bar carries its value, the value axis goes.
   const fits = tile.type === 'bar' && !multi && !hasCompare && categories.length <= (horizontal ? 16 : Math.floor(width / 48));
   const barLabels = tile.type === 'bar' && (labelMode === 'all' || (labelMode === 'auto' && fits));
+  // Bars of one series: a number stands at the end of its bar and must not go under a taller bar beside it,
+  // or under a reference line. An unseen line (upright bars) or row of dots (bars on their side) at the bar
+  // ends carries the numbers, so they are drawn above every bar and every line.
+  const topLabels = barLabels && !stacked && !multi;
   const labelText = (v: number) => (percent ? pctShare(v) : fmtOf(0).short(v));
   // Name the lines at their ends only when they end far enough apart to read.
   const ends = series.map((s) => s.values.at(-1) ?? 0).sort((a, b) => a - b);
@@ -167,7 +171,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         },
         // A value at the bar's end when there is one series and room for it.
         label: {
-          show: barLabels,
+          show: barLabels && !topLabels,
           // A pile of segments carries its numbers inside; the end of the bar is for the whole.
           position: stacked ? 'inside' : horizontal ? 'right' : 'top',
           color: c.text2,
@@ -181,6 +185,23 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         data,
       }];
     }
+    // The points of a line. With "All" each point says on its own whether it has a label, so a point
+    // left out has none to take part in the overlap check.
+    const lineData = (i: number, values: (number | null)[], unfinished: boolean) => {
+      const last = values.length - 1;
+      const base: (number | null | { value: number | null; raw: number | null })[] = unfinished
+        ? [...values.slice(0, -1), null]
+        : shares
+          ? shares[i].map((v, ci) => ({ value: v, raw: values[ci] }))
+          : values;
+      if (labelMode !== 'all') return base;
+      return base.map((v, ci) => {
+        const point = v !== null && typeof v === 'object' ? v : { value: v };
+        const named = v !== null && (last - ci) % every === 0;
+        // A dot only where a number stands, so dots do not pile on the numbers next to them.
+        return { ...point, label: { show: named }, ...(named ? {} : { symbolSize: 0 }) };
+      });
+    };
     const lineStyle = { width: 2, color, cap: 'round', join: 'round' };
     const itemStyle = { color, borderColor: c.surface, borderWidth: 2 };
     // A single line names its last value at the end. With "All" the value sits on the point instead,
@@ -206,7 +227,8 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       const point = (i: number) => ({
         coord: [i, values[i]],
         value: values[i],
-        label: { position: i === hi ? ('top' as const) : ('bottom' as const) },
+        // A point on the first place of the axis writes its number to the right, clear of the axis numbers.
+        label: { position: i === hi ? ('top' as const) : ('bottom' as const), ...(i === 0 && !hasBar ? { align: 'left' as const } : {}) },
       });
       return {
         silent: true,
@@ -214,7 +236,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         symbol: 'circle',
         symbolSize: 8,
         itemStyle: { color, borderColor: c.surface, borderWidth: 2 },
-        label: { show: true, color: c.text2, fontSize: 11, formatter: (p: { value: number }) => labelText(p.value) },
+        label: { show: true, color: c.text2, fontSize: 11, textBorderColor: c.surface, textBorderWidth: 3, formatter: (p: { value: number }) => labelText(p.value) },
         data: [point(hi), point(lo)],
       };
     };
@@ -236,18 +258,17 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       connectNulls: false,
       tooltip,
       markPoint: marks(shares ? shares[si] : s.values),
-      data: unfinished
-        ? [...s.values.slice(0, -1), null]
-        : shares
-          ? shares[si].map((v, i) => ({ value: v, raw: s.values[i] }))
-          : s.values,
-      // "All" names every point that has room: with k points to the label, every k-th one from the end.
+      data: lineData(si, s.values, unfinished),
+      // "All" names every point that has room: with k points to the label, every k-th one from the end
+      // (the others are switched off one by one), and the ones that still touch are hidden.
       label: {
         show: labelMode === 'all',
         position: 'top',
         color: c.text2,
         fontSize: 11,
-        formatter: (p: { value: number; dataIndex: number }) => ((s.values.length - 1 - p.dataIndex) % every === 0 ? labelText(p.value) : ''),
+        textBorderColor: c.surface,
+        textBorderWidth: 3,
+        formatter: (p: { value: number }) => labelText(p.value),
       },
       labelLayout: { hideOverlap: true },
       endLabel: unfinished ? { show: false } : endLabel,
@@ -268,6 +289,32 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     return [main, dashed];
   }).flat();
 
+  if (topLabels && series[0]) {
+    // With "All" on upright bars, a number stands on every k-th bar from the end (the others are switched
+    // off one by one), and the ones that still touch are hidden.
+    const values = series[0].values;
+    (built as object[]).push({
+      type: horizontal ? 'scatter' : 'line',
+      silent: true,
+      z: 6,
+      // A label hangs on a symbol: a one pixel dot that cannot be seen.
+      showSymbol: true,
+      symbol: 'circle',
+      symbolSize: 1,
+      itemStyle: { color: 'transparent', borderWidth: 0 },
+      lineStyle: { opacity: 0, width: 0 },
+      tooltip: { show: false },
+      emphasis: { disabled: true },
+      labelLayout: { hideOverlap: true },
+      // A halo in the colour of the surface keeps a number readable where a taller bar or a line is beside it.
+      label: { show: true, position: horizontal ? 'right' : 'top', distance: 4, color: c.text2, fontSize: 11, textBorderColor: c.surface, textBorderWidth: 3, formatter: (p: { value: number | number[] }) => labelText(Array.isArray(p.value) ? p.value[0] : p.value) },
+      data: values.map((v, ci) => ({
+        value: horizontal ? [v, ci] : v,
+        label: { show: v !== null && (horizontal || (values.length - 1 - ci) % every === 0) },
+      })),
+    });
+  }
+
   // Reference lines and the trend line. A 100 % chart has no values to compare with.
   // The numbers are those shown: the first value, or the total of each category when the series pile
   // up (a split, or several stacked values). "Other" never counts.
@@ -287,15 +334,18 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const lineKey = horizontal ? 'xAxis' : 'yAxis';
   // The plot is about as tall (or wide) as the chart less its margins and axis text.
   const plotLength = horizontal ? width - 70 : height - (multi || hasCompare || fit ? 34 : 14) - 30;
-  const markLine = levelMarkLine(
-    levels,
-    lineKey,
-    axisSpan(shown, levels.map((l) => l.value), true, plotLength),
-    c,
-    (_, n) => fmtOf(0).short(n),
-    // The category axis of horizontal bars runs top to bottom, so the top of an upright line is its start.
-    'start',
-  );
+  // A name above the plot may reach past its end, into the margin on the right.
+  const lineSpan = axisSpan(shown, levels.map((l) => l.value), true, plotLength, horizontal ? 40 : 0);
+  const lineText = (_: unknown, n: number) => fmtOf(0).short(n);
+  // Names of level lines on a chart of bars sit to the right of the plot when a bar could be under them:
+  // the last bar's slot is narrower than half a name. The plot gives up the room for them.
+  const nameW = widestName(levels, lineText);
+  const slot = (width - 60) / Math.max(1, categories.length);
+  const namesOutside = hasBar && !horizontal && levels.length > 0 && nameW > slot / 2 - 12 && nameW + 8 < width * 0.4;
+  // The category axis of horizontal bars runs top to bottom, so the top of an upright line is its start.
+  const markLine = levelMarkLine(levels, lineKey, lineSpan, c, lineText, 'start', namesOutside);
+  // Names above the plot that do not fit side by side go in a second row.
+  const secondRow = needsSecondRow(levels, lineKey, lineSpan, lineText);
   if (markLine || fit) {
     // One unseen series carries the lines. Its two points keep the axis wide enough for every line,
     // also a target above the data.
@@ -303,8 +353,9 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     (built as object[]).push(
       {
         type: 'line',
+        // Below the bars, so a value label is never struck through by a line.
         silent: true,
-        z: 5,
+        z: 2.5,
         showSymbol: false,
         symbol: 'none',
         lineStyle: { opacity: 0, width: 0 },
@@ -447,8 +498,8 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     animationDuration: 350,
     grid: {
       left: 4,
-      right: tile.type === 'bar' && horizontal ? 44 : nameEnds ? 72 : multi ? 12 : 44,
-      top: indexed ? (multi ? 56 : 34) : multi || hasCompare || fit ? 34 : horizontal && markLine ? 30 : 14,
+      right: namesOutside ? Math.max(44, nameW + 8) : tile.type === 'bar' && horizontal ? 44 : nameEnds ? 72 : multi ? 12 : 44,
+      top: (indexed ? (multi ? 56 : 34) : multi || hasCompare || fit ? 34 : horizontal && markLine ? 30 : 14) + (horizontal && secondRow ? NAME_ROW : 0),
       bottom: 4,
       containLabel: true,
     },

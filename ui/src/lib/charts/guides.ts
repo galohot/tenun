@@ -52,28 +52,47 @@ export function resolveLevels(lines: TileLine[] | undefined, scatter: boolean, r
 /** About how wide a label of 11 px text is. */
 const textWidth = (t: string) => 8 + t.length * 6.3;
 
+/** The width in px of the widest name, as it is written on the chart. */
+export const widestName = (levels: Level[], short: (axis: Axis, n: number) => string): number =>
+  Math.max(0, ...levels.map((l) => textWidth(`${l.name} ${short(l.axis, l.value)}`)));
+
+/** The height of one row of names above the plot, in px. */
+export const NAME_ROW = 17;
+
+/** Where each name goes: level lines (right end, above or below) or upright ones (first or second row, or left out). */
+function namePlaces(levels: Level[], key: 'xAxis' | 'yAxis', span: { lo: number; hi: number; length: number; overhang?: number }, short: (axis: Axis, n: number) => string): Place[] {
+  const values = levels.map((l) => l.value);
+  return key === 'yAxis'
+    ? placeLevelLabels(values, span.lo, span.hi, span.length)
+    : placeUprightLabels(values, span.lo, span.hi, span.length, (i) => textWidth(`${levels[i].name} ${short(levels[i].axis, levels[i].value)}`), span.overhang);
+}
+
+/** Do the names of these upright lines need a second row above the plot? */
+export function needsSecondRow(levels: Level[], key: 'xAxis' | 'yAxis', span: { lo: number; hi: number; length: number; overhang?: number }, short: (axis: Axis, n: number) => string): boolean {
+  return key === 'xAxis' && namePlaces(levels, key, span, short).includes('below');
+}
+
 /**
  * The ECharts `markLine` for lines of one direction. `key` is the coordinate of the value: `yAxis`
  * draws level lines (the name sits at the right end, above or below the line), `xAxis` upright ones
- * (the name sits above the plot). `span` is the range of the axis and `length` its length in px,
- * which decide whether two names would touch; a name that would touch another is left out.
+ * (the name sits above the plot, in one row or two). `span` is the range of the axis and `length` its
+ * length in px, which decide whether two names would touch; a name that would touch another is
+ * left out (the line stays).
  */
 export function levelMarkLine(
   levels: Level[],
   key: 'xAxis' | 'yAxis',
-  span: { lo: number; hi: number; length: number },
+  span: { lo: number; hi: number; length: number; overhang?: number },
   c: Colors,
   short: (axis: Axis, n: number) => string,
   /** Upright lines: which end of the line carries the name. A flipped axis (horizontal bars) swaps the ends. */
   top: 'start' | 'end' = 'end',
+  /** Level lines: the names sit outside the plot, to the right of the lines, where no bar can be under them. */
+  outside = false,
 ) {
   if (!levels.length) return null;
   const texts = levels.map((l) => `${l.name} ${short(l.axis, l.value)}`);
-  const values = levels.map((l) => l.value);
-  const places: Place[] =
-    key === 'yAxis'
-      ? placeLevelLabels(values, span.lo, span.hi, span.length)
-      : placeUprightLabels(values, span.lo, span.hi, span.length, (i) => textWidth(texts[i]));
+  const places = namePlaces(levels, key, span, short);
   return {
     silent: true,
     symbol: 'none',
@@ -92,18 +111,20 @@ export function levelMarkLine(
         borderRadius: 3,
         rotate: 0,
         ...(key === 'yAxis'
-          ? { position: places[i] === 'below' ? ('insideEndBottom' as const) : ('insideEndTop' as const), distance: 2 }
-          : { position: top, distance: 4 }),
+          ? outside
+            ? { position: 'end' as const, distance: 4, offset: [0, places[i] === 'below' ? 8 : -8] }
+            : { position: places[i] === 'below' ? ('insideEndBottom' as const) : ('insideEndTop' as const), distance: 2 }
+          : { position: top, distance: places[i] === 'below' ? 4 + NAME_ROW : 4 }),
       },
     })),
   };
 }
 
 /** The range an axis shows, for placing names: it takes in the lines and, for a chart from zero, zero. */
-export function axisSpan(data: number[], levels: number[], fromZero: boolean, length: number) {
+export function axisSpan(data: number[], levels: number[], fromZero: boolean, length: number, overhang = 0) {
   const all = [...data, ...levels];
   const lo = Math.min(...all, ...(fromZero ? [0] : []));
   // ECharts rounds the top of the axis up to a tidy number; a little room stands in for that.
   const hi = Math.max(...all, ...(fromZero ? [0] : []));
-  return { lo, hi: hi + (hi - lo) * 0.06, length: Math.max(40, length) };
+  return { lo, hi: hi + (hi - lo) * 0.06, length: Math.max(40, length), overhang };
 }

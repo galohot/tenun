@@ -58,7 +58,7 @@
   };
   const verdictOf = (v: Cell | undefined, j: number) => {
     const cond = condOf(j);
-    return cond?.kind === 'goodbad' ? goodBad(typeof v === 'number' ? v : null, cond, effectiveShowAs(tile, j, kind)) : null;
+    return cond?.kind === 'goodbad' ? goodBad(typeof v === 'number' ? v : null, cond, effectiveShowAs(tile, j, kind), show(v, j), lineText(j)) : null;
   };
   const lineText = (j: number) => {
     const how = effectiveShowAs(tile, j, kind);
