@@ -17,6 +17,8 @@
   import PublishSheet from './dash/PublishSheet.svelte';
   import RowsSheet from './dash/RowsSheet.svelte';
   import FocusSheet from './dash/FocusSheet.svelte';
+  // tenun.cloud is not live yet; build with VITE_TENUN_CLOUD=1 to show Publish.
+  const CLOUD_ON = import.meta.env.VITE_TENUN_CLOUD === '1';
 
   let { id }: { id: string } = $props();
 
@@ -615,7 +617,7 @@
       <button class="btn plain icon" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!canRedo} onclick={redo}><Icon name="redo" /></button>
     {/if}
     <button class="btn plain icon" title="Refresh now" aria-label="Refresh now" onclick={() => tick++}><Icon name="refresh" /></button>
-    {#if !phone}
+    {#if !phone && CLOUD_ON}
     <button
       class="btn"
       class:live={!!dash.publish?.url}
