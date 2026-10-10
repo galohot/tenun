@@ -1,7 +1,7 @@
 // Human formatting for numbers, dates and field names.
 
 import { MAX_CHART_MEASURES } from './tiles';
-import { isPart, type Agg, type Cell, type Dim, type DType, type Grain, type Measure, type NumFormat, type Table, type Tile } from './api';
+import { isPart, type Agg, type Cell, type Dim, type DType, type Grain, type Measure, type NumFormat, type QueryResult, type Table, type Tile } from './api';
 import * as L from './locale';
 import type { Locale } from './locale';
 import { localeState } from './localeState.svelte';
@@ -171,6 +171,20 @@ export function measureLabel(m: Measure, tables: Named[]): string {
   }
   if (m.agg === 'sum') return pretty(m.column);
   return `${aggWords[m.agg]} ${pretty(m.column).toLowerCase()}`;
+}
+
+/**
+ * The heading of each column of a table or pivot result: a field reads as in the pivot ("Category"),
+ * a value as in the charts ("Amount", "Average amount", "Number of rows"). Two values from one column
+ * differ by their way of adding up, so they are never both "amount".
+ */
+export function columnHeads(res: Pick<QueryResult, 'columns'>, tile: Pick<Tile, 'measures'>, tables: Named[]): string[] {
+  let j = 0;
+  return res.columns.map((c) => {
+    if (c.role !== 'measure') return pretty(c.name);
+    const m = tile.measures[j++];
+    return m ? measureLabel(m, tables) : pretty(c.name);
+  });
 }
 
 /** "name" of the stores table reads as "store". */

@@ -2,12 +2,13 @@
   // A pivot table: rows down the side, one field across the top, one or more values in each cell.
   // The engine computed every number, totals included. This only lays them out.
   import type { Cell, QueryResult, Tile } from '../../lib/api';
-  import { cell, pretty } from '../../lib/format';
+  import { cell, columnHeads, type Named } from '../../lib/format';
   import { MAX_PIVOT_ROWS, pivotModel } from '../../lib/pivot';
 
   let {
     res,
     tile,
+    tables = [],
     selected,
     selectedCol,
     onpick,
@@ -15,6 +16,8 @@
   }: {
     res: QueryResult;
     tile: Tile;
+    /** For the names of the values. */
+    tables?: Named[];
     /** Values of the first row field picked by a click on a row header. */
     selected: Cell[] | null;
     /** Values of the column field picked by a click on a column header. */
@@ -25,7 +28,8 @@
 
   const m = $derived(pivotModel(res, tile));
   const nd = $derived(res.columns.filter((c) => c.role === 'dimension').length);
-  const vname = (j: number) => res.columns[nd + j]?.name ?? '';
+  const heads = $derived(columnHeads(res, tile, tables));
+  const vname = (j: number) => heads[nd + j] ?? '';
   const fmtOf = (j: number) => tile.formats?.[j] ?? null;
   const blank = (v: Cell | undefined) => v === null || v === undefined;
   // A value shown another way (build 06) has no meaningful total.
@@ -33,7 +37,7 @@
   const show = (v: Cell | undefined, j: number) => (blank(v) ? '–' : cell(v as Cell, 'number', null, false, fmtOf(j)));
   const total = (cells: Cell[] | null | undefined, j: number) => (!cells || noTotal(j) || blank(cells[j]) ? '' : cell(cells[j], 'number', null, false, fmtOf(j)));
   const key = (v: Cell) => (v === null ? '\u0000null' : String(v));
-  const rowDimName = (i: number) => pretty(res.columns[i]?.name ?? '');
+  const rowDimName = (i: number) => heads[i] ?? '';
   const colLabel = (v: Cell) => cell(v, res.columns[m.nRows]?.dtype ?? 'text', tile.cols?.grain);
   const rowLabel = (v: Cell, i: number) => cell(v, res.columns[i]?.dtype ?? 'text', tile.dims[i]?.grain);
 

@@ -8,6 +8,7 @@
 import type { EChartsCoreOption } from 'echarts/core';
 import type { Cell, QueryResult, Tile } from '../api';
 import { cell, measureLabel, OTHER_KEY, type Named } from '../format';
+import { assignSlots } from './math';
 
 export interface Colors {
   surface: string;
@@ -44,7 +45,21 @@ export const key = (v: Cell) => (v === null ? '\u0000null' : String(v));
 
 export interface Pivot {
   categories: Cell[];
-  series: { name: string; raw: Cell; values: (number | null)[] }[];
+  /** `slot` is the palette slot of the colour; null for the folded "Other", which is grey. */
+  series: { name: string; raw: Cell; values: (number | null)[]; slot: number | null }[];
+}
+
+// The colours of a tile's split groups, kept for the session. A filter that takes a group away
+// must not repaint the groups that stay, so a group keeps the slot it had when first drawn.
+const slotMemory = new Map<string, Map<string, number>>();
+
+/** The palette slot of each key, kept per tile and per split field (see `assignSlots`). */
+export function slotsFor(tile: Tile, keys: string[]): number[] {
+  const d = tile.dims[1];
+  const id = `${tile.id}|${d ? `${d.table}.${d.column}.${d.grain ?? ''}` : ''}`;
+  let memory = slotMemory.get(id);
+  if (!memory) slotMemory.set(id, (memory = new Map()));
+  return assignSlots(memory, keys, MAX_SERIES);
 }
 
 /** Several values on one group: each value is its own series. */
@@ -75,7 +90,7 @@ export function pivot(res: QueryResult, tile: Tile, tables: Named[] = []): Pivot
       const m = tile.measures[k - mi];
       const many = res.columns.length - mi > 1;
       const name = many && m ? measureLabel(m, tables) : (res.columns[k]?.name ?? '');
-      series.push({ name, raw: name, values });
+      series.push({ name, raw: name, values, slot: k - mi });
     }
     return { categories, series };
   }
@@ -89,16 +104,18 @@ export function pivot(res: QueryResult, tile: Tile, tables: Named[] = []): Pivot
   }
   const ranked = [...totals.entries()].sort((a, b) => b[1].total - a[1].total);
   const keep = ranked.length > MAX_SERIES ? ranked.slice(0, MAX_SERIES - 1) : ranked;
-  // Stable colour per entity: order kept series by their value, not by rank.
+  // Order kept series by name. Their colour comes from the tile's colour memory, not from this order.
   keep.sort((a, b) => String(a[1].raw).localeCompare(String(b[1].raw), undefined, { numeric: true }));
   const names = new Map(keep.map(([k], i) => [k, i]));
-  const series: Pivot['series'] = keep.map(([, v]) => ({
+  const slots = slotsFor(tile, keep.map(([k]) => k));
+  const series: Pivot['series'] = keep.map(([, v], i) => ({
     name: cell(v.raw, res.columns[1].dtype, tile.dims[1]?.grain),
     raw: v.raw,
     values: categories.map(() => null),
+    slot: slots[i],
   }));
   const hasOther = ranked.length > keep.length;
-  if (hasOther) series.push({ name: OTHER, raw: OTHER, values: categories.map(() => null) });
+  if (hasOther) series.push({ name: OTHER, raw: OTHER, values: categories.map(() => null), slot: null });
   for (const r of res.rows) {
     const si = names.get(key(r[1])) ?? (hasOther ? series.length - 1 : -1);
     if (si < 0) continue;

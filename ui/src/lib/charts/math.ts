@@ -1,7 +1,7 @@
 // The arithmetic behind the stack modes and the waterfall. Pure functions with no imports
 // at run time, so the node tests can load this file on its own.
 
-import type { Tile } from '../api';
+import type { Measure, NumFormat, Tile } from '../api';
 
 /** Sums and counts add up, so they can be stacked. An average, a minimum or a distinct count cannot. */
 export const STACKABLE: readonly string[] = ['sum', 'count'];
@@ -12,14 +12,64 @@ export type StackMode = 'stacked' | 'side' | 'percent';
 export const stackable = (aggs: readonly string[]): boolean => aggs.every((a) => STACKABLE.includes(a));
 
 /**
- * How a bar or area with several series is drawn. The default is stacked for sums and counts and
- * side by side for everything else. A saved choice that cannot hold (stacking averages) is ignored.
- * `perValue` is true when the series are the tile's values, false when they are the split groups.
+ * The unit a value is counted in. Two values with the same unit can be piled up and the total means
+ * something. A currency is a unit of its own (Rp and Rp), a percent is another. Plain numbers share a
+ * unit only when they come from the same column, and rows counted in one table share it too.
+ * A sum of Amount and a sum of Quantity are different units: a stack of them adds money to units.
  */
-export function stackMode(tile: Pick<Tile, 'stack' | 'measures'>, perValue: boolean): StackMode {
+export function unitOf(m: Pick<Measure, 'table' | 'column' | 'agg'>, f?: NumFormat | null): string {
+  if (f?.currency) return `currency:${f.currency}`;
+  if (f?.percent) return 'percent';
+  if (m.agg === 'count' || m.column === null) return `rows:${m.table}`;
+  return `column:${m.table}.${m.column}`;
+}
+
+/**
+ * How a bar or area with several series is drawn when the user has not chosen. A split on one value
+ * is stacked. Several values (one series for each) are stacked only when every one is a sum or a
+ * count and they all share one unit; otherwise they sit side by side.
+ */
+export function defaultStack(tile: Pick<Tile, 'measures' | 'formats'>, perValue: boolean): StackMode {
+  if (!perValue) return 'stacked';
+  const units = new Set(tile.measures.map((m, i) => unitOf(m, tile.formats?.[i])));
+  return units.size <= 1 ? 'stacked' : 'side';
+}
+
+/**
+ * How a bar or area with several series is drawn. A saved choice wins. A choice that cannot hold
+ * (stacking averages) is ignored. `perValue` is true when the series are the tile's values, false
+ * when they are the split groups.
+ */
+export function stackMode(tile: Pick<Tile, 'stack' | 'measures' | 'formats'>, perValue: boolean): StackMode {
   const used = perValue ? tile.measures : tile.measures.slice(0, 1);
   if (!stackable(used.map((m) => m.agg))) return 'side';
-  return tile.stack ?? 'stacked';
+  return tile.stack ?? defaultStack(tile, perValue);
+}
+
+/**
+ * Colour slots that follow the entity, not its position (a filter that removes a group must not
+ * repaint the groups that stay). `memory` maps a series key to its palette slot and lives as long
+ * as the tile does. Keys are given in first-seen order; a key never seen before takes the lowest
+ * slot nobody holds. When every slot is held, it takes the lowest slot no shown key holds and the
+ * entity that held it forgets it. With more keys than slots the last ones wrap round and are not
+ * remembered. Returns the slot of each key, in order.
+ */
+export function assignSlots(memory: Map<string, number>, keys: readonly string[], slots: number): number[] {
+  const shown = new Set(keys);
+  return keys.map((k, i) => {
+    const known = memory.get(k);
+    if (known !== undefined) return known;
+    const held = new Set(memory.values());
+    let slot = Array.from({ length: slots }, (_, s) => s).find((s) => !held.has(s));
+    if (slot === undefined) {
+      const inUse = new Set(keys.filter((x) => memory.has(x)).map((x) => memory.get(x)!));
+      slot = Array.from({ length: slots }, (_, s) => s).find((s) => !inUse.has(s));
+      if (slot === undefined) return i % slots;
+      for (const [other, s] of memory) if (s === slot && !shown.has(other)) memory.delete(other);
+    }
+    memory.set(k, slot);
+    return slot;
+  });
 }
 
 /**

@@ -2,7 +2,7 @@
   import { api, DATE_PARTS, type Agg, type Grain, type Measure, type NumFormat, type QueryResult, type Tile, type TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { aggNames, tileTitle } from '../../lib/format';
-  import { stackable } from '../../lib/charts/math';
+  import { defaultStack, stackable, stackMode } from '../../lib/charts/math';
   import { advancedLocked, SHOW_ADVANCED_SWITCH } from '../../lib/tiers';
   import { defaultDim, defaultMeasure, dtypeOf, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, reachableFrom, type DashFilter } from '../../lib/tiles';
   import Icon, { type IconName } from '../Icon.svelte';
@@ -154,7 +154,12 @@
   const noFields = $derived(isText || isImage);
   const maxValues = $derived(tile.type === 'table' ? Infinity : isPivot ? PIVOT_MAX_MEASURES : MAX_CHART_MEASURES);
   const showSplit = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area' || tile.type === 'table' || isScatter);
-  const stackAble = $derived(stackable(tile.measures.slice(0, MAX_CHART_MEASURES).map((x) => x.agg)));
+  // Several values draw one series each; otherwise the series are the groups of a split.
+  const perValue = $derived(tile.measures.length > 1);
+  const stackAble = $derived(stackable((perValue ? tile.measures.slice(0, MAX_CHART_MEASURES) : tile.measures.slice(0, 1)).map((x) => x.agg)));
+  // The choice on show: the saved one, or the default for these values.
+  const stackNow = $derived(stackMode(tile, perValue));
+  const stackDefault = $derived(defaultStack(tile, perValue));
   // Stacking needs more than one series: a split, or several values.
   const hasSeries = $derived((tile.type === 'bar' || tile.type === 'area') && !!tile.measures.length && (!!tile.dims[1] || tile.measures.length > 1));
   const medianOn = $derived(!!tile.lines?.some((l) => l.kind === 'median'));
@@ -531,13 +536,16 @@
           {#each stacks as o}
             <button
               role="radio"
-              aria-checked={(tile.stack ?? 'stacked') === o.id}
-              class:on={(tile.stack ?? 'stacked') === o.id}
-              onclick={() => set({ stack: o.id === 'stacked' ? undefined : o.id })}>
+              aria-checked={stackNow === o.id}
+              class:on={stackNow === o.id}
+              onclick={() => set({ stack: o.id })}>
               {o.label}
             </button>
           {/each}
         </div>
+        {#if !tile.stack && stackDefault === 'side'}
+          <p class="hint tight">These values are not in one unit, so they sit side by side. Pick Stacked to pile them up.</p>
+        {/if}
       {:else}
         <p class="hint tight">Averages, lowest and highest values cannot be stacked, so they sit side by side.</p>
       {/if}

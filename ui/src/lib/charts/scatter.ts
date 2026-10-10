@@ -3,7 +3,7 @@
 
 import type { Cell } from '../api';
 import { cell, getLocale, measureLabel, numberFormatter } from '../format';
-import { axisCommon, esc, key, OTHER, tooltipBase, type BuildArgs, type Built } from './common';
+import { axisCommon, esc, key, OTHER, slotsFor, tooltipBase, type BuildArgs, type Built } from './common';
 import { farFromZero, median } from './math';
 
 /** The query asks for this many dots at most (`snapshot::tile_query`). */
@@ -25,7 +25,8 @@ export function buildScatter({ res, tile, colors: c, selected, tables = [] }: Bu
   const rows = res.rows.filter((r) => typeof r[xi] === 'number' && typeof r[yi] === 'number');
 
   // Colour groups: the seven most common stay, the rest become one grey "Other".
-  // The colour follows the name, in alphabetical order, so a group keeps its colour.
+  // The colour follows the group, not its place in the list: the tile remembers the slot each group
+  // had, so a filter that removes a group leaves the colours of the others as they were.
   const counts = new Map<string, { raw: Cell; n: number }>();
   if (hasColour) {
     for (const r of rows) {
@@ -40,8 +41,9 @@ export function buildScatter({ res, tile, colors: c, selected, tables = [] }: Bu
   const colourLabel = (raw: Cell) => cell(raw, res.columns[1]?.dtype ?? 'text', tile.dims[1]?.grain);
   kept.sort((a, b) => colourLabel(a[1].raw).localeCompare(colourLabel(b[1].raw), undefined, { numeric: true }));
   const groupOf = new Map(kept.map(([k], i) => [k, i]));
+  const slots = slotsFor(tile, kept.map(([k]) => k));
   const groups = hasColour
-    ? kept.map(([, g], i) => ({ name: colourLabel(g.raw), color: c.series[i % c.series.length] }))
+    ? kept.map(([, g], i) => ({ name: colourLabel(g.raw), color: c.series[slots[i] % c.series.length] }))
     : [{ name: '', color: c.series[0] }];
   const hasOther = ranked.length > kept.length;
   if (hasOther) groups.push({ name: OTHER, color: c.text2 });

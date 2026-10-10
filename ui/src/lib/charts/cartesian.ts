@@ -89,7 +89,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   }
   const built = order.map((si, pos) => {
     const s = series[si];
-    const color = s.name === OTHER ? c.text2 : c.series[si % c.series.length];
+    const color = s.slot === null ? c.text2 : c.series[(s.slot ?? si) % c.series.length];
     const isTop = pos === order.length - 1;
     const fmt = fmtOf(si);
     const tooltip = { valueFormatter: (v: number | null) => (v === null ? '–' : fmt.tip(v)) };

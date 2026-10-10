@@ -2,7 +2,7 @@
   // Draws one tile from its result. Used by the app and by exported files.
   import type { Cell, QueryResult, Tile } from '../../lib/api';
   import { buildOption, CHART_TYPES, type Colors } from '../../lib/chart';
-  import { cell, OTHER_KEY, type Named } from '../../lib/format';
+  import { cell, columnHeads, OTHER_KEY, type Named } from '../../lib/format';
   import ChartView from './ChartView.svelte';
   import ImageView from './ImageView.svelte';
   import KpiView from './KpiView.svelte';
@@ -40,8 +40,16 @@
   let height = $state(240);
 
   const isChart = $derived((CHART_TYPES as readonly string[]).includes(tile.type));
-  // A scatter needs two values and a field for its dots; without them there is nothing to draw.
-  const unfinished = $derived(tile.type === 'scatter' && (tile.measures.length < 2 || !tile.dims.length));
+  // A scatter needs two values and a field for its dots, and a waterfall a field to step through.
+  // Without them there is nothing to draw, so the tile says what is missing.
+  const missing = $derived.by(() => {
+    if (tile.type === 'scatter' && (tile.measures.length < 2 || !tile.dims.length)) {
+      return 'A scatter chart needs two values and a field to draw one dot for each.';
+    }
+    if (tile.type === 'waterfall' && !tile.dims.length) return 'A waterfall needs a category or a date to step through.';
+    return null;
+  });
+  const unfinished = $derived(missing !== null);
   const built = $derived(isChart && !unfinished ? buildOption({ res, tile, colors, selected, width, height, tables }) : null);
 
   // Table: click a header to sort.
@@ -74,6 +82,7 @@
     if (j < 0 || v === null || v === undefined || (!!tile.showAs?.[j] && tile.showAs[j] !== 'value')) return '';
     return cell(v, res.columns[i].dtype, null, false, formatOf(i));
   };
+  const heads = $derived(columnHeads(res, tile, tables));
   const note = $derived(built?.note ?? null);
   const selKeys = $derived(new Set((selected ?? []).map((v) => String(v))));
 </script>
@@ -85,13 +94,13 @@
 {:else if tile.type === 'kpi' && res.kpi}
   <KpiView kpi={res.kpi} {tile} {colors} />
 {:else if unfinished}
-  <div class="none">A scatter chart needs two values and a field to draw one dot for each.</div>
+  <div class="placeholder">{missing}</div>
 {:else if res.rows.length === 0}
   <div class="none">No data for this selection.</div>
 {:else if tile.type === 'share' || tile.type === 'donut'}
   <ShareView {res} {tile} {colors} {selected} {onpick} />
 {:else if tile.type === 'pivot'}
-  <PivotView {res} {tile} {selected} {selectedCol} {onpick} {onpickcol} />
+  <PivotView {res} {tile} {tables} {selected} {selectedCol} {onpick} {onpickcol} />
 {:else if tile.type === 'table'}
   <div class="tablewrap">
     <table>
@@ -100,7 +109,7 @@
           {#each res.columns as c, i}
             <th class:num={c.dtype === 'number'}>
               <button onclick={() => (sortBy === i ? (sortDesc = !sortDesc) : ((sortBy = i), (sortDesc = c.dtype === 'number')))}>
-                {c.name}{sortBy === i ? (sortDesc ? ' ↓' : ' ↑') : ''}
+                {heads[i]}{sortBy === i ? (sortDesc ? ' ↓' : ' ↑') : ''}
               </button>
             </th>
           {/each}
@@ -164,6 +173,17 @@
   .chart { height: 100%; display: flex; flex-direction: column; }
   .plot { flex: 1; min-height: 0; }
   .size-note { flex: none; margin: 4px 0 0; font-size: 11px; color: var(--text-2); }
+  .placeholder {
+    height: 100%;
+    display: grid;
+    place-items: center;
+    padding: 0 16px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-2);
+    border: 1.5px dashed var(--sep-strong);
+    border-radius: 8px;
+  }
   .none { height: 100%; display: grid; place-items: center; color: var(--text-2); font-size: 12px; }
   .tablewrap { height: 100%; overflow: auto; margin: 0 -14px; }
   table { border-collapse: collapse; width: 100%; font-size: 12px; }

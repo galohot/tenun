@@ -27,3 +27,15 @@ export function targetInfo(
   const basis = projected ?? value;
   return { share: value / target, projected, onTrack: better === 'down' ? basis <= target : basis >= target };
 }
+
+/**
+ * The words next to the target. `chip` is the status and `pace` the short phrase after the share of
+ * the target, which only an unfinished period has. Where lower is better, a miss is never "Behind":
+ * the number is over its target, or heading over it.
+ */
+export function targetWords(info: TargetInfo, better: 'up' | 'down' = 'up'): { chip: string; pace: string } {
+  const unfinished = info.projected !== null;
+  if (info.onTrack) return { chip: 'On track', pace: unfinished ? 'on pace' : '' };
+  if (better === 'down') return { chip: 'Over target', pace: unfinished ? 'heading over target' : '' };
+  return { chip: 'Behind', pace: unfinished ? 'behind pace' : '' };
+}

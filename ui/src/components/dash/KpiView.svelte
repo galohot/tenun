@@ -4,7 +4,7 @@
   import type { KpiInfo, Tile } from '../../lib/api';
   import type { Colors } from '../../lib/chart';
   import { compact, pctChange, pctOfTarget, tip } from '../../lib/format';
-  import { targetInfo } from '../../lib/kpi';
+  import { targetInfo, targetWords } from '../../lib/kpi';
   import Icon from '../Icon.svelte';
 
   let { kpi, tile, colors }: { kpi: KpiInfo; tile: Tile; colors: Colors } = $props();
@@ -17,7 +17,8 @@
   const target = $derived(tile.target?.value ?? null);
   const goal = $derived(targetInfo(kpi.value, target, kpi.elapsed, tile.better ?? 'up'));
   // Only a period that is not over has a pace: the value so far, scaled up to the whole period.
-  const pace = $derived(goal && goal.projected !== null ? (goal.onTrack ? 'on pace' : 'behind pace') : '');
+  const words = $derived(goal ? targetWords(goal, tile.better ?? 'up') : null);
+  const pace = $derived(words?.pace ?? '');
   // With a target there are two more lines of text, so the history waits for a wider tile.
   const showBars = $derived(kpi.bars.length > 2 && w >= (goal ? 420 : 200));
   // In a narrow tile the target line would wrap and push the figure into the title. The chip stays
@@ -75,7 +76,7 @@
       <div class="goal" title={narrow ? `${goalWords}${goal.projected === null ? '' : `. At this pace the period ends near ${tip(goal.projected, fmt)}`}.` : goal.projected === null ? '' : `At this pace the period ends near ${tip(goal.projected, fmt)}.`}>
         <span class="status {goal.onTrack ? 'good' : 'bad'}">
           <Icon name={goal.onTrack ? 'check' : 'warning'} size={12} />
-          {goal.onTrack ? 'On track' : 'Behind'}
+          {words?.chip}
         </span>
         {#if !narrow}<span class="muted">{goalWords}</span>{/if}
       </div>

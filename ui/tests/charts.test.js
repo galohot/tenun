@@ -1,7 +1,7 @@
 // The arithmetic behind stack modes, the 100 % view and the waterfall (build 04).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { farFromZero, labelledSteps, median, normalizeShares, stackMode, stackable, waterfallSteps } from '../src/lib/charts/math.ts';
+import { assignSlots, farFromZero, labelledSteps, median, normalizeShares, stackMode, stackable, unitOf, waterfallSteps } from '../src/lib/charts/math.ts';
 
 const m = (agg) => ({ table: 't', column: 'c', agg });
 const shape = (steps) => steps.map((s) => [s.kind, s.from, s.to, s.value]);
@@ -36,8 +36,60 @@ test('stack default: stacked for sums and counts, side by side for the rest', ()
   assert.equal(stackMode({ measures: [m('avg')], stack: 'percent' }, false), 'side');
   // Several values: every one of them has to add up. A split looks at the first value only.
   assert.equal(stackMode({ measures: [m('sum'), m('avg')] }, true), 'side');
-  assert.equal(stackMode({ measures: [m('sum'), m('count')] }, true), 'stacked');
   assert.equal(stackMode({ measures: [m('sum'), m('avg')] }, false), 'stacked');
+});
+
+test('stack default for several values: side by side unless they share one unit', () => {
+  const col = (column, agg = 'sum') => ({ table: 't', column, agg });
+  // Amount (money) and Quantity (units): different columns, so side by side.
+  assert.equal(stackMode({ measures: [col('amount'), col('quantity')] }, true), 'side');
+  // The same currency on both: they add up.
+  const idr = { currency: 'IDR' };
+  assert.equal(stackMode({ measures: [col('amount'), col('cost')], formats: [idr, idr] }, true), 'stacked');
+  // Money and a plain number never share a unit; two currencies do not either.
+  assert.equal(stackMode({ measures: [col('amount'), col('cost')], formats: [idr, null] }, true), 'side');
+  assert.equal(stackMode({ measures: [col('amount'), col('cost')], formats: [idr, { currency: 'USD' }] }, true), 'side');
+  // Counts of rows in one table share a unit; a count and a sum of a column do not.
+  assert.equal(stackMode({ measures: [col(null, 'count'), col('id', 'count')] }, true), 'stacked');
+  assert.equal(stackMode({ measures: [col('amount'), col(null, 'count')] }, true), 'side');
+  assert.equal(unitOf(col('amount')), unitOf(col('amount', 'count_distinct')));
+  // A split on one value stays stacked, and a saved choice wins for several values.
+  assert.equal(stackMode({ measures: [col('amount')] }, false), 'stacked');
+  assert.equal(stackMode({ measures: [col('amount'), col('quantity')], stack: 'stacked' }, true), 'stacked');
+  assert.equal(stackMode({ measures: [col('amount'), col('quantity')], stack: 'percent' }, true), 'percent');
+  // An average still cannot be stacked, whatever was saved.
+  assert.equal(stackMode({ measures: [col('amount'), col('quantity', 'avg')], stack: 'stacked' }, true), 'side');
+});
+
+test('colour slots: a group keeps its colour when others leave', () => {
+  const memory = new Map();
+  // The unfiltered render fills the slots in order.
+  assert.deepEqual(assignSlots(memory, ['Cafe', 'Online', 'Shop', 'Tea'], 8), [0, 1, 2, 3]);
+  // A filter takes Online and Shop away: Cafe and Tea keep slots 0 and 3.
+  assert.deepEqual(assignSlots(memory, ['Cafe', 'Tea'], 8), [0, 3]);
+  // The filter is lifted: everyone is back where they were.
+  assert.deepEqual(assignSlots(memory, ['Cafe', 'Online', 'Shop', 'Tea'], 8), [0, 1, 2, 3]);
+});
+
+test('colour slots: a group never seen before takes the lowest free slot', () => {
+  const memory = new Map();
+  assignSlots(memory, ['a', 'b', 'c'], 8);
+  // "d" appears while "b" is filtered out: slot 1 still belongs to "b", so "d" takes 3.
+  assert.deepEqual(assignSlots(memory, ['a', 'c', 'd'], 8), [0, 2, 3]);
+  assert.deepEqual(assignSlots(memory, ['a', 'b', 'c', 'd'], 8), [0, 1, 2, 3]);
+});
+
+test('colour slots: when every slot is held, a new group takes one that no shown group uses', () => {
+  const memory = new Map();
+  assignSlots(memory, ['a', 'b', 'c'], 3);
+  // Only "x" and "a" are on screen. "x" is new and every slot is held; "b" (slot 1) is not shown.
+  const [sa, sx] = assignSlots(memory, ['a', 'x'], 3);
+  assert.equal(sa, 0);
+  assert.equal(sx, 1);
+  assert.equal(memory.has('b'), false);
+  // More groups than slots wrap round without breaking the ones that are remembered.
+  const wrapped = assignSlots(new Map(), ['a', 'b', 'c', 'd'], 3);
+  assert.deepEqual(wrapped, [0, 1, 2, 0]);
 });
 
 test('waterfall by category: steps from 0 and a closing total', () => {

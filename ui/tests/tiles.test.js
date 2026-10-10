@@ -1,7 +1,7 @@
 // KPI pace, the pivot layout and the "Also try" rules (build 05).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { targetInfo } from '../src/lib/kpi.ts';
+import { targetInfo, targetWords } from '../src/lib/kpi.ts';
 import { MAX_PIVOT_COLS, pivotModel } from '../src/lib/pivot.ts';
 import { imageKind, normalisePicture } from '../src/lib/image.ts';
 import { suggestTypes } from '../src/lib/suggest.ts';
@@ -29,6 +29,18 @@ test('target: lower is better flips the verdict', () => {
   assert.equal(targetInfo(500, 1000, 14 / 31, 'down').onTrack, false); // heading for 1,107 over a limit of 1,000
   assert.equal(targetInfo(300, 1000, 14 / 31, 'down').onTrack, true);
   assert.equal(targetInfo(900, 1000, 1, 'down').onTrack, true);
+});
+
+test('target words: lower is better never says "Behind"', () => {
+  // Higher is better.
+  assert.deepEqual(targetWords(targetInfo(500, 1000, 14 / 31)), { chip: 'On track', pace: 'on pace' });
+  assert.deepEqual(targetWords(targetInfo(300, 1000, 14 / 31)), { chip: 'Behind', pace: 'behind pace' });
+  assert.deepEqual(targetWords(targetInfo(820, 1000, 1)), { chip: 'Behind', pace: '' });
+  // Lower is better: over target, and heading over it while the period is not over.
+  assert.deepEqual(targetWords(targetInfo(300, 1000, 14 / 31, 'down'), 'down'), { chip: 'On track', pace: 'on pace' });
+  assert.deepEqual(targetWords(targetInfo(500, 1000, 14 / 31, 'down'), 'down'), { chip: 'Over target', pace: 'heading over target' });
+  assert.deepEqual(targetWords(targetInfo(1200, 1000, 1, 'down'), 'down'), { chip: 'Over target', pace: '' });
+  assert.deepEqual(targetWords(targetInfo(900, 1000, 1, 'down'), 'down'), { chip: 'On track', pace: '' });
 });
 
 test('target: nothing to say without a value or a sensible target', () => {
