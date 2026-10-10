@@ -6,7 +6,7 @@
 use serde_json::json;
 use std::path::PathBuf;
 use tenun_core::Engine;
-use tenun_core::workspace::{FieldRef, Relationship, Source, SourceKind, Workspace};
+use tenun_core::workspace::{FieldRef, Locale, Relationship, Source, SourceKind, Workspace};
 
 const COFFEE: &[u8] = include_bytes!("../../../examples/sample/coffee.xlsx");
 const STORES: &[u8] = include_bytes!("../../../examples/sample/stores.csv");
@@ -38,7 +38,10 @@ pub fn open(engine: &Engine) -> anyhow::Result<()> {
         engine.open(&file)?;
         return Ok(());
     }
-    engine.replace(workspace(), Some(file.clone()));
+    // A new sample reads in the language of the computer, like any new workspace.
+    let mut ws = workspace();
+    ws.locale = Some(Locale::from_env());
+    engine.replace(ws, Some(file.clone()));
     engine.save(Some(file))?;
     Ok(())
 }

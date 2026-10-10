@@ -105,7 +105,7 @@
   button {
     width: 100%;
     display: grid;
-    grid-template-columns: 8px 1fr auto 52px;
+    grid-template-columns: 8px 1fr auto minmax(52px, max-content);
     grid-template-rows: auto 4px;
     align-content: center;
     align-items: center;
@@ -125,5 +125,5 @@
   .track span { display: block; height: 100%; border-radius: 2px; opacity: 0.85; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pct { font-weight: 600; font-variant-numeric: tabular-nums; }
-  .val { text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .val { white-space: nowrap; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
 </style>

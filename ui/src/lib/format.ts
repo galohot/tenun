@@ -88,17 +88,21 @@ export function dayMonth(d: Date, loc: Locale = getLocale()): string {
 
 const tag = (loc: Locale) => (loc === 'id' ? 'id-ID' : 'en-US');
 
+/** A clock time, "14:46" in Indonesian (Intl would write "14.46"), "2:46 PM" in English. */
+export function timeShort(when: string | Date, loc: Locale = getLocale()): string {
+  const d = new Date(when);
+  if (loc === 'id') return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return d.toLocaleTimeString(tag(loc), { hour: 'numeric', minute: '2-digit' });
+}
+
 /** A date and time in the style of the locale, from an ISO time or a Date. */
 export function dateTimeMedium(when: string | Date, loc: Locale = getLocale()): string {
+  if (loc === 'id') return `${dateMedium(when, loc)}, ${timeShort(when, loc)}`;
   return new Date(when).toLocaleString(tag(loc), { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 export function dateMedium(when: string | Date, loc: Locale = getLocale()): string {
   return new Date(when).toLocaleDateString(tag(loc), { dateStyle: 'medium' });
-}
-
-export function timeShort(when: string | Date, loc: Locale = getLocale()): string {
-  return new Date(when).toLocaleTimeString(tag(loc), { hour: 'numeric', minute: '2-digit' });
 }
 
 /** Formats one result cell for display. */

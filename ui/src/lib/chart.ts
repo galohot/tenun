@@ -244,6 +244,8 @@ export function buildOption({ res, tile, colors: c, selected, width, height, tab
           fontSize: 11,
           formatter: (p: { value: number }) => fmt.short(p.value),
         },
+        // Full-digit labels can be wider than the bar slot; hide the ones that collide.
+        labelLayout: { hideOverlap: true },
         tooltip,
         emphasis: { focus: 'none' },
         data,

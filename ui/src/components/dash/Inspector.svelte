@@ -410,7 +410,7 @@
   }
   .grains.parts button { text-transform: none; }
   .grains button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
-  .fmt { display: flex; flex-direction: column; gap: 4px; }
+  .fmt { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; }
   .fmt .label { font-size: 11px; }
   .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .pair select.field { min-width: 0; }
