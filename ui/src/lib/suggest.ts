@@ -31,7 +31,8 @@ export function suggestTypes(tile: Tile, tables: Pick<Table, 'id' | 'columns'>[]
   const out: Suggestion[] = [];
   const add = (type: TileType, change: Partial<Tile> = {}) => {
     if (out.some((s) => s.type === type) || type === tile.type || (type === 'share' && tile.type === 'donut')) return;
-    out.push({ type, variant: { ...tile, ...change, type } });
+    // A preview is a plain chart: Advanced layouts (small multiples, panels, indexed, combo) stay with the tile.
+    out.push({ type, variant: { ...tile, repeat: undefined, ownScale: undefined, layout: undefined, mix: undefined, ...change, type } });
   };
   const d0: Dim | undefined = tile.dims[0];
   const d1: Dim | undefined = tile.dims[1];

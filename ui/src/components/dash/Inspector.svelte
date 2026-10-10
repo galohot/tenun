@@ -1,13 +1,13 @@
 <script lang="ts">
   import { api, DATE_PARTS, isPart, type Agg, type CondFormat, type Grain, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileLine, type TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
-  import { aggNames, cell, tileTitle } from '../../lib/format';
+  import { aggNames, cell, measureLabel, OTHER_KEY, tileTitle } from '../../lib/format';
   import { isChange } from '../../lib/cells';
   import { MAX_LINES } from '../../lib/charts/lines';
-  import { defaultStack, stackableTile, stackMode } from '../../lib/charts/math';
+  import { defaultStack, sameUnit, stackableTile, stackMode } from '../../lib/charts/math';
   import { dim0Kind, effectiveShowAs, SHOW_AS_LABELS, showAsOptions, withShowAs } from '../../lib/showas';
-  import { advancedLocked, SHOW_ADVANCED_SWITCH } from '../../lib/tiers';
-  import { defaultDim, defaultMeasure, dtypeOf, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, reachableFrom, type DashFilter } from '../../lib/tiles';
+  import { ADVANCED_TYPES, advancedLocked, advancedOn, MORE_CHARTS, SHOW_ADVANCED_SWITCH } from '../../lib/tiers';
+  import { defaultDim, defaultMeasure, dtypeOf, isRepeated, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, reachableFrom, type DashFilter } from '../../lib/tiles';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
   import Suggestions from './Suggestions.svelte';
@@ -44,6 +44,12 @@
     { id: 'text', icon: 'text', label: 'Text' },
     { id: 'image', icon: 'image', label: 'Image' },
   ];
+  // The second group of the picker, shown while Advanced is on (build 12).
+  const moreTypes: { id: TileType; icon: IconName; label: string }[] = [
+    { id: 'heatmap', icon: 'heatmap', label: 'Heat map' },
+    { id: 'funnel', icon: 'funnel', label: 'Funnel' },
+    { id: 'box', icon: 'box', label: 'Box plot' },
+  ].filter((t) => MORE_CHARTS.includes(t.id as TileType)) as { id: TileType; icon: IconName; label: string }[];
   const stacks: { id: NonNullable<Tile['stack']>; label: string }[] = [
     { id: 'stacked', label: 'Stacked' },
     { id: 'side', label: 'Side by side' },
@@ -59,6 +65,19 @@
     { id: 'value-asc', label: 'Smallest first', sort: { by: 'value', desc: false } },
     { id: 'label-asc', label: 'A → Z', sort: { by: 'label', desc: false } },
     { id: 'label-desc', label: 'Z → A', sort: { by: 'label', desc: true } },
+  ];
+  // A funnel starts with the biggest stage, and a box plot with A → Z: that is its "Automatic".
+  const funnelSorts: typeof sorts = [
+    { id: 'auto', label: 'Biggest first' },
+    { id: 'value-asc', label: 'Smallest first', sort: { by: 'value', desc: false } },
+    { id: 'label-asc', label: 'A → Z', sort: { by: 'label', desc: false } },
+    { id: 'label-desc', label: 'Z → A', sort: { by: 'label', desc: true } },
+  ];
+  const boxSorts: typeof sorts = [
+    { id: 'auto', label: 'A → Z' },
+    { id: 'label-desc', label: 'Z → A', sort: { by: 'label', desc: true } },
+    { id: 'value-desc', label: 'Highest median first', sort: { by: 'value', desc: true } },
+    { id: 'value-asc', label: 'Lowest median first', sort: { by: 'value', desc: false } },
   ];
 
   // How a value is written. Each value has its own (V3-D9). Unset fields keep the defaults.
@@ -108,6 +127,14 @@
   // The value whose "Divide by" picker is open.
   let dividing = $state<number | null>(null);
 
+  // Advanced is on for this computer (V3-D1). It decides what the Inspector offers, never how a tile draws.
+  const advanced = $derived(advancedOn());
+  // A tile of an Advanced type, while the switch is off: it still draws, but its fields wait for the switch.
+  const lockedType = $derived(!advanced && ADVANCED_TYPES.includes(tile.type));
+  const isHeat = $derived(tile.type === 'heatmap');
+  const isFunnel = $derived(tile.type === 'funnel');
+  const isBox = $derived(tile.type === 'box');
+
   const m = $derived(tile.measures[0]);
   const rels = $derived(app.snap!.workspace.relationships);
   const reach = $derived(m ? reachableFrom(m.table, rels) : null);
@@ -116,7 +143,12 @@
     !x || x.column === null
       ? ['count']
       : dtypeOf(app.tables, x.table, x.column) === 'number'
-        ? ['sum', 'avg', 'min', 'max', 'median', 'p90', 'count', 'count_distinct']
+        ? [
+            'sum', 'avg', 'min', 'max', 'median', 'p90',
+            // Spread is Advanced; a value that already has it keeps it in the list.
+            ...(advanced || x.agg === 'stdev' || x.agg === 'variance' ? (['stdev', 'variance'] as Agg[]) : []),
+            'count', 'count_distinct',
+          ]
         : ['count', 'count_distinct', 'min', 'max'];
   const aggs = $derived(aggsOf(m));
 
@@ -135,7 +167,7 @@
       dividing = null;
     }
   });
-  const topKind = $derived(tile.type === 'bar' || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'pivot');
+  const topKind = $derived(tile.type === 'bar' || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'pivot' || isHeat);
   const topChoice = $derived(!tile.top ? 'all' : customTop || !TOP_PRESETS.includes(tile.top.n) ? 'custom' : String(tile.top.n));
 
   function setTop(choice: string) {
@@ -150,13 +182,18 @@
     if (Number.isFinite(n) && n >= 1) set({ top: { ...tile.top, n: Math.min(n, 1000) } });
   }
 
-  const sortId = $derived(
-    !tile.sort
-      ? 'auto'
-      : tile.sort.by === 'manual'
-        ? 'manual'
-        : `${tile.sort.by}-${(tile.sort.desc ?? tile.sort.by === 'value') ? 'desc' : 'asc'}`,
-  );
+  const sortId = $derived.by(() => {
+    if (!tile.sort) return 'auto';
+    if (tile.sort.by === 'manual') return 'manual';
+    const id = `${tile.sort.by}-${(tile.sort.desc ?? tile.sort.by === 'value') ? 'desc' : 'asc'}`;
+    // What a funnel and a box plot do when nothing is chosen is their first choice.
+    return (isFunnel && id === 'value-desc') || (isBox && id === 'label-asc') ? 'auto' : id;
+  });
+  const sortChoices = $derived([
+    ...(isFunnel ? funnelSorts : isBox ? boxSorts : sorts),
+    // Dragging the groups into an order is Advanced; a tile that has one keeps showing it.
+    ...(advanced || tile.sort?.by === 'manual' ? [{ id: 'manual', label: 'Manual order' }] : []),
+  ] as typeof sorts);
 
   function setDim(i: number, table: string, column: string) {
     const dims = [...tile.dims];
@@ -180,11 +217,17 @@
   const manyValues = $derived(tile.type === 'table' || isPivot || tile.type === 'bar' || tile.type === 'line' || tile.type === 'area');
   const isScatter = $derived(tile.type === 'scatter');
   const isHistogram = $derived(tile.type === 'histogram');
+  // Rows by one column field: a pivot, or a heat map (which has one row field and one value).
+  const pivotLike = $derived(isPivot || isHeat);
+  // A histogram and a box plot read one number column, so there is nothing to add up.
+  const numberOnly = $derived(isHistogram || isBox);
   const isText = $derived(tile.type === 'text');
   const isImage = $derived(tile.type === 'image');
   // A note and a picture have no fields to pick.
   const noFields = $derived(isText || isImage);
   const maxValues = $derived(tile.type === 'table' ? Infinity : isPivot ? PIVOT_MAX_MEASURES : MAX_CHART_MEASURES);
+  const chartKind = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area');
+  const repeated = $derived(isRepeated(tile));
   const showSplit = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area' || tile.type === 'table' || isScatter);
   // Several values draw one series each; otherwise the series are the groups of a split.
   const perValue = $derived(tile.measures.length > 1);
@@ -268,6 +311,84 @@
     const w = Number(raw);
     set({ bins: raw.trim() !== '' && Number.isFinite(w) && w > 0 ? { width: w } : undefined });
   }
+  // ---- Advanced (build 12) ----
+
+  /** The groups on screen, in the order they have now: the choices for a manual order. */
+  const shownGroups = $derived.by(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const r of current?.res.rows ?? []) {
+      const v = r[0];
+      if (v === null || v === undefined || v === OTHER_KEY) continue;
+      const k = String(v);
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push(k);
+      }
+    }
+    return out;
+  });
+  /** The manual order as the list shows it: the saved order first, then groups that are new. */
+  const manualList = $derived.by(() => {
+    const saved = tile.sort?.order ?? [];
+    const here = new Set(shownGroups);
+    return [...saved.filter((k) => here.has(k) || !shownGroups.length), ...shownGroups.filter((k) => !saved.includes(k))];
+  });
+  let dragFrom = $state<number | null>(null);
+
+  function setOrder(order: string[]) {
+    set({ sort: { by: 'manual', order } });
+  }
+
+  function moveGroup(from: number, to: number) {
+    if (from === to || to < 0 || to >= manualList.length) return;
+    const next = [...manualList];
+    const [one] = next.splice(from, 1);
+    next.splice(to, 0, one);
+    setOrder(next);
+  }
+
+  function pickSort(id: string) {
+    // Manual starts from the order on screen.
+    if (id === 'manual') return setOrder(manualList.length ? manualList : shownGroups);
+    set({ sort: sortChoices.find((x) => x.id === id)?.sort });
+  }
+
+  const LAYOUTS: { id: NonNullable<Tile['layout']>; label: string; hint: string }[] = [
+    { id: 'together', label: 'Together', hint: '' },
+    { id: 'panels', label: 'Separate panels', hint: 'Each value gets a plot and an axis of its own. One hover line runs through all of them.' },
+    { id: 'indexed', label: 'Indexed', hint: 'Every line starts at 100, so you compare how fast each one grows.' },
+  ];
+  const layoutNow = $derived(tile.layout ?? 'together');
+  /** Panels need two values; an index also works for the groups of a split. */
+  const layoutChoices = $derived(LAYOUTS.filter((l) => l.id === 'together' || (l.id === 'panels' ? tile.measures.length > 1 : tile.measures.length > 1 || !!tile.dims[1])));
+  const sharesUnit = $derived(sameUnit(tile));
+
+  /** Sets how value `i` is drawn in a bar and line chart; "bar" and "line" fall back to the tile's own kind. */
+  function setMix(i: number, how: 'bar' | 'line') {
+    const base: ('bar' | 'line')[] = tile.measures.map((_, j) => tile.mix?.[j] ?? (tile.type === 'bar' ? 'bar' : 'line'));
+    base[i] = how;
+    // All values drawn as the tile's own kind is no combo at all.
+    const own = tile.type === 'bar' ? 'bar' : 'line';
+    set({ mix: base.every((b) => b === own) ? undefined : base });
+  }
+
+  // Reference bands: a muted tint between two values.
+  let askBand = $state(false);
+  let bandFrom = $state('');
+  let bandTo = $state('');
+  let bandLabel = $state('');
+  const bands = $derived((tile.lines ?? []).filter((l) => l.kind === 'band'));
+
+  function addBand() {
+    const [a, b] = [Number(bandFrom.replace(/\s/g, '')), Number(bandTo.replace(/\s/g, ''))];
+    if (bandFrom.trim() === '' || bandTo.trim() === '' || !Number.isFinite(a) || !Number.isFinite(b) || a === b || bands.length >= MAX_LINES) return;
+    const label = bandLabel.trim();
+    set({ lines: [...(tile.lines ?? []), { kind: 'band', value: Math.min(a, b), to: Math.max(a, b), ...(label ? { label } : {}) }] });
+    askBand = false;
+    bandFrom = bandTo = bandLabel = '';
+  }
+
   const dimTypes = $derived(tile.dims.map((d) => dtypeOf(app.tables, d.table, d.column)));
   const dim0 = $derived(dim0Kind(dimTypes[0], tile.dims[0]?.grain));
   const showAsChoices = $derived(showAsOptions(tile, dim0));
@@ -366,7 +487,7 @@
 
 {#snippet valueRows(i: number)}
   {@const x = tile.measures[i]}
-  {#if x && !isHistogram}
+  {#if x && !numberOnly}
     {#if x.per}
       <div class="per">
         <span class="label">Divide by</span>
@@ -476,6 +597,17 @@
         </button>
       {/each}
     </div>
+    {#if advanced && moreTypes.length}
+      <span class="label up">More charts</span>
+      <div class="types" role="radiogroup" aria-label="More chart types">
+        {#each moreTypes as t}
+          <button role="radio" aria-checked={tile.type === t.id} class:on={tile.type === t.id} title={t.label} onclick={() => set({ type: t.id })}>
+            <Icon name={t.icon} size={18} />
+            <span>{t.label}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
     {#if tile.type === 'kpi' || tile.type === 'waterfall'}
       <div class="better" role="radiogroup" aria-label="Which change is good">
         <span class="label">A rise is</span>
@@ -550,19 +682,19 @@
     </div>
   {/if}
 
-  {#if !noFields}
+  {#if !noFields && !lockedType}
   <div class="sec">
-    <span class="label">{isScatter ? 'Across (X)' : isHistogram ? 'Number column' : 'Value'}</span>
+    <span class="label">{isScatter ? 'Across (X)' : numberOnly ? 'Number column' : 'Value'}</span>
     <FieldPicker
       mode="measure"
       table={m?.table ?? null}
       column={m?.column ?? null}
-      placeholder={isHistogram ? 'A column of numbers' : 'What to measure'}
-      numbersOnly={isHistogram}
+      placeholder={numberOnly ? 'A column of numbers' : 'What to measure'}
+      numbersOnly={numberOnly}
       onchange={(t, c) => swapField(0, t, c)} />
     {#if m}
-      <!-- A histogram counts every row of the column, so there is nothing to add up. -->
-      {#if !isHistogram}
+      <!-- A histogram and a box plot read every row of the column, so there is nothing to add up. -->
+      {#if !numberOnly}
         <select class="field" value={m.agg} onchange={(e) => set({ measures: [{ ...m, agg: e.currentTarget.value as Agg }, ...tile.measures.slice(1)] })}>
           {#each aggs as a}<option value={a}>{aggNames[a]}</option>{/each}
         </select>
@@ -611,12 +743,12 @@
 
   {#if !isHistogram}
   <div class="sec">
-      <span class="label">{tile.type === 'kpi' ? 'Period (a date, for the comparison)' : tile.type === 'share' || tile.type === 'donut' ? 'Split into' : isScatter ? 'Dot for each' : isPivot ? 'Rows' : 'Group by'}</span>
+      <span class="label">{tile.type === 'kpi' ? 'Period (a date, for the comparison)' : tile.type === 'share' || tile.type === 'donut' ? 'Split into' : isScatter ? 'Dot for each' : pivotLike ? 'Rows' : isFunnel ? 'Stages' : isBox ? 'Group by (optional)' : 'Group by'}</span>
       <FieldPicker
         mode="dim"
         table={tile.dims[0]?.table ?? null}
         column={tile.dims[0]?.column ?? null}
-        placeholder={tile.type === 'kpi' ? 'A date, for the trend' : isScatter ? 'One dot for each of these' : 'Category or date'}
+        placeholder={tile.type === 'kpi' ? 'A date, for the trend' : isScatter ? 'One dot for each of these' : isFunnel ? 'The steps, like visit and sale' : isBox ? 'One box for each of these' : 'Category or date'}
         reachable={reach}
         onchange={(t, c) => c && setDim(0, t, c)}
         onclear={() => removeDim(0)} />
@@ -655,7 +787,7 @@
     <p class="hint">Comparing needs one value, a date with a grain and no split.</p>
   {/if}
 
-  {#if showSplit && tile.dims[0] && (tile.type === 'table' || isScatter || tile.measures.length < 2)}
+  {#if showSplit && tile.dims[0] && !repeated && (tile.type === 'table' || isScatter || tile.measures.length < 2)}
     <div class="sec">
       <span class="label">{tile.type === 'table' ? 'Then by' : isScatter ? 'Colour by (optional)' : 'Split by (optional)'}</span>
       <FieldPicker
@@ -669,12 +801,15 @@
     </div>
   {/if}
 
-  {#if showSplit && tile.dims[0] && tile.type !== 'table' && !isScatter && tile.measures.length > 1}
+  {#if showSplit && tile.dims[0] && tile.type !== 'table' && !isScatter && tile.measures.length > 1 && !repeated}
     <p class="hint">Split by is off while a tile shows several values.</p>
   {/if}
+  {#if repeated}
+    <p class="hint">Split by is off while a tile has small multiples.</p>
+  {/if}
 
-  {#if isPivot}
-    {#if tile.dims[0]}
+  {#if pivotLike}
+    {#if isPivot && tile.dims[0]}
       <div class="sec">
         <span class="label">Then by (optional)</span>
         {#each tile.dims.slice(1, PIVOT_MAX_ROWS) as d, k}
@@ -702,11 +837,15 @@
           {/each}
         </div>
       {/if}
-      <label class="check">
-        <input type="checkbox" checked={tile.totals !== false} onchange={(e) => set({ totals: e.currentTarget.checked ? undefined : false })} />
-        Totals
-      </label>
-      <p class="hint tight">The rows are the fields above. Up to 30 columns are shown.</p>
+      {#if isPivot}
+        <label class="check">
+          <input type="checkbox" checked={tile.totals !== false} onchange={(e) => set({ totals: e.currentTarget.checked ? undefined : false })} />
+          Totals
+        </label>
+        <p class="hint tight">The rows are the fields above. Up to 30 columns are shown.</p>
+      {:else}
+        <p class="hint tight">Each cell is shaded by its number, from light to dark. Up to 30 columns are shown.</p>
+      {/if}
     </div>
   {/if}
 
@@ -833,16 +972,119 @@
     </div>
   {/if}
 
-  {#if (tile.type === 'bar' || tile.type === 'table' || tile.type === 'waterfall') && tile.dims[0]}
+  {#if (tile.type === 'bar' || tile.type === 'table' || tile.type === 'waterfall' || isFunnel || isBox) && tile.dims[0]}
     <div class="sec">
       <span class="label">Sort</span>
-      <select
-        class="field"
-        value={sortId}
-        onchange={(e) => set({ sort: sorts.find((x) => x.id === e.currentTarget.value)?.sort })}>
-        {#each sorts as o}<option value={o.id}>{o.label}</option>{/each}
-        {#if sortId === 'manual'}<option value="manual" disabled>Manual order</option>{/if}
+      <select class="field" aria-label="Sort" value={sortId} onchange={(e) => pickSort(e.currentTarget.value)}>
+        {#each sortChoices as o}<option value={o.id}>{o.label}</option>{/each}
       </select>
+      {#if sortId === 'manual'}
+        <!-- Drag a group to a new place, or use the arrows. The order is saved with the tile. -->
+        <ul class="order" aria-label="Order of the groups">
+          {#each manualList as g, i (g)}
+            <li
+              class:over={dragFrom !== null && dragFrom !== i}
+              draggable="true"
+              ondragstart={() => (dragFrom = i)}
+              ondragover={(e) => e.preventDefault()}
+              ondrop={(e) => {
+                e.preventDefault();
+                if (dragFrom !== null) moveGroup(dragFrom, i);
+                dragFrom = null;
+              }}
+              ondragend={() => (dragFrom = null)}>
+              <Icon name="grip" size={14} />
+              <span class="gname" title={g}>{g}</span>
+              <button class="btn plain icon" aria-label="Move {g} up" disabled={i === 0} onclick={() => moveGroup(i, i - 1)}><Icon name="chevronDown" size={12} class="flip" /></button>
+              <button class="btn plain icon" aria-label="Move {g} down" disabled={i === manualList.length - 1} onclick={() => moveGroup(i, i + 1)}><Icon name="chevronDown" size={12} /></button>
+            </li>
+          {/each}
+        </ul>
+        {#if !manualList.length}<p class="hint tight">The groups show here once the tile has data.</p>{/if}
+      {/if}
+    </div>
+  {/if}
+
+  {#if advanced && chartKind && tile.dims[0]}
+    <div class="sec adv">
+      <span class="label">Advanced</span>
+
+      {#if !repeated && (tile.measures.length > 1 || tile.dims[1])}
+        <span class="label sub">Several values</span>
+        <div class="grains stack" role="radiogroup" aria-label="How several values share the chart">
+          {#each layoutChoices as o}
+            <button
+              role="radio"
+              aria-checked={layoutNow === o.id}
+              class:on={layoutNow === o.id}
+              onclick={() => set({ layout: o.id === 'together' ? undefined : o.id, ...(o.id === 'together' ? {} : { mix: undefined }) })}>
+              {o.label}
+            </button>
+          {/each}
+        </div>
+        {#if LAYOUTS.find((l) => l.id === layoutNow)?.hint}
+          <p class="hint tight">{LAYOUTS.find((l) => l.id === layoutNow)?.hint}</p>
+        {/if}
+      {/if}
+
+      {#if !repeated && tile.measures.length > 1 && layoutNow === 'together'}
+        <span class="label sub">Bar or line</span>
+        {#each tile.measures as mm, i}
+          <div class="mixrow">
+            <span class="gname" title={measureLabel(mm, app.tables)}>{measureLabel(mm, app.tables)}</span>
+            <select
+              class="field"
+              aria-label="How {measureLabel(mm, app.tables)} is drawn"
+              disabled={!sharesUnit}
+              value={sharesUnit ? (tile.mix?.[i] ?? (tile.type === 'bar' ? 'bar' : 'line')) : (tile.type === 'bar' ? 'bar' : 'line')}
+              onchange={(e) => setMix(i, e.currentTarget.value as 'bar' | 'line')}>
+              <option value="bar">Bar</option>
+              <option value="line">Line</option>
+            </select>
+          </div>
+        {/each}
+        {#if !sharesUnit}
+          <p class="hint tight">Different units: use panels. Bars and a line share one axis, so they need values in the same unit.</p>
+        {/if}
+      {/if}
+
+      <span class="label sub">Small multiples</span>
+      <FieldPicker
+        mode="dim"
+        table={tile.repeat?.table ?? null}
+        column={tile.repeat?.column ?? null}
+        placeholder="One chart for each…"
+        reachable={reach}
+        onchange={(t, c) => c && set({ repeat: defaultDim(app.tables, t, c), layout: undefined, mix: undefined })}
+        onclear={() => set({ repeat: undefined, ownScale: undefined })} />
+      {#if tile.repeat}
+        <label class="check">
+          <input type="checkbox" checked={!!tile.ownScale} onchange={(e) => set({ ownScale: e.currentTarget.checked ? true : undefined })} />
+          Own scale per chart
+        </label>
+        <p class="hint tight">Up to 12 charts, the biggest first. They share one scale, so the sizes can be compared.{tile.measures.length > 1 ? ' Only the first value is shown.' : ''}</p>
+      {/if}
+
+      <span class="label sub">Bands</span>
+      {#each bands as b}
+        <div class="linerow">
+          <span>{b.label?.trim() || 'Band'} {cell(b.value ?? 0, 'number', null, false, tile.formats?.[0])} to {cell(b.to ?? 0, 'number', null, false, tile.formats?.[0])}</span>
+          <button class="btn plain icon" aria-label="Remove band" onclick={() => set({ lines: (tile.lines ?? []).filter((l) => l !== b) })}><Icon name="x" size={12} /></button>
+        </div>
+      {/each}
+      {#if askBand}
+        <div class="targetform">
+          <input class="field" type="number" step="any" placeholder="From" aria-label="Band from" bind:value={bandFrom} />
+          <input class="field" type="number" step="any" placeholder="To" aria-label="Band to" bind:value={bandTo} />
+          <input class="field" placeholder="Name (optional)" aria-label="Name of the band" bind:value={bandLabel} />
+          <div class="row">
+            <button class="btn small" disabled={bandFrom.trim() === '' || bandTo.trim() === ''} onclick={addBand}>Add band</button>
+            <button class="link" onclick={() => (askBand = false)}>Cancel</button>
+          </div>
+        </div>
+      {:else if bands.length < MAX_LINES}
+        <button class="link" onclick={() => (askBand = true)}>Add band…</button>
+      {/if}
     </div>
   {/if}
 
@@ -958,6 +1200,15 @@
   .target { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
   textarea.field { height: auto; padding: 8px 10px; line-height: 1.4; resize: vertical; font-family: inherit; }
   .hidden { display: none; }
+  .label.sub { margin-top: 8px; font-size: 11px; }
+  .sec.adv { padding-top: 12px; border-top: 1px solid var(--sep); }
+  .order { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .order li { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 6px; background: var(--inset); cursor: grab; font-size: 12px; }
+  .order li.over { outline: 1px dashed var(--accent); }
+  .order .btn.icon { width: 22px; height: 22px; }
+  .order :global(.flip) { transform: rotate(180deg); }
+  .gname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mixrow { display: grid; grid-template-columns: 1fr 90px; align-items: center; gap: 8px; font-size: 12px; }
   .error { display: flex; gap: 6px; margin: 0; color: var(--danger); font-size: 12px; }
   .error :global(svg) { flex: none; margin-top: 1px; }
 </style>

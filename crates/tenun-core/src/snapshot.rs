@@ -4,6 +4,7 @@
 //! cross-filter offline). One implementation for live tiles, exported files,
 //! published dashboards and the headless agent.
 
+use crate::advanced;
 use crate::engine::{Engine, QueryResult};
 use crate::query::{Agg, Dimension, Filter, FilterOp, Grain, Measure, SemanticQuery, Sort};
 use crate::shape;
@@ -43,6 +44,12 @@ pub struct Tile {
     /// A time chart also draws the same question one year or one period earlier.
     #[serde(default)]
     pub compare: Option<shape::CompareTo>,
+    /// Small multiples (Advanced): one chart for each value of this field.
+    #[serde(default)]
+    pub repeat: Option<Dimension>,
+    /// Several values on one chart: together (default), in separate panels or indexed.
+    #[serde(default)]
+    pub layout: Option<shape::Layout>,
 }
 
 /// Tiles that show something the user typed or picked, not a query: they have no result.
@@ -57,10 +64,14 @@ pub struct TileBins {
     pub width: Option<f64>,
 }
 
-/// How a tile orders its groups. `manual` is left to the UI.
+/// How a tile orders its groups. `manual` is applied by the engine after the top N
+/// ([`advanced::manual_order`]).
 #[derive(Debug, Clone, Deserialize)]
 pub struct TileSort {
     pub by: SortBy,
+    /// Manual order (Advanced): the groups in the order the user dragged them to.
+    #[serde(default)]
+    pub order: Option<Vec<String>>,
     /// Biggest first for `value`, A to Z for `label`.
     #[serde(default)]
     pub desc: Option<bool>,
@@ -151,21 +162,31 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
     if is_static(kind) || (tile.measures.is_empty() && tile.dims.is_empty()) {
         return None;
     }
-    let one = matches!(kind, "kpi" | "share" | "donut");
+    let one = matches!(kind, "kpi" | "share" | "donut" | "funnel" | "box");
+    // Small multiples: the group, then the field that makes one chart for each of its values.
+    let repeating = advanced::repeats(tile);
     // Bar, line and area take up to four values side by side. Then there is no split.
-    let many = matches!(kind, "bar" | "line" | "area") && tile.measures.len() > 1;
+    let many = matches!(kind, "bar" | "line" | "area") && tile.measures.len() > 1 && !repeating;
+    let pivotish = matches!(kind, "pivot" | "heatmap");
     let dims: Vec<Dimension> = if one || kind == "waterfall" {
         tile.dims.iter().take(1).cloned().collect()
     } else if kind == "histogram" {
         vec![]
     } else if kind == "table" {
         tile.dims.clone()
-    } else if kind == "pivot" {
-        // Rows first, then the column field.
+    } else if pivotish {
+        // Rows first, then the column field. A heat map has one row field.
         tile.dims
             .iter()
-            .take(PIVOT_MAX_ROWS)
+            .take(if kind == "heatmap" { 1 } else { PIVOT_MAX_ROWS })
             .chain(tile.cols.iter())
+            .cloned()
+            .collect()
+    } else if repeating {
+        tile.dims
+            .iter()
+            .take(1)
+            .chain(tile.repeat.iter())
             .cloned()
             .collect()
     } else if many {
@@ -203,18 +224,24 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
     // Output columns are the dimensions, then the measures.
     let mut sort = vec![];
     // A pivot keeps the engine's order: its rows and columns are not one list to sort.
-    if let Some(s) = &tile.sort
+    // A funnel without a chosen order puts the biggest stage first.
+    let by = tile
+        .sort
+        .as_ref()
+        .map(|s| (s.by, s.desc))
+        .or_else(|| (kind == "funnel").then_some((SortBy::Value, None)));
+    if let Some((by, desc)) = by
         && !dims.is_empty()
-        && kind != "pivot"
+        && !pivotish
     {
-        match s.by {
+        match by {
             SortBy::Value if !measures.is_empty() => sort.push(Sort {
                 by: dims.len(),
-                desc: s.desc.unwrap_or(true),
+                desc: desc.unwrap_or(true),
             }),
             SortBy::Label => sort.push(Sort {
                 by: 0,
-                desc: s.desc.unwrap_or(false),
+                desc: desc.unwrap_or(false),
             }),
             _ => {}
         }
@@ -226,7 +253,7 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
         sort,
         limit: Some(match kind {
             "table" => 500,
-            "pivot" => PIVOT_LIMIT,
+            "pivot" | "heatmap" => PIVOT_LIMIT,
             "kpi" => 400,
             _ => 2000,
         }),
@@ -247,10 +274,15 @@ pub fn run_tile(
     if tile.kind == "histogram" {
         return shape::histogram(engine, tile, &own_excluded(tile, filters));
     }
+    if tile.kind == "box" {
+        return advanced::boxplot(engine, tile, &own_excluded(tile, filters));
+    }
     let mut q =
         tile_query(tile, filters).ok_or_else(|| anyhow::anyhow!("the tile has no fields yet"))?;
     let wide = q.filters.clone();
-    if tile.kind == "pivot"
+    // Small multiples draw at most a dozen charts; the question is cut to those.
+    let repeat = advanced::limit_repeat(engine, tile, &mut q, &wide)?;
+    if matches!(tile.kind.as_str(), "pivot" | "heatmap")
         && let (Some(c), Some(m)) = (&tile.cols, q.measures.first())
     {
         // With many column values the cells are read for the first ones only, in the order of
@@ -278,6 +310,7 @@ pub fn run_tile(
         }
     }
     let mut res = engine.query(&q)?;
+    res.repeat = repeat;
     // Fill gaps and cut to the top N first, so the unfinished-period check below
     // still sees the real last period.
     shape::apply(engine, tile, &q, &wide, &mut res)?;
@@ -734,8 +767,12 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         groups.push(choices);
         // A click on a pivot column header filters by the column field. Its key starts with
         // `COL_PREFIX`, so it can never collide with a value of the first row field.
-        if let (true, Some(c)) = (src.kind == "pivot", &src.cols) {
-            let at = src.dims.len().min(PIVOT_MAX_ROWS);
+        if let (true, Some(c)) = (matches!(src.kind.as_str(), "pivot" | "heatmap"), &src.cols) {
+            let at = if src.kind == "heatmap" {
+                src.dims.len().min(1)
+            } else {
+                src.dims.len().min(PIVOT_MAX_ROWS)
+            };
             let mut seen = HashSet::new();
             groups.push(
                 res.rows

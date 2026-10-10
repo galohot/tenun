@@ -572,9 +572,16 @@ fn sort_options_order_the_groups() {
             "Robusta", "Liberica", "Kopi", "Geisha", "Excelsa", "Arabica"
         ]
     );
-    // The UI orders a manual sort; the engine keeps its default.
+    // A manual sort puts the listed groups first (build 12); the rest keep the default order.
     assert_eq!(
         names(json!({ "sort": { "by": "manual", "order": ["Kopi"] } })),
+        [
+            "Kopi", "Arabica", "Robusta", "Liberica", "Geisha", "Excelsa"
+        ]
+    );
+    // With no order saved yet, a manual sort changes nothing.
+    assert_eq!(
+        names(json!({ "sort": { "by": "manual" } })),
         names(json!({}))
     );
     // Top N picks by value whatever the order, and Other stays last.

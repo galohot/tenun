@@ -48,7 +48,7 @@
     return [...data.tiles]
       .sort((a, b) => a.y - b.y || a.x - b.x)
       .map((t) => {
-        const rows = t.type === 'kpi' ? 2 : t.type === 'text' ? Math.max(1, t.h) : t.type === 'pivot' ? 5 : 4;
+        const rows = t.type === 'kpi' ? 2 : t.type === 'text' ? Math.max(1, t.h) : t.type === 'pivot' || t.type === 'heatmap' || t.type === 'funnel' ? 5 : 4;
         const h = rows * ROW;
         const r = { t, x: 0, y, w: width, h };
         y += h + GAP;

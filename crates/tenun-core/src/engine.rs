@@ -97,6 +97,26 @@ pub struct QueryResult {
     /// Tables whose row limit cut the result: how many rows there are in all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_rows: Option<u64>,
+    /// Small multiples (`tile.repeat`): the repeat values that have a chart, in the order they are
+    /// drawn, and how many more there are. Rows are `[group, repeat value, value]`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<Repeat>,
+    /// Indexed lines (`tile.layout = "indexed"`): the rows before they were divided by the first
+    /// value, same shape as `rows`, for the tooltip.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub real: Option<Vec<Vec<serde_json::Value>>>,
+    /// Box plots: the outlier dots, `[group, value]`, at most 50 for each group.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outliers: Option<Vec<Vec<serde_json::Value>>>,
+}
+
+/// The charts of a small-multiples tile.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Repeat {
+    /// The repeat values that have a chart, in drawing order.
+    pub keys: Vec<serde_json::Value>,
+    /// How many more values there are than charts ("and 5 more").
+    pub more: u32,
 }
 
 /// The comparison series of a time chart. `rows` have the shape of the result's rows.
@@ -576,6 +596,9 @@ impl Engine {
             totals: None,
             compare: None,
             total_rows: None,
+            repeat: None,
+            real: None,
+            outliers: None,
         })
     }
 

@@ -1,7 +1,7 @@
 // Bars, lines and areas: the v1 chart types, with stack modes for bars and areas.
 
 import { isPart, type Cell, type QueryResult } from '../api';
-import { getLocale, numberFormatter, OTHER_KEY, pctChange, pctShare } from '../format';
+import { full, getLocale, numberFormatter, OTHER_KEY, pctChange, pctShare } from '../format';
 import { isShare } from '../showas';
 import {
   axisCommon,
@@ -18,13 +18,13 @@ import {
   type Built,
 } from './common';
 import { axisSpan, levelMarkLine, resolveLevels, wantsTrend } from './guides';
-import { fitAt, shownSeries, stepWord, trendFit, trendSentence, usableValues } from './lines';
-import { normalizeShares, stackMode } from './math';
+import { fitAt, MAX_LINES, shownSeries, stepWord, trendFit, trendSentence, usableValues } from './lines';
+import { normalizeShares, sameUnit, stackMode } from './math';
 
 /** The name of the trend line in the legend and the tooltip. */
 const TREND = 'Trend';
 
-export function buildCartesian({ res, tile, colors: c, selected, width, height, tables = [] }: BuildArgs): Built {
+export function buildCartesian({ res, tile, colors: c, selected, width, height, tables = [], noFold = false }: BuildArgs): Built {
   const dim0 = res.columns[0];
   const grain = tile.dims[0]?.grain;
   const isSel = (v: Cell) => !selected || selected.some((s) => key(s) === key(v));
@@ -35,7 +35,14 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const nd = res.columns.filter((x) => x.role === 'dimension').length;
   // A value shown as a share or a rank carries its unit; it formats as a percent or "#3".
   const unitOf = (si: number) => res.columns[nd + (perValue ? si : 0)]?.unit;
-  const fmtOf = (si: number) => numberFormatter(tile.formats?.[perValue ? si : 0], loc, unitOf(si));
+  // An indexed chart (the engine divided every series by its first value) shows index numbers, 100 at the start.
+  const indexed = !!res.real && tile.layout === 'indexed';
+  const idx = (v: number, digits: number) => full(v, { decimals: digits, compact: false }, loc);
+  const indexFmt = { short: (v: number) => idx(v, 0), long: (v: number) => idx(v, 1), tip: (v: number) => idx(v, 1) };
+  const fmtOf = (si: number) => (indexed ? indexFmt : numberFormatter(tile.formats?.[perValue ? si : 0], loc, unitOf(si)));
+  // A combo draws some values as bars and some as lines on one axis. It needs values in one unit.
+  const combo = perValue && !indexed && !!tile.mix?.some(Boolean) && sameUnit(tile);
+  const drawnAs = (si: number): 'bar' | 'line' => (combo ? (tile.mix?.[si] ?? (tile.type === 'bar' ? 'bar' : 'line')) : tile.type === 'bar' ? 'bar' : 'line');
   // The engine's "Other" (a top N): a real group that can be clicked, drawn muted.
   const isOther = (v: Cell | undefined) => !!res.other && v === OTHER_KEY;
   const partialKey = res.partial?.key;
@@ -43,15 +50,18 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
 
   // Dates and date parts (months, weekdays, hours) read in order, so they are never folded.
   const temporal = dim0.dtype === 'date' || dim0.dtype === 'datetime' || isPart(grain);
-  const horizontal = tile.type === 'bar' && !!tile.horizontal;
+  const horizontal = tile.type === 'bar' && !!tile.horizontal && !combo;
   const room = horizontal ? Math.floor((height - 16) / 26) : Math.floor(width / 44);
   // A result that already has its "Other" is never folded again.
   const { categories, series } =
-    temporal || tile.type !== 'bar' || res.other ? pivot(res, tile, tables) : fold(pivot(res, tile, tables), Math.max(4, room));
+    temporal || noFold || tile.type !== 'bar' || res.other ? pivot(res, tile, tables) : fold(pivot(res, tile, tables), Math.max(4, room));
   const multi = series.length > 1;
+  const hasBar = combo ? series.some((_, si) => drawnAs(si) === 'bar') : tile.type === 'bar';
+  // Series are drawn in the order of `built`; the combo decides bar or line for each value.
+  const lineLike = tile.type !== 'bar' || combo;
   // Bars and areas with more than one series stack, side by side, or fill the whole height (100 %).
   // The default is stacked for sums and counts and side by side for everything else. Lines ignore it.
-  const mode = tile.type === 'line' ? 'side' : stackMode(tile, perValue);
+  const mode = tile.type === 'line' || combo || indexed ? 'side' : stackMode(tile, perValue);
   const stacked = multi && mode !== 'side';
   const percent = stacked && mode === 'percent';
   // "Same period last year": a grey series lined up with the categories.
@@ -76,6 +86,16 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     },
     splitNumber: 4,
     ...(percent || shareAxis ? { min: 0, max: 1, interval: 0.25 } : {}),
+    // Index lines are read against 100, not against zero.
+    ...(indexed && tile.type === 'line' ? { scale: true } : {}),
+    ...(indexed
+      ? {
+          name: 'Index (first = 100)',
+          nameLocation: 'end' as const,
+          nameGap: 10,
+          nameTextStyle: { color: c.text2, fontSize: 11, align: horizontal ? ('right' as const) : ('left' as const) },
+        }
+      : {}),
   };
   const catAxis = {
     type: 'category' as const,
@@ -87,8 +107,8 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       width: horizontal ? 120 : undefined,
       overflow: 'truncate' as const,
     },
-    axisPointer: { type: (tile.type === 'bar' ? 'shadow' : 'line') as 'shadow' | 'line' },
-    boundaryGap: tile.type === 'bar',
+    axisPointer: { type: (hasBar ? 'shadow' : 'line') as 'shadow' | 'line' },
+    boundaryGap: hasBar,
     inverse: horizontal,
   };
 
@@ -104,7 +124,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const ends = series.map((s) => s.values.at(-1) ?? 0).sort((a, b) => a - b);
   const top = Math.max(1, ...series.flatMap((s) => s.values.map((v) => v ?? 0)));
   const nameEnds =
-    tile.type === 'line' && series.length <= 4 && ends.every((v, i) => i === 0 || (v - ends[i - 1]) / top > 0.08);
+    tile.type === 'line' && !combo && series.length <= 4 && ends.every((v, i) => i === 0 || (v - ends[i - 1]) / top > 0.08);
   // Value labels along a line are as wide as their numbers: leave points out so two never touch.
   const labelWidth = Math.max(0, ...series.flatMap((s) => s.values.map((v) => (v === null ? 0 : 8 + labelText(v).length * 6.3 + 6))));
   const every = Math.max(1, Math.ceil(labelWidth / Math.max(1, (width - 60) / Math.max(1, categories.length - 1))));
@@ -130,7 +150,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
           ? { opacity: selected ? 0.28 : 1, color: c.grid }
           : { opacity: (isSel(categories[ci]) ? 1 : 0.28) * (categories[ci] === partialKey ? 0.45 : 1) },
     }));
-    if (tile.type === 'bar') {
+    if (drawnAs(si) === 'bar') {
       return [{
         type: 'bar',
         name: s.name,
@@ -200,7 +220,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     };
     // An unfinished last period: the line stops one point early and a dashed
     // copy draws the final segment, so a half month never reads as a drop.
-    const unfinished = tile.type === 'line' && partialKey !== undefined && categories.at(-1) === partialKey && s.values.length > 1;
+    const unfinished = lineLike && tile.type !== 'area' && partialKey !== undefined && categories.at(-1) === partialKey && s.values.length > 1;
     const main = {
       type: 'line',
       name: s.name,
@@ -211,7 +231,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       symbolSize: labelMode === 'all' ? 6 : 8,
       lineStyle,
       itemStyle,
-      areaStyle: tile.type === 'area' ? { color, opacity: multi ? 0.14 : 0.1 } : undefined,
+      areaStyle: tile.type === 'area' && !combo ? { color, opacity: multi ? 0.14 : 0.1 } : undefined,
       emphasis: { focus: 'none', scale: false },
       connectNulls: false,
       tooltip,
@@ -255,7 +275,8 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const isRest = (v: Cell) => v === FOLDED || isOther(v);
   const aligned = shownSeries(series, (!perValue && multi) || (perValue && stacked));
   const shown = usableValues(aligned, categories, isRest);
-  const levels = guided ? resolveLevels(tile.lines, false, () => shown) : [];
+  // An indexed chart shows where it started: the line at 100.
+  const levels = guided ? [...resolveLevels(tile.lines, false, () => shown), ...(indexed ? [{ axis: 'y' as const, value: 100, name: 'Start' }] : [])] : [];
   // The unfinished last period is left out of the fit, so a half month never bends the line.
   const rest = new Set<number>();
   categories.forEach((v, i) => {
@@ -289,7 +310,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         lineStyle: { opacity: 0, width: 0 },
         tooltip: { show: false },
         emphasis: { disabled: true },
-        data: reach.length ? categories.map((_, i) => (i === 0 ? Math.max(...reach) : i === 1 ? Math.min(0, ...reach) : null)) : [],
+        data: reach.length ? categories.map((_, i) => (i === 0 ? Math.max(...reach) : i === 1 ? Math.min(...(indexed && tile.type === 'line' ? [] : [0]), ...reach) : null)) : [],
         markLine: markLine ?? undefined,
       },
       ...(fit
@@ -312,6 +333,34 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
           ]
         : []),
     );
+  }
+
+  // Reference bands (Advanced): a muted tint between two values. One unseen series carries them, behind
+  // the data. Its points keep the axis wide enough to hold every band.
+  const bands = (tile.lines ?? [])
+    .filter((l) => l.kind === 'band' && Number.isFinite(l.value) && Number.isFinite(l.to))
+    .slice(0, MAX_LINES)
+    .map((l) => ({ lo: Math.min(l.value!, l.to!), hi: Math.max(l.value!, l.to!), name: l.label?.trim() ?? '' }));
+  if (bands.length && !percent) {
+    const [lo, hi] = [Math.min(...bands.map((b) => b.lo)), Math.max(...bands.map((b) => b.hi))];
+    (built as object[]).push({
+      type: 'line',
+      silent: true,
+      z: 1,
+      showSymbol: false,
+      symbol: 'none',
+      lineStyle: { opacity: 0, width: 0 },
+      tooltip: { show: false },
+      emphasis: { disabled: true },
+      data: categories.map((_, i) => (i === 0 ? hi : i === 1 ? Math.min(...(indexed && tile.type === 'line' ? [] : [0]), lo) : null)),
+      markArea: {
+        silent: true,
+        animation: false,
+        itemStyle: { color: c.text2, opacity: 0.12 },
+        label: { show: true, position: 'insideTopRight', color: c.text2, fontSize: 11, distance: 4 },
+        data: bands.map((b) => [{ [lineKey]: b.lo, name: b.name }, { [lineKey]: b.hi }]),
+      },
+    });
   }
 
   // The comparison series goes behind the others: grey bars (wider, so they show beside the bar in
@@ -353,6 +402,20 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
    * Both values and the change between them, for a chart with a comparison. The grey bars sit on their
    * own axis, so the tooltip does not list them: the earlier value is read by position here.
    */
+  // An indexed chart: the index of each series, and beside it the number it comes from.
+  const realPivot = indexed && res.real ? pivot({ ...res, rows: res.real }, tile, tables) : null;
+  const indexTip = (all: { marker: string; seriesName: string; value: number | null; dataIndex: number; axisValueLabel: string }[]) =>
+    `${esc(all[0]?.axisValueLabel ?? '')}<br/>` +
+    all
+      .filter((p) => series.some((s) => s.name === p.seriesName))
+      .map((p) => {
+        const si = series.findIndex((s) => s.name === p.seriesName);
+        const real = realPivot?.series.find((s) => s.name === p.seriesName)?.values[p.dataIndex];
+        const now = typeof real === 'number' ? ` · ${esc(numberFormatter(tile.formats?.[perValue ? si : 0], loc, unitOf(si)).tip(real))}` : '';
+        return `${p.marker} ${esc(p.seriesName)} <b>${typeof p.value === 'number' ? esc(idx(p.value, 1)) : '–'}</b>${now}`;
+      })
+      .join('<br/>');
+
   const compareTip = (all: { marker: string; seriesName: string; value: unknown; dataIndex: number; axisValueLabel: string }[]) => {
     const num = (v: unknown) => (typeof v === 'number' ? v : null);
     const fmt = fmtOf(0);
@@ -385,7 +448,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     grid: {
       left: 4,
       right: tile.type === 'bar' && horizontal ? 44 : nameEnds ? 72 : multi ? 12 : 44,
-      top: multi || hasCompare || fit ? 34 : horizontal && markLine ? 30 : 14,
+      top: indexed ? (multi ? 56 : 34) : multi || hasCompare || fit ? 34 : horizontal && markLine ? 30 : 14,
       bottom: 4,
       containLabel: true,
     },
@@ -397,7 +460,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
           data: [...(hasCompare ? [series[0].name, compareName] : series.map((s) => s.name)), ...(fit ? [TREND] : [])],
           top: 0,
           left: 0,
-          icon: tile.type === 'bar' ? 'roundRect' : 'circle',
+          icon: hasBar ? 'roundRect' : 'circle',
           itemWidth: 10,
           itemHeight: 10,
           textStyle: { color: c.text, fontSize: 12 },
@@ -408,11 +471,13 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       ...tooltipBase(c),
       trigger: 'axis',
       axisPointer: {
-        type: tile.type === 'bar' ? 'shadow' : 'line',
+        type: hasBar ? 'shadow' : 'line',
         lineStyle: { color: c.text2, width: 1 },
         shadowStyle: { color: c.grid, opacity: 0.5 },
       },
-      ...(percent
+      ...(indexed
+        ? { formatter: indexTip }
+        : percent
         ? {
             // Each row says the share and, beside it, the value it comes from.
             formatter: (ps: { marker: string; seriesName: string; value: number | null; data: { raw: number | null }; axisValueLabel: string }[]) =>
@@ -433,7 +498,15 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     yAxis: horizontal ? withBehind(catAxis) : quietValue,
     series: built,
   };
-  return { option, categories: categories.map((v) => (v === FOLDED && !res.other ? undefined : v)), note: sizeNote(res) };
+  // The note about values of very different sizes comes with a way out; an indexed chart has no need of it.
+  const note = indexed || combo ? null : sizeNote(res);
+  return {
+    option,
+    categories: categories.map((v) => (v === FOLDED && !res.other ? undefined : v)),
+    note,
+    noteAction: note ? 'panels' : undefined,
+    horizontal,
+  };
 }
 
 /**

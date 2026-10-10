@@ -28,6 +28,20 @@ export function unitOf(m: Pick<Measure, 'table' | 'column' | 'agg' | 'per'>, f?:
   return `column:${m.table}.${m.column}`;
 }
 
+/** Sums and counts add up; an average or a minimum is a level; a distinct count and a spread are their own kinds. */
+const aggFamily = (agg: string): string =>
+  agg === 'sum' || agg === 'count' ? 'total' : agg === 'count_distinct' ? 'distinct' : agg === 'stdev' || agg === 'variance' ? 'spread' : 'level';
+
+/**
+ * Can these values share one axis as bars and lines (a combo chart)? They need the same kind of
+ * aggregate and the same unit (see `unitOf`: the same currency, or the same column). Values in different
+ * units belong in separate panels or on an indexed chart.
+ */
+export function sameUnit(tile: Pick<Tile, 'measures' | 'formats' | 'showAs'>): boolean {
+  const keys = tile.measures.map((m, i) => `${aggFamily(m.agg)}|${unitOf(m, tile.formats?.[i], tile.showAs?.[i])}`);
+  return new Set(keys).size <= 1;
+}
+
 /**
  * How a bar or area with several series is drawn when the user has not chosen. A split on one value
  * is stacked. Several values (one series for each) are stacked only when every one is a sum or a

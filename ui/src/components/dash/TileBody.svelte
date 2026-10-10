@@ -5,11 +5,15 @@
   import { barScale, barSpan, barStyle, goodBad } from '../../lib/cells';
   import { cell, columnHeads, full, OTHER_KEY, resultDim0, type Named } from '../../lib/format';
   import { effectiveShowAs } from '../../lib/showas';
+  import { isRepeated } from '../../lib/tiles';
   import ChartView from './ChartView.svelte';
+  import FunnelView from './FunnelView.svelte';
+  import HeatmapView from './HeatmapView.svelte';
   import ImageView from './ImageView.svelte';
   import KpiView from './KpiView.svelte';
   import PivotView from './PivotView.svelte';
   import ShareView from './ShareView.svelte';
+  import SmallMultiples from './SmallMultiples.svelte';
   import TextView from './TextView.svelte';
 
   let {
@@ -23,6 +27,7 @@
     onpick,
     onpickcol,
     onwidths,
+    onlayout,
   }: {
     tile: Tile;
     res: QueryResult;
@@ -39,6 +44,8 @@
     onpickcol?: (value: Cell) => void;
     /** Table: the column widths after a drag on a heading, or undefined after a double click (back to automatic). */
     onwidths?: (widths: number[] | undefined) => void;
+    /** Advanced: the note about values of very different sizes offers separate panels. Not set: the note has no link. */
+    onlayout?: (layout: 'panels') => void;
   } = $props();
 
   let width = $state(400);
@@ -52,10 +59,16 @@
       return 'A scatter chart needs two values and a field to draw one dot for each.';
     }
     if (tile.type === 'waterfall' && !tile.dims.length) return 'A waterfall needs a category or a date to step through.';
+    if (tile.type === 'heatmap' && (!tile.dims.length || !tile.cols || !tile.measures.length)) {
+      return 'A heat map needs a value, a field for the rows and a field for the columns.';
+    }
+    if (tile.type === 'funnel' && !tile.dims.length) return 'A funnel needs a field that names its stages.';
     return null;
   });
   const unfinished = $derived(missing !== null);
-  const built = $derived(isChart && !unfinished ? buildOption({ res, tile, colors, selected, width, height, tables }) : null);
+  // Small multiples draw a chart for each value of a field (Advanced).
+  const multiples = $derived(isRepeated(tile) && !!res.repeat);
+  const built = $derived(isChart && !unfinished && !multiples ? buildOption({ res, tile, colors, selected, width, height, tables }) : null);
 
   // Table: click a header to sort.
   let sortBy = $state<number | null>(null);
@@ -184,6 +197,12 @@
   <ShareView {res} {tile} {colors} {selected} {onpick} />
 {:else if tile.type === 'pivot'}
   <PivotView {res} {tile} {tables} {selected} {selectedCol} {onpick} {onpickcol} />
+{:else if tile.type === 'heatmap'}
+  <HeatmapView {res} {tile} {colors} {tables} {selected} {selectedCol} {onpick} {onpickcol} />
+{:else if tile.type === 'funnel'}
+  <FunnelView {res} {tile} {colors} {selected} {onpick} />
+{:else if multiples}
+  <SmallMultiples {res} {tile} {colors} {selected} {tables} {onpick} />
 {:else if tile.type === 'table'}
   <div class="tabletile">
     {#if tableTools}
@@ -251,7 +270,8 @@
     <div class="plot">
       <ChartView
         option={built.option}
-        horizontal={!!tile.horizontal && tile.type === 'bar'}
+        horizontal={built.horizontal ?? (!!tile.horizontal && tile.type === 'bar')}
+        grids={built.grids}
         onresize={(w, h) => ((width = w), (height = h))}
         onpick={onpick && !built.pick
           ? (i) => {
@@ -272,7 +292,14 @@
             }
           : undefined} />
     </div>
-    {#if note}<p class="size-note">{note}</p>{/if}
+    {#if note}
+      <p class="size-note">
+        {note}
+        {#if built?.noteAction === 'panels' && onlayout}
+          <button class="link" onclick={() => onlayout('panels')}>Use separate panels</button>
+        {/if}
+      </p>
+    {/if}
   </div>
 {/if}
 
@@ -280,6 +307,8 @@
   .chart { height: 100%; display: flex; flex-direction: column; }
   .plot { flex: 1; min-height: 0; }
   .size-note { flex: none; margin: 4px 0 0; font-size: 11px; color: var(--text-2); }
+  .size-note .link { border: 0; background: none; padding: 0; margin-left: 4px; font-size: 11px; color: var(--accent-text); }
+  .size-note .link:hover { text-decoration: underline; }
   .placeholder {
     height: 100%;
     display: grid;

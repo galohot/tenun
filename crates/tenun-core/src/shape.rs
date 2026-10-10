@@ -7,6 +7,7 @@
 //!
 //! Histograms live here too: their bin width and counts are computed in one place.
 
+use crate::advanced;
 use crate::catalog::DType;
 use crate::engine::{Bins, Compare, Engine, QueryResult, Totals};
 use crate::query::{
@@ -47,11 +48,27 @@ pub fn apply(
 ) -> anyhow::Result<()> {
     densify(engine, tile, q, res);
     top_n(engine, tile, q, wide, res)?;
+    advanced::manual_order(engine, tile, q, res);
     totals(engine, tile, q, wide, res)?;
     compare(engine, tile, q, res)?;
     show_as(tile, q, engine, res);
+    advanced::indexed(engine, tile, q, res);
     total_rows(engine, tile, q, res)?;
     Ok(())
+}
+
+/// How several values (or the groups of a split) share a chart (`tile.layout`). `panels` is
+/// drawn by the UI from the normal result; `indexed` is computed here ([`advanced::indexed`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum Layout {
+    #[serde(rename = "together")]
+    Together,
+    #[serde(rename = "panels")]
+    Panels,
+    #[serde(rename = "indexed")]
+    Indexed,
+    #[serde(other)]
+    Unknown,
 }
 
 /// A table that hit its row limit says how many rows it has in all, so the footer can read
@@ -98,7 +115,7 @@ fn total_rows(
 }
 
 /// What the first group-by column is.
-enum Dim0 {
+pub(crate) enum Dim0 {
     /// A date cut into periods (months, weeks…).
     Period(Grain),
     /// A date part: month of year, weekday or hour.
@@ -108,7 +125,7 @@ enum Dim0 {
     Plain,
 }
 
-fn classify(engine: &Engine, d: &Dimension) -> Dim0 {
+pub(crate) fn classify(engine: &Engine, d: &Dimension) -> Dim0 {
     let temporal = engine
         .column_dtype(&d.table, &d.column)
         .is_some_and(|t| t.is_temporal());
@@ -269,9 +286,12 @@ pub fn top_n(
     };
     if !matches!(
         tile.kind.as_str(),
-        "bar" | "table" | "share" | "donut" | "pivot"
+        "bar" | "table" | "share" | "donut" | "pivot" | "heatmap"
     ) {
         return Ok(());
+    }
+    if res.repeat.is_some() {
+        return advanced::top_n_each(engine, tile, q, top, res);
     }
     let (Some(d0), Some(m0)) = (q.dimensions.first(), q.measures.first()) else {
         return Ok(());
@@ -351,7 +371,8 @@ pub fn totals(
 ) -> anyhow::Result<()> {
     let wanted = match tile.kind.as_str() {
         "table" => tile.totals == Some(true),
-        "pivot" => tile.totals != Some(false),
+        // A heat map keeps its totals for the order of its rows and columns: the biggest first.
+        "pivot" | "heatmap" => tile.totals != Some(false),
         _ => false,
     };
     if !wanted || q.measures.is_empty() {
@@ -374,7 +395,7 @@ pub fn totals(
         rows: None,
         cols: None,
     };
-    if tile.kind == "pivot"
+    if matches!(tile.kind.as_str(), "pivot" | "heatmap")
         && let Some(c) = &tile.cols
         && q.dimensions.len() > 1
     {
@@ -555,12 +576,13 @@ pub fn show_as(tile: &Tile, q: &SemanticQuery, engine: &Engine, res: &mut QueryR
         if res.rows.iter().any(|r| r.len() <= col) || res.columns.len() <= col {
             continue;
         }
-        let how = if how == ShowAs::PctGroup && nd < 2 {
+        let how = if how == ShowAs::PctGroup && (nd < 2 || res.repeat.is_some()) {
             ShowAs::PctTotal
         } else {
             how
         };
-        shape_column(&mut res.rows, nd, col, how);
+        // In small multiples the second column is the chart: a share is a share of its own chart.
+        shape_column(&mut res.rows, nd, col, how, res.repeat.is_some());
         let c = &mut res.columns[col];
         c.name = format!("{} ({})", c.name, how.suffix());
         c.unit = how.unit();
@@ -569,9 +591,10 @@ pub fn show_as(tile: &Tile, q: &SemanticQuery, engine: &Engine, res: &mut QueryR
 
 /// Replaces column `col` of `rows` with the value shown as `how`. The first `nd` columns are the
 /// groups. Used for the result and for the comparison series.
-fn shape_column(rows: &mut [Vec<Value>], nd: usize, col: usize, how: ShowAs) {
+fn shape_column(rows: &mut [Vec<Value>], nd: usize, col: usize, how: ShowAs, per_chart: bool) {
     let vals: Vec<Option<f64>> = rows.iter().map(|r| r[col].as_f64()).collect();
     let out = match how {
+        ShowAs::PctTotal if per_chart => share_of(&vals, &group_ids(rows, 1..2)),
         ShowAs::PctTotal => share_of(&vals, &vec![0; vals.len()]),
         ShowAs::PctGroup => {
             // One group for each value of the first column, across the split.
@@ -607,7 +630,7 @@ fn shape_column(rows: &mut [Vec<Value>], nd: usize, col: usize, how: ShowAs) {
 }
 
 /// Orders the first-column values of a time chart: dates (ISO text) and date parts (numbers).
-fn cmp_key(a: &Value, b: &Value) -> std::cmp::Ordering {
+pub(crate) fn cmp_key(a: &Value, b: &Value) -> std::cmp::Ordering {
     match (a.as_f64(), b.as_f64()) {
         (Some(x), Some(y)) => x.total_cmp(&y),
         _ => a.as_str().cmp(&b.as_str()),
@@ -771,6 +794,10 @@ pub fn compare(
     let Some(to) = tile.compare.filter(|c| *c != CompareTo::Unknown) else {
         return Ok(());
     };
+    // An indexed chart and a small-multiples chart have no comparison series.
+    if tile.layout == Some(Layout::Indexed) || res.repeat.is_some() {
+        return Ok(());
+    }
     if !matches!(tile.kind.as_str(), "bar" | "line" | "area")
         || q.measures.len() != 1
         || q.dimensions.len() != 1
@@ -833,7 +860,7 @@ pub fn compare(
             }
         })
     {
-        shape_column(&mut earlier.rows, 1, 1, how);
+        shape_column(&mut earlier.rows, 1, 1, how, false);
     }
     let mine: HashSet<String> = res.rows.iter().map(|r| js_key(&r[0])).collect();
     earlier.rows.retain(|r| mine.contains(&js_key(&r[0])));
@@ -975,6 +1002,9 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
         totals: None,
         compare: None,
         total_rows: None,
+        repeat: None,
+        real: None,
+        outliers: None,
     };
     let (Some(n), Some(min), Some(max), Some(q1), Some(q3)) =
         (num(0), num(1), num(2), num(3), num(4))

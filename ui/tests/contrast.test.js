@@ -60,3 +60,28 @@ for (const [name, theme] of [['light', light], ['dark', dark]]) {
     }
   });
 }
+
+// The heat map ramp (build 12): one hue in seven steps. Numbers are printed on the cells, in white
+// or in dark ink, whichever reads better; both themes need 4.5:1 on every step. Light mode runs
+// light to dark, dark mode runs dark to bright, so the biggest value always stands out.
+const INKS = ['#ffffff', '#1c1c1e'];
+for (const [name, theme] of [['light', light], ['dark', dark]]) {
+  const steps = [1, 2, 3, 4, 5, 6, 7].map((i) => theme[`ramp-${i}`]);
+  test(`${name}: ramp steps exist`, () => {
+    assert.ok(steps.every(Boolean), `missing ramp step in ${name}: ${steps}`);
+  });
+  test(`${name}: ink on every ramp step clears 4.5:1`, () => {
+    for (const bg of steps) {
+      const best = Math.max(...INKS.map((ink) => ratio(ink, bg)));
+      assert.ok(best >= 4.5, `ramp ${bg} reaches only ${best.toFixed(2)}:1`);
+    }
+  });
+  test(`${name}: ramp runs one way and every step is visibly different`, () => {
+    const l = steps.map(lum);
+    for (let i = 1; i < l.length; i++) {
+      const d = name === 'light' ? l[i - 1] - l[i] : l[i] - l[i - 1];
+      assert.ok(d > 0, `step ${i + 1} ${steps[i]} does not go the right way`);
+      assert.ok(ratio(steps[i - 1], steps[i]) >= 1.15, `steps ${i} and ${i + 1} are too alike (${ratio(steps[i - 1], steps[i]).toFixed(2)})`);
+    }
+  });
+}

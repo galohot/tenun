@@ -17,6 +17,8 @@ export interface Colors {
   text2: string;
   grid: string;
   series: string[];
+  /** The sequential ramp of the heat map, light to dark (dark mode has its own steps). */
+  ramp: string[];
   raised: string;
   /** Status colours. Always paired with a word, a sign or an icon. */
   good: string;
@@ -33,6 +35,7 @@ export function readColors(el: Element = document.documentElement): Colors {
     text2: v('--axis-text'),
     grid: v('--grid-line'),
     series: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => v(`--s${i}`)),
+    ramp: [1, 2, 3, 4, 5, 6, 7].map((i) => v(`--ramp-${i}`)),
     good: v('--success'),
     bad: v('--danger'),
   };
@@ -158,6 +161,8 @@ export interface BuildArgs {
   height: number;
   /** For the names of several values. */
   tables?: Named[];
+  /** Small multiples: keep every bar of a chart; the charts share a scale and nothing may fold into "Other". */
+  noFold?: boolean;
 }
 
 export interface Built {
@@ -173,6 +178,12 @@ export interface Built {
     | { by: 'x'; value: (x: number) => Cell | undefined };
   /** A line under the chart that says what the reader might misread. */
   note?: string | null;
+  /** The way out the note offers, as a link beside it (Advanced): draw the values in separate panels. */
+  noteAction?: 'panels';
+  /** How many plots stand above each other, when more than one. A click is found in any of them. */
+  grids?: number;
+  /** The categories run down the side (horizontal bars, box plots). Not set: read it from the tile. */
+  horizontal?: boolean;
 }
 
 /** Escapes a value from the data before it goes into tooltip HTML. */

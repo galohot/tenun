@@ -5,6 +5,7 @@
   import { cell, dimLabel, OTHER_KEY, stampLabel } from '../lib/format';
   import { COLS, compact, defaultSize, minHeight, newId, place, type DashFilter } from '../lib/tiles';
   import { key } from '../lib/chart';
+  import { advancedOn } from '../lib/tiers';
   import Icon, { type IconName } from './Icon.svelte';
   import TileView from './dash/TileView.svelte';
   import Inspector from './dash/Inspector.svelte';
@@ -180,6 +181,9 @@
       .join('\n'),
   );
   const failed = $derived(usedSources.filter((s) => app.snap!.errors[s.id]));
+
+  // Advanced chart types join the Add tile menu while the switch is on.
+  const advanced = $derived(advancedOn());
 
   function addTile(type: TileType) {
     addMenu = false;
@@ -406,7 +410,7 @@
       <button class="btn primary" onclick={() => (addMenu = !addMenu)} aria-expanded={addMenu}><Icon name="plus" /> Add tile</button>
       {#if addMenu}
         <div class="menu" role="menu">
-          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['table', 'Table'], ['pivot', 'Pivot table'], ['text', 'Text'], ['image', 'Image']] as [t, label]}
+          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['table', 'Table'], ['pivot', 'Pivot table'], ['text', 'Text'], ['image', 'Image'], ...(advanced ? [['heatmap', 'Heat map'], ['funnel', 'Funnel'], ['box', 'Box plot']] : [])] as [t, label]}
             <button role="menuitem" onclick={() => addTile(t as TileType)}>
               <Icon name={t as IconName} /> {label}
             </button>
@@ -475,6 +479,7 @@
               onresult={(r, k) => setResult(t.id, r, k)}
               onselect={() => (selectedTile = t.id)}
               onwidths={(w) => change({ ...(dash.tiles.find((x) => x.id === t.id) ?? t), widths: w })}
+              onlayout={(layout) => change({ ...(dash.tiles.find((x) => x.id === t.id) ?? t), layout })}
               ondragstart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'move')}
               onresizestart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'resize')} />
           </div>

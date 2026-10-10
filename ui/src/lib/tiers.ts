@@ -5,8 +5,8 @@
 import type { Tile, TileType } from './api';
 import { app } from './state.svelte';
 
-/** Build 12 turns this on. While false, nobody can switch Advanced on and the switch is hidden. */
-export const SHOW_ADVANCED_SWITCH: boolean = false;
+/** While false, nobody can switch Advanced on and the switch is hidden. Build 12 turned it on. */
+export const SHOW_ADVANCED_SWITCH: boolean = true;
 
 export const ADVANCED_TYPES: readonly TileType[] = [
   'heatmap',
@@ -19,6 +19,9 @@ export const ADVANCED_TYPES: readonly TileType[] = [
   'cohort',
   'gantt',
 ];
+
+/** The types in the second group of the picker, "More charts". The rest of ADVANCED_TYPES come in build 13. */
+export const MORE_CHARTS: readonly TileType[] = ['heatmap', 'funnel', 'box'];
 
 /** True when the tile needs an Advanced feature to look or behave as it does. */
 export function usesAdvanced(tile: Tile): boolean {

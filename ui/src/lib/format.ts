@@ -267,20 +267,29 @@ export function tileTitle(t: Tile, tables: Named[]): string {
     m = names.length > 2 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names.join(' and ');
   }
   // "Revenue by category and channel": rows, then columns.
-  if (t.type === 'pivot') {
+  if (t.type === 'pivot' || t.type === 'heatmap') {
     const fields = [...t.dims.slice(0, 3), ...(t.cols ? [t.cols] : [])].map((d) => dimLabel(d, tables));
     return fields.length ? `${m} by ${fields.join(' and ')}` : m;
   }
   if (t.type === 'table') {
     return t.dims.length ? `${m} by ${t.dims.map((d) => dimLabel(d, tables)).join(' and ')}` : m;
   }
+  // "Spread of amount by region": a box plot reads one number column for each group.
+  if (t.type === 'box') {
+    const col = t.measures[0]?.column ? pretty(t.measures[0].column).toLowerCase() : null;
+    return col ? `Spread of ${col}${t.dims[0] ? ` by ${dimLabel(t.dims[0], tables)}` : ''}` : m;
+  }
   // "Distribution of amount": a histogram bins one column, whatever the way it is added up.
   if (t.type === 'histogram') return t.measures[0]?.column ? `Distribution of ${pretty(t.measures[0].column).toLowerCase()}` : m;
   // "Revenue vs quantity by product": one dot for each product.
   if (t.type === 'scatter' && t.measures[1]) m = `${m} vs ${label(t.measures[1], 1).toLowerCase()}`;
   const by = t.dims[0] && t.type !== 'kpi' ? ` by ${dimLabel(t.dims[0], tables)}` : '';
-  const split = t.dims[1] && t.measures.length < 2 && (t.type === 'bar' || t.type === 'line' || t.type === 'area') ? ` and ${dimLabel(t.dims[1], tables)}` : '';
-  return m + by + split;
+  const chart = t.type === 'bar' || t.type === 'line' || t.type === 'area';
+  const repeated = !!t.repeat && !!t.dims[0] && chart;
+  const split = t.dims[1] && t.measures.length < 2 && chart && !repeated ? ` and ${dimLabel(t.dims[1], tables)}` : '';
+  // Small multiples: "Revenue by month, a chart for each region".
+  const each = repeated ? `, a chart for each ${dimLabel(t.repeat!, tables)}` : '';
+  return m + by + split + each;
 }
 
 /** When data was loaded, for the "Updated" stamp: "10:32" today, "Oct 9, 10:32" or "9 Okt, 10:32" on other days. */

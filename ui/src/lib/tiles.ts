@@ -24,8 +24,15 @@ export const isStatic = (t: Tile | TileType): boolean => STATIC_TYPES.includes(t
 /** What a static tile is drawn from: it has no rows. */
 export const EMPTY_RESULT: QueryResult = { columns: [], rows: [], ignored_filters: [], ms: 0 };
 
+/** Small multiples need a bar, line or area with a group. The engine and this file agree on it. */
+export const isRepeated = (tile: Tile) =>
+  !!tile.repeat && tile.dims.length > 0 && (tile.type === 'bar' || tile.type === 'line' || tile.type === 'area');
+
 export const hasManyValues = (tile: Tile) =>
-  (tile.type === 'bar' || tile.type === 'line' || tile.type === 'area') && tile.measures.length > 1;
+  (tile.type === 'bar' || tile.type === 'line' || tile.type === 'area') && tile.measures.length > 1 && !isRepeated(tile);
+
+/** A pivot and a heat map ask the same kind of question: rows by one column field. */
+export const isPivotLike = (type: TileType) => type === 'pivot' || type === 'heatmap';
 
 /**
  * The question a tile asks. The server builds its own copy of this (`snapshot::tile_query`); this one
@@ -33,19 +40,21 @@ export const hasManyValues = (tile: Tile) =>
  */
 export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | null {
   if (isStatic(tile) || (!tile.measures.length && !tile.dims.length)) return null;
-  const one = tile.type === 'kpi' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'waterfall';
+  const one = ['kpi', 'share', 'donut', 'waterfall', 'funnel', 'box'].includes(tile.type);
   const many = hasManyValues(tile);
-  // A histogram has no groups: it bins one number column.
+  // A histogram has no groups: it bins one number column. A heat map has one row field.
   const dims =
     tile.type === 'histogram'
       ? []
-      : tile.type === 'pivot'
-        ? [...tile.dims.slice(0, PIVOT_MAX_ROWS), ...(tile.cols ? [tile.cols] : [])] // rows, then columns
-        : one || many
-          ? tile.dims.slice(0, 1)
-          : tile.type === 'table'
-            ? tile.dims
-            : tile.dims.slice(0, 2);
+      : isPivotLike(tile.type)
+        ? [...tile.dims.slice(0, tile.type === 'heatmap' ? 1 : PIVOT_MAX_ROWS), ...(tile.cols ? [tile.cols] : [])] // rows, then columns
+        : isRepeated(tile)
+          ? [tile.dims[0], tile.repeat!] // the group, then the field that makes a chart for each of its values
+          : one || many
+            ? tile.dims.slice(0, 1)
+            : tile.type === 'table'
+              ? tile.dims
+              : tile.dims.slice(0, 2);
   // A chart with a group but no value counts rows of the grouped table.
   const measures = tile.measures.length
     ? tile.type === 'table'
@@ -61,17 +70,19 @@ export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | nu
       ? []
       : [{ table: tile.dims[0].table, column: null, agg: 'count' as const }];
   const sort: { by: number; desc: boolean }[] = [];
-  // A pivot keeps the engine's order: its rows and columns are not one list to sort.
-  if (dims.length && tile.sort && tile.type !== 'pivot') {
-    if (tile.sort.by === 'value' && measures.length) sort.push({ by: dims.length, desc: tile.sort.desc ?? true });
-    else if (tile.sort.by === 'label') sort.push({ by: 0, desc: tile.sort.desc ?? false });
+  // A pivot keeps the engine's order: its rows and columns are not one list to sort. A funnel
+  // with no chosen order puts the biggest stage first.
+  const by = tile.sort ?? (tile.type === 'funnel' ? { by: 'value' as const } : undefined);
+  if (dims.length && by && !isPivotLike(tile.type)) {
+    if (by.by === 'value' && measures.length) sort.push({ by: dims.length, desc: by.desc ?? true });
+    else if (by.by === 'label') sort.push({ by: 0, desc: by.desc ?? false });
   }
   return {
     measures,
     dimensions: dims,
     filters: filters.filter((f) => f.fromTile !== tile.id).map(({ fromTile: _, ...f }) => f),
     sort,
-    limit: tile.type === 'table' ? 500 : tile.type === 'pivot' ? PIVOT_LIMIT : tile.type === 'kpi' ? 400 : 2000,
+    limit: tile.type === 'table' ? 500 : isPivotLike(tile.type) ? PIVOT_LIMIT : tile.type === 'kpi' ? 400 : 2000,
   };
 }
 
@@ -90,6 +101,9 @@ export function resultKey(tile: Tile, filters: DashFilter[]): string {
     tile.cols ?? null,
     tile.showAs ?? null,
     tile.compare ?? null,
+    tile.repeat ?? null,
+    tile.layout ?? null,
+    tile.sort ?? null,
   ]);
 }
 
@@ -131,7 +145,10 @@ export function defaultSize(type: TileType): { w: number; h: number } {
     case 'table':
       return { w: 6, h: 4 };
     case 'pivot':
+    case 'heatmap':
       return { w: 8, h: 5 };
+    case 'funnel':
+      return { w: 6, h: 5 };
     case 'text':
       return { w: 4, h: 2 };
     case 'image':

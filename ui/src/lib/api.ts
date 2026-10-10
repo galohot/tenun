@@ -109,6 +109,12 @@ export interface QueryResult {
   compare?: { label: string; rows: Cell[][] };
   /** Tables only, when the row limit cut the result: how many rows there are in all. */
   total_rows?: number;
+  /** Small multiples: the repeat values that have a chart (drawing order) and how many more there are. Rows are `[group, repeat value, value]`. */
+  repeat?: { keys: Cell[]; more: number };
+  /** Indexed lines: the rows before they were divided by the first value, same shape as `rows`. */
+  real?: Cell[][];
+  /** Box plots: the outlier dots, `[group, value]`. The rows are `[group, min, q1, median, q3, max, lower whisker, upper whisker, count]`. */
+  outliers?: Cell[][];
 }
 
 /**
@@ -224,8 +230,10 @@ export interface Tile {
   cond?: (CondFormat | null)[];
   /** Table: the width in px of each column, from a drag on a heading. The engine ignores it. */
   widths?: number[];
-  /** Small multiples (Advanced). */
+  /** Small multiples (Advanced): one chart for each value of this field. */
   repeat?: Dim;
+  /** Small multiples: every chart has its own scale. Not set: they share one. */
+  ownScale?: boolean;
   /** Several measures: `panels` and `indexed` are Advanced. */
   layout?: 'together' | 'panels' | 'indexed';
   /** Bars plus a line, index-aligned with measures (Advanced). */

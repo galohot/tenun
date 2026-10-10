@@ -5,7 +5,8 @@
   import { app } from '../../lib/state.svelte';
   import { readColors, type Colors } from '../../lib/chart';
   import { OTHER_KEY, tileTitle } from '../../lib/format';
-  import { appliedFilters, EMPTY_RESULT, isStatic, resultKey, tileQuery, type DashFilter } from '../../lib/tiles';
+  import { appliedFilters, EMPTY_RESULT, isPivotLike, isStatic, resultKey, tileQuery, type DashFilter } from '../../lib/tiles';
+  import { advancedOn } from '../../lib/tiers';
   import Icon from '../Icon.svelte';
   import TileBody from './TileBody.svelte';
 
@@ -19,6 +20,7 @@
     onresult,
     onselect,
     onwidths,
+    onlayout,
     ondragstart,
     onresizestart,
   }: {
@@ -34,6 +36,8 @@
     onselect: () => void;
     /** A table column was dragged to a new width (or reset with undefined). */
     onwidths: (widths: number[] | undefined) => void;
+    /** The note about values of very different sizes offers separate panels (Advanced). */
+    onlayout?: (layout: 'panels') => void;
     ondragstart: (e: PointerEvent) => void;
     onresizestart: (e: PointerEvent) => void;
   } = $props();
@@ -88,7 +92,7 @@
   // A click on a histogram bin is a range; the tile shows the bin that starts it.
   const mine = $derived(filters.find((x) => x.fromTile === tile.id));
   // On a pivot, a click on a column header filters by the column field instead of the first row field.
-  const onCol = $derived(tile.type === 'pivot' && !!mine && !!tile.cols && mine.table === tile.cols.table && mine.column === tile.cols.column);
+  const onCol = $derived(isPivotLike(tile.type) && !!mine && !!tile.cols && mine.table === tile.cols.table && mine.column === tile.cols.column);
   const selected = $derived(mine && !onCol ? (mine.op === 'not_in' ? [OTHER_KEY] : mine.op === 'range' ? mine.values.slice(0, 1) : mine.values) : null);
   const selectedCol = $derived(mine && onCol ? mine.values : null);
   const note = $derived(res && tile.type !== 'kpi' ? partialNote(res, tile.dims[0]?.grain) : null);
@@ -126,8 +130,9 @@
         {selectedCol}
         tables={app.tables}
         onpick={canPick ? (v) => onpick(v, res?.otherOf, res?.bins) : undefined}
-        onpickcol={tile.type === 'pivot' && tile.cols ? onpickcol : undefined}
-        onwidths={tile.type === 'table' ? onwidths : undefined} />
+        onpickcol={isPivotLike(tile.type) && tile.cols ? onpickcol : undefined}
+        onwidths={tile.type === 'table' ? onwidths : undefined}
+        onlayout={advancedOn() ? onlayout : undefined} />
     {/if}
   </div>
   {#if ignored.length || note}
