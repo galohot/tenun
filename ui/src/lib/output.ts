@@ -115,15 +115,43 @@ function fit(ctx: CanvasRenderingContext2D, text: string, width: number): string
   return s + '…';
 }
 
+/**
+ * The picture is made from a copy of the page, and the copy loses what a person ticked or moved.
+ * The state goes into the attributes for the length of the capture, then it is put back.
+ */
+async function withControlState<T>(root: HTMLElement, draw: () => Promise<T>): Promise<T> {
+  const undo: (() => void)[] = [];
+  for (const input of root.querySelectorAll('input')) {
+    if (input.type === 'checkbox' || input.type === 'radio') {
+      const had = input.hasAttribute('checked');
+      if (input.checked !== had) {
+        input.toggleAttribute('checked', input.checked);
+        undo.push(() => input.toggleAttribute('checked', had));
+      }
+    } else if (input.type === 'range') {
+      const had = input.getAttribute('value');
+      input.setAttribute('value', input.value);
+      undo.push(() => (had === null ? input.removeAttribute('value') : input.setAttribute('value', had)));
+    }
+  }
+  try {
+    return await draw();
+  } finally {
+    for (const f of undo) f();
+  }
+}
+
 /** A tile that is not a chart: what is on the screen is drawn to a canvas. */
 async function domPicture(el: HTMLElement, colors: Colors) {
   await document.fonts?.ready;
-  return toCanvas(el, {
-    pixelRatio: SCALE,
-    backgroundColor: colors.surface,
-    // The buttons that show on hover are not part of the picture.
-    filter: (n) => !(n instanceof HTMLElement && n.matches('.edit, .resize')),
-  });
+  return withControlState(el, () =>
+    toCanvas(el, {
+      pixelRatio: SCALE,
+      backgroundColor: colors.surface,
+      // The buttons that show on hover are not part of the picture.
+      filter: (n) => !(n instanceof HTMLElement && n.matches('.edit, .resize')),
+    }),
+  );
 }
 
 /** The tile as a PNG file. `el` is the tile on the screen; charts do not need it for their pixels. */
@@ -179,7 +207,7 @@ async function dashboardCanvas(p: DashboardPicture): Promise<HTMLCanvasElement> 
     const node = holder.firstElementChild as HTMLElement;
     const side = Math.max(node.offsetWidth, node.offsetHeight);
     const ratio = Math.min(SCALE, MAX_SIDE / side);
-    return await toCanvas(node, { pixelRatio: ratio, backgroundColor: colors.surface });
+    return await withControlState(node, () => toCanvas(node, { pixelRatio: ratio, backgroundColor: colors.surface }));
   } finally {
     motion.still = false;
     unmount(app);

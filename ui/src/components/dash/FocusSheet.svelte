@@ -64,5 +64,6 @@
   }
   .knob { width: 18px; height: 18px; border-radius: 9px; background: var(--sep-strong); transition: transform 150ms var(--spring), background 150ms; }
   .switch.on { border-color: var(--accent); color: var(--accent-text); background: var(--selected); }
-  .switch.on .knob { background: var(--accent); transform: translateX(0); }
+  .switch.on { flex-direction: row-reverse; padding: 0 4px 0 10px; }
+  .switch.on .knob { background: var(--accent); }
 </style>

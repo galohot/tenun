@@ -779,13 +779,13 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 52px;
-    padding: 0 12px 0 16px;
+    min-height: 52px;
+    padding: 6px 12px 6px 16px;
     border-bottom: 1px solid var(--sep);
     background: var(--surface);
     flex: none;
   }
-  .toolbar.phone { height: auto; min-height: 44px; flex-wrap: wrap; padding: 6px 10px; }
+  .toolbar.phone { min-height: 44px; flex-wrap: wrap; padding: 6px 10px; }
   .toolbar.phone .spacer { display: none; }
   .toolbar.phone .chips { flex-wrap: wrap; overflow: visible; }
   .title:disabled { color: var(--text); cursor: default; }
@@ -800,7 +800,7 @@
   }
   .title:hover { background: var(--hover); }
   .title-input { width: 240px; font-size: 15px; font-weight: 600; }
-  .chips { display: flex; gap: 6px; align-items: center; min-width: 0; overflow: hidden; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
   .chip {
     display: inline-flex;
     align-items: center;
@@ -813,6 +813,7 @@
     font-size: 12px;
     font-weight: 500;
     white-space: nowrap;
+    flex: none;
   }
   .chip button {
     width: 18px;
