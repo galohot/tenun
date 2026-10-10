@@ -2,7 +2,7 @@
   import { DATE_PARTS, type Agg, type Grain, type NumFormat, type Tile, type TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { aggNames, tileTitle } from '../../lib/format';
-  import { advancedLocked } from '../../lib/tiers';
+  import { advancedLocked, SHOW_ADVANCED_SWITCH } from '../../lib/tiers';
   import { defaultDim, defaultMeasure, dtypeOf, MAX_CHART_MEASURES, reachableFrom } from '../../lib/tiles';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
@@ -162,7 +162,9 @@
     <div class="notice" role="note">
       <Icon name="info" size={14} />
       <p>This tile uses Advanced features. Turn them on in Settings to edit them.</p>
-      <button class="btn small" onclick={() => (app.settingsOpen = true)}>Open Settings</button>
+      {#if SHOW_ADVANCED_SWITCH}
+        <button class="btn small" onclick={() => (app.settingsOpen = true)}>Open Settings</button>
+      {/if}
     </div>
   {/if}
 

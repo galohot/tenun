@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { api, type Cell, type Tile, type TileType } from '../lib/api';
   import { app, go } from '../lib/state.svelte';
   import { cell, dimLabel, OTHER_KEY, stampLabel } from '../lib/format';
@@ -64,6 +64,15 @@
   let historyTick = $state(0);
   const canUndo = $derived((void historyTick, past.length > 0));
   const canRedo = $derived((void historyTick, future.length > 0));
+  // A step taken before another window's edit would undo that edit too, so start fresh.
+  $effect(() => {
+    void app.outsideEdits;
+    untrack(() => {
+      past.length = 0;
+      future.length = 0;
+      historyTick++;
+    });
+  });
 
   function snap(): Step {
     return { title: dash!.title, tiles: $state.snapshot(dash!.tiles) as Tile[] };
@@ -129,6 +138,8 @@
     }
     const el = e.target as HTMLElement | null;
     if (el && (['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) || el.isContentEditable)) return;
+    // A sheet is open in front of the dashboard: undo must not change what it hides.
+    if (app.settingsOpen || app.addOpen || publishing) return;
     if (!(e.ctrlKey || e.metaKey)) return;
     const k = e.key.toLowerCase();
     if (k === 'z' && !e.shiftKey) {

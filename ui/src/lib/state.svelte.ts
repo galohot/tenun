@@ -46,6 +46,8 @@ class App {
   toasts = $state<Toast[]>([]);
   /** Bumped when source data changes; tiles re-query when it moves. */
   dataVersion = $state(0);
+  /** Bumped when another window changes the dashboards; open views drop their undo history. */
+  outsideEdits = $state(0);
   addOpen = $state(false);
   cloud = $state<CloudStatus | null>(null);
   /** Set while waiting for the browser approval of a tenun.cloud connection. */
@@ -191,7 +193,10 @@ class App {
         this.refresh();
       } else if (ev.type === 'dashboards-changed') {
         // Our own save echoes back; only other windows need to reload.
-        if (Date.now() - this.#lastLocalSave > 1500) this.refresh();
+        if (Date.now() - this.#lastLocalSave > 1500) {
+          this.outsideEdits++;
+          this.refresh();
+        }
       } else if (ev.type === 'cloud-connected') {
         this.connecting = null;
         api.cloud().then((c) => (this.cloud = c));
