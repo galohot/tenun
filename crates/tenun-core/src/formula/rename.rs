@@ -22,6 +22,36 @@ pub fn rename_column_qualified(text: &str, table: &str, old: &str, new: &str) ->
     rewrite(text, table, old, new, false)
 }
 
+/// Rewrites a formula after the link `old` was renamed `new` (V4-D28): `[Old].[region]` becomes
+/// `[New].[region]`. Only the name of the link changes; the rest of the text stays byte for
+/// byte, as in [`rename_column`].
+pub fn rename_link(text: &str, old: &str, new: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len() + new.len());
+    let mut done = 0;
+    for t in lex(text) {
+        let Tok::Ref {
+            table: Some(qualifier),
+            ..
+        } = &t.tok
+        else {
+            continue;
+        };
+        if !same(qualifier, old) {
+            continue;
+        }
+        let Some(offset) = column_start(&chars[t.at..t.at + t.len]) else {
+            continue;
+        };
+        // The first name in brackets ends one before the `.` that comes before the column.
+        out.extend(&chars[done..t.at]);
+        out.push_str(&bracketed(new));
+        done = t.at + offset - 1;
+    }
+    out.extend(&chars[done..]);
+    out
+}
+
 /// The same name, ignoring case and the spaces at the ends: how a formula finds a column.
 fn same(a: &str, b: &str) -> bool {
     a.trim() == b.trim() || a.trim().to_lowercase() == b.trim().to_lowercase()
@@ -153,6 +183,26 @@ mod tests {
             rename_column("[a]]b] + 1", "T", "a]b", "plain"),
             "[plain] + 1"
         );
+    }
+
+    #[test]
+    fn a_renamed_link_changes_only_its_own_name() {
+        assert_eq!(
+            rename_link(
+                "[Shipped from].[region] & \"[Shipped from].[x]\" & [Sold at].[region] & [region]",
+                "Shipped from",
+                "Sent from"
+            ),
+            "[Sent from].[region] & \"[Shipped from].[x]\" & [Sold at].[region] & [region]"
+        );
+        // Case, spaces and a bracket in the new name.
+        assert_eq!(
+            rename_link("SUM([ shipped FROM ].[qty])", "Shipped from", "a]b"),
+            "SUM([a]]b].[qty])"
+        );
+        // Nothing to change: the same text comes back.
+        let text = "  [Stores].[region] + 1 ";
+        assert_eq!(rename_link(text, "Shipped from", "x"), text);
     }
 
     #[test]

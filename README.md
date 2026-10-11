@@ -36,7 +36,10 @@ every other chart filters. Save the Excel file and the dashboard updates.
   `file` column), a table pasted from the clipboard, and a web link to CSV or JSON data, such as a
   published Google Sheet or an API (https only, fetched again every 15 minutes, hour or day).
 - **Relationships across sources:** drag from a column to a column in the Model view. Tenun
-  suggests the likely ones (`store_id` → `stores.id`) and checks them against the data.
+  suggests the likely ones (`store_id` → `stores.id`) and checks them against the data, again each
+  time a table loads: a store id that appears twice never counts an order twice, and the link and
+  its tiles say so. Two links to one table (stock sent from a store, stock sent to a store) get
+  names. See [the relationships guide](docs/relationships.md).
 - **Charts:** number, bar, line, area, share of total and table. Also stacked, side-by-side and
   100 % bars, scatter, histogram, waterfall, pivot table, filter, text and image tiles. No pies
   and no donuts: part-to-whole is a 100 % strip with the exact shares listed under it.
@@ -166,7 +169,9 @@ dashboard and **Add tile**.
 - A tile asks for "this value, grouped by that column". Tenun finds the path through your
   relationships and writes one SQL query with the joins. Values are always query parameters.
 - A relationship needs one side with unique values, like an ID. If neither side is unique, Tenun
-  refuses the link and explains why. Such a join would count every total twice.
+  refuses the link and explains why. Such a join would count every total twice. If a key repeats
+  later, Tenun reads one row for each key and shows a warning
+  ([how](docs/relationships.md)).
 - A workspace is one `.tenun` file (JSON) with your sources, relationships and dashboards. File
   paths are stored relative to it, so a folder with the file and its data moves as one. It is
   safe to commit to git.

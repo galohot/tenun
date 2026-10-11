@@ -4,6 +4,7 @@ import { MAX_CHART_MEASURES } from './tiles';
 import { isPart, type Agg, type Cell, type Column, type Dim, type DType, type Grain, type Measure, type NumFormat, type QueryResult, type ShowAs, type Table, type Tile, type Unit } from './api';
 import { dim0Kind, effectiveShowAs, SHOW_AS_WORDS, type Dim0Kind } from './showas';
 import { labelOf } from './prep';
+import { fieldWithLink } from './links';
 import * as L from './locale';
 import type { Locale } from './locale';
 import { localeState } from './localeState.svelte';
@@ -240,7 +241,7 @@ export function columnHeads(
   return res.columns.map((c) => {
     if (c.role !== 'measure') {
       const f = fields[d++];
-      return f ? fieldLabel(tables, f.table, f.column) : pretty(c.name);
+      return f ? fieldWithLink(fieldLabel(tables, f.table, f.column), f.via) : pretty(c.name);
     }
     const i = j++;
     const m = tile.measures[i];
@@ -258,6 +259,11 @@ export function resultDim0(res: Pick<QueryResult, 'columns'>, tile: Pick<Tile, '
 
 /** "name" of the stores table reads as "store". */
 export function dimLabel(d: Dim, tables: Named[] = []): string {
+  // A field that crosses a named link says so, or two tiles of the same table read the same.
+  return fieldWithLink(dimWord(d, tables), d.via);
+}
+
+function dimWord(d: Dim, tables: Named[]): string {
   if (d.grain === 'month_of_year') return 'month of year';
   if (d.grain) return d.grain;
   if (GENERIC.has(d.column.toLowerCase())) {

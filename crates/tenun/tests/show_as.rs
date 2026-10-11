@@ -83,6 +83,7 @@ fn engine(tag: &str) -> Engine {
                 table: "p/products".into(),
                 column: "cat".into(),
             },
+            name: None,
         }],
         ..Workspace::default()
     };

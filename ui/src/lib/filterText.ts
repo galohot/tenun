@@ -8,7 +8,7 @@ type Tables = (Named & Pick<Table, 'columns'>)[];
 
 export function filterText(f: DashFilter, tables: Tables): string {
   const dtype = tables.find((t) => t.id === f.table)?.columns?.find((c) => c.name === f.column)?.dtype ?? 'text';
-  const name = dimLabel({ table: f.table, column: f.column, grain: f.grain }, tables);
+  const name = dimLabel({ table: f.table, column: f.column, grain: f.grain, via: f.via }, tables);
   const show = (v: unknown, short = false) => cell(v as never, dtype, f.grain, short);
   const list = () => f.values.map((v) => show(v)).join(', ');
   const body =

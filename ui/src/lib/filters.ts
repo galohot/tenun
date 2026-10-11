@@ -44,6 +44,9 @@ export function nextDay(day: string): string | null {
   return d.toISOString().slice(0, 10);
 }
 
+/** The link of a field, to copy onto the filter a click on it makes. A field with no link adds nothing. */
+const via = (f: { via?: string }): { via?: string } => (f.via ? { via: f.via } : {});
+
 const isDay = (v: Cell | undefined): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v);
 
 /** The filter a filter tile stands for, or null while it keeps everything. `dtype` is its field's type. */
@@ -51,7 +54,7 @@ export function tileFilter(tile: Tile, dtype: DType | undefined): DashFilter | n
   const f = tile.filter;
   const d = tile.dims[0];
   if (tile.type !== 'filter' || !f || !d) return null;
-  const make = (op: Filter['op'], values: Cell[]): DashFilter => ({ table: d.table, column: d.column, grain: null, op, values, fromTile: tile.id });
+  const make = (op: Filter['op'], values: Cell[]): DashFilter => ({ table: d.table, column: d.column, grain: null, op, values, ...via(d), fromTile: tile.id });
   if (f.style === 'range') {
     const [lo, hi] = f.range ?? [null, null];
     if (lo === null && hi === null) return null;
@@ -91,6 +94,7 @@ export function sameFilter(a: Filter, b: Filter): boolean {
   return (
     a.table === b.table &&
     a.column === b.column &&
+    a.via === b.via &&
     a.op === b.op &&
     a.values.length === b.values.length &&
     a.values.every((v, i) => keyOf(v) === keyOf(b.values[i]))
@@ -114,20 +118,20 @@ export function markFilter(
   if (tile.type === 'histogram') {
     const m = tile.measures[0];
     if (!m?.column || !bins || typeof value !== 'number') return null;
-    return { table: m.table, column: m.column, grain: null, op: 'range', values: [value, Math.round((value + bins.width) * 1e10) / 1e10] };
+    return { table: m.table, column: m.column, grain: null, op: 'range', values: [value, Math.round((value + bins.width) * 1e10) / 1e10], ...via(m) };
   }
   // A Sankey node is a value of the field of its stage; every other tile filters by its first field.
   const d = tile.type === 'sankey' && stage !== undefined ? tile.dims[stage] : tile.dims[0];
   if (!d) return null;
   // A calendar is always read by day.
-  const base = { table: d.table, column: d.column, grain: tile.type === 'calendar' ? ('day' as const) : (d.grain ?? null) };
+  const base = { table: d.table, column: d.column, grain: tile.type === 'calendar' ? ('day' as const) : (d.grain ?? null), ...via(d) };
   if (value === OTHER && otherOf) return { ...base, op: 'not_in', values: [...otherOf], label: 'Other' };
   return { ...base, op: 'in', values: [value] };
 }
 
 /** A click on a pivot's column header. */
 export function colFilter(c: Dim | undefined, value: Cell): Omit<DashFilter, 'fromTile'> | null {
-  return c ? { table: c.table, column: c.column, grain: c.grain ?? null, op: 'in', values: [value] } : null;
+  return c ? { table: c.table, column: c.column, grain: c.grain ?? null, op: 'in', values: [value], ...via(c) } : null;
 }
 
 /**

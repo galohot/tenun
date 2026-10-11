@@ -58,6 +58,7 @@ fn rel(id: &str, from: FieldRef, to: FieldRef) -> Relationship {
         id: id.into(),
         from,
         to,
+        name: None,
     }
 }
 

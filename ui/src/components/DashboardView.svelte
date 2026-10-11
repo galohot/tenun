@@ -343,7 +343,7 @@
     let mark = '';
     if (value !== undefined) {
       const f = markFilter(t, value, otherOf, bins);
-      click = f ? { table: f.table, column: f.column, grain: f.grain, op: f.op, values: f.values } : null;
+      click = f ? { table: f.table, column: f.column, grain: f.grain, op: f.op, values: f.values, ...(f.via ? { via: f.via } : {}) } : null;
       const d = t.dims[0];
       const dtype = app.table(d?.table ?? '')?.columns.find((c) => c.name === d?.column)?.dtype ?? 'text';
       mark = f?.label ?? (t.type === 'histogram' ? filterText({ ...f!, fromTile: '' }, app.tables).split(': ')[1] : cell(value, dtype, d?.grain));

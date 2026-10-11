@@ -78,6 +78,7 @@ fn engine(tag: &str, dashboard: Value) -> Engine {
                 table: "s2/stores".into(),
                 column: "id".into(),
             },
+            name: None,
         }],
         dashboards: vec![dashboard],
         ..Workspace::default()
@@ -102,6 +103,7 @@ fn filter(column: &str, op: FilterOp, values: Value) -> Filter {
         grain: None,
         op,
         values: values.as_array().cloned().unwrap_or_default(),
+        via: None,
     }
 }
 
@@ -753,6 +755,7 @@ fn rows_behind_include_columns_of_related_tables() {
         grain: None,
         op: FilterOp::In,
         values: vec![json!("Bandung")],
+        via: None,
     });
     let r = rows_behind(&e, &t, &[], c).unwrap();
     // Store 2: Robusta, Liberica_X and Kopi.
@@ -795,6 +798,7 @@ fn rows_behind_stop_at_500_and_say_how_many_match() {
         grain: None,
         op: FilterOp::Range,
         values: vec![json!(0), json!(100)],
+        via: None,
     });
     assert_eq!(rows_behind(&e, &h, &[], c).unwrap().total, 100);
 }

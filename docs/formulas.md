@@ -9,6 +9,9 @@ Formulas arrive with calculated columns and measures in Tenun 0.4. This page des
 
 - **A column** is written in square brackets: `[amount]`.
 - **A column of another table** has the table first: `[Stores].[rent]`.
+- **A column through a named link** has the name of the link first: `[Shipped from].[city]`. Use it
+  when two links lead to the same table. `[Stores].[city]` is then an error that names both links.
+  See [relationships](relationships.md).
 - **A bracket inside a name** is written twice: the column `a]b` is `[a]]b]`.
 - **Numbers** are written as `12`, `1.5`, `.5` or `1e3`.
 - **Text** goes in double quotes: `"Java"`. A quote inside the text is written twice: `"say ""hi"""`.

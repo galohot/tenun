@@ -3,12 +3,15 @@
   import { app } from '../../lib/state.svelte';
   import { typeIcon } from '../../lib/ui';
   import { blankNote, isShown } from '../../lib/prep';
+  import { fieldGroups, groupOf, labelOfLink } from '../../lib/links';
   import Icon from '../Icon.svelte';
 
   let {
     mode,
     table,
     column,
+    via,
+    base = null,
     placeholder = 'Choose a field',
     reachable,
     numbersOnly = false,
@@ -19,6 +22,10 @@
     mode: 'measure' | 'dim';
     table: string | null;
     column: string | null;
+    /** The link this field's table is reached through. Not set: the only path, or the first. */
+    via?: string;
+    /** The table of the tile's first value. Two links to one table list it once for each link, seen from here. */
+    base?: string | null;
     placeholder?: string;
     /** Tables that can be used together with the tile's other fields. */
     reachable?: Set<string> | null;
@@ -26,7 +33,7 @@
     numbersOnly?: boolean;
     /** Lists date columns only, and no row count (a Gantt chart reads a start and an end date). */
     datesOnly?: boolean;
-    onchange: (table: string, column: string | null) => void;
+    onchange: (table: string, column: string | null, via?: string) => void;
     onclear?: () => void;
   } = $props();
 
@@ -43,27 +50,32 @@
         : (current?.columns.find((c) => c.name === column)?.label ?? column),
   );
 
+  /** Every table once, or once for each link that leads to it (V4-D28). */
+  const all = $derived(fieldGroups(app.tables, app.snap?.workspace.relationships ?? [], app.linkHealth, base));
+  const here = $derived(groupOf(all, table, via));
+
   const groups = $derived(
-    app.tables
-      .map((t) => ({
-        t,
+    all
+      .map((g) => ({
+        g,
         // A hidden column stays in the list only while this field uses it.
-        cols: t.columns.filter(
+        cols: g.table.columns.filter(
           (c) =>
-            isShown(c, table === t.id && column === c.name) &&
+            isShown(c, here?.key === g.key && column === c.name) &&
             (!numbersOnly || c.dtype === 'number') &&
             (!datesOnly || c.dtype === 'date' || c.dtype === 'datetime') &&
             (!q ||
               c.name.toLowerCase().includes(q.toLowerCase()) ||
               c.label?.toLowerCase().includes(q.toLowerCase()) ||
-              t.label.toLowerCase().includes(q.toLowerCase())),
+              g.title.toLowerCase().includes(q.toLowerCase()) ||
+              g.table.label.toLowerCase().includes(q.toLowerCase())),
         ),
       }))
-      .filter((g) => g.cols.length || (mode === 'measure' && !q && !numbersOnly && !datesOnly)),
+      .filter((x) => x.cols.length || (mode === 'measure' && !q && !numbersOnly && !datesOnly)),
   );
 
-  function pick(t: string, c: string | null) {
-    onchange(t, c);
+  function pick(t: string, c: string | null, v?: string) {
+    onchange(t, c, v);
     open = false;
     q = '';
   }
@@ -80,7 +92,7 @@
 <div class="fp" bind:this={root}>
   <button class="trigger" class:empty={!table} onclick={() => (open = !open)} aria-expanded={open}>
     {#if table}
-      <span class="tbl">{current?.label}</span>
+      <span class="tbl">{labelOfLink(via) ? `${labelOfLink(via)} ›` : current?.label}</span>
       <span class="col">{label}</span>
     {:else}
       <span class="ph">{placeholder}</span>
@@ -95,20 +107,21 @@
       <!-- svelte-ignore a11y_autofocus -->
       <input class="field" placeholder="Search fields" bind:value={q} autofocus />
       <div class="list">
-        {#each groups as g (g.t.id)}
-          {@const far = reachable && !reachable.has(g.t.id)}
+        {#each groups as { g, cols } (g.key)}
+          {@const far = reachable && !reachable.has(g.table.id)}
           <div class="group" class:far>
             <div class="gh">
-              <Icon name="table" size={12} />{g.t.label}
+              <Icon name="table" size={12} />{g.title}
+              {#if g.sub}<span class="sub">{g.sub}</span>{/if}
               {#if far}<span class="note">not related</span>{/if}
             </div>
             {#if mode === 'measure' && !q && !numbersOnly && !datesOnly}
-              <button class="opt" onclick={() => pick(g.t.id, null)}>
-                <Icon name="hash" size={12} /> Number of {g.t.label.toLowerCase()}
+              <button class="opt" onclick={() => pick(g.table.id, null, g.via)}>
+                <Icon name="hash" size={12} /> Number of {g.table.label.toLowerCase()}
               </button>
             {/if}
-            {#each g.cols as c (c.name)}
-              <button class="opt" class:on={table === g.t.id && column === c.name} title={c.description} onclick={() => pick(g.t.id, c.name)}>
+            {#each cols as c (c.name)}
+              <button class="opt" class:on={here?.key === g.key && column === c.name} title={c.description} onclick={() => pick(g.table.id, c.name, g.via)}>
                 <Icon name={typeIcon[dim(c.dtype)]} size={12} />
                 <span class="nm">{c.label ?? c.name}</span>
                 {#if blankNote(c)}<span class="blank">{blankNote(c)}</span>{/if}
@@ -163,6 +176,7 @@
   .group.far { opacity: 0.55; }
   .gh { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 11px; font-weight: 600; color: var(--text-2); }
   .note { font-weight: 400; margin-left: auto; }
+  .sub { font-weight: 400; color: var(--text-3); }
   .opt {
     display: flex;
     align-items: center;

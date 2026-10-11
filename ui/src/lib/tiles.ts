@@ -141,14 +141,15 @@ export function autoType(tables: Table[], measures: Measure[], dims: Dim[]): Til
   return 'bar';
 }
 
-export function defaultMeasure(tables: Table[], table: string, column: string | null): Measure {
+/** A value for a field. `via` is the link the field's table is reached through, when two links lead to it. */
+export function defaultMeasure(tables: Table[], table: string, column: string | null, via?: string): Measure {
   const d = dtypeOf(tables, table, column);
-  return { table, column, agg: column === null ? 'count' : d === 'number' ? 'sum' : 'count_distinct' };
+  return { table, column, agg: column === null ? 'count' : d === 'number' ? 'sum' : 'count_distinct', ...(via ? { via } : {}) };
 }
 
-export function defaultDim(tables: Table[], table: string, column: string): Dim {
+export function defaultDim(tables: Table[], table: string, column: string, via?: string): Dim {
   const d = dtypeOf(tables, table, column);
-  return { table, column, grain: d === 'date' || d === 'datetime' ? 'month' : null };
+  return { table, column, grain: d === 'date' || d === 'datetime' ? 'month' : null, ...(via ? { via } : {}) };
 }
 
 export function defaultSize(type: TileType): { w: number; h: number } {
@@ -230,20 +231,4 @@ export function place(tiles: Tile[], w: number, h: number): { x: number; y: numb
 
 export function newDashboard(n: number): Dashboard {
   return { id: newId('d'), title: n ? `Dashboard ${n + 1}` : 'Overview', refresh: 60, tiles: [] };
-}
-
-/** Tables a query based on `base` can use: base plus everything reachable many → one. */
-export function reachableFrom(base: string, rels: { from: { table: string }; to: { table: string } }[]): Set<string> {
-  const seen = new Set([base]);
-  const queue = [base];
-  while (queue.length) {
-    const t = queue.shift()!;
-    for (const r of rels) {
-      if (r.from.table === t && !seen.has(r.to.table)) {
-        seen.add(r.to.table);
-        queue.push(r.to.table);
-      }
-    }
-  }
-  return seen;
 }

@@ -99,6 +99,7 @@ pub fn limit_repeat(
             grain: r.grain,
             op: FilterOp::In,
             values: keys.clone(),
+            via: r.via.clone(),
         });
     }
     Ok(Some(Repeat {
@@ -154,6 +155,7 @@ pub fn top_n_each(
                 grain: d0.grain,
                 op: FilterOp::NotIn,
                 values: kept,
+                via: d0.via.clone(),
             });
             filters.push(Filter {
                 table: d1.table.clone(),
@@ -161,6 +163,7 @@ pub fn top_n_each(
                 grain: d1.grain,
                 op: FilterOp::In,
                 values: vec![key.clone()],
+                via: d1.via.clone(),
             });
             let rest = engine.query(&SemanticQuery {
                 measures: q.measures.clone(),
@@ -331,6 +334,7 @@ pub fn boxplot(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
             column: Some(column.clone()),
             agg: crate::query::Agg::Count,
             per: None,
+            via: m.via.clone(),
         }],
         dimensions: group.cloned().into_iter().collect(),
         filters: filters.to_vec(),
@@ -341,9 +345,9 @@ pub fn boxplot(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
     // The shared start of both queries: the values of each group, and the numbers of its box.
     let prelude =
         |sc: &crate::query::Scope<'_>| -> Result<(String, DType), crate::query::QueryError> {
-            let (x, _) = sc.expr(&m.table, &column, None)?;
+            let (x, _) = sc.expr_via(&m.table, m.via.as_deref(), &column, None)?;
             let (g, gtype) = match group {
-                Some(d) => sc.expr(&d.table, &d.column, d.grain)?,
+                Some(d) => sc.expr_via(&d.table, d.via.as_deref(), &d.column, d.grain)?,
                 None => ("CAST('All' AS VARCHAR)".to_string(), DType::Text),
             };
             Ok((
@@ -463,6 +467,7 @@ pub fn boxplot(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
         outliers: Some(outliers),
         sparks: None,
         pair: None,
+        notes: Vec::new(),
     })
 }
 
@@ -514,6 +519,7 @@ pub fn compare_periods(
         grain: d.grain,
         op: FilterOp::In,
         values: chosen.clone(),
+        via: d.via,
     });
     Ok(Some(chosen))
 }
@@ -824,6 +830,7 @@ pub fn cohort(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resul
         column: Some(ent_col.clone()),
         agg: Agg::Count,
         per: None,
+        via: ent.via.clone(),
     }];
     measures.extend(amount.cloned());
     let q = SemanticQuery {
@@ -835,10 +842,13 @@ pub fn cohort(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resul
     };
     let start = std::time::Instant::now();
     let (found, ignored) = engine.query_custom(&q, |sc| {
-        let (e, _) = sc.expr(&ent.table, &ent_col, None)?;
-        let (p, _) = sc.expr(&d.table, &d.column, d.grain)?;
+        let (e, _) = sc.expr_via(&ent.table, ent.via.as_deref(), &ent_col, None)?;
+        let (p, _) = sc.expr_via(&d.table, d.via.as_deref(), &d.column, d.grain)?;
         let x = match amount.and_then(|a| a.column.as_deref().map(|c| (a, c))) {
-            Some((a, c)) => format!("CAST({} AS DOUBLE)", sc.expr(&a.table, c, None)?.0),
+            Some((a, c)) => format!(
+                "CAST({} AS DOUBLE)",
+                sc.expr_via(&a.table, a.via.as_deref(), c, None)?.0
+            ),
             None => "1".to_string(),
         };
         Ok((
@@ -956,6 +966,7 @@ fn latest_day(engine: &Engine, field: &Dimension, filters: &[Filter]) -> Option<
                 column: Some(field.column.clone()),
                 agg: Agg::Max,
                 per: None,
+                via: field.via.clone(),
             }],
             dimensions: vec![],
             filters: filters.to_vec(),
@@ -1018,6 +1029,7 @@ pub fn sparks(
         grain: q.dimensions[0].grain,
         op: FilterOp::In,
         values: shown,
+        via: q.dimensions[0].via.clone(),
     });
     filters.push(Filter {
         table: sd.table.clone(),
@@ -1025,6 +1037,7 @@ pub fn sparks(
         grain: None,
         op: FilterOp::Gte,
         values: vec![json!(iso(first))],
+        via: sd.via.clone(),
     });
     let mut dims = q.dimensions.clone();
     dims.push(Dimension {

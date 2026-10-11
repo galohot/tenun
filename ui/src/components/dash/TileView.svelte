@@ -136,6 +136,8 @@
     return i < 0 ? null : i;
   });
   const note = $derived(res && tile.type !== 'kpi' ? partialNote(res, tile.dims[0]?.grain) : null);
+  // A link this tile crosses repeats a key on its one side, so the first row was used (V4-D26).
+  const linkNotes = $derived(res?.notes ?? []);
   const title = $derived(tileTitle(tile, app.tables));
   // A note or a picture with no title has no header, so the whole tile drags.
   const bare = $derived((fixed || tile.type === 'filter') && !title);
@@ -250,8 +252,11 @@
       </svelte:boundary>
     {/if}
   </div>
-  {#if ignored.length || note}
+  {#if ignored.length || note || linkNotes.length}
     <footer>
+      {#each linkNotes as n (n)}
+        <span class="link-note"><Icon name="warning" size={12} /> {n}</span>
+      {/each}
       {#if note}<span>{note}</span>{/if}
       {#if ignored.length}
         <span title="This tile's table is not related to the filtered field.">
@@ -328,10 +333,22 @@
   .error { display: flex; gap: 6px; margin: 0; color: var(--danger); font-size: 12px; }
   .error :global(svg) { flex: none; margin-top: 1px; }
   footer span { display: inline-flex; align-items: center; gap: 5px; }
+  /* A sentence about a link may be long: it wraps under its mark instead of cutting. */
+  footer span.link-note {
+    align-items: flex-start;
+    flex: 1 1 100%;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: color-mix(in srgb, #c47400 14%, var(--surface));
+    color: var(--text);
+    line-height: 1.35;
+  }
+  footer span.link-note :global(svg) { flex: none; margin-top: 1px; color: #c47400; }
   footer {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
+    gap: 4px 12px;
     padding: 0 14px 8px;
     font-size: 11px;
     color: var(--text-2);

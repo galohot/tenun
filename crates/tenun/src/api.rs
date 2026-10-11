@@ -75,7 +75,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/prep/unpivot", get(unpivot_detect))
         .route("/prep/unpivot/preview", post(unpivot_preview))
         .route("/relationships", post(add_rel))
-        .route("/relationships/{id}", delete(remove_rel))
+        .route("/relationships/{id}", delete(remove_rel).patch(rename_rel))
         .route("/relationships/suggest", get(suggest))
         .route("/dashboards", put(put_dashboards))
         .route("/layout", put(put_layout))
@@ -511,6 +511,28 @@ async fn add_rel(State(s): S, Json(b): Json<RelBody>) -> R<Json<Value>> {
     Ok(Json(
         blocking(&s, move |st| {
             st.engine.add_relationship(b.from, b.to)?;
+            changed(st)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct RenameRelBody {
+    /// The new name of the link. Empty or missing: the link has no name.
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// Names a link, or clears its name (V4-D28).
+async fn rename_rel(
+    State(s): S,
+    Path(id): Path<String>,
+    Json(b): Json<RenameRelBody>,
+) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            st.engine.rename_link(&id, b.name)?;
             changed(st)
         })
         .await?,

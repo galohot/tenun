@@ -172,6 +172,7 @@ pub(crate) fn count_rows(table: &str) -> Measure {
         column: None,
         agg: Agg::Count,
         per: None,
+        via: None,
     }
 }
 
@@ -323,8 +324,22 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
 
 const MAX_CHART_MEASURES: usize = 4;
 
-/// Runs one tile, with number-tile and unfinished-period extras.
+/// Runs one tile, with number-tile and unfinished-period extras, and a note for every link the
+/// tile crosses whose one side repeats a key (V4-D26). The notes travel with the result into
+/// snapshots, exports and published pages.
 pub fn run_tile(
+    engine: &Engine,
+    tile: &Tile,
+    filters: &[DashFilter],
+) -> anyhow::Result<QueryResult> {
+    let mut res = run_tile_inner(engine, tile, filters)?;
+    if let Some(q) = tile_query(tile, filters) {
+        res.notes = engine.link_notes(&q);
+    }
+    Ok(res)
+}
+
+fn run_tile_inner(
     engine: &Engine,
     tile: &Tile,
     filters: &[DashFilter],
@@ -376,6 +391,7 @@ pub fn run_tile(
                     .take(PIVOT_MAX_COLS)
                     .filter_map(|r| r.first().cloned())
                     .collect(),
+                via: c.via.clone(),
             });
         }
     }
@@ -414,6 +430,7 @@ pub fn run_tile(
             column: Some(d.column.clone()),
             agg: Agg::Max,
             per: None,
+            via: d.via.clone(),
         }],
         dimensions: vec![],
         filters: q.filters.clone(),
@@ -495,6 +512,7 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
             column: Some(d.column.clone()),
             agg: Agg::Max,
             per: None,
+            via: d.via.clone(),
         }],
         dimensions: vec![],
         filters: fs.clone(),
@@ -553,6 +571,7 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
             grain: None,
             op: FilterOp::Between,
             values: vec![json!(iso(prev_start)), json!(hi)],
+            via: d.via.clone(),
         };
         let mut wfs = fs.clone();
         wfs.push(window);
@@ -853,6 +872,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                             grain: None,
                             op: FilterOp::Range,
                             values: vec![r[0].clone(), shape::round_edge(lo + bins.width).into()],
+                            via: m.via.clone(),
                         },
                     ))
                 })
@@ -884,6 +904,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                                 grain: d.grain,
                                 op: FilterOp::In,
                                 values: vec![v],
+                                via: d.via.clone(),
                             },
                         ));
                     }
@@ -919,6 +940,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                             grain,
                             op,
                             values,
+                            via: d.via.clone(),
                         },
                     )
                 })
@@ -948,6 +970,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                                 grain: c.grain,
                                 op: FilterOp::In,
                                 values: vec![v],
+                                via: c.via.clone(),
                             },
                         )
                     })
@@ -1017,7 +1040,30 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
             json!({ "id": t.id, "name": t.name, "label": t.label, "columns": columns })
         })
         .collect();
-    Ok(json!({
+    // The links the tiles name, so a viewer can write "Shipped from › region" in a title.
+    let mut links: BTreeMap<String, String> = BTreeMap::new();
+    for raw in &raw_kept {
+        fn vias(v: &Value, out: &mut Vec<String>) {
+            match v {
+                Value::Object(m) => {
+                    if let Some(Value::String(id)) = m.get("via") {
+                        out.push(id.clone());
+                    }
+                    m.values().for_each(|x| vias(x, out));
+                }
+                Value::Array(a) => a.iter().for_each(|x| vias(x, out)),
+                _ => {}
+            }
+        }
+        let mut ids = Vec::new();
+        vias(raw, &mut ids);
+        for id in ids {
+            if let Some(label) = engine.link_label(&id) {
+                links.insert(id, label);
+            }
+        }
+    }
+    let mut payload = json!({
         "version": 2,
         "title": dash.get("title").cloned().unwrap_or(json!("Dashboard")),
         "workspace": engine.workspace_name(),
@@ -1030,7 +1076,11 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         "filters": clicked,
         "saved": saved,
         "grain": grain,
-    }))
+    });
+    if !links.is_empty() {
+        payload["links"] = json!(links);
+    }
+    Ok(payload)
 }
 
 fn chrono_now() -> String {

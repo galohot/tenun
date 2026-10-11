@@ -7,7 +7,8 @@ use super::functions::{self, Def};
 use super::parse::{BinOp, Expr, ExprKind, UnOp, parse};
 use super::{Context, FormulaError, Kind};
 use crate::catalog::{Catalog, DType, Table};
-use crate::query::reach;
+use crate::links::{Links, PathError, Paths, first_links, link_label, reach};
+use crate::workspace::Relationship;
 
 /// The kind of value a part of a formula has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,10 +85,12 @@ pub enum TNode {
     Num(f64),
     Str(String),
     Bool(bool),
-    /// A column. `table` is a table id.
+    /// A column. `table` is a table id. `via` is the link (a relationship id) the path to the
+    /// table crosses, when the formula named a link instead of the table (V4-D28).
     Col {
         table: String,
         column: String,
+        via: Option<String>,
     },
     /// SQL that is already written. The SQL writer uses it for a value it has bound to a name,
     /// or built itself. `atomic` is true when it is a name or a literal, which is safe to repeat.
@@ -293,10 +296,19 @@ fn has_agg(e: &TExpr) -> bool {
     }
 }
 
+/// One column an aggregate reads: its table, the link the formula named (if any), and how the
+/// formula wrote it, for a message.
+struct AggRead {
+    table: String,
+    via: Option<String>,
+    text: String,
+    column: String,
+}
+
 /// The columns an aggregate has read so far.
 struct AggScope {
     name: &'static str,
-    tables: Vec<String>,
+    tables: Vec<AggRead>,
 }
 
 struct Checker<'a> {
@@ -360,10 +372,10 @@ impl<'a> Checker<'a> {
                 e.len,
             ));
         }
-        let t: &Table = match table {
-            Some(name) => self.table_named(name, e)?,
+        let (t, via): (&Table, Option<String>) = match table {
+            Some(name) => self.table_or_link(name, e)?,
             None => match self.current {
-                Some(t) => t,
+                Some(t) => (t, None),
                 None => {
                     return Err(FormulaError::new(
                         format!(
@@ -417,24 +429,35 @@ impl<'a> Checker<'a> {
         if self.kind != Kind::Measure
             && let Some(cur) = self.current
             && t.id != cur.id
-            && !reach(&cur.id, self.cx.rels).contains_key(&t.id)
         {
-            return Err(FormulaError::new(
-                self.unreachable_message(&text, cur, t),
-                e.at,
-                e.len,
-            ));
+            let found = Paths::new(&cur.id, self.cx.links()).path(&t.id, via.as_deref());
+            if let Err(err) = found {
+                return Err(FormulaError::new(
+                    self.unreachable_message(&text, cur, t, via.as_deref(), err),
+                    e.at,
+                    e.len,
+                ));
+            }
+            if via.is_none() {
+                self.check_one_way(cur, t, &text, column, e)?;
+            }
         }
         self.note_use(&t.id);
         if let Some(a) = &mut self.agg
-            && !a.tables.contains(&t.id)
+            && !a.tables.iter().any(|r| r.table == t.id && r.via == via)
         {
-            a.tables.push(t.id.clone());
+            a.tables.push(AggRead {
+                table: t.id.clone(),
+                via: via.clone(),
+                text: text.clone(),
+                column: column.to_string(),
+            });
         }
         Ok(TExpr {
             node: TNode::Col {
                 table: t.id.clone(),
                 column: col.name.clone(),
+                via,
             },
             ty: Ty::from_dtype(col.dtype),
             at: e.at,
@@ -442,14 +465,45 @@ impl<'a> Checker<'a> {
         })
     }
 
-    fn unreachable_message(&self, text: &str, cur: &Table, t: &Table) -> String {
+    fn unreachable_message(
+        &self,
+        text: &str,
+        cur: &Table,
+        t: &Table,
+        via: Option<&str>,
+        err: PathError,
+    ) -> String {
+        let links = self.cx.links();
+        let unused = |r: &Relationship| {
+            format!(
+                "The link {} cannot be used now: both sides repeat their values. Open Model to see which file to fix.",
+                link_label(r, self.cx.catalog)
+            )
+        };
+        if let Some(r) = via.and_then(|v| links.find(v)) {
+            return match err {
+                PathError::Unusable => unused(r),
+                _ => format!(
+                    "{text} cannot be reached from {} through the link {}. Check the line between them in Model.",
+                    cur.label,
+                    link_label(r, self.cx.catalog)
+                ),
+            };
+        }
+        // A link that repeats its values on both sides is not used. Say so, not "not related".
+        let all = Links::new(self.cx.rels, None);
+        if reach(&cur.id, all).contains_key(&t.id)
+            && let Some(r) = self.cx.rels.iter().find(|r| !links.usable(r))
+        {
+            return unused(r);
+        }
         if self.kind == Kind::Group {
             return format!(
                 "{} is not related to {} in the right direction, so a group value cannot read {text}. Check the line between them in Model.",
                 t.label, cur.label
             );
         }
-        if reach(&t.id, self.cx.rels).contains_key(&cur.id) {
+        if reach(&t.id, links).contains_key(&cur.id) {
             format!(
                 "{text} has many values for each row of {cur_label}. Total it in a measure with SUMIF or COUNTROWS, or check the line between {t_label} and {cur_label} in Model.",
                 cur_label = cur.label,
@@ -461,6 +515,93 @@ impl<'a> Checker<'a> {
                 t.label, cur.label
             )
         }
+    }
+
+    /// `[Stores].[region]` is an error when two links lead to Stores: it says which links and
+    /// how to name the one it means.
+    fn check_one_way(
+        &self,
+        from: &Table,
+        to: &Table,
+        text: &str,
+        column: &str,
+        e: &Expr,
+    ) -> Result<(), FormulaError> {
+        let firsts = first_links(&from.id, &to.id, self.cx.links());
+        if firsts.len() < 2 {
+            return Ok(());
+        }
+        Err(FormulaError::new(
+            self.ambiguous_message(text, column, &firsts),
+            e.at,
+            e.len,
+        ))
+    }
+
+    fn ambiguous_message(&self, text: &str, column: &str, firsts: &[String]) -> String {
+        let links = self.cx.links();
+        let rels: Vec<&Relationship> = firsts.iter().filter_map(|id| links.find(id)).collect();
+        let labels: Vec<String> = rels
+            .iter()
+            .map(|r| format!("\"{}\"", link_label(r, self.cx.catalog)))
+            .collect();
+        let list = match labels.split_last() {
+            Some((last, rest)) if !rest.is_empty() => {
+                format!("{} or {last}", rest.join(", "))
+            }
+            _ => labels.join(", "),
+        };
+        let count = if rels.len() == 2 {
+            "two links".to_string()
+        } else {
+            format!("{} links", rels.len())
+        };
+        match rels.iter().find_map(|r| r.name.as_deref()) {
+            Some(name) if rels.iter().all(|r| r.name.is_some()) => format!(
+                "{text} could mean {count}: {list}. Write the name of the link instead of the table, like [{name}].[{column}]."
+            ),
+            _ => format!(
+                "{text} could mean {count}: {list}. Give the links a name in Model, then write the name of the link instead of the table."
+            ),
+        }
+    }
+
+    /// A table named in a formula: a table first, then a link by its name (V4-D28). A link
+    /// stands for the table on its one side, reached through that link.
+    fn table_or_link(
+        &self,
+        name: &str,
+        e: &Expr,
+    ) -> Result<(&'a Table, Option<String>), FormulaError> {
+        if let Some(t) = find_table(self.cx.catalog, name) {
+            return Ok((t, None));
+        }
+        let n = name.trim().to_lowercase();
+        let link = self.cx.rels.iter().find(|r| {
+            r.name
+                .as_deref()
+                .is_some_and(|x| x.trim().to_lowercase() == n)
+        });
+        if let Some(r) = link
+            && let Some(t) = self.cx.catalog.table(&r.to.table)
+        {
+            return Ok((t, Some(r.id.clone())));
+        }
+        let names = self
+            .cx
+            .catalog
+            .tables
+            .iter()
+            .map(|t| t.label.as_str())
+            .chain(self.cx.rels.iter().filter_map(|r| r.name.as_deref()));
+        Err(FormulaError::new(
+            match closest(name, names) {
+                Some(s) => format!("No table [{name}]. Did you mean [{s}]?"),
+                None => format!("No table [{name}] in this workspace."),
+            },
+            e.at,
+            e.len,
+        ))
     }
 
     fn table_named(&self, name: &str, e: &Expr) -> Result<&'a Table, FormulaError> {
@@ -772,11 +913,12 @@ impl<'a> Checker<'a> {
     }
 
     /// The table whose rows an aggregate reads: the one from which all the others are reached
-    /// on the many-to-one path.
+    /// on the many-to-one path. A column read through a named link is reached from the table the
+    /// link starts at, so the table on its far side is never the home for that column.
     fn home_of(
         &self,
         def: &Def,
-        tables: &[String],
+        tables: &[AggRead],
         e: &Expr,
         name_len: usize,
     ) -> Result<String, FormulaError> {
@@ -800,14 +942,31 @@ impl<'a> Checker<'a> {
             // The checks at each reference already made sure the table reaches them all.
             return Ok(self.current.expect("a group has a table").id.clone());
         }
-        let home = tables.iter().find(|h| {
-            let paths = reach(h, self.cx.rels);
-            tables.iter().all(|t| paths.contains_key(t))
+        let links = self.cx.links();
+        // The tables read, then the tables that named links start at.
+        let mut candidates: Vec<String> = tables.iter().map(|r| r.table.clone()).collect();
+        for read in tables {
+            if let Some(r) = read.via.as_deref().and_then(|v| links.find(v))
+                && !candidates.contains(&r.from.table)
+            {
+                candidates.push(r.from.table.clone());
+            }
+        }
+        let home = candidates.iter().find(|h| {
+            let paths = Paths::new(h, links);
+            tables.iter().all(|r| {
+                // A column read through a link is not on the table the link leads to.
+                !(r.via.is_some() && r.table == **h)
+                    && paths.path(&r.table, r.via.as_deref()).is_ok()
+            })
         });
         match home {
-            Some(h) => Ok(h.clone()),
+            Some(h) => {
+                self.check_measure_links(h, tables, e)?;
+                Ok(h.clone())
+            }
             None => {
-                let names: Vec<String> = tables.iter().map(|t| label(t)).collect();
+                let names: Vec<String> = tables.iter().map(|r| label(&r.table)).collect();
                 Err(FormulaError::new(
                     format!(
                         "{} reads {}, which are not related one to many. Total each table on its own, like SUM([A].[x]) / SUM([B].[y]), or draw a line between them in Model.",
@@ -819,6 +978,30 @@ impl<'a> Checker<'a> {
                 ))
             }
         }
+    }
+
+    /// A column of a table that two links lead to, written with the table name, is an error
+    /// inside a total too.
+    fn check_measure_links(
+        &self,
+        home: &str,
+        tables: &[AggRead],
+        e: &Expr,
+    ) -> Result<(), FormulaError> {
+        for read in tables {
+            if read.via.is_some() || read.table == home {
+                continue;
+            }
+            let firsts = first_links(home, &read.table, self.cx.links());
+            if firsts.len() >= 2 {
+                return Err(FormulaError::new(
+                    self.ambiguous_message(&read.text, &read.column, &firsts),
+                    e.at,
+                    e.len,
+                ));
+            }
+        }
+        Ok(())
     }
 }
 

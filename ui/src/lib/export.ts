@@ -24,4 +24,6 @@ export interface ExportPayload {
   saved?: DashFilter[];
   /** The one grain the dashboard set for every chart over time, if it set one. */
   grain?: Grain | null;
+  /** Link id → what the link is called, for the links the tiles name. Not set when none does. */
+  links?: Record<string, string>;
 }

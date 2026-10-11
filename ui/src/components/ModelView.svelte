@@ -2,10 +2,12 @@
   import { SvelteFlow, Background, Controls, ConnectionMode, type Node, type Edge, type Connection } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import { untrack } from 'svelte';
-  import { api, type FieldRef, type Suggestion } from '../lib/api';
+  import { api, type FieldRef, type Relationship, type Suggestion } from '../lib/api';
   import { app } from '../lib/state.svelte';
+  import { firstLinks, kindWords, linkLabel, siblings, unnamedPairs } from '../lib/links';
   import TableNode from './model/TableNode.svelte';
   import RelEdge from './model/RelEdge.svelte';
+  import LinkSheet from './model/LinkSheet.svelte';
   import Icon from './Icon.svelte';
 
   const nodeTypes = { table: TableNode };
@@ -16,6 +18,8 @@
   let looking = $state(false);
   let nodes = $state.raw<Node[]>([]);
   let edges = $state.raw<Edge[]>([]);
+  /** The links whose sheet is open: one to look at it, several to name them (V4-D28). */
+  let sheet = $state<string[] | null>(null);
 
   const ws = $derived(app.snap!.workspace);
   const sk = (s: Suggestion) => `${s.from.table}.${s.from.column}>${s.to.table}.${s.to.column}`;
@@ -51,7 +55,7 @@
       }
       const col = linked.has(t.id) ? level.get(t.id)! : last + 1;
       const y = nextY.get(col) ?? 0;
-      out[t.id] = { x: col * 320, y };
+      out[t.id] = { x: col * 400, y };
       nextY.set(col, y + 64 + t.columns.length * 24 + 48);
     }
     return out;
@@ -73,18 +77,27 @@
     const pos = layout(ws.relationships);
     const names = new Map(ws.sources.map((s) => [s.id, s.name]));
     const linked = new Map<string, Set<string>>();
+    // The columns that repeat values: the keys of a link with a warning.
+    const warned = new Map<string, Set<string>>();
+    const mark = (f: FieldRef) => {
+      if (!warned.has(f.table)) warned.set(f.table, new Set());
+      warned.get(f.table)!.add(f.column);
+    };
     for (const r of ws.relationships) {
       for (const f of [r.from, r.to]) {
         if (!linked.has(f.table)) linked.set(f.table, new Set());
         linked.get(f.table)!.add(f.column);
       }
+      const h = app.linkHealth?.[r.id];
+      if (h && h.duplicates > 0) mark(r.to);
+      if (h?.unusable) mark(r.from);
     }
     const current = new Map(untrack(() => nodes).map((n) => [n.id, n.position]));
     nodes = app.tables.map((t) => ({
       id: t.id,
       type: 'table',
       position: current.get(t.id) ?? pos[t.id],
-      data: { table: t, source: names.get(t.source_id) ?? '', linked: linked.get(t.id) ?? new Set() },
+      data: { table: t, source: names.get(t.source_id) ?? '', linked: linked.get(t.id) ?? new Set(), warned: warned.get(t.id) ?? new Set() },
       dragHandle: 'header',
     }));
   });
@@ -113,9 +126,23 @@
 
   $effect(() => {
     void nodes;
-    const rels = ws.relationships.map((r) =>
-      edgeFor(r.id, r.from, r.to, { onremove: () => app.run(null, () => api.removeRelationship(r.id)) }),
-    );
+    const toName = new Set(unnamedPairs(ws.relationships).flat().map((r) => r.id));
+    const rels = ws.relationships.map((r) => {
+      const h = app.linkHealth?.[r.id];
+      // Two lines between the same tables end in the same place; their labels sit one above the other.
+      const pair = siblings(r, ws.relationships);
+      const dy = pair.length > 1 ? (pair.findIndex((x) => x.id === r.id) - (pair.length - 1) / 2) * 30 : 0;
+      return edgeFor(r.id, r.from, r.to, {
+        dy,
+        onremove: () => app.run(null, () => api.removeRelationship(r.id)),
+        onopen: () => (sheet = toName.has(r.id) ? siblings(r, ws.relationships).map((x) => x.id) : [r.id]),
+        name: r.name,
+        kind: kindWords(h),
+        note: h?.note,
+        unusable: h?.unusable,
+        needsName: toName.has(r.id),
+      });
+    });
     const sugg = suggestions
       .filter((s) => !dismissed.includes(sk(s)))
       .map((s) =>
@@ -142,8 +169,18 @@
     }
   }
 
+  /** Adds a link. A second link between the same two tables opens the sheet that asks for names. */
+  async function addLink(a: FieldRef, b: FieldRef): Promise<boolean> {
+    const before = new Set(ws.relationships.map((r) => r.id));
+    if (!(await app.run(null, () => api.addRelationship(a, b)))) return false;
+    const added = ws.relationships.find((r: Relationship) => !before.has(r.id));
+    const group = added ? siblings(added, ws.relationships) : [];
+    if (group.length > 1) sheet = group.map((r) => r.id);
+    return true;
+  }
+
   async function accept(s: Suggestion) {
-    if (await app.run(null, () => api.addRelationship(s.from, s.to))) {
+    if (await addLink(s.from, s.to)) {
       suggestions = suggestions.filter((x) => sk(x) !== sk(s));
     }
   }
@@ -151,10 +188,23 @@
   async function onconnect(c: Connection) {
     const col = (h?: string | null) => (h ?? '').replace(/^[LR]:/, '');
     if (!c.sourceHandle || !c.targetHandle || c.source === c.target) return;
-    await app.run(null, () =>
-      api.addRelationship({ table: c.source, column: col(c.sourceHandle) }, { table: c.target, column: col(c.targetHandle) }),
-    );
+    await addLink({ table: c.source, column: col(c.sourceHandle) }, { table: c.target, column: col(c.targetHandle) });
   }
+
+  /** Tables that can be reached two ways at the same length: the field list offers them once for each way. */
+  const ways = $derived.by(() => {
+    const out: string[] = [];
+    for (const a of app.tables) {
+      for (const b of app.tables) {
+        if (a.id === b.id) continue;
+        const first = firstLinks(a.id, b.id, ws.relationships, app.linkHealth);
+        if (first.length < 2) continue;
+        const names = first.map((id) => ws.relationships.find((r) => r.id === id)).filter((r): r is Relationship => !!r).map((r) => linkLabel(r, app.tables));
+        out.push(`${a.label} reaches ${b.label} ${first.length === 2 ? 'two ways' : `${first.length} ways`}: ${names.join(' and ')}.`);
+      }
+    }
+    return out;
+  });
 
   function savePositions() {
     const model: Record<string, { x: number; y: number }> = {};
@@ -176,7 +226,7 @@
 
 <header class="toolbar">
   <h2>Model</h2>
-  <span class="hint muted">Drag from a column to a column in another table to relate them.</span>
+  <span class="hint muted">Drag from a column to a column in another table to relate them. Click the label of a line to open it.</span>
   <span class="spacer"></span>
   <button class="btn" onclick={findSuggestions} disabled={looking || app.tables.length < 2}>
     <Icon name="sparkles" /> {looking ? 'Looking…' : 'Suggest relationships'}
@@ -225,9 +275,22 @@
     {/key}
     <div class="legend">
       <span><i class="solid"></i> relationship (the dot marks the side with unique values)</span>
+      <span><i class="warn-line"></i> a column repeats values</span>
       <span><i class="dash"></i> suggestion</span>
     </div>
+    {#if ways.length}
+      <div class="ways" role="note">
+        <strong>More than one way</strong>
+        {#each ways.slice(0, 3) as w (w)}<span>{w}</span>{/each}
+        {#if ways.length > 3}<span>and {ways.length - 3} more.</span>{/if}
+        <span class="muted">The field list offers these tables once for each way.</span>
+      </div>
+    {/if}
   </div>
+{/if}
+
+{#if sheet}
+  <LinkSheet ids={sheet} onclose={() => (sheet = null)} />
 {/if}
 
 <style>
@@ -276,7 +339,32 @@
   .legend span { display: flex; align-items: center; gap: 6px; }
   .legend i { display: inline-block; width: 18px; height: 0; border-top: 1.6px solid var(--text-2); }
   .legend i.dash { border-top: 1.6px dashed var(--accent); }
+  .legend i.warn-line { border-top-color: #c47400; }
+  .ways {
+    position: absolute;
+    left: 72px;
+    bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-width: 340px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow-tile);
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text);
+  }
+  .ways strong { font-weight: 600; }
+  .ways .muted { color: var(--text-2); }
   .empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
   .empty :global(svg) { color: var(--accent-text); }
   .empty p { margin: 0 0 8px; }
+  @media (max-width: 760px) {
+    .hint { display: none; }
+    /* A narrow screen has no room for two boxes at the bottom: the note about two ways goes to the top. */
+    .legend { display: none; }
+    .ways { left: 12px; right: 12px; top: 12px; bottom: auto; max-width: none; }
+  }
 </style>

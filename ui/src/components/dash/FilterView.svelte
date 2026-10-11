@@ -31,7 +31,7 @@
   const style = $derived(tile.filter?.style ?? 'list');
   const single = $derived(!!tile.filter?.single);
   const dtype = $derived<DType>(tables.find((t) => t.id === d?.table)?.columns?.find((c) => c.name === d?.column)?.dtype ?? 'text');
-  const name = $derived(d ? pretty(dimLabel({ table: d.table, column: d.column }, tables)) : '');
+  const name = $derived(d ? pretty(dimLabel({ table: d.table, column: d.column, via: d.via }, tables)) : '');
   const editable = $derived(!!onchange);
 
   const save = (patch: Partial<TileFilter>) => onchange?.({ style, ...tile.filter, ...patch });

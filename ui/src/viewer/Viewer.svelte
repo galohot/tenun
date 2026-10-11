@@ -11,6 +11,7 @@
   import TileBody from '../components/dash/TileBody.svelte';
   import { filterText } from '../lib/filterText';
   import { partialNote } from '../lib/run';
+  import { setLinkNames } from '../lib/links';
   import { EMPTY_RESULT, isStatic } from '../lib/tiles';
   import { phoneLayout, PHONE_MAX, readingOrder } from '../lib/layout';
 
@@ -42,6 +43,9 @@
   onMount(() => {
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => (dark = e.matches));
   });
+
+  // The names of the links the tiles use, so a title can say "Shipped from › region".
+  $effect.pre(() => setLinkNames(data.links));
 
   $effect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -215,6 +219,9 @@
           {#if r.res && l.t.type !== 'kpi' && partialNote(r.res, l.t.dims[0]?.grain)}
             <p class="note">{partialNote(r.res, l.t.dims[0]?.grain)}</p>
           {/if}
+          {#each r.res?.notes ?? [] as n (n)}
+            <p class="note link-note"><Icon name="warning" size={12} /> {n}</p>
+          {/each}
           {#if r.offline && !isStatic(l.t) && l.t.type !== 'filter'}<p class="note">Not filtered in this file</p>{/if}
         </article>
       {/each}
@@ -307,6 +314,8 @@
   .body { flex: 1; min-height: 0; padding: 6px 14px 10px; }
   .body.bare { padding-top: 12px; }
   .note { margin: 0; padding: 0 14px 8px; font-size: 11px; color: var(--text-2); }
+  .note.link-note { display: flex; align-items: flex-start; gap: 5px; line-height: 1.35; }
+  .note.link-note :global(svg) { flex: none; margin-top: 1px; color: #c47400; }
   .late {
     margin: 0 0 16px;
     padding: 10px 14px;

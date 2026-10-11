@@ -87,7 +87,10 @@ fn total_rows(
     let (found, _) = engine.query_custom(q, |sc| {
         let mut exprs = Vec::new();
         for d in &q.dimensions {
-            exprs.push(sc.expr(&d.table, &d.column, d.grain)?.0);
+            exprs.push(
+                sc.expr_via(&d.table, d.via.as_deref(), &d.column, d.grain)?
+                    .0,
+            );
         }
         let n = exprs.len();
         let select: Vec<String> = exprs
@@ -338,6 +341,7 @@ pub fn top_n(
         grain: d0.grain,
         op: FilterOp::NotIn,
         values: keys.clone(),
+        via: d0.via.clone(),
     });
     let rest = engine.query(&SemanticQuery {
         measures: q.measures.clone(),
@@ -434,6 +438,7 @@ pub fn totals(
                         grain: row_dims[0].grain,
                         op: FilterOp::NotIn,
                         values: keys.clone(),
+                        via: row_dims[0].via.clone(),
                     });
                     for r in ask(
                         dims[1..].to_vec(),
@@ -994,6 +999,7 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
             column: Some(column.clone()),
             agg: Agg::Count,
             per: None,
+            via: m.via.clone(),
         }],
         dimensions: vec![],
         filters: filters.to_vec(),
@@ -1002,7 +1008,7 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
     };
     let start_time = std::time::Instant::now();
     let (stats, ignored) = engine.query_custom(&q, |sc| {
-        let (x, _) = sc.expr(&m.table, &column, None)?;
+        let (x, _) = sc.expr_via(&m.table, m.via.as_deref(), &column, None)?;
         Ok((
             format!(
                 "SELECT count({x}), min({x}), max({x}), quantile_cont({x}, 0.25), \
@@ -1045,6 +1051,7 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
         outliers: None,
         sparks: None,
         pair: None,
+        notes: Vec::new(),
     };
     let (Some(n), Some(min), Some(max), Some(q1), Some(q3)) =
         (num(0), num(1), num(2), num(3), num(4))
@@ -1066,7 +1073,7 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
     let count = bin_count(min, max, width) as usize;
 
     let (found, _) = engine.query_custom(&q, |sc| {
-        let (x, _) = sc.expr(&m.table, &column, None)?;
+        let (x, _) = sc.expr_via(&m.table, m.via.as_deref(), &column, None)?;
         let mut params = vec![Param::Double(start), Param::Double(width)];
         params.extend(sc.params.iter().cloned());
         Ok((

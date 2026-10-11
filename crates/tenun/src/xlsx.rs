@@ -196,6 +196,13 @@ pub fn build(
     }
 
     sheet.autofit();
+    // What the reader should know about the links the numbers crossed (V4-D26). It is written
+    // after the columns are sized, so a long sentence does not widen the first column.
+    let note_fmt = Format::new().set_italic();
+    let first = (rows.len() + if totals_on { 3 } else { 2 }) as u32;
+    for (r, note) in (first..).zip(&res.notes) {
+        sheet.write_string_with_format(r, 0, note, &note_fmt)?;
+    }
     Ok(wb.save_to_buffer()?)
 }
 

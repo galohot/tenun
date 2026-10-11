@@ -368,6 +368,11 @@ pub struct Relationship {
     pub id: String,
     pub from: FieldRef,
     pub to: FieldRef,
+    /// A name for the link ("Shipped from"). When two links join the same two tables each one
+    /// has a name, so a field and a formula can say which link they mean (V4-D28). Not written
+    /// until the link is named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// A column of a table. `table` is a stable table id: `<source id>/<table name>`.

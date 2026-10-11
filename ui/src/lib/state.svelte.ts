@@ -2,6 +2,7 @@
 
 import { guessLocale } from './locale';
 import { PHONE_MAX } from './layout';
+import { setLinkLabels } from './links';
 import { api, type CloudStatus, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
 
 export type Route =
@@ -39,7 +40,7 @@ interface Toast {
 }
 
 class App {
-  snap = $state<Snapshot | null>(null);
+  #snap = $state<Snapshot | null>(null);
   health = $state<Health | null>(null);
   route = $state<Route>(parseHash());
   themePref = $state<ThemePref>((localStorage.getItem('tenun-theme') as ThemePref) || 'system');
@@ -65,6 +66,8 @@ class App {
     this.themePref === 'system' ? (this.systemDark ? 'dark' : 'light') : this.themePref,
   );
 
+  /** What the data says about each link, by relationship id (V4-D26). */
+  linkHealth = $derived(this.snap?.health);
   tables = $derived<Table[]>(this.snap?.tables ?? []);
   dashboards = $derived<Dashboard[]>(this.snap?.workspace.dashboards ?? []);
   /** How numbers and dates read in the open workspace. A file without it reads as English. */
@@ -73,6 +76,16 @@ class App {
   #toastId = 0;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
   #lastLocalSave = 0;
+
+  get snap(): Snapshot | null {
+    return this.#snap;
+  }
+
+  /** The names of the links are remembered for titles and column headings, which are plain functions. */
+  set snap(v: Snapshot | null) {
+    this.#snap = v;
+    setLinkLabels(v?.workspace.relationships ?? [], v?.tables ?? []);
+  }
 
   constructor() {
     addEventListener('hashchange', () => (this.route = parseHash()));

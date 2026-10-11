@@ -8,7 +8,8 @@
   import { dim0Kind, effectiveShowAs, SHOW_AS_LABELS, showAsOptions, withShowAs } from '../../lib/showas';
   import { ADVANCED_TYPES, advancedLocked, advancedOn, ganttOffered as hasTwoDates, MORE_CHARTS, SHOW_ADVANCED_SWITCH } from '../../lib/tiers';
   import { isCleared, isPeriod } from '../../lib/filters';
-  import { defaultDim, defaultMeasure, dtypeOf, isRepeated, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, reachableFrom, type DashFilter } from '../../lib/tiles';
+  import { defaultDim, defaultMeasure, dtypeOf, isRepeated, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, type DashFilter } from '../../lib/tiles';
+  import { reachableFrom } from '../../lib/links';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
   import Suggestions from './Suggestions.svelte';
@@ -135,9 +136,9 @@
   }
 
   /** Another field for value `i`. Its "Divide by" stays. */
-  function swapField(i: number, table: string, column: string | null) {
+  function swapField(i: number, table: string, column: string | null, via?: string) {
     const ms = [...tile.measures];
-    ms[i] = { ...defaultMeasure(app.tables, table, column), ...(ms[i]?.per ? { per: ms[i].per } : {}) };
+    ms[i] = { ...defaultMeasure(app.tables, table, column, via), ...(ms[i]?.per ? { per: ms[i].per } : {}) };
     set({ measures: ms });
   }
 
@@ -145,7 +146,7 @@
   function setPer(i: number, per: Measure | null) {
     const { per: _old, ...rest } = tile.measures[i];
     dividing = null;
-    set({ measures: tile.measures.map((x, j) => (j === i ? (per ? { ...rest, per: { table: per.table, column: per.column, agg: per.agg } } : rest) : x)) });
+    set({ measures: tile.measures.map((x, j) => (j === i ? (per ? { ...rest, per: { table: per.table, column: per.column, agg: per.agg, ...(per.via ? { via: per.via } : {}) } } : rest) : x)) });
   }
 
   function setShowAs(i: number, how: string) {
@@ -175,7 +176,7 @@
 
   const m = $derived(tile.measures[0]);
   const rels = $derived(app.snap!.workspace.relationships);
-  const reach = $derived(m ? reachableFrom(m.table, rels) : null);
+  const reach = $derived(m ? reachableFrom(m.table, rels, app.linkHealth) : null);
   /** The ways a value can be added up: a number column can be summed, any other column only counted. */
   const aggsOf = (x: Measure | undefined): Agg[] =>
     !x || x.column === null
@@ -234,9 +235,9 @@
     ...(advanced || tile.sort?.by === 'manual' ? [{ id: 'manual', label: 'Manual order' }] : []),
   ] as typeof sorts);
 
-  function setDim(i: number, table: string, column: string) {
+  function setDim(i: number, table: string, column: string, via?: string) {
     const dims = [...tile.dims];
-    dims[i] = defaultDim(app.tables, table, column);
+    dims[i] = defaultDim(app.tables, table, column, via);
     const isDate = dims[0] && ['date', 'datetime'].includes(dtypeOf(app.tables, dims[0].table, dims[0].column) ?? '');
     // A calendar has one square for each day.
     if (i === 0 && isCalendar && dims[0]) dims[0] = { ...dims[0], grain: 'day' };
@@ -278,11 +279,11 @@
   const styleChoices = $derived(filterStyles.filter((s) => !s.types || !filterField || s.types.includes(filterField)));
 
   /** A new field starts with a style that suits it and nothing selected. */
-  function setFilterField(table: string, column: string | null) {
+  function setFilterField(table: string, column: string | null, via?: string) {
     if (!column) return;
     const t = dtypeOf(app.tables, table, column);
     const style = t === 'number' ? 'range' : t === 'date' || t === 'datetime' ? 'dates' : 'list';
-    set({ dims: [{ table, column }], h: tile.h === 1 ? 3 : tile.h, filter: { style } });
+    set({ dims: [{ table, column, ...(via ? { via } : {}) }], h: tile.h === 1 ? 3 : tile.h, filter: { style } });
   }
   function setFilterStyle(style: NonNullable<Tile['filter']>['style']) {
     // The selection of one style means nothing in another. A dropdown is one row high; a list needs more.
@@ -388,23 +389,23 @@
   }
 
   /** A start or an end date for a Gantt chart: the earliest start and the latest end of each row. */
-  function setDateValue(i: number, table: string, column: string | null) {
+  function setDateValue(i: number, table: string, column: string | null, via?: string) {
     if (column === null) return;
     const ms = [...tile.measures];
-    ms[i] = { table, column, agg: i === 0 ? 'min' : 'max' };
+    ms[i] = { table, column, agg: i === 0 ? 'min' : 'max', ...(via ? { via } : {}) };
     set({ measures: ms });
   }
 
   /** The column that names who to follow in a cohort grid. It is counted by its different values. */
-  function setEntity(table: string, column: string | null) {
+  function setEntity(table: string, column: string | null, via?: string) {
     if (column === null) return;
-    set({ measures: [{ table, column, agg: 'count_distinct' }, ...tile.measures.slice(1)] });
+    set({ measures: [{ table, column, agg: 'count_distinct', ...(via ? { via } : {}) }, ...tile.measures.slice(1)] });
   }
 
   /** The value a cohort adds up instead of the share that is active. */
-  function setCohortSum(table: string, column: string | null) {
+  function setCohortSum(table: string, column: string | null, via?: string) {
     if (!tile.measures[0]) return;
-    set({ measures: [tile.measures[0], { table, column, agg: 'sum' }] });
+    set({ measures: [tile.measures[0], { table, column, agg: 'sum', ...(via ? { via } : {}) }] });
   }
 
   // The periods a compare chart can take: every value of its second field, oldest first.
@@ -642,9 +643,9 @@
         <FieldPicker
           mode="measure"
           table={x.per.table}
-          column={x.per.column}
-          reachable={reach}
-          onchange={(t, c) => setPer(i, defaultMeasure(app.tables, t, c))}
+          column={x.per.column} via={x.per.via}
+          reachable={reach} base={m?.table ?? null}
+          onchange={(t, c, v) => setPer(i, defaultMeasure(app.tables, t, c, v))}
           onclear={() => setPer(i, null)} />
         <select
           class="field"
@@ -657,7 +658,7 @@
     {:else if dividing === i}
       <div class="per">
         <span class="label">Divide by</span>
-        <FieldPicker mode="measure" table={null} column={null} placeholder="What to divide by" reachable={reach} onchange={(t, c) => setPer(i, defaultMeasure(app.tables, t, c))} />
+        <FieldPicker mode="measure" table={null} column={null} placeholder="What to divide by" reachable={reach} base={m?.table ?? null} onchange={(t, c, v) => setPer(i, defaultMeasure(app.tables, t, c, v))} />
         <button class="link" onclick={() => (dividing = null)}>Cancel</button>
       </div>
     {:else}
@@ -859,9 +860,9 @@
       <FieldPicker
         mode="dim"
         table={tile.dims[0]?.table ?? null}
-        column={tile.dims[0]?.column ?? null}
+        column={tile.dims[0]?.column ?? null} via={tile.dims[0]?.via}
         placeholder="Pick a field"
-        onchange={(t, c) => setFilterField(t, c)}
+        onchange={(t, c, v) => setFilterField(t, c, v)}
         onclear={() => set({ dims: [], filter: { style: tile.filter?.style ?? 'list' } })} />
       {#if tile.dims[0]}
         <div class="grains stack" role="radiogroup" aria-label="Filter style">
@@ -892,11 +893,11 @@
     <FieldPicker
       mode="measure"
       table={m?.table ?? null}
-      column={m?.column ?? null}
+      column={m?.column ?? null} via={m?.via}
       placeholder={isGantt ? 'The column the work starts in' : isCohort ? 'A column like customer_id' : numberOnly ? 'A column of numbers' : 'What to measure'}
       numbersOnly={numberOnly}
       datesOnly={isGantt}
-      onchange={(t, c) => (isGantt ? setDateValue(0, t, c) : isCohort ? setEntity(t, c) : swapField(0, t, c))} />
+      onchange={(t, c, v) => (isGantt ? setDateValue(0, t, c, v) : isCohort ? setEntity(t, c, v) : swapField(0, t, c, v))} />
     {#if m && isCohort}
       <p class="hint tight">Each different value in this column is one customer, user or item. It joins the cohort of the first period it appears in.</p>
     {/if}
@@ -914,10 +915,10 @@
       <FieldPicker
         mode="measure"
         table={tile.measures[1]?.table ?? null}
-        column={tile.measures[1]?.column ?? null}
+        column={tile.measures[1]?.column ?? null} via={tile.measures[1]?.via}
         placeholder="What to measure"
-        reachable={reach}
-        onchange={(t, c) => swapField(1, t, c)}
+        reachable={reach} base={m?.table ?? null}
+        onchange={(t, c, v) => swapField(1, t, c, v)}
         onclear={() => removeMeasure(1)} />
       {#if tile.measures[1]}
         <select class="field" value={tile.measures[1].agg} onchange={(e) => set({ measures: [m, { ...tile.measures[1], agg: e.currentTarget.value as Agg }, ...tile.measures.slice(2)] })}>
@@ -931,10 +932,10 @@
         <FieldPicker
           mode="measure"
           table={tile.measures[2]?.table ?? null}
-          column={tile.measures[2]?.column ?? null}
+          column={tile.measures[2]?.column ?? null} via={tile.measures[2]?.via}
           placeholder="Make the dots bigger for more"
-          reachable={reach}
-          onchange={(t, c) => set({ measures: [m, tile.measures[1], defaultMeasure(app.tables, t, c)] })}
+          reachable={reach} base={m?.table ?? null}
+          onchange={(t, c, v) => set({ measures: [m, tile.measures[1], defaultMeasure(app.tables, t, c, v)] })}
           onclear={() => removeMeasure(2)} />
         {#if tile.measures[2]}
           <select class="field" aria-label="How to add up the size" value={tile.measures[2].agg} onchange={(e) => set({ measures: [m, tile.measures[1], { ...tile.measures[2], agg: e.currentTarget.value as Agg }] })}>
@@ -949,10 +950,10 @@
       <FieldPicker
         mode="measure"
         table={tile.measures[1]?.table ?? null}
-        column={tile.measures[1]?.column ?? null}
+        column={tile.measures[1]?.column ?? null} via={tile.measures[1]?.via}
         placeholder="A value that holds the target"
-        reachable={reach}
-        onchange={(t, c) => set({ measures: [m, defaultMeasure(app.tables, t, c)], target: undefined })}
+        reachable={reach} base={m?.table ?? null}
+        onchange={(t, c, v) => set({ measures: [m, defaultMeasure(app.tables, t, c, v)], target: undefined })}
         onclear={() => removeMeasure(1)} />
       {#if tile.measures[1]}
         <select class="field" aria-label="How to add up the target" value={tile.measures[1].agg} onchange={(e) => set({ measures: [m, { ...tile.measures[1], agg: e.currentTarget.value as Agg }] })}>
@@ -976,10 +977,10 @@
       <FieldPicker
         mode="measure"
         table={tile.measures[1]?.table ?? null}
-        column={tile.measures[1]?.column ?? null}
+        column={tile.measures[1]?.column ?? null} via={tile.measures[1]?.via}
         placeholder="A second value, or compare two periods"
-        reachable={reach}
-        onchange={(t, c) => set({ measures: [m, defaultMeasure(app.tables, t, c)] })}
+        reachable={reach} base={m?.table ?? null}
+        onchange={(t, c, v) => set({ measures: [m, defaultMeasure(app.tables, t, c, v)] })}
         onclear={() => removeMeasure(1)} />
       {#if tile.measures[1]}
         <select class="field" aria-label="How to add up the second value" value={tile.measures[1].agg} onchange={(e) => set({ measures: [m, { ...tile.measures[1], agg: e.currentTarget.value as Agg }] })}>
@@ -995,11 +996,11 @@
       <FieldPicker
         mode="measure"
         table={tile.measures[1]?.table ?? null}
-        column={tile.measures[1]?.column ?? null}
+        column={tile.measures[1]?.column ?? null} via={tile.measures[1]?.via}
         placeholder="The column the work ends in"
         datesOnly
-        reachable={reach}
-        onchange={(t, c) => setDateValue(1, t, c)}
+        reachable={reach} base={m?.table ?? null}
+        onchange={(t, c, v) => setDateValue(1, t, c, v)}
         onclear={() => removeMeasure(1)} />
       <p class="hint tight">Each row is a bar from its earliest start to its latest end. The first 100 rows are drawn.</p>
     {/if}
@@ -1008,10 +1009,10 @@
       <FieldPicker
         mode="measure"
         table={tile.measures[1]?.table ?? null}
-        column={tile.measures[1]?.column ?? null}
+        column={tile.measures[1]?.column ?? null} via={tile.measures[1]?.via}
         placeholder="Show a total, not a share"
         numbersOnly
-        reachable={reach}
+        reachable={reach} base={m?.table ?? null}
         onchange={setCohortSum}
         onclear={() => removeMeasure(1)} />
     {/if}
@@ -1020,9 +1021,9 @@
         <FieldPicker
           mode="measure"
           table={extra.table}
-          column={extra.column}
-          reachable={reach}
-          onchange={(t, c) => swapField(k + 1, t, c)}
+          column={extra.column} via={extra.via}
+          reachable={reach} base={m?.table ?? null}
+          onchange={(t, c, v) => swapField(k + 1, t, c, v)}
           onclear={() => removeMeasure(k + 1)} />
         {@render valueRows(k + 1)}
       {/each}
@@ -1032,8 +1033,8 @@
           table={null}
           column={null}
           placeholder="Add another value"
-          reachable={reach}
-          onchange={(t, c) => set({ measures: [...tile.measures, defaultMeasure(app.tables, t, c)] })} />
+          reachable={reach} base={m?.table ?? null}
+          onchange={(t, c, v) => set({ measures: [...tile.measures, defaultMeasure(app.tables, t, c, v)] })} />
       {/if}
     {/if}
   </div>
@@ -1044,10 +1045,10 @@
       <FieldPicker
         mode="dim"
         table={tile.dims[0]?.table ?? null}
-        column={tile.dims[0]?.column ?? null}
+        column={tile.dims[0]?.column ?? null} via={tile.dims[0]?.via}
         placeholder={tile.type === 'kpi' ? 'A date, for the trend' : isScatter ? 'One dot for each of these' : isFunnel ? 'The steps, like visit and sale' : isBox ? 'One box for each of these' : isBullet ? 'One bar for each of these' : isGantt ? 'A task, a project or an id' : isCalendar || isCohort ? 'A date column' : isSankey ? 'Where it starts, like a channel' : 'Category or date'}
-        reachable={reach}
-        onchange={(t, c) => c && setDim(0, t, c)}
+        reachable={reach} base={m?.table ?? null}
+        onchange={(t, c, v) => c && setDim(0, t, c, v)}
         onclear={() => removeDim(0)} />
       {#if tile.dims[0] && (dimTypes[0] === 'date' || dimTypes[0] === 'datetime') && !isCalendar && !isGantt}
         <div class="grains" role="radiogroup" aria-label="Date grouping">
@@ -1091,7 +1092,7 @@
     <div class="sec">
       <span class="label">Next stages</span>
       {#each tile.dims.slice(1, 3) as d, k}
-        <FieldPicker mode="dim" table={d.table} column={d.column} reachable={reach} onchange={(t, c) => c && setDim(k + 1, t, c)} onclear={() => removeDim(k + 1)} />
+        <FieldPicker mode="dim" table={d.table} column={d.column} via={d.via} reachable={reach} base={m?.table ?? null} onchange={(t, c, v) => c && setDim(k + 1, t, c, v)} onclear={() => removeDim(k + 1)} />
       {/each}
       {#if tile.dims.length < 3}
         <FieldPicker
@@ -1099,8 +1100,8 @@
           table={null}
           column={null}
           placeholder={tile.dims.length < 2 ? 'Where it goes next, like a category' : 'A third stage (optional)'}
-          reachable={reach}
-          onchange={(t, c) => c && setDim(tile.dims.length, t, c)} />
+          reachable={reach} base={m?.table ?? null}
+          onchange={(t, c, v) => c && setDim(tile.dims.length, t, c, v)} />
       {/if}
       <p class="hint tight">A band is as wide as its value. A stage shows 25 nodes at most; the smallest are added up as Other.</p>
     </div>
@@ -1112,10 +1113,10 @@
       <FieldPicker
         mode="dim"
         table={tile.dims[1]?.table ?? null}
-        column={tile.dims[1]?.column ?? null}
+        column={tile.dims[1]?.column ?? null} via={tile.dims[1]?.via}
         placeholder="A date, like the year"
-        reachable={reach}
-        onchange={(t, c) => c && set({ dims: [tile.dims[0], defaultDim(app.tables, t, c)], periods: undefined })}
+        reachable={reach} base={m?.table ?? null}
+        onchange={(t, c, v) => c && set({ dims: [tile.dims[0], defaultDim(app.tables, t, c, v)], periods: undefined })}
         onclear={() => set({ dims: tile.dims.slice(0, 1), periods: undefined })} />
       {#if tile.dims[1] && (dim1Type === 'date' || dim1Type === 'datetime')}
         <div class="grains" role="radiogroup" aria-label="Date grouping of the periods">
@@ -1143,10 +1144,10 @@
       <FieldPicker
         mode="dim"
         table={tile.dims[1]?.table ?? null}
-        column={tile.dims[1]?.column ?? null}
+        column={tile.dims[1]?.column ?? null} via={tile.dims[1]?.via}
         placeholder={tile.type === 'table' ? 'Another column' : 'Colour by a category'}
-        reachable={reach}
-        onchange={(t, c) => c && setDim(1, t, c)}
+        reachable={reach} base={m?.table ?? null}
+        onchange={(t, c, v) => c && setDim(1, t, c, v)}
         onclear={() => removeDim(1)} />
     </div>
   {/if}
@@ -1163,10 +1164,10 @@
       <div class="sec">
         <span class="label">Then by (optional)</span>
         {#each tile.dims.slice(1, PIVOT_MAX_ROWS) as d, k}
-          <FieldPicker mode="dim" table={d.table} column={d.column} reachable={reach} onchange={(t, c) => c && setDim(k + 1, t, c)} onclear={() => removeDim(k + 1)} />
+          <FieldPicker mode="dim" table={d.table} column={d.column} via={d.via} reachable={reach} base={m?.table ?? null} onchange={(t, c, v) => c && setDim(k + 1, t, c, v)} onclear={() => removeDim(k + 1)} />
         {/each}
         {#if tile.dims.length < PIVOT_MAX_ROWS}
-          <FieldPicker mode="dim" table={null} column={null} placeholder="Another row field" reachable={reach} onchange={(t, c) => c && setDim(tile.dims.length, t, c)} />
+          <FieldPicker mode="dim" table={null} column={null} placeholder="Another row field" reachable={reach} base={m?.table ?? null} onchange={(t, c, v) => c && setDim(tile.dims.length, t, c, v)} />
         {/if}
       </div>
     {/if}
@@ -1175,10 +1176,10 @@
       <FieldPicker
         mode="dim"
         table={tile.cols?.table ?? null}
-        column={tile.cols?.column ?? null}
+        column={tile.cols?.column ?? null} via={tile.cols?.via}
         placeholder="The field across the top"
-        reachable={reach}
-        onchange={(t, c) => c && set({ cols: defaultDim(app.tables, t, c) })}
+        reachable={reach} base={m?.table ?? null}
+        onchange={(t, c, v) => c && set({ cols: defaultDim(app.tables, t, c, v) })}
         onclear={() => set({ cols: undefined })} />
       {#if tile.cols && ['date', 'datetime'].includes(dtypeOf(app.tables, tile.cols.table, tile.cols.column) ?? '')}
         <div class="grains" role="radiogroup" aria-label="Date grouping of the columns">
@@ -1223,10 +1224,10 @@
           <FieldPicker
             mode="dim"
             table={tile.spark.table}
-            column={tile.spark.column}
+            column={tile.spark.column} via={tile.spark.via}
             datesOnly
-            reachable={reach}
-            onchange={(t, c) => c && set({ spark: { table: t, column: c, grain: tile.spark?.grain ?? 'month' } })} />
+            reachable={reach} base={m?.table ?? null}
+            onchange={(t, c, v) => c && set({ spark: { table: t, column: c, ...(v ? { via: v } : {}), grain: tile.spark?.grain ?? 'month' } })} />
           <div class="grains" role="radiogroup" aria-label="Period of the trend">
             {#each SPARK_GRAINS as g}
               <button role="radio" aria-checked={(tile.spark.grain ?? 'month') === g} class:on={(tile.spark.grain ?? 'month') === g} onclick={() => set({ spark: { ...tile.spark!, grain: g } })}>{g}</button>
@@ -1439,10 +1440,10 @@
       <FieldPicker
         mode="dim"
         table={tile.repeat?.table ?? null}
-        column={tile.repeat?.column ?? null}
+        column={tile.repeat?.column ?? null} via={tile.repeat?.via}
         placeholder="One chart for each…"
-        reachable={reach}
-        onchange={(t, c) => c && set({ repeat: defaultDim(app.tables, t, c), layout: undefined, mix: undefined })}
+        reachable={reach} base={m?.table ?? null}
+        onchange={(t, c, v) => c && set({ repeat: defaultDim(app.tables, t, c, v), layout: undefined, mix: undefined })}
         onclear={() => set({ repeat: undefined, ownScale: undefined })} />
       {#if tile.repeat}
         <label class="check">

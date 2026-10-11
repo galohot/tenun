@@ -89,8 +89,34 @@ export interface FieldRef {
 
 export interface Relationship {
   id: string;
+  /** The many side. */
   from: FieldRef;
+  /** The one side. */
   to: FieldRef;
+  /** A name for the link ("Shipped from"). Two links that join the same two tables each have one. */
+  name?: string;
+}
+
+/**
+ * What the data says about a link, made when its tables load. `kind` reads from the one side:
+ * `one-many` is the usual link, `one-one` works both ways, `many-one` means the stored way stopped
+ * working so the link reads the other way round, and `many-many` is not used.
+ */
+export interface LinkHealth {
+  oneToOne: boolean;
+  /** Rows on the one side beyond the first of each key. */
+  duplicates: number;
+  /** Up to five of the keys that repeat, and how many rows each has. */
+  sample: Cell[];
+  sampleRows?: number[];
+  /** How many keys repeat. */
+  keys?: number;
+  /** No key repeats on the many side, so the link also works from the one side. */
+  fromUnique: boolean;
+  kind: 'one-many' | 'one-one' | 'many-one' | 'many-many';
+  unusable?: boolean;
+  /** The warning in plain words. Not set when the link is healthy. */
+  note?: string;
 }
 
 /** How often a web link is fetched again. */
@@ -167,19 +193,25 @@ export interface Measure {
   column: string | null;
   agg: Agg;
   /** Makes a ratio: agg(column) divided by agg(per). A zero below gives a gap. */
-  per?: { table: string; column: string | null; agg: Agg };
+  per?: { table: string; column: string | null; agg: Agg; via?: string };
+  /** The link (a relationship id) the path to `table` crosses, when two links lead to it. Not set: the first. */
+  via?: string;
 }
 
 export interface Dim {
   table: string;
   column: string;
   grain?: Grain | null;
+  /** The link the path to `table` crosses (see `Measure.via`). */
+  via?: string;
 }
 
 export interface Filter {
   table: string;
   column: string;
   grain?: Grain | null;
+  /** The link the path to `table` crosses. A click on a mark carries the link of its field. */
+  via?: string;
   op: 'in' | 'not_in' | 'between' | 'gte' | 'lte' | 'range' | 'contains' | 'starts_with' | 'blank' | 'not_blank' | 'relative';
   values: (string | number | boolean | null)[];
 }
@@ -236,6 +268,8 @@ export interface QueryResult {
   compare?: { label: string; rows: Cell[][] };
   /** Tables only, when the row limit cut the result: how many rows there are in all. */
   total_rows?: number;
+  /** What the reader should know about the links this result crossed: a key that repeats on the one side, so the first row was used. */
+  notes?: string[];
   /** Small multiples: the repeat values that have a chart (drawing order) and how many more there are. Rows are `[group, repeat value, value]`. */
   repeat?: { keys: Cell[]; more: number };
   /** Indexed lines: the rows before they were divided by the first value, same shape as `rows`. */
@@ -486,6 +520,8 @@ export interface Snapshot {
   loaded_at?: Record<string, string>;
   /** Ids of the web links whose key has a value on this computer. */
   link_keys?: string[];
+  /** Relationship id → what the data says about the link. Not set for a link that was not checked. */
+  health?: Record<string, LinkHealth>;
   dirty: boolean;
 }
 
@@ -628,6 +664,9 @@ export const api = {
     ),
   addRelationship: (from: FieldRef, to: FieldRef) => call<Snapshot>('POST', '/relationships', { from, to }),
   removeRelationship: (id: string) => call<Snapshot>('DELETE', `/relationships/${encodeURIComponent(id)}`),
+  /** Names a link, or clears its name (an empty name). A name must be new and cannot be a table's. */
+  renameRelationship: (id: string, name: string) =>
+    call<Snapshot>('PATCH', `/relationships/${encodeURIComponent(id)}`, { name }),
   suggest: () => call<Suggestion[]>('GET', '/relationships/suggest'),
   putDashboards: (d: Dashboard[]) => call<{ ok: boolean }>('PUT', '/dashboards', d),
   putLayout: (l: unknown) => call<{ ok: boolean }>('PUT', '/layout', l),

@@ -55,12 +55,13 @@ pub mod parse;
 pub mod rename;
 pub mod sql;
 
-pub use rename::{rename_column, rename_column_qualified};
+pub use rename::{rename_column, rename_column_qualified, rename_link};
 
 #[cfg(test)]
 mod tests;
 
 use crate::catalog::{Catalog, DType};
+use crate::links::{Health, Links};
 use crate::workspace::Relationship;
 use chrono::{NaiveDate, NaiveDateTime};
 use duckdb::Connection;
@@ -116,6 +117,8 @@ pub enum Kind {
 pub struct Context<'a> {
     pub catalog: &'a Catalog,
     pub rels: &'a [Relationship],
+    /// What the data says about each relationship (V4-D26). `None`: every link is read as stored.
+    pub health: Option<&'a Health>,
     /// What `TODAY()` is. A date literal goes into the SQL, so a view is stable while it is used.
     pub today: NaiveDate,
     /// What `NOW()` is.
@@ -129,9 +132,15 @@ impl<'a> Context<'a> {
         Context {
             catalog,
             rels,
+            health: None,
             today: now.date(),
             now,
         }
+    }
+
+    /// The relationships with what the data says about them.
+    pub fn links(&self) -> Links<'a> {
+        Links::new(self.rels, self.health)
     }
 }
 

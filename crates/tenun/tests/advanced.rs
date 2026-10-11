@@ -146,6 +146,7 @@ fn box_stats_match_duckdb_quantiles() {
                 column: Some("v".into()),
                 agg: Agg::Count,
                 per: None,
+                via: None,
             }],
             dimensions: vec![],
             filters: vec![

@@ -75,7 +75,7 @@ async function chartPicture(tile: Tile, res: QueryResult, tables: Named[], title
   let note = '';
   try {
     const built = buildOption({ res, tile, colors, selected: null, width: w, height: h, tables });
-    note = [built.note, partialNote(res, tile.dims[0]?.grain)].filter(Boolean).join(' ');
+    note = [built.note, partialNote(res, tile.dims[0]?.grain), ...(res.notes ?? [])].filter(Boolean).join(' ');
     const chart = echarts.init(holder, null, { renderer: 'canvas', width: w, height: h });
     chart.setOption({ ...built.option, animation: false });
     url = chart.getDataURL({ pixelRatio: SCALE, backgroundColor: colors.surface });

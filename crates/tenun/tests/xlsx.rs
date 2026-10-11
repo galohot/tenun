@@ -97,3 +97,23 @@ fn dates_are_dates_and_there_is_no_total_row_without_totals() {
     );
     assert_eq!(rows.len(), 3);
 }
+
+#[test]
+fn the_note_about_a_link_is_written_under_the_numbers() {
+    let e = engine("note");
+    let tile = json!({
+        "id": "t", "type": "table",
+        "measures": [{ "table": "s1/sales", "column": "amount", "agg": "sum" }],
+        "dims": [{ "table": "s1/sales", "column": "cat" }],
+    });
+    let t: Tile = serde_json::from_value(tile.clone()).unwrap();
+    let mut res = run_tile(&e, &t, &[]).unwrap();
+    res.notes = vec!["stores.csv has 2 rows with id 7. Tenun used the first.".into()];
+    let rows = read(xlsx::build(&tile, &res, &[], "Sales").unwrap());
+    // The header, two groups, a blank row, then the sentence.
+    assert_eq!(rows.len(), 5, "{rows:?}");
+    assert_eq!(
+        rows[4][0].as_string().as_deref(),
+        Some("stores.csv has 2 rows with id 7. Tenun used the first.")
+    );
+}

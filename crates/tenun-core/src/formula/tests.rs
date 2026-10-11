@@ -47,6 +47,7 @@ fn rel(id: &str, from: (&str, &str), to: (&str, &str)) -> Relationship {
             table: to.0.into(),
             column: to.1.into(),
         },
+        name: None,
     }
 }
 
@@ -156,6 +157,7 @@ fn cx() -> Context<'static> {
     Context {
         catalog: &w.catalog,
         rels: &w.rels,
+        health: None,
         today,
         now: today.and_hms_opt(14, 3, 22).unwrap(),
     }

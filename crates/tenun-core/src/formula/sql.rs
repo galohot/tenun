@@ -24,8 +24,7 @@ use super::functions::{emit, emit_aggregate};
 use super::parse::{BinOp, UnOp};
 use super::{AggregateSql, Body, ColumnSql, Compiled, Context, FormulaError, Join, Kind, Part};
 use crate::catalog::{ident, lit};
-use crate::query::{Edge, join_on, reach};
-use std::collections::HashMap;
+use crate::links::{Paths, join_on};
 
 /// The most SQL a formula may become, in bytes (V4-D24).
 pub const MAX_SQL: usize = 200_000;
@@ -105,13 +104,14 @@ pub(crate) fn typed_null(ty: Ty) -> String {
 // ---- joins ----------------------------------------------------------------------------
 
 /// The joins a formula needs from its table (`t0`) to the tables it reads: `r1`, `r2`, … in
-/// the order they are first used.
+/// the order they are first used. A join is named after the path that reaches it, so one table
+/// read through two links is two joins (V4-D28).
 struct JoinPlan<'a> {
     cx: &'a Context<'a>,
-    root: String,
-    paths: HashMap<String, Option<Edge>>,
-    /// Table ids; the alias of the table at index `i` is `r{i + 1}`.
-    joined: Vec<String>,
+    paths: Paths<'a>,
+    /// The path of each join, as the link ids crossed from the table of the formula. The alias
+    /// of the join at index `i` is `r{i + 1}`.
+    keys: Vec<Vec<String>>,
     joins: Vec<Join>,
 }
 
@@ -119,51 +119,38 @@ impl<'a> JoinPlan<'a> {
     fn new(cx: &'a Context<'a>, root: &str) -> Self {
         JoinPlan {
             cx,
-            root: root.to_string(),
-            paths: reach(root, cx.rels),
-            joined: Vec::new(),
+            paths: Paths::new(root, cx.links()),
+            keys: Vec::new(),
             joins: Vec::new(),
         }
     }
 
-    fn existing(&self, table: &str) -> Option<String> {
-        if table == self.root {
-            return Some("t0".into());
-        }
-        self.joined
-            .iter()
-            .position(|t| t == table)
-            .map(|i| format!("r{}", i + 1))
-    }
-
-    /// The alias of a table, adding the joins that reach it.
-    fn alias(&mut self, table: &str) -> String {
-        if let Some(a) = self.existing(table) {
-            return a;
-        }
-        // The chain back to the table of the formula, then joined root-first.
-        let mut chain = Vec::new();
-        let mut cur = table.to_string();
-        while let Some(Some(e)) = self.paths.get(&cur) {
-            chain.push(e.clone());
-            cur = e.from_table.clone();
-        }
-        for e in chain.into_iter().rev() {
-            if self.existing(&e.to_table).is_some() {
+    /// The alias of a table, adding the joins that reach it. `via` is the link the path must
+    /// cross, when a link was named.
+    fn alias(&mut self, table: &str, via: Option<&str>) -> String {
+        // A table that cannot be reached has no path. The checker rules this out.
+        let Ok(path) = self.paths.path(table, via) else {
+            return "t0".into();
+        };
+        let mut key: Vec<String> = Vec::new();
+        let mut from = "t0".to_string();
+        for e in path {
+            key.push(e.rel.clone());
+            if let Some(i) = self.keys.iter().position(|k| *k == key) {
+                from = format!("r{}", i + 1);
                 continue;
             }
-            let from = self.existing(&e.from_table).unwrap_or_else(|| "t0".into());
-            self.joined.push(e.to_table.clone());
-            let alias = format!("r{}", self.joined.len());
             let (Some(ft), Some(tt)) = (
                 self.cx.catalog.table(&e.from_table),
                 self.cx.catalog.table(&e.to_table),
             ) else {
-                continue;
+                return "t0".into();
             };
             let (Some(fc), Some(tc)) = (ft.column(&e.from_col), tt.column(&e.to_col)) else {
-                continue;
+                return "t0".into();
             };
+            self.keys.push(key.clone());
+            let alias = format!("r{}", self.keys.len());
             let on = join_on(
                 &format!("{from}.{}", ident(&e.from_col)),
                 &format!("{alias}.{}", ident(&e.to_col)),
@@ -172,13 +159,13 @@ impl<'a> JoinPlan<'a> {
             );
             self.joins.push(Join {
                 table: e.to_table.clone(),
-                sql_ref: tt.sql_ref.clone(),
-                alias,
+                sql_ref: e.target_sql(tt, fc.dtype != tc.dtype),
+                alias: alias.clone(),
                 on,
             });
+            from = alias;
         }
-        // A table that cannot be reached has no alias. The checker rules this out.
-        self.existing(table).unwrap_or_else(|| "t0".into())
+        from
     }
 }
 
@@ -230,8 +217,8 @@ impl<'a> Gen<'a> {
             TNode::Str(s) => lit(s),
             TNode::Bool(b) => if *b { "TRUE" } else { "FALSE" }.into(),
             TNode::Sql { sql, .. } => sql.clone(),
-            TNode::Col { table, column } => {
-                let a = self.plan.alias(table);
+            TNode::Col { table, column, via } => {
+                let a = self.plan.alias(table, via.as_deref());
                 let r = format!("{a}.{}", ident(column));
                 match e.ty {
                     Ty::Num => format!("CAST({r} AS DOUBLE)"),

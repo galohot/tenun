@@ -54,6 +54,7 @@ pub fn tile_filter(engine: &Engine, tile: &Tile) -> Option<DashFilter> {
             grain: None,
             op,
             values,
+            via: d.via.clone(),
         },
         from_tile: tile.id.clone(),
     };
@@ -200,6 +201,7 @@ pub fn options(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
         table: d.table.clone(),
         column: d.column.clone(),
         grain: None,
+        via: d.via.clone(),
     };
     match style {
         "range" => range_bins(engine, &plain, dtype, filters),
@@ -212,6 +214,7 @@ pub fn options(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
                 column: Some(d.column.clone()),
                 agg,
                 per: None,
+                via: d.via.clone(),
             };
             let mut res = engine.query(&SemanticQuery {
                 measures: vec![ask(Agg::Min), ask(Agg::Max)],
@@ -231,6 +234,7 @@ pub fn options(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
                     column: None,
                     agg: Agg::Count,
                     per: None,
+                    via: d.via.clone(),
                 }],
                 dimensions: vec![plain],
                 filters: filters.to_vec(),
@@ -281,6 +285,7 @@ fn range_bins(
             column: Some(d.column.clone()),
             agg: Agg::Count,
             per: None,
+            via: d.via.clone(),
         }],
         dimensions: vec![],
         filters: filters.to_vec(),
@@ -288,7 +293,7 @@ fn range_bins(
         limit: None,
     };
     let (stats, ignored) = engine.query_custom(&q, |sc| {
-        let (x, _) = sc.expr(&d.table, &d.column, None)?;
+        let (x, _) = sc.expr_via(&d.table, d.via.as_deref(), &d.column, None)?;
         Ok((
             format!("SELECT count({x}), min({x}), max({x}){}", sc.from_where),
             sc.params.clone(),
@@ -311,7 +316,7 @@ fn range_bins(
         1.0
     };
     let (found, _) = engine.query_custom(&q, |sc| {
-        let (x, _) = sc.expr(&d.table, &d.column, None)?;
+        let (x, _) = sc.expr_via(&d.table, d.via.as_deref(), &d.column, None)?;
         let mut params = vec![Param::Double(min), Param::Double(width)];
         params.extend(sc.params.iter().cloned());
         Ok((
@@ -398,41 +403,52 @@ pub fn rows_behind(
             .table(id)
             .ok_or_else(|| anyhow::anyhow!("The table {id} no longer exists."))
     };
-    // Every base column, then each column a related table gives to the tile.
-    let mut fields: Vec<(String, String)> = table(&base)?
+    // Every base column, then each column a related table gives to the tile. A table read
+    // through a named link is a field of its own (V4-D28).
+    type Field = (String, Option<String>, String);
+    let mut fields: Vec<Field> = table(&base)?
         .columns
         .iter()
-        .map(|c| (base.clone(), c.name.clone()))
+        .map(|c| (base.clone(), None, c.name.clone()))
         .collect();
-    let mut used: Vec<(&str, &str)> = vec![];
+    let mut used: Vec<(&str, Option<&str>, &str)> = vec![];
     for d in &q.dimensions {
-        used.push((&d.table, &d.column));
+        used.push((&d.table, d.via.as_deref(), &d.column));
     }
     for m in &q.measures {
         if let Some(c) = &m.column {
-            used.push((&m.table, c));
+            used.push((&m.table, m.via.as_deref(), c));
         }
         if let Some(p) = &m.per
             && let Some(c) = &p.column
         {
-            used.push((&p.table, c));
+            used.push((&p.table, p.via.as_deref(), c));
         }
     }
-    for (t, c) in used {
+    for (t, via, c) in used {
         let known = catalog.table(t).is_some_and(|x| x.column(c).is_some());
-        if t != base && known && !fields.iter().any(|(ft, fc)| ft == t && fc == c) {
-            fields.push((t.to_string(), c.to_string()));
+        if t != base
+            && known
+            && !fields
+                .iter()
+                .any(|(ft, fv, fc)| ft == t && fv.as_deref() == via && fc == c)
+        {
+            fields.push((t.to_string(), via.map(str::to_string), c.to_string()));
         }
     }
     let mut columns = Vec::new();
-    for (t, c) in &fields {
+    for (t, via, c) in &fields {
         let tab = table(t)?;
         let dtype = tab.column(c).map_or(DType::Text, |x| x.dtype);
         columns.push(RowColumn {
             label: if *t == base {
                 c.clone()
             } else {
-                format!("{} · {c}", tab.label)
+                let from = via
+                    .as_deref()
+                    .and_then(|v| engine.link_label(v))
+                    .unwrap_or_else(|| tab.label.clone());
+                format!("{from} · {c}")
             },
             dtype,
         });
@@ -450,8 +466,8 @@ pub fn rows_behind(
         .unwrap_or(0);
     let (rows, _) = engine.query_custom(&q, |sc| {
         let mut exprs = Vec::new();
-        for (i, (t, c)) in fields.iter().enumerate() {
-            let (e, _) = sc.expr(t, c, None)?;
+        for (i, (t, via, c)) in fields.iter().enumerate() {
+            let (e, _) = sc.expr_via(t, via.as_deref(), c, None)?;
             exprs.push(format!(
                 "{e} AS {}",
                 crate::catalog::ident(&format!("c{i}"))

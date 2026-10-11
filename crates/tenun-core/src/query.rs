@@ -6,10 +6,9 @@
 //! emits one SQL statement. Identifiers are quoted; every value is a parameter.
 
 use crate::catalog::{Catalog, DType, Table, ident};
-use crate::workspace::Relationship;
+use crate::links::{Edge, Links, PathError, Paths, join_on};
 use chrono::{Datelike, Duration, Months, NaiveDate};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SemanticQuery {
@@ -35,6 +34,10 @@ pub struct Measure {
     /// Makes a ratio: `agg(column)` divided by `agg(per.column)`, in the same SELECT.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub per: Option<Per>,
+    /// The link (a relationship id) the path to `table` must cross, when two links lead to it
+    /// (V4-D28). Not set: the default path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
 }
 
 /// The bottom of a ratio measure. It may come from any table the query can reach.
@@ -44,6 +47,9 @@ pub struct Per {
     #[serde(default)]
     pub column: Option<String>,
     pub agg: Agg,
+    /// The link the path to `table` must cross (see [`Measure::via`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +77,9 @@ pub struct Dimension {
     pub column: String,
     #[serde(default)]
     pub grain: Option<Grain>,
+    /// The link the path to `table` must cross (see [`Measure::via`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,6 +136,10 @@ pub struct Filter {
     pub op: FilterOp,
     #[serde(default)]
     pub values: Vec<serde_json::Value>,
+    /// The link the path to `table` must cross (see [`Measure::via`]). A click on a mark carries
+    /// the `via` of the field it came from, so it filters by that role only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -276,6 +289,12 @@ pub enum QueryError {
     UnknownColumn(String, String),
     #[error("{1} is not related to {0}. Draw a line between them in Model.")]
     Unreachable(String, String),
+    #[error("A field of this tile uses a link that was removed. Pick the field again.")]
+    LinkGone,
+    #[error(
+        "{1} cannot be used with {0} now: the link between them repeats its values on both sides. Open Model to see which file to fix."
+    )]
+    LinkUnusable(String, String),
     #[error("{0} cannot be {1}.")]
     BadAgg(String, &'static str),
     #[error("A filter value does not match the column type.")]
@@ -300,7 +319,7 @@ pub struct Scope<'a> {
     /// Indexes of filters that could not reach the base table and were skipped.
     pub ignored_filters: Vec<usize>,
     catalog: &'a Catalog,
-    joins: Joins,
+    joins: Joins<'a>,
 }
 
 impl Scope<'_> {
@@ -311,7 +330,18 @@ impl Scope<'_> {
         column: &str,
         grain: Option<Grain>,
     ) -> Result<(String, DType), QueryError> {
-        dim_expr(self.catalog, &self.joins, table, column, grain)
+        self.expr_via(table, None, column, grain)
+    }
+
+    /// Like `expr`, for a field that crosses a named link (V4-D28).
+    pub fn expr_via(
+        &self,
+        table: &str,
+        via: Option<&str>,
+        column: &str,
+        grain: Option<Grain>,
+    ) -> Result<(String, DType), QueryError> {
+        dim_expr(self.catalog, &self.joins, table, via, column, grain)
     }
 
     /// The SQL expression, type and name of a measure.
@@ -323,59 +353,97 @@ impl Scope<'_> {
 pub fn scope<'a>(
     q: &SemanticQuery,
     catalog: &'a Catalog,
-    rels: &[Relationship],
+    links: impl Into<Links<'a>>,
 ) -> Result<Scope<'a>, QueryError> {
-    scope_on(q, catalog, rels, local_today())
+    scope_on(q, catalog, links, local_today())
 }
 
-/// Like `scope`, with the day that relative date filters count from.
-pub fn scope_on<'a>(
+/// The joins of a query: which tables it reads and the links they cross.
+fn plan<'a>(
     q: &SemanticQuery,
     catalog: &'a Catalog,
-    rels: &[Relationship],
-    today: NaiveDate,
-) -> Result<Scope<'a>, QueryError> {
+    links: Links<'a>,
+) -> Result<(Joins<'a>, Vec<usize>), QueryError> {
     let base_id = q
         .measures
         .first()
         .map(|m| m.table.clone())
         .or_else(|| q.dimensions.first().map(|d| d.table.clone()))
         .ok_or(QueryError::Empty)?;
-    let base = lookup(catalog, &base_id)?;
+    lookup(catalog, &base_id)?;
 
-    let paths = reach(&base_id, rels);
-    let mut joins = Joins::new(&base_id);
+    let mut joins = Joins::new(&base_id, links);
 
     // Dimensions and measures must all be reachable.
-    for t in q
+    let fields = q
         .dimensions
         .iter()
-        .map(|d| &d.table)
-        .chain(q.measures.iter().map(|m| &m.table))
+        .map(|d| (&d.table, d.via.as_deref()))
+        .chain(q.measures.iter().map(|m| (&m.table, m.via.as_deref())))
         .chain(
             q.measures
                 .iter()
-                .filter_map(|m| m.per.as_ref().map(|p| &p.table)),
-        )
-    {
+                .filter_map(|m| m.per.as_ref().map(|p| (&p.table, p.via.as_deref()))),
+        );
+    for (t, via) in fields {
         lookup(catalog, t)?;
-        if !paths.contains_key(t) {
-            return Err(QueryError::Unreachable(
-                label(catalog, &base_id),
-                label(catalog, t),
-            ));
-        }
-        joins.add(t, &paths);
+        joins.add(t, via).map_err(|e| match e {
+            PathError::Gone => QueryError::LinkGone,
+            PathError::Unusable => {
+                QueryError::LinkUnusable(label(catalog, &base_id), label(catalog, t))
+            }
+            PathError::No => unreachable_error(catalog, links, &base_id, t),
+        })?;
     }
     // Filters that cannot reach the base table are skipped and reported.
     let mut ignored = Vec::new();
     for (i, f) in q.filters.iter().enumerate() {
-        if catalog.table(&f.table).is_none() || !paths.contains_key(&f.table) {
+        if catalog.table(&f.table).is_none() || joins.add(&f.table, f.via.as_deref()).is_err() {
             ignored.push(i);
-        } else {
-            joins.add(&f.table, &paths);
         }
     }
+    Ok((joins, ignored))
+}
+
+/// "X is not related to Y", or when a link that would relate them repeats its values on both
+/// sides, why that link is not used.
+fn unreachable_error(catalog: &Catalog, links: Links<'_>, base: &str, table: &str) -> QueryError {
+    let all = Links::new(links.rels, None);
+    if crate::links::reach(base, all).contains_key(table) {
+        QueryError::LinkUnusable(label(catalog, base), label(catalog, table))
+    } else {
+        QueryError::Unreachable(label(catalog, base), label(catalog, table))
+    }
+}
+
+/// The links a query crosses that carry a warning: the ones whose far side repeats keys, or that
+/// are read the other way round. A filter that cannot reach the base table crosses nothing.
+pub fn crossed_dirty<'a>(
+    q: &SemanticQuery,
+    catalog: &'a Catalog,
+    links: impl Into<Links<'a>>,
+) -> Vec<String> {
+    let Ok((joins, _)) = plan(q, catalog, links.into()) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for step in &joins.list {
+        if step.edge.warn && !out.contains(&step.edge.rel) {
+            out.push(step.edge.rel.clone());
+        }
+    }
+    out
+}
+
+/// Like `scope`, with the day that relative date filters count from.
+pub fn scope_on<'a>(
+    q: &SemanticQuery,
+    catalog: &'a Catalog,
+    links: impl Into<Links<'a>>,
+    today: NaiveDate,
+) -> Result<Scope<'a>, QueryError> {
+    let (joins, ignored) = plan(q, catalog, links.into())?;
+    let base = lookup(catalog, &joins.base)?;
 
     let mut params = Vec::new();
     let mut wheres = Vec::new();
@@ -383,25 +451,33 @@ pub fn scope_on<'a>(
         if ignored.contains(&i) {
             continue;
         }
-        let (expr, dtype) = dim_expr(catalog, &joins, &f.table, &f.column, f.grain)?;
+        let (expr, dtype) = dim_expr(
+            catalog,
+            &joins,
+            &f.table,
+            f.via.as_deref(),
+            &f.column,
+            f.grain,
+        )?;
         wheres.push(filter_sql(&expr, dtype, f, today, &mut params)?);
     }
 
     let mut sql = format!(" FROM {} AS t0", base.sql_ref);
     for j in &joins.list {
-        let to = lookup(catalog, &j.to_table)?;
-        let from_t = lookup(catalog, &j.from_table)?;
-        let fc = col(from_t, &j.from_col)?;
-        let tc = col(to, &j.to_col)?;
+        let to = lookup(catalog, &j.edge.to_table)?;
+        let from_t = lookup(catalog, &j.edge.from_table)?;
+        let fc = col(from_t, &j.edge.from_col)?;
+        let tc = col(to, &j.edge.to_col)?;
         let (l, r) = (
-            format!("{}.{}", joins.alias(&j.from_table), ident(&j.from_col)),
-            format!("{}.{}", joins.alias(&j.to_table), ident(&j.to_col)),
+            format!("t{}.{}", j.from, ident(&j.edge.from_col)),
+            format!("t{}.{}", j.alias, ident(&j.edge.to_col)),
         );
+        let as_text = fc.dtype != tc.dtype;
         let on = join_on(&l, &r, fc.dtype, tc.dtype);
         sql.push_str(&format!(
-            " LEFT JOIN {} AS {} ON {on}",
-            to.sql_ref,
-            joins.alias(&j.to_table)
+            " LEFT JOIN {} AS t{} ON {on}",
+            j.edge.target_sql(to, as_text),
+            j.alias
         ));
     }
     if !wheres.is_empty() {
@@ -417,29 +493,29 @@ pub fn scope_on<'a>(
     })
 }
 
-pub fn compile(
+pub fn compile<'a>(
     q: &SemanticQuery,
-    catalog: &Catalog,
-    rels: &[Relationship],
+    catalog: &'a Catalog,
+    links: impl Into<Links<'a>>,
 ) -> Result<Compiled, QueryError> {
-    compile_on(q, catalog, rels, local_today())
+    compile_on(q, catalog, links, local_today())
 }
 
 /// Like `compile`, with the day that relative date filters count from.
-pub fn compile_on(
+pub fn compile_on<'a>(
     q: &SemanticQuery,
-    catalog: &Catalog,
-    rels: &[Relationship],
+    catalog: &'a Catalog,
+    links: impl Into<Links<'a>>,
     today: NaiveDate,
 ) -> Result<Compiled, QueryError> {
-    let scope = scope_on(q, catalog, rels, today)?;
+    let scope = scope_on(q, catalog, links, today)?;
 
     let mut select = Vec::new();
     let mut columns = Vec::new();
     // Dimensions that read in order: dates, and date parts.
     let mut ordered = Vec::new();
     for d in &q.dimensions {
-        let (expr, dtype) = scope.expr(&d.table, &d.column, d.grain)?;
+        let (expr, dtype) = scope.expr_via(&d.table, d.via.as_deref(), &d.column, d.grain)?;
         select.push(format!(
             "{expr} AS {}",
             ident(&format!("d{}", columns.len()))
@@ -548,82 +624,72 @@ fn col<'a>(t: &'a Table, c: &str) -> Result<&'a crate::catalog::Column, QueryErr
         .ok_or_else(|| QueryError::UnknownColumn(t.label.clone(), c.to_string()))
 }
 
-/// The condition of a join. Columns of different types meet as text.
-pub(crate) fn join_on(left: &str, right: &str, left_type: DType, right_type: DType) -> String {
-    if left_type == right_type {
-        format!("{left} = {right}")
-    } else {
-        format!("CAST({left} AS VARCHAR) = CAST({right} AS VARCHAR)")
-    }
+/// One `LEFT JOIN` of a query: the link crossed, the alias that joins and the alias it joins from.
+struct Step {
+    edge: Edge,
+    /// The number of the alias of the table the join starts from (`t{from}`).
+    from: usize,
+    /// The number of the alias of the table that is joined (`t{alias}`).
+    alias: usize,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Edge {
-    pub(crate) from_table: String,
-    pub(crate) from_col: String,
-    pub(crate) to_table: String,
-    pub(crate) to_col: String,
+/// The tables a query joins, each under an alias named after the path that reaches it, not
+/// after the table: one table joined through two links is two aliases (V4-D28). The base table
+/// is `t0`; the others are numbered in the order they are first needed.
+struct Joins<'a> {
+    base: String,
+    paths: Paths<'a>,
+    /// The path of each alias, as the link ids crossed from the base. `keys[0]` is empty.
+    keys: Vec<Vec<String>>,
+    list: Vec<Step>,
 }
 
-/// Breadth-first from the base table, many side → one side. Maps every
-/// reachable table to the edge that reached it.
-pub(crate) fn reach(base: &str, rels: &[Relationship]) -> HashMap<String, Option<Edge>> {
-    let mut seen: HashMap<String, Option<Edge>> = HashMap::new();
-    seen.insert(base.to_string(), None);
-    let mut queue = VecDeque::from([base.to_string()]);
-    while let Some(t) = queue.pop_front() {
-        for r in rels.iter().filter(|r| r.from.table == t) {
-            if !seen.contains_key(&r.to.table) {
-                seen.insert(
-                    r.to.table.clone(),
-                    Some(Edge {
-                        from_table: r.from.table.clone(),
-                        from_col: r.from.column.clone(),
-                        to_table: r.to.table.clone(),
-                        to_col: r.to.column.clone(),
-                    }),
-                );
-                queue.push_back(r.to.table.clone());
-            }
-        }
-    }
-    seen
-}
-
-struct Joins {
-    aliases: Vec<String>,
-    list: Vec<Edge>,
-}
-
-impl Joins {
-    fn new(base: &str) -> Self {
+impl<'a> Joins<'a> {
+    fn new(base: &str, links: Links<'a>) -> Self {
         Self {
-            aliases: vec![base.to_string()],
+            base: base.to_string(),
+            paths: Paths::new(base, links),
+            keys: vec![Vec::new()],
             list: Vec::new(),
         }
     }
 
-    fn add(&mut self, table: &str, paths: &HashMap<String, Option<Edge>>) {
-        if self.aliases.iter().any(|a| a == table) {
-            return;
+    /// Adds the joins that reach `table`, crossing the link `via` when one is named.
+    fn add(&mut self, table: &str, via: Option<&str>) -> Result<(), PathError> {
+        let path = self.paths.path(table, via)?;
+        let mut key: Vec<String> = Vec::new();
+        let mut from = 0;
+        for e in path {
+            key.push(e.rel.clone());
+            from = match self.keys.iter().position(|k| *k == key) {
+                Some(i) => i,
+                None => {
+                    self.keys.push(key.clone());
+                    let alias = self.keys.len() - 1;
+                    self.list.push(Step {
+                        edge: e,
+                        from,
+                        alias,
+                    });
+                    alias
+                }
+            };
         }
-        // Collect the chain back to the base, then add it base-first.
-        let mut chain = Vec::new();
-        let mut cur = table.to_string();
-        while let Some(Some(e)) = paths.get(&cur) {
-            chain.push(e.clone());
-            cur = e.from_table.clone();
-        }
-        for e in chain.into_iter().rev() {
-            if !self.aliases.contains(&e.to_table) {
-                self.aliases.push(e.to_table.clone());
-                self.list.push(e);
-            }
-        }
+        Ok(())
     }
 
-    fn alias(&self, table: &str) -> String {
-        let i = self.aliases.iter().position(|a| a == table).unwrap_or(0);
+    /// The alias of a table reached the way `via` says. A table that was never added reads as the
+    /// base; the callers have checked the field first.
+    fn alias(&self, table: &str, via: Option<&str>) -> String {
+        let i = self
+            .paths
+            .path(table, via)
+            .ok()
+            .and_then(|p| {
+                let key: Vec<String> = p.iter().map(|e| e.rel.clone()).collect();
+                self.keys.iter().position(|k| *k == key)
+            })
+            .unwrap_or(0);
         format!("t{i}")
     }
 }
@@ -632,12 +698,13 @@ fn dim_expr(
     catalog: &Catalog,
     joins: &Joins,
     table: &str,
+    via: Option<&str>,
     column: &str,
     grain: Option<Grain>,
 ) -> Result<(String, DType), QueryError> {
     let t = lookup(catalog, table)?;
     let c = col(t, column)?;
-    let r = format!("{}.{}", joins.alias(table), ident(column));
+    let r = format!("{}.{}", joins.alias(table, via), ident(column));
     Ok(match (c.dtype, grain) {
         (d, Some(g)) if d.is_temporal() && g.is_part() => (g.sql(&r), DType::Number),
         (d, Some(g)) if d.is_temporal() => (g.sql(&r), DType::Date),
@@ -657,14 +724,28 @@ fn measure_expr(
     joins: &Joins,
     m: &Measure,
 ) -> Result<(String, DType, String), QueryError> {
-    let top = agg_expr(catalog, joins, &m.table, m.column.as_deref(), m.agg)?;
+    let top = agg_expr(
+        catalog,
+        joins,
+        &m.table,
+        m.via.as_deref(),
+        m.column.as_deref(),
+        m.agg,
+    )?;
     let Some(per) = &m.per else {
         return Ok(top);
     };
     // A ratio divides one aggregate by another in the same SELECT. A zero below gives a gap,
     // never an error. Totals ask the same question without groups, so they are a ratio of
     // totals and never a sum of ratios.
-    let bottom = agg_expr(catalog, joins, &per.table, per.column.as_deref(), per.agg)?;
+    let bottom = agg_expr(
+        catalog,
+        joins,
+        &per.table,
+        per.via.as_deref(),
+        per.column.as_deref(),
+        per.agg,
+    )?;
     for (_, dtype, name) in [&top, &bottom] {
         if *dtype != DType::Number {
             return Err(QueryError::BadAgg(name.clone(), "divided"));
@@ -683,6 +764,7 @@ fn agg_expr(
     catalog: &Catalog,
     joins: &Joins,
     table: &str,
+    via: Option<&str>,
     column: Option<&str>,
     agg: Agg,
 ) -> Result<(String, DType, String), QueryError> {
@@ -698,7 +780,7 @@ fn agg_expr(
         };
     };
     let c = col(t, cname)?;
-    let r = format!("{}.{}", joins.alias(table), ident(cname));
+    let r = format!("{}.{}", joins.alias(table, via), ident(cname));
     let name = cname.to_string();
     match agg {
         Agg::Count => Ok((format!("CAST(count({r}) AS DOUBLE)"), DType::Number, name)),
@@ -885,7 +967,7 @@ fn filter_sql(
 mod tests {
     use super::*;
     use crate::catalog::Column;
-    use crate::workspace::FieldRef;
+    use crate::workspace::{FieldRef, Relationship};
 
     fn table(id: &str, cols: &[(&str, DType)]) -> Table {
         let (src, name) = id.split_once('/').unwrap();
@@ -937,6 +1019,7 @@ mod tests {
                 table: b.0.into(),
                 column: b.1.into(),
             },
+            name: None,
         };
         let rels = vec![
             rel("r1", ("s1/orders", "store_id"), ("s2/stores", "id")),
@@ -951,6 +1034,7 @@ mod tests {
             column: Some("amount".into()),
             agg: Agg::Sum,
             per: None,
+            via: None,
         }
     }
 
@@ -963,6 +1047,7 @@ mod tests {
                 table: "s3/regions".into(),
                 column: "name".into(),
                 grain: None,
+                via: None,
             }],
             ..Default::default()
         };
@@ -986,6 +1071,7 @@ mod tests {
                 table: "s1/orders".into(),
                 column: "date".into(),
                 grain: Some(Grain::Month),
+                via: None,
             }],
             ..Default::default()
         };
@@ -1006,6 +1092,7 @@ mod tests {
                 table: "s4/customers".into(),
                 column: "tier".into(),
                 grain: None,
+                via: None,
             }],
             ..Default::default()
         };
@@ -1024,6 +1111,7 @@ mod tests {
                 column: None,
                 agg: Agg::Count,
                 per: None,
+                via: None,
             }],
             filters: vec![Filter {
                 table: "s1/orders".into(),
@@ -1031,6 +1119,7 @@ mod tests {
                 grain: None,
                 op: FilterOp::In,
                 values: vec!["x".into()],
+                via: None,
             }],
             ..Default::default()
         };
@@ -1052,6 +1141,7 @@ mod tests {
                     grain: None,
                     op: FilterOp::In,
                     values: vec![evil.into(), serde_json::Value::Null],
+                    via: None,
                 },
                 Filter {
                     table: "s1/orders".into(),
@@ -1059,6 +1149,7 @@ mod tests {
                     grain: None,
                     op: FilterOp::Gte,
                     values: vec![10.into()],
+                    via: None,
                 },
             ],
             ..Default::default()
@@ -1086,6 +1177,7 @@ mod tests {
                 column: Some("a\"; DROP".into()),
                 agg: Agg::Sum,
                 per: None,
+                via: None,
             }],
             ..Default::default()
         };
@@ -1102,6 +1194,7 @@ mod tests {
                 column: Some("customer".into()),
                 agg: Agg::Sum,
                 per: None,
+                via: None,
             }],
             ..Default::default()
         };
@@ -1121,6 +1214,7 @@ mod tests {
                 table: "s3/regions".into(),
                 column: "name".into(),
                 grain: None,
+                via: None,
             }],
             filters: vec![Filter {
                 table: "s2/stores".into(),
@@ -1128,6 +1222,7 @@ mod tests {
                 grain: None,
                 op: FilterOp::In,
                 values: vec![evil.into()],
+                via: None,
             }],
             ..Default::default()
         };
@@ -1163,6 +1258,7 @@ mod tests {
                 grain: None,
                 op: FilterOp::Range,
                 values: vec![10.into(), 20.into()],
+                via: None,
             }],
             ..Default::default()
         };
@@ -1194,6 +1290,7 @@ mod tests {
                     table: "s1/orders".into(),
                     column: "date".into(),
                     grain: Some(grain),
+                    via: None,
                 }],
                 filters: vec![Filter {
                     table: "s1/orders".into(),
@@ -1201,6 +1298,7 @@ mod tests {
                     grain: Some(grain),
                     op: FilterOp::In,
                     values: vec![3.into()],
+                    via: None,
                 }],
                 ..Default::default()
             };
@@ -1236,6 +1334,7 @@ mod tests {
                 table: "s2/stores".into(),
                 column: "city".into(),
                 grain: None,
+                via: None,
             }],
             ..Default::default()
         };
@@ -1258,6 +1357,7 @@ mod tests {
                 grain: None,
                 op,
                 values,
+                via: None,
             }],
             ..Default::default()
         };
@@ -1405,6 +1505,7 @@ mod tests {
             grain: None,
             op: FilterOp::Relative,
             values: vec!["ytd".into()],
+            via: None,
         };
         let r = resolve_relative(&f, d("2026-10-10"));
         assert_eq!(r.op, FilterOp::Range);
@@ -1421,5 +1522,263 @@ mod tests {
             ..f
         };
         assert_eq!(resolve_relative(&g, d("2026-10-10")).op, FilterOp::In);
+    }
+
+    // ---- links that stay honest (V4-D26 to D28) -------------------------------------------
+
+    use crate::links::{Health, LinkHealth};
+
+    /// Transfers say which store sent and which store received: two links to one table.
+    fn two_links() -> (Catalog, Vec<Relationship>) {
+        use DType::*;
+        let cat = Catalog {
+            tables: vec![
+                table(
+                    "s1/transfers",
+                    &[
+                        ("from_store", Number),
+                        ("to_store", Number),
+                        ("qty", Number),
+                    ],
+                ),
+                table("s2/stores", &[("id", Number), ("region", Text)]),
+            ],
+        };
+        let rel = |id: &str, col: &str| Relationship {
+            id: id.into(),
+            from: FieldRef {
+                table: "s1/transfers".into(),
+                column: col.into(),
+            },
+            to: FieldRef {
+                table: "s2/stores".into(),
+                column: "id".into(),
+            },
+            name: None,
+        };
+        (cat, vec![rel("r1", "from_store"), rel("r2", "to_store")])
+    }
+
+    fn qty() -> Measure {
+        Measure {
+            table: "s1/transfers".into(),
+            column: Some("qty".into()),
+            agg: Agg::Sum,
+            per: None,
+            via: None,
+        }
+    }
+
+    fn region(via: Option<&str>) -> Dimension {
+        Dimension {
+            table: "s2/stores".into(),
+            column: "region".into(),
+            grain: None,
+            via: via.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn one_table_joined_through_two_links_is_two_aliases() {
+        let (cat, rels) = two_links();
+        let q = SemanticQuery {
+            measures: vec![qty()],
+            dimensions: vec![region(Some("r1")), region(Some("r2"))],
+            ..Default::default()
+        };
+        let c = compile(&q, &cat, &rels).unwrap();
+        assert_eq!(
+            c.sql,
+            "SELECT CAST(t1.\"region\" AS VARCHAR) AS \"d0\", CAST(t2.\"region\" AS VARCHAR) AS \"d1\", \
+             CAST(sum(t0.\"qty\") AS DOUBLE) AS \"m2\" \
+             FROM \"s_s1\".\"transfers\" AS t0 \
+             LEFT JOIN \"s_s2\".\"stores\" AS t1 ON t0.\"from_store\" = t1.\"id\" \
+             LEFT JOIN \"s_s2\".\"stores\" AS t2 ON t0.\"to_store\" = t2.\"id\" \
+             GROUP BY 1, 2 ORDER BY 3 DESC NULLS LAST, 1 ASC NULLS LAST, 2 ASC NULLS LAST LIMIT 1000"
+        );
+    }
+
+    #[test]
+    fn no_via_means_the_first_link_and_the_same_numbers_as_before() {
+        let (cat, rels) = two_links();
+        let by = |via: Option<&str>| SemanticQuery {
+            measures: vec![qty()],
+            dimensions: vec![region(via)],
+            ..Default::default()
+        };
+        let plain = compile(&by(None), &cat, &rels).unwrap().sql;
+        assert!(plain.contains("t0.\"from_store\" = t1.\"id\""), "{plain}");
+        assert_eq!(plain, compile(&by(Some("r1")), &cat, &rels).unwrap().sql);
+        let to = compile(&by(Some("r2")), &cat, &rels).unwrap().sql;
+        assert!(to.contains("t0.\"to_store\" = t1.\"id\""), "{to}");
+    }
+
+    #[test]
+    fn a_filter_through_a_link_filters_that_role_only() {
+        let (cat, rels) = two_links();
+        let q = SemanticQuery {
+            measures: vec![qty()],
+            dimensions: vec![region(Some("r1"))],
+            filters: vec![Filter {
+                table: "s2/stores".into(),
+                column: "region".into(),
+                grain: None,
+                op: FilterOp::In,
+                values: vec!["West".into()],
+                via: Some("r2".into()),
+            }],
+            ..Default::default()
+        };
+        let c = compile(&q, &cat, &rels).unwrap();
+        assert!(
+            c.sql
+                .contains("WHERE (CAST(t2.\"region\" AS VARCHAR) IN (?))"),
+            "{}",
+            c.sql
+        );
+        assert!(c.sql.contains("t0.\"to_store\" = t2.\"id\""), "{}", c.sql);
+        assert!(c.ignored_filters.is_empty());
+    }
+
+    #[test]
+    fn a_link_that_is_gone_or_unusable_says_so() {
+        let (cat, rels) = two_links();
+        let q = |via: &str| SemanticQuery {
+            measures: vec![qty()],
+            dimensions: vec![region(Some(via))],
+            ..Default::default()
+        };
+        assert_eq!(
+            compile(&q("r9"), &cat, &rels).unwrap_err(),
+            QueryError::LinkGone
+        );
+        // The one side is mostly repeats and the many side repeats: many to many.
+        let mut health = Health::new();
+        health.insert(
+            "r2".into(),
+            LinkHealth {
+                one_rows: 4,
+                one_dups: 3,
+                many_dups: 5,
+                ..LinkHealth::default()
+            },
+        );
+        let links = Links::new(&rels, Some(&health));
+        assert_eq!(
+            compile(&q("r2"), &cat, links).unwrap_err(),
+            QueryError::LinkUnusable("transfers".into(), "stores".into())
+        );
+        // The other link still works, and a field with no via takes it.
+        assert!(compile(&q("r1"), &cat, links).is_ok());
+        let plain = SemanticQuery {
+            measures: vec![qty()],
+            dimensions: vec![region(None)],
+            ..Default::default()
+        };
+        assert!(compile(&plain, &cat, links).is_ok());
+    }
+
+    #[test]
+    fn a_repeated_key_on_the_one_side_reads_one_row_per_key() {
+        let (mut cat, rels) = fixture();
+        // A local table (a file, a sheet): the first row of a key in the order of the file.
+        cat.tables[1].prep = true;
+        let mut health = Health::new();
+        health.insert(
+            "r1".into(),
+            LinkHealth {
+                one_rows: 11,
+                one_dups: 1,
+                one_keys: 1,
+                many_dups: 30,
+                ..LinkHealth::default()
+            },
+        );
+        let q = SemanticQuery {
+            measures: vec![sum_amount()],
+            dimensions: vec![Dimension {
+                table: "s2/stores".into(),
+                column: "city".into(),
+                grain: None,
+                via: None,
+            }],
+            ..Default::default()
+        };
+        let c = compile(&q, &cat, Links::new(&rels, Some(&health))).unwrap();
+        assert_eq!(
+            c.sql,
+            "SELECT CAST(t1.\"city\" AS VARCHAR) AS \"d0\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m1\" \
+             FROM \"s_s1\".\"orders\" AS t0 \
+             LEFT JOIN (SELECT * FROM (SELECT *, row_number() OVER () AS \"__tenun_row\" FROM \"s_s2\".\"stores\") \
+             QUALIFY row_number() OVER (PARTITION BY \"id\" ORDER BY \"__tenun_row\") = 1) AS t1 \
+             ON t0.\"store_id\" = t1.\"id\" \
+             GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000"
+        );
+        // The warning rides with the tile.
+        assert_eq!(
+            crossed_dirty(&q, &cat, Links::new(&rels, Some(&health))),
+            ["r1"]
+        );
+        assert!(crossed_dirty(&q, &cat, &rels).is_empty());
+        // A database table has no file order: it keeps the row that sorts first.
+        let mut live = cat.clone();
+        live.tables[1].prep = false;
+        let c = compile(&q, &live, Links::new(&rels, Some(&health))).unwrap();
+        assert!(
+            c.sql.contains(
+                "(SELECT * FROM \"s_s2\".\"stores\" QUALIFY row_number() OVER (PARTITION BY \"id\" \
+                 ORDER BY \"id\", CAST(\"region_code\" AS VARCHAR), CAST(\"city\" AS VARCHAR)) = 1) AS t1"
+            ),
+            "{}",
+            c.sql
+        );
+    }
+
+    #[test]
+    fn a_one_to_one_link_is_crossed_from_either_table() {
+        let (cat, rels) = fixture();
+        let mut health = Health::new();
+        health.insert(
+            "r1".into(),
+            LinkHealth {
+                one_rows: 20,
+                ..LinkHealth::default()
+            },
+        );
+        // Stores to orders: not possible when the data says nothing, possible for one to one.
+        let q = SemanticQuery {
+            measures: vec![Measure {
+                table: "s2/stores".into(),
+                column: None,
+                agg: Agg::Count,
+                per: None,
+                via: None,
+            }],
+            dimensions: vec![Dimension {
+                table: "s1/orders".into(),
+                column: "customer".into(),
+                grain: None,
+                via: None,
+            }],
+            ..Default::default()
+        };
+        assert!(matches!(
+            compile(&q, &cat, &rels),
+            Err(QueryError::Unreachable(..))
+        ));
+        let c = compile(&q, &cat, Links::new(&rels, Some(&health))).unwrap();
+        assert!(
+            c.sql.contains(
+                "FROM \"s_s2\".\"stores\" AS t0 LEFT JOIN \"s_s1\".\"orders\" AS t1 ON t0.\"id\" = t1.\"store_id\""
+            ),
+            "{}",
+            c.sql
+        );
+        // It stops being one to one when the orders side repeats a store: one way again.
+        health.get_mut("r1").unwrap().many_dups = 3;
+        assert!(matches!(
+            compile(&q, &cat, Links::new(&rels, Some(&health))),
+            Err(QueryError::Unreachable(..))
+        ));
     }
 }
