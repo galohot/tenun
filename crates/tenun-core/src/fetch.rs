@@ -435,7 +435,7 @@ impl Client {
             };
             if code == 401 || code == 403 {
                 anyhow::bail!(
-                    "{} answered {code} {reason}. The link needs a key, or the key is wrong. Open Link settings to add it.{tail}",
+                    "{} answered {code} {reason}. The link needs a key, or the key is wrong.{tail}",
                     reply.host
                 );
             }

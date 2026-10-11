@@ -1024,7 +1024,7 @@ fn a_header_key_is_sent_and_kept_out_of_every_file() {
         .to_string();
     assert!(err.contains("answered 401 Unauthorized"), "{err}");
     assert!(
-        err.ends_with("The link needs a key, or the key is wrong. Open Link settings to add it."),
+        err.ends_with("The link needs a key, or the key is wrong."),
         "{err}"
     );
     // A wrong key fails the same way, shows nothing of the key, and leaves no entry behind.
@@ -1270,7 +1270,8 @@ fn link_settings_change_the_records_and_the_key_and_the_secret_follows() {
     .unwrap();
     assert!(e.snapshot().errors.is_empty(), "{:?}", e.snapshot().errors);
     assert_eq!(rows(&e), Some(3));
-    // A new name with no value takes the stored value along, and the old entry goes.
+    // A new name with no value takes the stored value along. The old entry stays, because a link
+    // in another workspace on this computer may still use it.
     e.set_link(
         &id,
         None,
@@ -1280,7 +1281,7 @@ fn link_settings_change_the_records_and_the_key_and_the_secret_follows() {
     .unwrap();
     assert!(e.snapshot().errors.is_empty(), "{:?}", e.snapshot().errors);
     let secrets = std::fs::read_to_string(d.join("secrets.json")).unwrap();
-    assert!(secrets.contains("link://127.0.0.1/header/X-Token") && !secrets.contains("X-Api-Key"));
+    assert!(secrets.contains("link://127.0.0.1/header/X-Token") && secrets.contains("X-Api-Key"));
     assert_eq!(files_holding(&d, KEY), ["secrets.json"]);
     // `key: null` removes the key and deletes its secret. The fetch then fails with the words for
     // a missing key, and the last copy is still there.
@@ -1289,12 +1290,10 @@ fn link_settings_change_the_records_and_the_key_and_the_secret_follows() {
     assert!(snap.errors[&id].contains("401"), "{:?}", snap.errors);
     assert_eq!(rows(&e), Some(3), "the last copy is still read");
     assert!(snap.link_keys.is_empty());
-    assert!(files_holding(&d, KEY).is_empty());
-    assert!(
-        !std::fs::read_to_string(d.join("secrets.json"))
-            .unwrap()
-            .contains("link://")
-    );
+    let secrets = std::fs::read_to_string(d.join("secrets.json")).unwrap();
+    assert!(!secrets.contains("X-Token"), "{secrets}");
+    // Only the entry under the old name is left, and only in the secrets file.
+    assert_eq!(files_holding(&d, KEY), ["secrets.json"]);
     let text = std::fs::read_to_string(d.join("Books.tenun")).unwrap();
     assert!(!text.contains("\"key\""), "{text}");
     // The settings of a source that is not a web link are refused.
@@ -1302,7 +1301,7 @@ fn link_settings_change_the_records_and_the_key_and_the_secret_follows() {
 }
 
 #[test]
-fn a_removed_link_takes_its_key_unless_another_link_still_uses_it() {
+fn a_removed_link_keeps_its_key_for_other_workspaces() {
     let d = dir("remove-key");
     let (base, _) = api();
     let e = engine(&d);
@@ -1330,9 +1329,11 @@ fn a_removed_link_takes_its_key_unless_another_link_still_uses_it() {
             .unwrap()
             .contains(KEY)
     );
+    // The entry is shared by every workspace on this computer, so removing the last link in
+    // this one keeps it. Only "Remove key" in Link settings deletes it.
     e.remove_source(&b);
     assert!(
-        !std::fs::read_to_string(d.join("secrets.json"))
+        std::fs::read_to_string(d.join("secrets.json"))
             .unwrap()
             .contains(KEY)
     );

@@ -587,7 +587,8 @@ impl Engine {
         {
             let mut s = self.state.write().unwrap();
             // The downloaded copy of a web link is Tenun's own file, so it goes with the source.
-            let secret = s.ws.source(id).and_then(|x| link_secret(&x.kind));
+            // Its key stays, like a database password: a link in another workspace on this
+            // computer may use the same entry. Only "Remove key" deletes it (V3-D88).
             if s.ws
                 .source(id)
                 .is_some_and(|x| matches!(x.kind, SourceKind::Url { .. }))
@@ -598,16 +599,6 @@ impl Engine {
             }
             s.fetched.remove(id);
             s.ws.sources.retain(|x| x.id != id);
-            // The key goes too, unless another link to that host uses it.
-            if let Some(secret) = secret
-                && !s
-                    .ws
-                    .sources
-                    .iter()
-                    .any(|x| link_secret(&x.kind).as_deref() == Some(secret.as_str()))
-            {
-                let _ = self.secrets.remove(&secret);
-            }
             let prefix = format!("{id}/");
             s.ws.relationships
                 .retain(|r| !r.from.table.starts_with(&prefix) && !r.to.table.starts_with(&prefix));
@@ -941,9 +932,12 @@ impl Engine {
             };
             *r = clean(records);
             *p = pages;
+            let removed = new_key.is_none();
             *k = new_key;
-            // The old entry goes, unless another link to that host still uses it.
-            if let Some(old) = old_secret
+            // "Remove key" deletes the entry, unless another link here still uses it. A renamed
+            // key keeps its old entry: a link in another workspace on this computer may use it.
+            if removed
+                && let Some(old) = old_secret
                 && !s
                     .ws
                     .sources
