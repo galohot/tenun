@@ -28,6 +28,12 @@
 
   const geo = $derived(getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition }));
   const d = $derived(data as Data);
+  /** What a person who cannot see the chip hears, and what a long name shows when it is hovered: the name, the kind and the warning. */
+  const said = $derived(
+    d.needsName
+      ? `Name these links. ${d.kind ?? ''}${d.note ? `. Warning: ${d.note}` : ''}`
+      : `${d.name ?? 'Link'}, ${d.kind ?? ''}${d.unusable ? ', not used' : ''}${d.note ? `. Warning: ${d.note}` : ''}`,
+  );
 </script>
 
 <BaseEdge
@@ -43,7 +49,7 @@
     </div>
   {:else}
     <div class="pill chip" class:on={selected} class:warn={!!d.note} class:needs={d.needsName}>
-      <button class="open" onclick={d.onopen} title={d.note ?? 'Open this link'} aria-label="Open this link">
+      <button class="open" onclick={d.onopen} title={said} aria-label={`Open this link: ${said}`}>
         {#if d.note}<Icon name="warning" size={12} />{/if}
         {#if d.needsName}
           <span class="name needs">Name these links</span>

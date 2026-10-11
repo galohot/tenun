@@ -2,6 +2,7 @@
 // link that leads to a table, the rule for a link's name, and the words that say which link a field means.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   cleanName,
   defaultName,
@@ -15,11 +16,12 @@ import {
   pairs,
   proposeNames,
   reachableFrom,
+  search,
   setLinkLabels,
   siblings,
   unnamedPairs,
 } from '../src/lib/links.ts';
-import { markFilter, sameFilter, tileFilter } from '../src/lib/filters.ts';
+import { colFilter, isColFilter, markFilter, sameField, sameFilter, stageOf, tileFilter } from '../src/lib/filters.ts';
 
 const table = (id, label, cols = []) => ({ id, label, name: label, source_id: id.split('/')[0], columns: cols.map((c) => ({ name: c, dtype: 'text', raw_type: '' })) });
 const tables = [
@@ -144,4 +146,61 @@ test('a field that crosses a named link says so, and its clicks keep the link', 
   // A link that was removed is no longer a name.
   setLinkLabels([], tables);
   assert.equal(fieldWithLink('region', 'r1'), 'region');
+});
+
+test('search: the same answers as the engine, from the vectors both read', () => {
+  const cases = JSON.parse(readFileSync(new URL('./fixtures/paths.json', import.meta.url), 'utf8'));
+  assert.ok(cases.length >= 10);
+  // The kinds the engine's test builds records for. A link with no record is unknown.
+  const health = (kind) => ({ oneToOne: kind === 'one-one', duplicates: 0, sample: [], fromUnique: kind === 'one-one' || kind === 'many-one', kind });
+  for (const c of cases) {
+    const rels = c.rels.map((r) => ({ id: r.id, from: { table: r.from[0], column: r.from[1] }, to: { table: r.to[0], column: r.to[1] } }));
+    const h = Object.fromEntries(Object.entries(c.health).map(([id, kind]) => [id, health(kind)]));
+    const found = search(c.base, rels, h);
+    assert.deepEqual(Object.fromEntries(found.edge), c.reach, `${c.name}: the way to each table`);
+    assert.deepEqual(Object.fromEntries(found.firsts), c.first, `${c.name}: the first links`);
+    for (const [table, first] of Object.entries(c.first)) assert.deepEqual(firstLinks(c.base, table, rels, h), first, c.name);
+    assert.deepEqual([...reachableFrom(c.base, rels, h)].sort(), Object.keys(c.reach).sort(), c.name);
+  }
+});
+
+test('field list for a filter: a table two links lead to from some table is listed once for each', () => {
+  const rels = [{ ...SHIP, name: 'Shipped from' }, { ...SOLD, name: 'Sold at' }, AREA];
+  const titles = (groups) => groups.map((g) => [g.title, g.via ?? null]);
+  // No first value and no roles: each table once.
+  assert.equal(fieldGroups(tables, rels, undefined, null).length, tables.length);
+  // A filter tile has no first value: it can pick either link to the stores, and either way to the regions.
+  const groups = fieldGroups(tables, rels, undefined, null, true);
+  assert.deepEqual(
+    titles(groups).filter(([t]) => ['Shipped from', 'Sold at'].includes(t)),
+    [['Shipped from', 'r1'], ['Sold at', 'r2'], ['Shipped from', 'r1'], ['Sold at', 'r2']],
+  );
+  assert.deepEqual(
+    groups.filter((g) => g.via).map((g) => g.table.id),
+    ['s2/stores', 's2/stores', 's3/regions', 's3/regions'],
+  );
+  // A table nothing reaches two ways stays one entry, and the tables of other tiles are not touched.
+  assert.equal(groups.filter((g) => g.table.id === 's4/cards').length, 1);
+  assert.equal(groups.filter((g) => g.table.id === 's1/transfers').length, 1);
+  assert.equal(fieldGroups(tables, [SHIP], undefined, null, true).length, tables.length);
+});
+
+test('a pivot with the same field on its rows and its columns through two links keeps them apart', () => {
+  const rows = { table: 's2/stores', column: 'region', via: 'r1' };
+  const cols = { table: 's2/stores', column: 'region', via: 'r2' };
+  const tile = { id: 'p', type: 'pivot', title: '', x: 0, y: 0, w: 8, h: 5, measures: [{ table: 's1/transfers', column: 'qty', agg: 'sum' }], dims: [rows], cols };
+  const onRow = markFilter(tile, 'West');
+  const onCol = colFilter(tile.cols, 'West');
+  assert.equal(onRow.via, 'r1');
+  assert.equal(onCol.via, 'r2');
+  // Only the click on the column header is a column filter; the same table and column on the rows is not.
+  assert.ok(isColFilter(tile, onCol));
+  assert.ok(!isColFilter(tile, onRow));
+  assert.ok(!sameFilter(onRow, onCol));
+  assert.ok(sameField(rows, onRow) && !sameField(rows, onCol));
+  // A Sankey node reads the stage of its own link.
+  const flow = { id: 's', type: 'sankey', dims: [{ table: 's2/stores', column: 'region', via: 'r1' }, { table: 's2/stores', column: 'region', via: 'r2' }] };
+  assert.equal(stageOf(flow, { table: 's2/stores', column: 'region', via: 'r2', op: 'in', values: [] }), 1);
+  assert.equal(stageOf(flow, { table: 's2/stores', column: 'region', via: 'r1', op: 'in', values: [] }), 0);
+  assert.equal(stageOf(tile, onRow), 0);
 });

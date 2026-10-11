@@ -166,14 +166,21 @@ fn a_repeated_store_id_never_doubles_a_total_and_the_tile_says_so() {
     let after = run(&lab.e, tile(sum_amount(), by_region_of_store()), vec![]).unwrap();
     // The first row of store 1 is the one that counts: West. The totals are the same.
     assert_eq!(groups(&after), map(&[("West", 425.5), ("East", 50.0)]));
-    let note =
-        "stores.csv has 2 rows with id 1. Tenun used the first. Fix the file to remove this note.";
+    // Two of the five orders belong to store 1: the reader can weigh the warning.
+    let note = "stores.csv has 2 rows with id 1. Tenun used the first. 2 of 5 orders rows meet a repeated key. Fix the file to remove this note.";
     assert_eq!(after.notes, [note]);
+    // What would leave the computer has no key and no file name.
+    assert_eq!(
+        after.public_notes,
+        [
+            "The stores table repeats 1 value of id. Tenun used the first row of it. 2 of 5 orders rows meet a repeated key."
+        ]
+    );
 
     let snap = lab.e.snapshot();
     let h = &snap.health["r1"];
     assert_eq!(h.duplicates, 1);
-    assert_eq!(h.sample, [json!(1.0)]);
+    assert_eq!(h.sample, [json!("1")]);
     assert_eq!(h.sample_rows, [2]);
     assert!(!h.one_to_one && !h.from_unique && !h.unusable);
     assert_eq!(h.kind, "one-many");
@@ -205,11 +212,12 @@ fn several_repeated_keys_are_listed_with_the_most_repeated_first() {
     );
     let h = lab.e.snapshot().health["r1"].clone();
     assert_eq!((h.duplicates, h.keys), (5, 4));
-    assert_eq!(h.sample, [json!(1.0), json!(2.0), json!(4.0), json!(5.0)]);
+    assert_eq!(h.sample, [json!("1"), json!("2"), json!("4"), json!("5")]);
     assert_eq!(h.sample_rows, [3, 2, 2, 2]);
+    // Four of the five orders (stores 1, 1, 2, 2) meet one of those keys.
     assert_eq!(
         h.note.unwrap(),
-        "stores.csv repeats id: 1, 2, 4 and 5 (5 rows too many). Tenun used the first row of each. Fix the file to remove this note."
+        "stores.csv repeats id: 1, 2, 4 and 5 (5 rows too many). Tenun used the first row of each. 4 of 5 orders rows meet a repeated key. Fix the file to remove this note."
     );
     // Orders still add up.
     let r = run(&lab.e, tile(sum_amount(), by_region_of_store()), vec![]).unwrap();
@@ -217,21 +225,23 @@ fn several_repeated_keys_are_listed_with_the_most_repeated_first() {
 }
 
 #[test]
-fn a_one_side_that_is_mostly_repeats_is_not_a_key_and_the_link_is_not_used() {
+fn a_column_that_is_mostly_repeated_keys_is_not_a_key_and_the_link_is_not_used() {
     let lab = Lab::new("many-to-many").with_order_link();
-    // Three of four rows repeat id 1: the stores table is not a list of stores any more, and the
-    // orders repeat their store too. Many to many.
+    // Three of the four distinct ids repeat (1, 2 and 3 twice): more than half. The stores table
+    // is not a list of stores any more, and the orders repeat their store too: many to many.
     lab.save(
         "stores.csv",
-        "id,name,region\n1,a,West\n1,b,East\n1,c,West\n2,d,East\n",
+        "id,name,region\n1,a,West\n1,b,East\n2,c,West\n2,d,East\n3,e,West\n3,f,East\n4,g,East\n",
         "s2",
     );
     let h = lab.e.snapshot().health["r1"].clone();
     assert!(h.unusable);
     assert_eq!(h.kind, "many-many");
+    // The keys are named even though the link is not used.
+    assert_eq!(h.sample, [json!("1"), json!("2"), json!("3")]);
     assert_eq!(
         h.note.unwrap(),
-        "orders.csv and stores.csv both repeat the values of this link (store_id and id), so Tenun cannot tell which row to use. The link is not used until one of them is fixed."
+        "This link was one to many and is now many to many. orders.csv and stores.csv both repeat the values of this link (store_id and id), so Tenun cannot tell which row to use. Repeated id: 1, 2 and 3. The link is not used until one of them is fixed."
     );
     let err = run(&lab.e, tile(sum_amount(), by_region_of_store()), vec![]).unwrap_err();
     assert_eq!(
@@ -243,6 +253,31 @@ fn a_one_side_that_is_mostly_repeats_is_not_a_key_and_the_link_is_not_used() {
     lab.save("stores.csv", STORES, "s2");
     let ok = run(&lab.e, tile(sum_amount(), by_region_of_store()), vec![]).unwrap();
     assert_eq!(groups(&ok), map(&[("West", 425.5), ("East", 50.0)]));
+}
+
+#[test]
+fn one_key_repeated_ten_times_among_real_ids_is_a_warning_and_never_a_dead_link() {
+    let lab = Lab::new("ten-rows").with_order_link();
+    // The stores file has its three real stores, and ten rows of a placeholder id, 99. One key
+    // repeats among four. The link must go on working: totals unchanged, a warning on the tiles.
+    let mut text = String::from(STORES);
+    for i in 0..10 {
+        text.push_str(&format!("99,Unknown {i},East\n"));
+    }
+    lab.save("stores.csv", &text, "s2");
+    let h = lab.e.snapshot().health["r1"].clone();
+    assert!(!h.unusable);
+    assert_eq!(h.kind, "one-many");
+    assert_eq!((h.duplicates, h.keys), (9, 1));
+    let r = run(&lab.e, tile(sum_amount(), by_region_of_store()), vec![]).unwrap();
+    assert_eq!(groups(&r), map(&[("West", 425.5), ("East", 50.0)]));
+    // No order has store 99.
+    assert_eq!(
+        r.notes,
+        [
+            "stores.csv has 10 rows with id 99. Tenun used the first. No orders row meets a repeated key. Fix the file to remove this note."
+        ]
+    );
 }
 
 // ---- one to one ---------------------------------------------------------------------------
@@ -289,9 +324,15 @@ fn a_one_to_one_link_works_from_either_table_and_one_way_after_a_repeat() {
     );
     assert_eq!(lab.e.snapshot().health["r1"].kind, "one-many");
     let err = run(&lab.e, tile(stores_count, by_card), vec![]).unwrap_err();
+    // The words say which table repeats its key, not that the tables are not related (case C).
     assert_eq!(
         err.to_string(),
-        "cards is not related to stores. Draw a line between them in Model."
+        "Tenun cannot read cards from stores: cards repeats store_id. See the link between them in Model."
+    );
+    // And the link says that it changed.
+    assert_eq!(
+        lab.note("r1").unwrap(),
+        "This link was one to one and is now one to many. A tile that reads the many side from the one side cannot do it now."
     );
     // The stored way still works.
     let cards_count = json!({ "table": "s4/cards", "column": null, "agg": "count" });
@@ -731,9 +772,10 @@ fn snapshots_and_exports_carry_the_note_of_each_tile() {
     ]});
     lab.e.set_dashboards(vec![dash]);
     let snap = snapshot::build(&lab.e, "d1", &[]).unwrap();
-    let note =
-        "stores.csv has 2 rows with id 1. Tenun used the first. Fix the file to remove this note.";
+    // What leaves the computer has no key value and no file name (V4-D52).
+    let note = "The stores table repeats 1 value of id. Tenun used the first row of it. 2 of 5 orders rows meet a repeated key.";
     assert_eq!(snap["base"]["t1"]["notes"], json!([note]));
+    assert!(snap["base"]["t1"].get("publicNotes").is_none());
     assert_eq!(snap["base"]["t3"]["notes"], json!([note]));
     // The tile that never meets the link has no note, and the field is not even written.
     assert!(snap["base"]["t2"].get("notes").is_none());
@@ -876,8 +918,457 @@ async fn the_route_names_a_link_and_refuses_a_bad_name_in_words() {
         v["error"],
         "Another link is called shipped from. Give this one another name."
     );
+    // A body with no name is not a request to clear it.
+    let (status, v) = patch(&running, "/api/relationships/r1", json!({})).await;
+    assert_eq!(status, 400);
+    assert_eq!(
+        v["error"],
+        "Send the name of the link as text. An empty name clears it."
+    );
+    let (status, _) = patch(&running, "/api/relationships/r1", json!({ "name": null })).await;
+    assert_eq!(status, 400);
+    let w = get(&running, "/api/workspace").await;
+    assert_eq!(w["workspace"]["relationships"][0]["name"], "Shipped from");
+    // Two links swap their names in one request.
+    let url = format!("http://{}/api/relationships/names", running.addr);
+    let status = tokio::task::spawn_blocking(move || {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let mut res = agent
+            .put(url)
+            .header("content-type", "application/json")
+            .header("x-tenun", "1")
+            .send(json!({ "names": { "r1": "Sold at", "r2": "Shipped from" } }).to_string())
+            .unwrap();
+        let _ = res.body_mut().read_to_string();
+        res.status().as_u16()
+    })
+    .await
+    .unwrap();
+    assert_eq!(status, 200);
+    let w = get(&running, "/api/workspace").await;
+    assert_eq!(w["workspace"]["relationships"][0]["name"], "Sold at");
+    assert_eq!(w["workspace"]["relationships"][1]["name"], "Shipped from");
     // The health of a clean link is there and says nothing is wrong.
     let w = get(&running, "/api/workspace").await;
     assert_eq!(w["health"]["r1"]["kind"], "one-many");
     assert_eq!(w["health"]["r1"]["duplicates"], 0);
+}
+
+// ---- the review of 01b --------------------------------------------------------------------
+
+#[test]
+fn nothing_is_counted_twice_while_a_file_is_being_reloaded() {
+    // The window after a save: the new file is read, the link is not checked yet. A total in that
+    // window must not be the doubled one (V4-D51). The check is held open for a second.
+    let lab = std::sync::Arc::new(Lab::new("race").with_order_link());
+    lab.e
+        .slow_link_checks(std::time::Duration::from_millis(900));
+    std::fs::write(
+        lab.d.join("stores.csv"),
+        format!("{STORES}1,Kopi A (copy),East\n"),
+    )
+    .unwrap();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reader = {
+        let (lab, stop) = (lab.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let mut seen = 0;
+            let mut wrong = Vec::new();
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                let r = run(&lab.e, tile(sum_amount(), by_region_of_store()), vec![]).unwrap();
+                seen += 1;
+                if groups(&r) != map(&[("West", 425.5), ("East", 50.0)]) {
+                    wrong.push(groups(&r));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            (seen, wrong)
+        })
+    };
+    lab.e.load("s2");
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    let (seen, wrong) = reader.join().unwrap();
+    assert!(seen > 10, "the reader ran {seen} times");
+    assert!(wrong.is_empty(), "a total was wrong: {wrong:?}");
+    // The check has run and the warning is there.
+    assert!(lab.note("r1").is_some());
+}
+
+#[test]
+fn a_check_that_cannot_read_the_data_leaves_the_link_deduplicated() {
+    let lab = Lab::new("failed").with_order_link();
+    // The stores file loses the column the link needs. The tables load, the check fails.
+    lab.save("stores.csv", "name,region\nKopi A,West\n", "s2");
+    assert!(!lab.e.snapshot().health.contains_key("r1"));
+    // The query itself says the column is gone; nothing joins raw.
+    let err = run(&lab.e, tile(sum_amount(), by_region_of_store()), vec![]).unwrap_err();
+    assert!(err.to_string().contains("id"), "{err}");
+    // The file comes back with a repeated id: nothing is counted twice.
+    lab.save(
+        "stores.csv",
+        &format!("{STORES}1,Kopi A (copy),East\n"),
+        "s2",
+    );
+    let r = run(&lab.e, tile(sum_amount(), by_region_of_store()), vec![]).unwrap();
+    assert_eq!(groups(&r), map(&[("West", 425.5), ("East", 50.0)]));
+}
+
+/// Customers with a repeated e-mail, and sales that point at them by e-mail.
+fn email_lab(tag: &str) -> Lab {
+    let d = dir(tag);
+    // The customers are unique when the link is made, as a link needs, and repeat an e-mail after.
+    std::fs::write(
+        d.join("customers.csv"),
+        "email,tier\nana@example.com,gold\nbo@example.com,gold\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.join("sales.csv"),
+        "id,email,amount\n1,ana@example.com,10\n2,bo@example.com,20\n3,ana@example.com,5\n",
+    )
+    .unwrap();
+    let e = Engine::new(Secrets::new(d.join("secrets.json"))).unwrap();
+    for f in ["customers.csv", "sales.csv"] {
+        e.add_source(AddSource::File {
+            path: d.join(f).to_string_lossy().into_owned(),
+        })
+        .unwrap();
+    }
+    e.add_relationship(field("s2/sales", "email"), field("s1/customers", "email"))
+        .unwrap();
+    let lab = Lab { e, d };
+    lab.save(
+        "customers.csv",
+        "email,tier\nana@example.com,gold\nana@example.com,silver\nbo@example.com,gold\n",
+        "s1",
+    );
+    lab
+}
+
+#[test]
+fn a_page_that_leaves_the_computer_carries_no_key_and_no_file_name() {
+    let lab = email_lab("email");
+    let by_tier = json!([{ "table": "s1/customers", "column": "tier" }]);
+    let amount = json!({ "table": "s2/sales", "column": "amount", "agg": "sum" });
+    // In the app the note names the e-mail and the file.
+    let r = run(&lab.e, tile(amount.clone(), by_tier.clone()), vec![]).unwrap();
+    assert_eq!(
+        r.notes,
+        [
+            "customers.csv has 2 rows with email ana@example.com. Tenun used the first. 2 of 3 sales rows meet a repeated key. Fix the file to remove this note."
+        ]
+    );
+    // Totals are not doubled: ana's first row is gold, so gold has 10 + 5 + 20.
+    assert_eq!(groups(&r), map(&[("gold", 35.0)]));
+    lab.e.set_dashboards(vec![json!({
+        "id": "d1", "title": "Sales", "tiles": [tile(amount, by_tier)]
+    })]);
+    // The snapshot behind an exported page says it without them.
+    let payload = snapshot::build(&lab.e, "d1", &[]).unwrap();
+    for what in [
+        "ana@example.com",
+        "bo@example.com",
+        "customers.csv",
+        "sales.csv",
+    ] {
+        assert!(
+            !payload.to_string().contains(what),
+            "the snapshot holds {what}"
+        );
+    }
+    assert_eq!(
+        payload["base"]["t1"]["notes"][0],
+        "The customers table repeats 1 value of email. Tenun used the first row of it. 2 of 3 sales rows meet a repeated key."
+    );
+    // The picture of a tile is made from the public notes too.
+    assert!(!r.public_notes[0].contains("example.com"));
+    let t: Tile = serde_json::from_value(tile(
+        json!({ "table": "s2/sales", "column": "amount", "agg": "sum" }),
+        json!([{ "table": "s1/customers", "column": "tier" }]),
+    ))
+    .unwrap();
+    let out = snapshot::run_tile_public(&lab.e, &t, &[]).unwrap();
+    assert_eq!(out.notes, r.public_notes);
+    assert!(out.public_notes.is_empty());
+}
+
+#[test]
+fn the_notes_of_a_tile_come_from_every_query_it_runs() {
+    // The table of sales by shop crosses no link; its trend column reads the opening date of the
+    // shop, and that crosses the link with the repeated shop id (V4-D45).
+    let d = dir("spark");
+    std::fs::write(d.join("sales.csv"), "shop_id,amount\n1,10\n2,20\n1,5\n").unwrap();
+    std::fs::write(
+        d.join("shops.csv"),
+        "id,opened\n1,2026-01-05\n2,2026-02-10\n",
+    )
+    .unwrap();
+    let e = Engine::new(Secrets::new(d.join("secrets.json"))).unwrap();
+    for f in ["sales.csv", "shops.csv"] {
+        e.add_source(AddSource::File {
+            path: d.join(f).to_string_lossy().into_owned(),
+        })
+        .unwrap();
+    }
+    e.add_relationship(field("s1/sales", "shop_id"), field("s2/shops", "id"))
+        .unwrap();
+    // Shop 1 is written twice after the link was made.
+    std::fs::write(
+        d.join("shops.csv"),
+        "id,opened\n1,2026-01-05\n2,2026-02-10\n1,2026-03-01\n",
+    )
+    .unwrap();
+    e.load("s2");
+    let mut t = tile(
+        json!({ "table": "s1/sales", "column": "amount", "agg": "sum" }),
+        json!([{ "table": "s1/sales", "column": "shop_id" }]),
+    );
+    t["type"] = json!("table");
+    // Without the trend column the tile crosses nothing and has no note.
+    assert!(run(&e, t.clone(), vec![]).unwrap().notes.is_empty());
+    t["spark"] = json!({ "table": "s2/shops", "column": "opened", "grain": "month" });
+    let r = run(&e, t, vec![]).unwrap();
+    assert!(r.sparks.is_some(), "the trend column was not drawn");
+    assert_eq!(r.notes.len(), 1, "{:?}", r.notes);
+    assert!(
+        r.notes[0].starts_with("shops.csv has 2 rows with id 1."),
+        "{:?}",
+        r.notes
+    );
+}
+
+#[test]
+fn a_link_note_goes_to_the_link_when_its_kind_changes_and_goes_when_it_changes_back() {
+    let lab = Lab::new("kind");
+    std::fs::write(
+        lab.d.join("cards.csv"),
+        "store_id,card\n1,visa\n2,amex\n3,visa2\n",
+    )
+    .unwrap();
+    lab.e
+        .add_source(AddSource::File {
+            path: lab.d.join("cards.csv").to_string_lossy().into_owned(),
+        })
+        .unwrap();
+    lab.e
+        .add_relationship(field("s4/cards", "store_id"), field("s2/stores", "id"))
+        .unwrap();
+    assert!(lab.note("r1").is_none());
+    lab.save(
+        "cards.csv",
+        "store_id,card\n1,visa\n2,amex\n2,x\n3,v\n",
+        "s4",
+    );
+    assert!(
+        lab.note("r1")
+            .unwrap()
+            .starts_with("This link was one to one and is now one to many.")
+    );
+    // A reload that changes nothing keeps the note: the link is still not what it was.
+    lab.save(
+        "cards.csv",
+        "store_id,card\n1,visa\n2,amex\n2,x\n3,v\n4,w\n",
+        "s4",
+    );
+    assert!(lab.note("r1").is_some());
+    lab.save("cards.csv", "store_id,card\n1,visa\n2,amex\n3,v\n", "s4");
+    assert!(lab.note("r1").is_none());
+}
+
+#[test]
+fn names_can_swap_and_a_table_name_clash_is_reported() {
+    let lab = Lab::new("swap").with_transfer_links();
+    let e = &lab.e;
+    e.rename_link("r1", Some("Shipped from".into())).unwrap();
+    e.rename_link("r2", Some("Sold at".into())).unwrap();
+    // One at a time the swap cannot work; as a set it can.
+    assert!(e.rename_link("r1", Some("Sold at".into())).is_err());
+    e.rename_links(BTreeMap::from([
+        ("r1".to_string(), Some("Sold at".to_string())),
+        ("r2".to_string(), Some("Shipped from".to_string())),
+    ]))
+    .unwrap();
+    let names = |lab: &Lab| -> Vec<Option<String>> {
+        lab.e
+            .snapshot()
+            .workspace
+            .relationships
+            .iter()
+            .map(|r| r.name.clone())
+            .collect()
+    };
+    assert_eq!(
+        names(&lab),
+        [Some("Sold at".into()), Some("Shipped from".into())]
+    );
+    // Two links cannot end with one name, and a table id is a table's name too.
+    assert!(
+        e.rename_links(BTreeMap::from([
+            ("r1".to_string(), Some("same".to_string())),
+            ("r2".to_string(), Some("Same".to_string())),
+        ]))
+        .is_err()
+    );
+    let err = e.rename_link("r1", Some("s2/stores".into())).unwrap_err();
+    assert!(
+        err.to_string().starts_with("A table is called s2/stores."),
+        "{err}"
+    );
+    assert_eq!(names(&lab)[0].as_deref(), Some("Sold at"));
+    // A table that arrives later with a link's name is a clash the Model view can show.
+    assert!(e.snapshot().link_clashes.is_empty());
+    std::fs::write(lab.d.join("Sold at.csv"), "a,b\n1,2\n").unwrap();
+    e.add_source(AddSource::File {
+        path: lab.d.join("Sold at.csv").to_string_lossy().into_owned(),
+    })
+    .unwrap();
+    let clashes = e.snapshot().link_clashes;
+    assert_eq!(clashes.len(), 1);
+    assert!(
+        clashes["r1"].starts_with("A table is called Sold at too"),
+        "{clashes:?}"
+    );
+}
+
+async fn post_bytes(running: &Running, path: &str, body: Value) -> (u16, Vec<u8>) {
+    let url = format!("http://{}{path}", running.addr);
+    tokio::task::spawn_blocking(move || {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let mut res = agent
+            .post(url)
+            .header("content-type", "application/json")
+            .header("x-tenun", "1")
+            .send(body.to_string())
+            .unwrap();
+        let status = res.status().as_u16();
+        (status, res.body_mut().read_to_vec().unwrap())
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_export_route_writes_a_page_with_no_key_and_no_file_name() {
+    let d = dir("export");
+    std::fs::write(
+        d.join("customers.csv"),
+        "email,tier\nana@example.com,gold\nbo@example.com,gold\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.join("sales.csv"),
+        "id,email,amount\n1,ana@example.com,10\n2,bo@example.com,20\n3,ana@example.com,5\n",
+    )
+    .unwrap();
+    let running = tenun::start(Options {
+        host: "127.0.0.1".parse().unwrap(),
+        port: 0,
+        workspace: None,
+        picker: None,
+    })
+    .await
+    .unwrap();
+    let e = &running.state.engine;
+    for f in ["customers.csv", "sales.csv"] {
+        e.add_source(AddSource::File {
+            path: d.join(f).to_string_lossy().into_owned(),
+        })
+        .unwrap();
+    }
+    e.add_relationship(field("s2/sales", "email"), field("s1/customers", "email"))
+        .unwrap();
+    std::fs::write(
+        d.join("customers.csv"),
+        "email,tier\nana@example.com,gold\nana@example.com,silver\nbo@example.com,gold\n",
+    )
+    .unwrap();
+    e.load("s1");
+    e.set_dashboards(vec![json!({
+        "id": "d1", "title": "Sales", "tiles": [tile(
+            json!({ "table": "s2/sales", "column": "amount", "agg": "sum" }),
+            json!([{ "table": "s1/customers", "column": "tier" }]),
+        )]
+    })]);
+    let (status, html) =
+        post_bytes(&running, "/api/export-html", json!({ "dashboard": "d1" })).await;
+    assert_eq!(status, 200);
+    let html = String::from_utf8(html).unwrap();
+    for what in [
+        "ana@example.com",
+        "bo@example.com",
+        "customers.csv",
+        "sales.csv",
+    ] {
+        assert!(!html.contains(what), "the page holds {what}");
+    }
+    assert!(html.contains("The customers table repeats 1 value of email."));
+    // The Excel file of the tile has the same sentence.
+    let (status, xlsx) = post_bytes(
+        &running,
+        "/api/export-xlsx",
+        json!({ "tile": tile(
+            json!({ "table": "s2/sales", "column": "amount", "agg": "sum" }),
+            json!([{ "table": "s1/customers", "column": "tier" }]),
+        ), "filters": [], "headers": [], "title": "Sales" }),
+    )
+    .await;
+    assert_eq!(status, 200);
+    use calamine::{DataType, Reader};
+    let mut wb: calamine::Xlsx<_> =
+        calamine::open_workbook_from_rs(std::io::Cursor::new(xlsx)).unwrap();
+    let name = wb.sheet_names()[0].clone();
+    let text: Vec<String> = wb
+        .worksheet_range(&name)
+        .unwrap()
+        .rows()
+        .flat_map(|r| r.iter().filter_map(|c| c.as_string()))
+        .collect();
+    assert!(
+        text.iter()
+            .any(|t| t.starts_with("The customers table repeats 1 value of email.")),
+        "{text:?}"
+    );
+    assert!(
+        !text
+            .iter()
+            .any(|t| t.contains("example.com") || t.contains(".csv")),
+        "{text:?}"
+    );
+}
+
+#[test]
+fn a_large_whole_number_key_is_written_in_full() {
+    let d = dir("bigkey");
+    let big = "1234567890123456789";
+    std::fs::write(d.join("owners.csv"), format!("id,name\n{big},a\n2,b\n")).unwrap();
+    std::fs::write(
+        d.join("cars.csv"),
+        format!("owner,plate\n{big},x\n2,y\n{big},z\n"),
+    )
+    .unwrap();
+    let e = Engine::new(Secrets::new(d.join("secrets.json"))).unwrap();
+    for f in ["owners.csv", "cars.csv"] {
+        e.add_source(AddSource::File {
+            path: d.join(f).to_string_lossy().into_owned(),
+        })
+        .unwrap();
+    }
+    e.add_relationship(field("s2/cars", "owner"), field("s1/owners", "id"))
+        .unwrap();
+    std::fs::write(
+        d.join("owners.csv"),
+        format!("id,name\n{big},a\n2,b\n{big},c\n"),
+    )
+    .unwrap();
+    e.load("s1");
+    let h = e.snapshot().health["r1"].clone();
+    // Not 1.2345678901234568e+18.
+    assert_eq!(h.sample, [json!(big)]);
+    assert!(h.note.unwrap().contains(&format!("with id {big}")));
 }

@@ -32,7 +32,8 @@ fn table(id: &str, name: &str, cols: &[(&str, DType)]) -> Table {
         rows: None,
         notes: vec![],
         header_row: None,
-        prep: false,
+        // The tables stand for files: a join into them reads them as they are.
+        prep: true,
     }
 }
 
@@ -55,12 +56,19 @@ struct World {
     db: Mutex<Connection>,
     catalog: Catalog,
     rels: Vec<Relationship>,
+    /// Every link as the data of a usual one to many link says it: clean on the one side.
+    health: crate::links::Health,
 }
 
 fn world() -> &'static World {
     static W: OnceLock<World> = OnceLock::new();
     W.get_or_init(|| {
         use DType::*;
+        let rels = vec![
+            rel("r1", ("s1/Orders", "store_id"), ("s2/Stores", "id")),
+            rel("r2", ("s2/Stores", "region_code"), ("s3/Regions", "code")),
+            rel("r3", ("s4/Targets", "store_id"), ("s2/Stores", "id")),
+        ];
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(
             "CREATE TABLE orders (id INTEGER, date DATE, store_id INTEGER, customer VARCHAR,
@@ -142,11 +150,21 @@ fn world() -> &'static World {
                     ),
                 ],
             },
-            rels: vec![
-                rel("r1", ("s1/Orders", "store_id"), ("s2/Stores", "id")),
-                rel("r2", ("s2/Stores", "region_code"), ("s3/Regions", "code")),
-                rel("r3", ("s4/Targets", "store_id"), ("s2/Stores", "id")),
-            ],
+            rels: rels.clone(),
+            health: rels
+                .iter()
+                .map(|r| {
+                    (
+                        r.id.clone(),
+                        crate::links::LinkHealth {
+                            one_rows: 100,
+                            many_rows: 100,
+                            many_dups: 50,
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect(),
         }
     })
 }
@@ -157,7 +175,7 @@ fn cx() -> Context<'static> {
     Context {
         catalog: &w.catalog,
         rels: &w.rels,
-        health: None,
+        health: &w.health,
         today,
         now: today.and_hms_opt(14, 3, 22).unwrap(),
     }

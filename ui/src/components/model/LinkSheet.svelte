@@ -26,6 +26,8 @@
   let typed = $state<Record<string, string>>(start());
 
   const table = (id: string) => app.table(id);
+  /** Why the name of a link no longer works: a table has the same name now. */
+  const clash = (id: string) => app.snap?.link_clashes?.[id];
   const shown = (t: string, c: string) => table(t)?.columns.find((x) => x.name === c)?.label ?? c;
 
   const problems = $derived(
@@ -34,11 +36,16 @@
   const changed = $derived(links.filter((r) => cleanName(typed[r.id] ?? '') !== (r.name ?? '')));
   const valid = $derived(links.every((r) => !problems[r.id]));
 
+  /** All the names go as one set, so two links can swap theirs. */
   async function save() {
-    if (!valid) return;
-    for (const r of changed) {
-      if (!(await app.run(null, () => api.renameRelationship(r.id, cleanName(typed[r.id] ?? ''))))) return;
-    }
+    if (!valid || !changed.length) return;
+    const names = Object.fromEntries(changed.map((r) => [r.id, cleanName(typed[r.id] ?? '')]));
+    if (await app.run(null, () => api.renameRelationships(names))) onclose();
+  }
+
+  /** Closing with names typed and not saved asks first: the text is not lost without a word. */
+  function close() {
+    if (changed.length && !confirm('Close without saving the names you typed?')) return;
     onclose();
   }
 
@@ -62,7 +69,7 @@
   }
 </script>
 
-<Modal title={naming ? 'Name these links' : 'Link'} {onclose} width={540}>
+<Modal title={naming ? 'Name these links' : 'Link'} onclose={close} width={540}>
   {#if naming}
     <p class="lead">
       {links.length} links join {table(links[0].from.table)?.label} and {table(links[0].to.table)?.label}. Give each one a name,
@@ -79,6 +86,7 @@
           class="field"
           class:bad={!!problems[r.id]}
           maxlength={MAX_NAME + 10}
+          title={typed[r.id] || defaultName(r, app.tables)}
           placeholder={defaultName(r, app.tables)}
           bind:value={typed[r.id]}
           onkeydown={(e) => e.key === 'Enter' && valid && save()} />
@@ -90,12 +98,13 @@
         <span><b>{table(r.to.table)?.label}</b>.{shown(r.to.table, r.to.column)}</span>
         <span class="kind">{kindWords(h)}</span>
       </p>
-      {#if h?.note}
+      {#if h?.note || clash(r.id)}
         <div class="warn" role="note">
           <Icon name="warning" size={14} />
           <div>
-            <p>{h.note}</p>
-            {#if repeated(r) && !h.unusable}<p class="keys">Repeated {shown(r.to.table, r.to.column)}: {repeated(r)}</p>{/if}
+            {#if h?.note}<p>{h.note}</p>{/if}
+            {#if clash(r.id)}<p>{clash(r.id)}</p>{/if}
+            {#if h && repeated(r) && !h.note?.includes('Repeated ')}<p class="keys">Repeated {shown(r.to.table, r.to.column)}: {repeated(r)}</p>{/if}
           </div>
         </div>
       {/if}

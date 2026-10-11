@@ -140,6 +140,14 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
         schedule: Mutex::new(cloud::Schedule::default()),
     });
 
+    // A check of live database links finishes after the load that began it: tell the windows.
+    {
+        let events = state.events.clone();
+        state.engine.on_links_checked(move || {
+            let _ = events.send(serde_json::json!({ "type": "workspace-changed" }).to_string());
+        });
+    }
+
     // File changes reload the source and tell every open window.
     let weak = Arc::downgrade(&state);
     let handle = tokio::runtime::Handle::current();

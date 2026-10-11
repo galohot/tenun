@@ -17,7 +17,7 @@ use tenun_core::engine::{AddSource, KeyEdit, KeyIn, LinkPreview};
 use tenun_core::formula::CheckRequest;
 use tenun_core::paste;
 use tenun_core::query::{Filter, SemanticQuery};
-use tenun_core::snapshot::{self, DashFilter, Tile, run_tile};
+use tenun_core::snapshot::{self, DashFilter, Tile, run_tile, run_tile_public};
 use tenun_core::workspace::{Every, FieldRef, Locale, Paging, TableSetup};
 
 type S = State<Arc<AppState>>;
@@ -76,6 +76,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/prep/unpivot/preview", post(unpivot_preview))
         .route("/relationships", post(add_rel))
         .route("/relationships/{id}", delete(remove_rel).patch(rename_rel))
+        .route("/relationships/names", put(rename_rels))
+        .route("/relationships/check", post(check_links))
         .route("/relationships/suggest", get(suggest))
         .route("/dashboards", put(put_dashboards))
         .route("/layout", put(put_layout))
@@ -517,23 +519,51 @@ async fn add_rel(State(s): S, Json(b): Json<RelBody>) -> R<Json<Value>> {
     ))
 }
 
-#[derive(Deserialize)]
-struct RenameRelBody {
-    /// The new name of the link. Empty or missing: the link has no name.
-    #[serde(default)]
-    name: Option<String>,
-}
-
-/// Names a link, or clears its name (V4-D28).
-async fn rename_rel(
-    State(s): S,
-    Path(id): Path<String>,
-    Json(b): Json<RenameRelBody>,
-) -> R<Json<Value>> {
+/// Names a link, or clears its name with an empty one (V4-D28). A body with no `name` is refused:
+/// it is not a request to clear the name.
+async fn rename_rel(State(s): S, Path(id): Path<String>, Json(b): Json<Value>) -> R<Json<Value>> {
+    let Some(name) = b.get("name").and_then(Value::as_str).map(str::to_string) else {
+        return Err(
+            anyhow::anyhow!("Send the name of the link as text. An empty name clears it.").into(),
+        );
+    };
     Ok(Json(
         blocking(&s, move |st| {
-            st.engine.rename_link(&id, b.name)?;
+            st.engine.rename_link(&id, Some(name))?;
             changed(st)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct RenameRelsBody {
+    /// Link id → its new name. They are checked together, so two links can swap their names.
+    names: std::collections::BTreeMap<String, String>,
+}
+
+/// Names several links at once, as one set (V4-D46).
+async fn rename_rels(State(s): S, Json(b): Json<RenameRelsBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let names = b.names.into_iter().map(|(k, v)| (k, Some(v))).collect();
+            st.engine.rename_links(names)?;
+            changed(st)
+        })
+        .await?,
+    ))
+}
+
+/// Reads the links of live database tables again, because a dashboard refreshed (V4-D51). The
+/// windows are told when an answer changed.
+async fn check_links(State(s): S) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, |st| {
+            let changed = st.engine.recheck_live_links();
+            if changed {
+                st.emit(json!({ "type": "workspace-changed" }));
+            }
+            Ok(json!({ "changed": changed }))
         })
         .await?,
     ))
@@ -701,7 +731,8 @@ async fn export_xlsx(State(s): S, Json(b): Json<XlsxBody>) -> R<Response> {
         if snapshot::is_static(&t.kind) || t.kind == "filter" {
             anyhow::bail!("This tile has no numbers to download.");
         }
-        let res = run_tile(&st.engine, &t, &b.filters)?;
+        // A file that leaves the computer carries the notes with no key value and no file name.
+        let res = run_tile_public(&st.engine, &t, &b.filters)?;
         Ok((xlsx::build(&b.tile, &res, &b.headers, &b.title)?, b.path))
     })
     .await?;

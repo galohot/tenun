@@ -6,6 +6,7 @@
   import { readColors, type Colors } from '../../lib/chart';
   import { OTHER_KEY, tileTitle } from '../../lib/format';
   import { appliedFilters, EMPTY_RESULT, isPivotLike, isStatic, resultKey, tileQuery, type DashFilter } from '../../lib/tiles';
+  import { isColFilter, sameField } from '../../lib/filters';
   import { advancedOn } from '../../lib/tiers';
   import Icon from '../Icon.svelte';
   import { downloadCsv, downloadTilePng, downloadXlsx } from '../../lib/output';
@@ -125,14 +126,14 @@
   // A click on a histogram bin is a range; the tile shows the bin that starts it.
   const mine = $derived(filters.find((x) => x.fromTile === tile.id));
   // On a pivot, a click on a column header filters by the column field instead of the first row field.
-  const onCol = $derived(isPivotLike(tile.type) && !!mine && !!tile.cols && mine.table === tile.cols.table && mine.column === tile.cols.column);
+  const onCol = $derived(isPivotLike(tile.type) && !!mine && isColFilter(tile, mine));
   // A filter tile keeps its own selection in the tile and is not drawn from the cross-filters.
   const selected = $derived(tile.type !== 'filter' && mine && !onCol ? (mine.op === 'not_in' ? [OTHER_KEY] : mine.op === 'range' ? mine.values.slice(0, 1) : mine.values) : null);
   const selectedCol = $derived(mine && onCol ? mine.values : null);
   // On a Sankey chart a click names a node: a value of the field of its stage.
   const selectedStage = $derived.by(() => {
     if (tile.type !== 'sankey' || !mine) return null;
-    const i = tile.dims.findIndex((d) => d.table === mine.table && d.column === mine.column);
+    const i = tile.dims.findIndex((d) => sameField(d, mine));
     return i < 0 ? null : i;
   });
   const note = $derived(res && tile.type !== 'kpi' ? partialNote(res, tile.dims[0]?.grain) : null);

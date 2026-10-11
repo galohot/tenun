@@ -268,8 +268,10 @@ export interface QueryResult {
   compare?: { label: string; rows: Cell[][] };
   /** Tables only, when the row limit cut the result: how many rows there are in all. */
   total_rows?: number;
-  /** What the reader should know about the links this result crossed: a key that repeats on the one side, so the first row was used. */
+  /** What the reader should know about the links this result crossed: a key that repeats on the one side, so one row of it was used. Names the keys and the files; stays in the app. */
   notes?: string[];
+  /** The same notes with no key value and no file name, for a picture or a file that leaves the computer. */
+  publicNotes?: string[];
   /** Small multiples: the repeat values that have a chart (drawing order) and how many more there are. Rows are `[group, repeat value, value]`. */
   repeat?: { keys: Cell[]; more: number };
   /** Indexed lines: the rows before they were divided by the first value, same shape as `rows`. */
@@ -522,6 +524,8 @@ export interface Snapshot {
   link_keys?: string[];
   /** Relationship id → what the data says about the link. Not set for a link that was not checked. */
   health?: Record<string, LinkHealth>;
+  /** Link id → why its name no longer works: a table now has that name, or another link does. */
+  link_clashes?: Record<string, string>;
   dirty: boolean;
 }
 
@@ -667,6 +671,10 @@ export const api = {
   /** Names a link, or clears its name (an empty name). A name must be new and cannot be a table's. */
   renameRelationship: (id: string, name: string) =>
     call<Snapshot>('PATCH', `/relationships/${encodeURIComponent(id)}`, { name }),
+  /** Names several links as one set, so two links can swap their names. */
+  renameRelationships: (names: Record<string, string>) => call<Snapshot>('PUT', '/relationships/names', { names }),
+  /** Reads the links of live database tables again. The server tells the windows if an answer changed. */
+  checkLinks: () => call<{ changed: boolean }>('POST', '/relationships/check'),
   suggest: () => call<Suggestion[]>('GET', '/relationships/suggest'),
   putDashboards: (d: Dashboard[]) => call<{ ok: boolean }>('PUT', '/dashboards', d),
   putLayout: (l: unknown) => call<{ ok: boolean }>('PUT', '/layout', l),

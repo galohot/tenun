@@ -19,17 +19,53 @@ use chrono::NaiveDate;
 use duckdb::Connection;
 use duckdb::types::Value;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, SystemTime};
 
+/// Called when a check of live database links that ran off the request path has written its answer.
+type Listener = Arc<dyn Fn() + Send + Sync>;
+
+/// The most rows of a live database table that a link check reads (V4-D51).
+pub const LIVE_CHECK_ROWS: u64 = 1_000_000;
+
 pub struct Engine {
-    db: Mutex<Connection>,
-    state: RwLock<State>,
+    db: Arc<Mutex<Connection>>,
+    state: Arc<RwLock<State>>,
     secrets: Secrets,
     /// Replaces today's date for relative date filters. Tests set it; the app never does.
     today: Mutex<Option<NaiveDate>>,
+    /// How many link checks of live tables are running in the background.
+    pending: Arc<AtomicUsize>,
+    /// Told when such a check has written its answer.
+    listener: Arc<Mutex<Option<Listener>>>,
+    /// The most rows of a live table a check reads.
+    live_rows: Arc<AtomicU64>,
+    /// Milliseconds a link check waits before it reads the data. Tests use it to hold the moment
+    /// after a reload open; the app never sets it.
+    check_delay: Arc<AtomicU64>,
+}
+
+thread_local! {
+    /// While a tile runs: the links its queries crossed that have something to tell the reader.
+    static CROSSED: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
+
+fn note_crossed(ids: &[String]) {
+    CROSSED.with(|c| {
+        if let Some(v) = c.borrow_mut().as_mut() {
+            for id in ids {
+                if !v.contains(id) {
+                    v.push(id.clone());
+                }
+            }
+        }
+    });
 }
 
 #[derive(Default)]
@@ -44,8 +80,15 @@ struct State {
     /// Source id → when a CSV link was last fetched (or tried), for its refresh schedule.
     fetched: BTreeMap<String, SystemTime>,
     /// Relationship id → what the data of its two columns says. Made when a table loads (V4-D26),
-    /// never when a query runs.
+    /// never when a query runs. A link with no record is unknown: a join into it reads one row
+    /// per key (V4-D51).
     health: Health,
+    /// Relationship id → how many times its record was thrown away. A check that began before
+    /// the last time writes nothing.
+    epoch: BTreeMap<String, u64>,
+    /// Relationship id → the kind the link had at its last check, and the kind it had before the
+    /// data changed it (while it has not changed back).
+    kinds: BTreeMap<String, (&'static str, Option<&'static str>)>,
     dirty: bool,
 }
 
@@ -67,6 +110,9 @@ pub struct Snapshot {
     /// one to one, and the warning in plain words. Not set for a link that was not checked.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub health: BTreeMap<String, HealthOut>,
+    /// Link id → why its name no longer works: a table now has that name, or another link does.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub link_clashes: BTreeMap<String, String>,
     pub dirty: bool,
 }
 
@@ -183,6 +229,10 @@ pub struct QueryResult {
     /// the one side, so the first row was used (V4-D26).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
+    /// The same notes with no key value and no file name, for what leaves the computer: pictures
+    /// and exports (V4-D52). Snapshots put these in `notes`.
+    #[serde(rename = "publicNotes", skip_serializing_if = "Vec::is_empty")]
+    pub public_notes: Vec<String>,
     /// Small multiples (`tile.repeat`): the repeat values that have a chart, in the order they are
     /// drawn, and how many more there are. Rows are `[group, repeat value, value]`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -232,6 +282,7 @@ impl QueryResult {
             sparks: None,
             pair: None,
             notes: Vec::new(),
+            public_notes: Vec::new(),
         }
     }
 }
@@ -302,10 +353,14 @@ impl Engine {
         conn.execute_batch("SET autoinstall_known_extensions = false;")
             .ok();
         Ok(Self {
-            db: Mutex::new(conn),
-            state: RwLock::new(State::default()),
+            db: Arc::new(Mutex::new(conn)),
+            state: Arc::new(RwLock::new(State::default())),
             secrets,
             today: Mutex::new(None),
+            pending: Arc::new(AtomicUsize::new(0)),
+            listener: Arc::new(Mutex::new(None)),
+            live_rows: Arc::new(AtomicU64::new(LIVE_CHECK_ROWS)),
+            check_delay: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -336,6 +391,7 @@ impl Engine {
                 .map(|x| x.id.clone())
                 .collect(),
             health: health_out(&s),
+            link_clashes: link_clashes(&s),
             dirty: s.dirty,
         }
     }
@@ -670,6 +726,9 @@ impl Engine {
                 }
             }
         }
+        // The data is about to change. From now until the check has read it, the links of this
+        // source are unknown, so no query can join them as if they were clean (V4-D51).
+        forget_links(&mut self.state.write().unwrap(), id);
         let result = {
             let db = self.db.lock().unwrap();
             load_source(&db, &src, base.as_deref(), &self.secrets, &setups, &cache)
@@ -679,7 +738,7 @@ impl Engine {
             self.finish_load(&mut s, id, result, fetched, fetch_error)
         };
         // The links of this source's tables are checked once per load (V4-D26), never per query.
-        self.check_links(Some(id));
+        self.check_links(id);
         ids
     }
 
@@ -695,6 +754,9 @@ impl Engine {
         if fetched {
             s.fetched.insert(id.to_string(), SystemTime::now());
         }
+        // Under the same lock that puts the new tables in: the links of this source are unknown
+        // until the check has read them. A check that began earlier writes nothing (V4-D51).
+        forget_links(s, id);
         s.catalog.tables.retain(|t| t.source_id != id);
         match result {
             Ok(mut tables) => {
@@ -729,71 +791,110 @@ impl Engine {
         }
     }
 
-    /// Checks the links that touch the tables of one source (`None`: every link) against the data
-    /// and keeps the answer (V4-D26). It runs once for each load, so a duplicate that a live file
-    /// save adds shows up at once, and never for a query. A link with a table that is not loaded
-    /// has no health until both are.
-    fn check_links(&self, source: Option<&str>) {
-        let prefix = source.map(|id| format!("{id}/"));
-        let touches = |r: &Relationship| {
-            prefix
-                .as_deref()
-                .is_none_or(|p| r.from.table.starts_with(p) || r.to.table.starts_with(p))
-        };
-        // The jobs are copied out so no lock is held while the data is read.
-        let jobs: Vec<LinkJob> = {
-            let s = self.state.read().unwrap();
-            s.ws.relationships
-                .iter()
-                .filter(|r| touches(r))
-                .map(|r| LinkJob {
-                    id: r.id.clone(),
-                    sides: s
-                        .catalog
-                        .table(&r.to.table)
-                        .zip(s.catalog.table(&r.from.table))
-                        .map(|(one, many)| {
-                            (
-                                (one.clone(), r.to.column.clone()),
-                                (many.clone(), r.from.column.clone()),
-                            )
-                        }),
-                })
-                .collect()
-        };
-        if jobs.is_empty() {
+    /// Checks the links that touch the tables of one source against the data and keeps the answer
+    /// (V4-D26). It runs once for each load, so a repeated key that a live file save adds shows up
+    /// at once, and never for a query.
+    ///
+    /// A link between local tables is checked here, before this returns: it is quick. A link that
+    /// touches a live database table is checked in the background, reading at most
+    /// [`LIVE_CHECK_ROWS`] rows of each side, so a load never waits for a database (V4-D51). Until
+    /// the answer is in, the link is unknown and joins one row per key.
+    fn check_links(&self, source: &str) {
+        let prefix = format!("{source}/");
+        let (local, live) = self
+            .link_jobs(|r| r.from.table.starts_with(&prefix) || r.to.table.starts_with(&prefix));
+        let delay = self.check_delay.load(Ordering::Relaxed);
+        let rows = self.live_rows.load(Ordering::Relaxed);
+        if !local.is_empty() {
+            run_checks(&self.db, &self.state, local, rows, delay);
+        }
+        if live.is_empty() {
             return;
         }
-        let conn = self.conn().ok();
-        let measured: Vec<(String, Option<LinkHealth>)> = jobs
-            .into_iter()
-            .map(|job| {
-                let health =
-                    job.sides
-                        .zip(conn.as_ref())
-                        .and_then(|(((one, oc), (many, mc)), conn)| {
-                            let many_dups = key_counts(conn, &many, &mc).ok()?.1;
-                            let one = measure_one_side(conn, &one, &oc).ok()?;
-                            Some(LinkHealth { many_dups, ..one })
-                        });
-                (job.id, health)
-            })
-            .collect();
-        let mut s = self.state.write().unwrap();
-        for (id, health) in measured {
-            // A link that was removed while the data was read stays removed.
-            if !s.ws.relationships.iter().any(|r| r.id == id) {
-                continue;
+        let (db, state, listener) = (self.db.clone(), self.state.clone(), self.listener.clone());
+        let pending = self.pending.clone();
+        pending.fetch_add(1, Ordering::SeqCst);
+        std::thread::spawn(move || {
+            run_checks(&db, &state, live, rows, delay);
+            pending.fetch_sub(1, Ordering::SeqCst);
+            let told = listener.lock().unwrap().clone();
+            if let Some(f) = told {
+                f();
             }
-            match health {
-                Some(h) => {
-                    s.health.insert(id, h);
-                }
-                None => {
-                    s.health.remove(&id);
-                }
+        });
+    }
+
+    /// The links to check, copied out so no lock is held while the data is read: the ones between
+    /// local tables first, then the ones that touch a live database table.
+    fn link_jobs(&self, wanted: impl Fn(&Relationship) -> bool) -> (Vec<LinkJob>, Vec<LinkJob>) {
+        let s = self.state.read().unwrap();
+        let mut local = Vec::new();
+        let mut live = Vec::new();
+        for r in s.ws.relationships.iter().filter(|r| wanted(r)) {
+            let sides = s
+                .catalog
+                .table(&r.to.table)
+                .zip(s.catalog.table(&r.from.table))
+                .map(|(one, many)| {
+                    (
+                        (one.clone(), r.to.column.clone()),
+                        (many.clone(), r.from.column.clone()),
+                    )
+                });
+            let is_live = sides
+                .as_ref()
+                .is_some_and(|((one, _), (many, _))| !one.prep || !many.prep);
+            let job = LinkJob {
+                id: r.id.clone(),
+                epoch: s.epoch.get(&r.id).copied().unwrap_or(0),
+                sides,
+            };
+            if is_live {
+                live.push(job);
+            } else {
+                local.push(job);
             }
         }
+        (local, live)
+    }
+
+    /// Reads the links of live database tables again, now (V4-D51): a refresh of a dashboard, a
+    /// publish, and the agent call it, because a database changes without a load. Returns whether
+    /// any answer changed. Without live links it does nothing.
+    pub fn recheck_live_links(&self) -> bool {
+        let (_, live) = self.link_jobs(|_| true);
+        if live.is_empty() {
+            return false;
+        }
+        let before = self.state.read().unwrap().health.clone();
+        let rows = self.live_rows.load(Ordering::Relaxed);
+        let delay = self.check_delay.load(Ordering::Relaxed);
+        let ids: Vec<String> = live.iter().map(|j| j.id.clone()).collect();
+        run_checks(&self.db, &self.state, live, rows, delay);
+        let s = self.state.read().unwrap();
+        ids.iter().any(|id| before.get(id) != s.health.get(id))
+    }
+
+    /// Is a link check of a live table still running in the background?
+    pub fn checks_pending(&self) -> bool {
+        self.pending.load(Ordering::SeqCst) > 0
+    }
+
+    /// Calls `f` each time such a check has written its answer. The server tells the windows.
+    pub fn on_links_checked(&self, f: impl Fn() + Send + Sync + 'static) {
+        *self.listener.lock().unwrap() = Some(Arc::new(f));
+    }
+
+    /// Reads at most this many rows of a live table when a link is checked (tests make it small).
+    pub fn set_live_check_rows(&self, rows: u64) {
+        self.live_rows.store(rows, Ordering::Relaxed);
+    }
+
+    /// Makes every link check wait before it reads the data (tests hold the moment after a
+    /// reload open to see that nothing is counted twice there). The app never calls it.
+    pub fn slow_link_checks(&self, wait: Duration) {
+        self.check_delay
+            .store(wait.as_millis() as u64, Ordering::Relaxed);
     }
 
     /// Absolute paths of every single-file source, for the watcher.
@@ -1093,6 +1194,7 @@ impl Engine {
     /// is unique the join would multiply rows and every sum would be wrong, so
     /// it is refused with an explanation.
     pub fn add_relationship(&self, a: FieldRef, b: FieldRef) -> anyhow::Result<String> {
+        let rows = self.live_rows.load(Ordering::Relaxed);
         let (from, to, health) = {
             let s = self.state.read().unwrap();
             let ta = s
@@ -1104,13 +1206,13 @@ impl Engine {
                 .table(&b.table)
                 .ok_or_else(|| anyhow::anyhow!("unknown table {}", b.table))?;
             let conn = self.conn()?;
-            // How many keys repeat on each side, measured once. The answer for the chosen
-            // direction is kept as the health of the new link.
+            // How many keys repeat on each side. The answer for the chosen direction is kept
+            // as the health of the new link.
             let (dupes_a, dupes_b) = (
-                key_counts(&conn, ta, &a.column)?.1,
-                key_counts(&conn, tb, &b.column)?.1,
+                key_counts(&conn, ta, &a.column, live_limit(ta, rows))?.dups,
+                key_counts(&conn, tb, &b.column, live_limit(tb, rows))?.dups,
             );
-            let (from, to, many_dups, one_table) = match (dupes_a > 0, dupes_b > 0) {
+            let (from, to, one_table, many_table) = match (dupes_a > 0, dupes_b > 0) {
                 (true, true) => anyhow::bail!(
                     "Neither {}.{} nor {}.{} has unique values. One side of a relationship must be unique, like an ID, or totals would be counted twice.",
                     ta.label,
@@ -1118,13 +1220,16 @@ impl Engine {
                     tb.label,
                     b.column
                 ),
-                (false, true) => (b.clone(), a.clone(), dupes_b, ta),
-                _ => (a.clone(), b.clone(), dupes_a, tb),
+                (false, true) => (b.clone(), a.clone(), ta, tb),
+                _ => (a.clone(), b.clone(), tb, ta),
             };
-            let health = LinkHealth {
-                many_dups,
-                ..measure_one_side(&conn, one_table, &to.column)?
-            };
+            let health = measure_link(
+                &conn,
+                (one_table, &to.column),
+                (many_table, &from.column),
+                rows,
+                &mut Memo::default(),
+            )?;
             (from, to, health)
         };
         let id = {
@@ -1155,7 +1260,7 @@ impl Engine {
                 to,
                 name: None,
             });
-            s.health.insert(id.clone(), health);
+            record(&mut s, &id, health);
             id
         };
         self.persist();
@@ -1167,57 +1272,96 @@ impl Engine {
             let mut s = self.state.write().unwrap();
             s.ws.relationships.retain(|r| r.id != id);
             s.health.remove(id);
+            s.epoch.remove(id);
+            s.kinds.remove(id);
         }
         self.persist();
     }
 
-    /// Names a link, or clears its name (`None`). A name is how a field or a formula says which
-    /// link it means when two links join the same two tables (V4-D28), so it must be new:
-    /// not another link's name and not the name of a table.
+    /// Names a link, or clears its name (`None`). See [`Engine::rename_links`].
     pub fn rename_link(&self, id: &str, name: Option<String>) -> anyhow::Result<()> {
-        let name = name
-            .map(|n| n.split_whitespace().collect::<Vec<_>>().join(" "))
-            .filter(|n| !n.is_empty());
+        self.rename_links(BTreeMap::from([(id.to_string(), name)]))
+    }
+
+    /// Names several links at once, and checks the names as a set, so two links can swap their
+    /// names (V4-D46). A name is how a field or a formula says which link it means when two links
+    /// join the same two tables (V4-D28), so it must be new: not another link's name, and not the
+    /// label or the id of a table, which a formula reads first. A name has at most 60 letters;
+    /// spaces at its ends and doubled spaces go. An empty name clears it, unless another link joins
+    /// the same two tables.
+    ///
+    /// **Whoever stores formulas must follow a rename here.** Calculated columns (02), measures
+    /// and group values (03) call `formula::rename_link(text, old, new)` for every stored formula,
+    /// from this function, as `formula::rename_column` is called when a column is renamed
+    /// (V4-D25). No formula is stored yet, so nothing is rewritten today.
+    pub fn rename_links(&self, names: BTreeMap<String, Option<String>>) -> anyhow::Result<()> {
         {
             let mut s = self.state.write().unwrap();
-            let Some(i) = s.ws.relationships.iter().position(|r| r.id == id) else {
-                anyhow::bail!("There is no link {id}.");
-            };
-            match &name {
-                Some(n) => {
-                    if n.chars().count() > 60 {
-                        anyhow::bail!("Keep the name of a link to 60 letters or fewer.");
+            // The names as they will be, so the set is checked as a whole.
+            let mut next: Vec<(String, Option<String>)> =
+                s.ws.relationships
+                    .iter()
+                    .map(|r| (r.id.clone(), r.name.clone()))
+                    .collect();
+            for (id, name) in &names {
+                let Some(slot) = next.iter_mut().find(|(i, _)| i == id) else {
+                    anyhow::bail!("There is no link {id}.");
+                };
+                slot.1 = name
+                    .as_ref()
+                    .map(|n| n.split_whitespace().collect::<Vec<_>>().join(" "))
+                    .filter(|n| !n.is_empty());
+            }
+            for id in names.keys() {
+                let name = next
+                    .iter()
+                    .find(|(i, _)| i == id)
+                    .and_then(|(_, n)| n.clone());
+                match name {
+                    Some(n) => {
+                        if n.chars().count() > 60 {
+                            anyhow::bail!("Keep the name of a link to 60 letters or fewer.");
+                        }
+                        let same = |a: &str| a.trim().to_lowercase() == n.to_lowercase();
+                        if s.catalog
+                            .tables
+                            .iter()
+                            .any(|t| same(&t.label) || same(&t.id))
+                        {
+                            anyhow::bail!(
+                                "A table is called {n}. Give the link another name, so a formula can tell them apart."
+                            );
+                        }
+                        if next
+                            .iter()
+                            .any(|(i, other)| i != id && other.as_deref().is_some_and(same))
+                        {
+                            anyhow::bail!(
+                                "Another link is called {n}. Give this one another name."
+                            );
+                        }
                     }
-                    let same = |a: &str| a.trim().to_lowercase() == n.to_lowercase();
-                    if s.catalog.tables.iter().any(|t| same(&t.label)) {
-                        anyhow::bail!(
-                            "A table is called {n}. Give the link another name, so a formula can tell them apart."
-                        );
-                    }
-                    if s.ws
-                        .relationships
-                        .iter()
-                        .any(|r| r.id != id && r.name.as_deref().is_some_and(same))
-                    {
-                        anyhow::bail!("Another link is called {n}. Give this one another name.");
-                    }
-                }
-                None => {
-                    let r = &s.ws.relationships[i];
-                    let pair = |x: &Relationship| {
-                        (x.from.table == r.from.table && x.to.table == r.to.table)
-                            || (x.from.table == r.to.table && x.to.table == r.from.table)
-                    };
-                    if s.ws.relationships.iter().any(|x| x.id != id && pair(x)) {
-                        anyhow::bail!(
-                            "Two links join these tables, so each one needs a name. Give this link a name."
-                        );
+                    None => {
+                        let Some(r) = s.ws.relationships.iter().find(|r| &r.id == id) else {
+                            continue;
+                        };
+                        let pair = |x: &Relationship| {
+                            (x.from.table == r.from.table && x.to.table == r.to.table)
+                                || (x.from.table == r.to.table && x.to.table == r.from.table)
+                        };
+                        if s.ws.relationships.iter().any(|x| x.id != *id && pair(x)) {
+                            anyhow::bail!(
+                                "Two links join these tables, so each one needs a name. Give this link a name."
+                            );
+                        }
                     }
                 }
             }
-            // A formula that writes the old name follows the new one. No formula is stored yet:
-            // calculated columns and measures call `formula::rename_link` here when they exist.
-            s.ws.relationships[i].name = name;
+            for (id, name) in next {
+                if let Some(r) = s.ws.relationships.iter_mut().find(|r| r.id == id) {
+                    r.name = name;
+                }
+            }
         }
         self.persist();
         Ok(())
@@ -1293,6 +1437,7 @@ impl Engine {
                 today,
             )?
         };
+        note_crossed(&compiled.crossed);
         let start = std::time::Instant::now();
         let conn = self.conn()?;
         let rows = run(&conn, &compiled.sql, &compiled.params)?;
@@ -1315,6 +1460,7 @@ impl Engine {
             sparks: None,
             pair: None,
             notes: Vec::new(),
+            public_notes: Vec::new(),
         })
     }
 
@@ -1335,6 +1481,7 @@ impl Engine {
                 Links::new(&s.ws.relationships, Some(&s.health)),
                 today,
             )?;
+            note_crossed(&sc.crossed);
             let (sql, params) = build(&sc)?;
             (sql, params, sc.ignored_filters.clone())
         };
@@ -1571,22 +1718,32 @@ impl Engine {
         Some(links::link_label(r, &s.catalog))
     }
 
-    /// What the reader of a result should know about the links its question crosses: a key that
-    /// repeats on the one side, so the first row was used (V4-D26). Nothing is read from the
-    /// data; the answer comes from the health made when the tables loaded.
-    pub fn link_notes(&self, q: &SemanticQuery) -> Vec<String> {
+    /// Runs `f` and returns what it returns with the links its queries crossed that have
+    /// something to tell the reader. Every query that `f` runs counts, so a tile's spark line
+    /// and its side questions are included, not only its main one (V4-D45).
+    pub fn collecting<R>(&self, f: impl FnOnce() -> R) -> (R, Vec<String>) {
+        let before = CROSSED.replace(Some(Vec::new()));
+        let result = f();
+        let found = CROSSED.replace(before).unwrap_or_default();
+        (result, found)
+    }
+
+    /// What the reader of a result in the app should know about those links: a key that repeats
+    /// on the side joined into, so one row of it was used (V4-D26). Nothing is read from the
+    /// data; the sentences come from the health made when the tables loaded. They name the keys
+    /// and the files, and stay in the app.
+    pub fn link_notes(&self, crossed: &[String]) -> Vec<String> {
         let s = self.state.read().unwrap();
-        let links = Links::new(&s.ws.relationships, Some(&s.health));
-        let mut out: Vec<String> = Vec::new();
-        for id in query::crossed_dirty(q, &s.catalog, links) {
-            if let (Some(r), Some(h)) = (links.find(&id), s.health.get(&id))
-                && let Some(n) = links::note(r, h, &s.catalog, &source_lookup(&s))
-                && !out.contains(&n)
-            {
-                out.push(n);
-            }
-        }
-        out
+        let sources = source_lookup(&s);
+        notes_of(&s, crossed, |r, h| {
+            links::tile_note(r, h, &s.catalog, &sources)
+        })
+    }
+
+    /// The same notes with no key value and no file name, for what leaves the computer (V4-D52).
+    pub fn public_link_notes(&self, crossed: &[String]) -> Vec<String> {
+        let s = self.state.read().unwrap();
+        notes_of(&s, crossed, |r, h| links::public_note(r, h, &s.catalog))
     }
 
     /// Checks a formula against the open workspace and runs a preview of it (the first 5 values
@@ -1607,19 +1764,12 @@ impl Engine {
         let cx = formula::Context {
             catalog: &catalog,
             rels: &rels,
-            health: Some(&health),
+            health: &health,
             today,
             now: today.and_time(chrono::Local::now().time()),
         };
         Ok(formula::answer(req, &cx, &self.conn()?))
     }
-}
-
-/// One link to check: the one side and the many side, each a table and a column. `sides` is
-/// `None` while one of the two tables is not loaded.
-struct LinkJob {
-    id: String,
-    sides: Option<((Table, String), (Table, String))>,
 }
 
 /// The name of a source and how many tables it holds, for the sentences about a link.
@@ -1648,16 +1798,191 @@ fn health_out(s: &State) -> BTreeMap<String, HealthOut> {
         .collect()
 }
 
-/// How many rows of the table have a value in the column, and how many of them repeat a value
-/// that an earlier row has: `count(key)` and `count(key) - count(DISTINCT key)`. Blank keys
-/// are not counted: they never match a row.
-fn key_counts(conn: &Connection, t: &Table, column: &str) -> anyhow::Result<(u64, u64)> {
+/// The sentences of the links in `crossed` that have one, once each.
+fn notes_of(
+    s: &State,
+    crossed: &[String],
+    say: impl Fn(&Relationship, &LinkHealth) -> Option<String>,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in crossed {
+        if let (Some(r), Some(h)) = (
+            s.ws.relationships.iter().find(|r| &r.id == id),
+            s.health.get(id),
+        ) && let Some(n) = say(r, h)
+            && !out.contains(&n)
+        {
+            out.push(n);
+        }
+    }
+    out
+}
+
+/// Why a link's name no longer works: a table has that name now (its label or its id), or another
+/// link has (V4-D46). A formula reads a table first, so the link would never be found.
+fn link_clashes(s: &State) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for r in &s.ws.relationships {
+        let Some(n) = r.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) else {
+            continue;
+        };
+        let same = |a: &str| a.trim().to_lowercase() == n.to_lowercase();
+        if s.catalog
+            .tables
+            .iter()
+            .any(|t| same(&t.label) || same(&t.id))
+        {
+            out.insert(
+                r.id.clone(),
+                format!(
+                    "A table is called {n} too, so a formula reads the table, not this link. Give the link another name."
+                ),
+            );
+        } else if s
+            .ws
+            .relationships
+            .iter()
+            .any(|o| o.id != r.id && o.name.as_deref().is_some_and(same))
+        {
+            out.insert(
+                r.id.clone(),
+                format!("Another link is called {n}. Give one of them another name."),
+            );
+        }
+    }
+    out
+}
+
+/// The links that touch a source are unknown from now on: their record goes, and a check that
+/// began before this writes nothing (V4-D51).
+fn forget_links(s: &mut State, source: &str) {
+    let prefix = format!("{source}/");
+    let ids: Vec<String> =
+        s.ws.relationships
+            .iter()
+            .filter(|r| r.from.table.starts_with(&prefix) || r.to.table.starts_with(&prefix))
+            .map(|r| r.id.clone())
+            .collect();
+    for id in ids {
+        s.health.remove(&id);
+        *s.epoch.entry(id).or_insert(0) += 1;
+    }
+}
+
+/// Keeps the answer for a link, and remembers what kind it was before the data changed it.
+fn record(s: &mut State, id: &str, mut h: LinkHealth) {
+    let kind = h.kind();
+    let was = s.kinds.get(id).and_then(|(last, was)| {
+        let origin = was.unwrap_or(*last);
+        (kind != origin).then_some(origin)
+    });
+    h.was = was;
+    s.kinds.insert(id.to_string(), (kind, was));
+    s.health.insert(id.to_string(), h);
+}
+
+/// One link to check: the one side and the many side, each a table and a column, and how many
+/// times the record of the link had been thrown away when the job was made. `sides` is `None`
+/// while one of the two tables is not loaded.
+struct LinkJob {
+    id: String,
+    epoch: u64,
+    sides: Option<((Table, String), (Table, String))>,
+}
+
+/// Reads the data of each link and writes the answers (V4-D26, V4-D51). A link whose record was
+/// thrown away since the job was made is left alone: a newer load owns it. A check that fails
+/// leaves the link unknown, which reads one row per key.
+fn run_checks(
+    db: &Mutex<Connection>,
+    state: &RwLock<State>,
+    jobs: Vec<LinkJob>,
+    live_rows: u64,
+    delay_ms: u64,
+) {
+    if delay_ms > 0 {
+        std::thread::sleep(Duration::from_millis(delay_ms));
+    }
+    let conn = db.lock().unwrap().try_clone().ok();
+    // The same column in several links is read once.
+    let mut memo = Memo::default();
+    for job in jobs {
+        let health = match (&job.sides, &conn) {
+            (Some(((one, oc), (many, mc))), Some(conn)) => {
+                measure_link(conn, (one, oc), (many, mc), live_rows, &mut memo).ok()
+            }
+            _ => None,
+        };
+        let mut s = state.write().unwrap();
+        if !s.ws.relationships.iter().any(|r| r.id == job.id)
+            || s.epoch.get(&job.id).copied().unwrap_or(0) != job.epoch
+        {
+            continue;
+        }
+        match health {
+            Some(h) => record(&mut s, &job.id, h),
+            None => {
+                s.health.remove(&job.id);
+            }
+        }
+    }
+}
+
+/// What a check read of one column, kept while the checks of one load run.
+#[derive(Default)]
+struct Memo {
+    counts: HashMap<(String, String), Counts>,
+    ones: HashMap<(String, String), OneSide>,
+}
+
+/// How many rows of a column have a value, how many repeat one, and whether only the first rows
+/// were read.
+#[derive(Clone, Default)]
+struct Counts {
+    rows: u64,
+    dups: u64,
+    /// Set when only the first rows were read: how many.
+    limit: Option<u64>,
+}
+
+/// What the one side of a link says: its counts, how many keys repeat, and the most repeated few
+/// with their row counts.
+#[derive(Clone, Default)]
+struct OneSide {
+    counts: Counts,
+    keys: u64,
+    sample: Vec<serde_json::Value>,
+    sample_rows: Vec<u64>,
+}
+
+/// A live database table is read up to `rows` rows when a link is checked; a local table whole.
+fn live_limit(t: &Table, rows: u64) -> Option<u64> {
+    (!t.prep).then_some(rows)
+}
+
+/// The keys of a column as a relation `(k)`: all of them, or the first `limit` rows.
+fn keys_of(t: &Table, column: &str, limit: Option<u64>) -> String {
     let q = ident(column);
+    match limit {
+        Some(n) => format!("(SELECT {q} AS k FROM {} LIMIT {n})", t.sql_ref),
+        None => format!("(SELECT {q} AS k FROM {})", t.sql_ref),
+    }
+}
+
+/// `count(key)` and `count(key) - count(DISTINCT key)` of a column. Blank keys are not counted:
+/// they never match a row.
+fn key_counts(
+    conn: &Connection,
+    t: &Table,
+    column: &str,
+    limit: Option<u64>,
+) -> anyhow::Result<Counts> {
     let rows = run(
         conn,
         &format!(
-            "SELECT CAST(count({q}) AS DOUBLE), CAST(count({q}) - count(DISTINCT {q}) AS DOUBLE) FROM {}",
-            t.sql_ref
+            "SELECT CAST(count(*) AS DOUBLE), CAST(count(k) AS DOUBLE), \
+             CAST(count(k) - count(DISTINCT k) AS DOUBLE) FROM {}",
+            keys_of(t, column, limit)
         ),
         &[],
     )?;
@@ -1667,31 +1992,41 @@ fn key_counts(conn: &Connection, t: &Table, column: &str) -> anyhow::Result<(u64
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0) as u64
     };
-    Ok((num(0), num(1)))
+    Ok(Counts {
+        rows: num(1),
+        dups: num(2),
+        limit: limit.filter(|n| num(0) >= *n),
+    })
 }
 
-/// What the one side of a link says: how many rows repeat a key, how many keys repeat, and the
-/// most repeated few with their row counts.
-fn measure_one_side(conn: &Connection, t: &Table, column: &str) -> anyhow::Result<LinkHealth> {
-    let (one_rows, one_dups) = key_counts(conn, t, column)?;
-    if one_dups == 0 {
-        return Ok(LinkHealth {
-            one_rows,
-            ..LinkHealth::default()
+fn measure_one_side(
+    conn: &Connection,
+    t: &Table,
+    column: &str,
+    limit: Option<u64>,
+) -> anyhow::Result<OneSide> {
+    let counts = key_counts(conn, t, column, limit)?;
+    if counts.dups == 0 {
+        return Ok(OneSide {
+            counts,
+            ..OneSide::default()
         });
     }
-    let q = ident(column);
-    // The key as a number or as text, so the answer reads the same in JSON for any column type.
+    let src = keys_of(t, column, limit);
+    // The key as text, so a large whole number is not written as 1.2e18 and the answer reads the
+    // same in JSON for any column type.
     let key = match t.column(column).map(|c| c.dtype) {
-        Some(DType::Number) => format!("CAST({q} AS DOUBLE)"),
-        _ => format!("CAST({q} AS VARCHAR)"),
+        Some(DType::Number) => "CASE WHEN CAST(k AS DOUBLE) = floor(CAST(k AS DOUBLE)) \
+             AND abs(CAST(k AS DOUBLE)) < 1e15 THEN CAST(CAST(k AS BIGINT) AS VARCHAR) \
+             ELSE CAST(k AS VARCHAR) END"
+            .to_string(),
+        _ => "CAST(k AS VARCHAR)".to_string(),
     };
     let found = run(
         conn,
         &format!(
-            "SELECT {key}, CAST(count(*) AS DOUBLE) FROM {} WHERE {q} IS NOT NULL \
-             GROUP BY {q} HAVING count(*) > 1 ORDER BY 2 DESC, 1 LIMIT {}",
-            t.sql_ref,
+            "SELECT {key}, CAST(count(*) AS DOUBLE) FROM {src} WHERE k IS NOT NULL \
+             GROUP BY k HAVING count(*) > 1 ORDER BY 2 DESC, 1 LIMIT {}",
             links::SAMPLE_KEYS
         ),
         &[],
@@ -1699,9 +2034,8 @@ fn measure_one_side(conn: &Connection, t: &Table, column: &str) -> anyhow::Resul
     let count = run(
         conn,
         &format!(
-            "SELECT CAST(count(*) AS DOUBLE) FROM (SELECT 1 FROM {} WHERE {q} IS NOT NULL \
-             GROUP BY {q} HAVING count(*) > 1)",
-            t.sql_ref
+            "SELECT CAST(count(*) AS DOUBLE) FROM (SELECT 1 FROM {src} WHERE k IS NOT NULL \
+             GROUP BY k HAVING count(*) > 1)"
         ),
         &[],
     )?;
@@ -1710,16 +2044,98 @@ fn measure_one_side(conn: &Connection, t: &Table, column: &str) -> anyhow::Resul
         .and_then(|r| r.first())
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0) as u64;
-    Ok(LinkHealth {
-        one_rows,
-        one_dups,
-        one_keys: keys,
+    Ok(OneSide {
+        counts,
+        keys,
         sample: found.iter().map(|r| r[0].clone()).collect(),
         sample_rows: found
             .iter()
             .map(|r| r[1].as_f64().unwrap_or(0.0) as u64)
             .collect(),
-        many_dups: 0,
+    })
+}
+
+/// How many rows of the many side have a key that repeats on the one side.
+fn many_hits(
+    conn: &Connection,
+    one: (&Table, &str),
+    many: (&Table, &str),
+    rows: u64,
+) -> anyhow::Result<u64> {
+    let (ot, oc) = one;
+    let (mt, mc) = many;
+    let text = match (ot.column(oc), mt.column(mc)) {
+        (Some(a), Some(b)) => a.dtype != b.dtype,
+        _ => true,
+    };
+    let key = |x: &str| {
+        if text {
+            format!("CAST({x} AS VARCHAR)")
+        } else {
+            x.to_string()
+        }
+    };
+    let found = run(
+        conn,
+        &format!(
+            "SELECT CAST(count(*) AS DOUBLE) FROM {} m WHERE {} IN \
+             (SELECT {} FROM {} WHERE k IS NOT NULL GROUP BY {} HAVING count(*) > 1)",
+            keys_of(mt, mc, live_limit(mt, rows)),
+            key("m.k"),
+            key("k"),
+            keys_of(ot, oc, live_limit(ot, rows)),
+            key("k"),
+        ),
+        &[],
+    )?;
+    Ok(found
+        .first()
+        .and_then(|r| r.first())
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) as u64)
+}
+
+/// What the data of the two columns of a link says.
+fn measure_link(
+    conn: &Connection,
+    one: (&Table, &str),
+    many: (&Table, &str),
+    rows: u64,
+    memo: &mut Memo,
+) -> anyhow::Result<LinkHealth> {
+    let key = |t: &Table, c: &str| (t.id.clone(), c.to_string());
+    let many_counts = match memo.counts.get(&key(many.0, many.1)) {
+        Some(c) => c.clone(),
+        None => {
+            let c = key_counts(conn, many.0, many.1, live_limit(many.0, rows))?;
+            memo.counts.insert(key(many.0, many.1), c.clone());
+            c
+        }
+    };
+    let side = match memo.ones.get(&key(one.0, one.1)) {
+        Some(o) => o.clone(),
+        None => {
+            let o = measure_one_side(conn, one.0, one.1, live_limit(one.0, rows))?;
+            memo.ones.insert(key(one.0, one.1), o.clone());
+            o
+        }
+    };
+    let hits = if side.counts.dups > 0 && many_counts.rows > 0 {
+        many_hits(conn, one, many, rows)?
+    } else {
+        0
+    };
+    Ok(LinkHealth {
+        one_rows: side.counts.rows,
+        one_dups: side.counts.dups,
+        one_keys: side.keys,
+        sample: side.sample,
+        sample_rows: side.sample_rows,
+        many_rows: many_counts.rows,
+        many_dups: many_counts.dups,
+        many_hits: hits,
+        limit: many_counts.limit.or(side.counts.limit),
+        was: None,
     })
 }
 

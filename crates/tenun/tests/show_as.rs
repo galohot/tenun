@@ -535,7 +535,7 @@ fn same_period_last_year_lines_up_the_months() {
 
     // A date filter on the chart moves back by the same year.
     let f = date_filter("2026-01-01", "2026-03-31");
-    let r = run_tile(&e, &t, &[f.clone()]).unwrap();
+    let r = run_tile(&e, &t, std::slice::from_ref(&f)).unwrap();
     assert_eq!(r.rows.len(), 3);
     let c = r.compare.unwrap();
     assert_eq!(c.rows.len(), 3);

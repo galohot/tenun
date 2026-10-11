@@ -1052,6 +1052,7 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
         sparks: None,
         pair: None,
         notes: Vec::new(),
+        public_notes: Vec::new(),
     };
     let (Some(n), Some(min), Some(max), Some(q1), Some(q3)) =
         (num(0), num(1), num(2), num(3), num(4))

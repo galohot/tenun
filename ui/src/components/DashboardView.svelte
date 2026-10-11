@@ -90,6 +90,25 @@
     return () => ro.disconnect();
   });
 
+  // A database changes without a load, so its links are read again with every refresh, the
+  // interval and "Refresh now" alike (V4-D51). If an answer changed, the tiles ask again to get
+  // the new notes.
+  let checkedAt = 0;
+  $effect(() => {
+    const t = tick;
+    if (!t || t === checkedAt) return;
+    checkedAt = t;
+    api
+      .checkLinks()
+      .then((r) => {
+        if (r.changed) {
+          app.dataVersion++;
+          app.refresh();
+        }
+      })
+      .catch(() => {});
+  });
+
   // Live databases refresh on the dashboard's interval.
   $effect(() => {
     const secs = dash?.refresh ?? 0;

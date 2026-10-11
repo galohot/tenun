@@ -1,0 +1,489 @@
+[
+  {
+    "name": "two links to one table are two ways to it",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "t",
+          "from_store"
+        ],
+        "to": [
+          "s",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "t",
+          "to_store"
+        ],
+        "to": [
+          "s",
+          "id"
+        ]
+      }
+    ],
+    "health": {},
+    "base": "t",
+    "reach": {
+      "t": null,
+      "s": "r1"
+    },
+    "first": {
+      "s": [
+        "r1",
+        "r2"
+      ]
+    }
+  },
+  {
+    "name": "two ways to the stores are two ways to what the stores point at",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "t",
+          "a"
+        ],
+        "to": [
+          "s",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "t",
+          "b"
+        ],
+        "to": [
+          "s",
+          "id"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "s",
+          "region"
+        ],
+        "to": [
+          "g",
+          "code"
+        ]
+      }
+    ],
+    "health": {},
+    "base": "t",
+    "reach": {
+      "t": null,
+      "s": "r1",
+      "g": "r3"
+    },
+    "first": {
+      "s": [
+        "r1",
+        "r2"
+      ],
+      "g": [
+        "r1",
+        "r2"
+      ]
+    }
+  },
+  {
+    "name": "a table nobody points at is not reachable",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "t",
+          "a"
+        ],
+        "to": [
+          "s",
+          "id"
+        ]
+      }
+    ],
+    "health": {},
+    "base": "s",
+    "reach": {
+      "s": null
+    },
+    "first": {}
+  },
+  {
+    "name": "a one to one link is crossed backward",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "a",
+          "x"
+        ],
+        "to": [
+          "b",
+          "y"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-one"
+    },
+    "base": "b",
+    "reach": {
+      "b": null,
+      "a": "r1"
+    },
+    "first": {
+      "a": [
+        "r1"
+      ]
+    }
+  },
+  {
+    "name": "a link nobody has read is crossed as stored only",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "a",
+          "x"
+        ],
+        "to": [
+          "b",
+          "y"
+        ]
+      }
+    ],
+    "health": {},
+    "base": "b",
+    "reach": {
+      "b": null
+    },
+    "first": {}
+  },
+  {
+    "name": "the usual one to many link does not go backward",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "a",
+          "x"
+        ],
+        "to": [
+          "b",
+          "y"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-many"
+    },
+    "base": "b",
+    "reach": {
+      "b": null
+    },
+    "first": {}
+  },
+  {
+    "name": "a link whose one side is not a key reads the other way round",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "a",
+          "x"
+        ],
+        "to": [
+          "b",
+          "y"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "many-one"
+    },
+    "base": "a",
+    "reach": {
+      "a": null
+    },
+    "first": {}
+  },
+  {
+    "name": "a link whose one side is not a key reads the other way round (from the one side)",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "a",
+          "x"
+        ],
+        "to": [
+          "b",
+          "y"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "many-one"
+    },
+    "base": "b",
+    "reach": {
+      "b": null,
+      "a": "r1"
+    },
+    "first": {
+      "a": [
+        "r1"
+      ]
+    }
+  },
+  {
+    "name": "many to many is not used",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "a",
+          "x"
+        ],
+        "to": [
+          "b",
+          "y"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "many-many"
+    },
+    "base": "a",
+    "reach": {
+      "a": null
+    },
+    "first": {}
+  },
+  {
+    "name": "a table that was reachable forward keeps its way when a shorter way appears backward",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "a",
+          "x"
+        ],
+        "to": [
+          "b",
+          "y"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "b",
+          "y"
+        ],
+        "to": [
+          "c",
+          "z"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "c",
+          "z"
+        ],
+        "to": [
+          "x",
+          "id"
+        ]
+      },
+      {
+        "id": "r4",
+        "from": [
+          "d",
+          "k"
+        ],
+        "to": [
+          "a",
+          "k"
+        ]
+      },
+      {
+        "id": "r5",
+        "from": [
+          "d",
+          "w"
+        ],
+        "to": [
+          "x",
+          "id"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-many",
+      "r2": "one-many",
+      "r3": "one-many",
+      "r4": "one-one",
+      "r5": "one-many"
+    },
+    "base": "a",
+    "reach": {
+      "a": null,
+      "b": "r1",
+      "c": "r2",
+      "x": "r3",
+      "d": "r4"
+    },
+    "first": {
+      "b": [
+        "r1"
+      ],
+      "c": [
+        "r1"
+      ],
+      "x": [
+        "r1"
+      ],
+      "d": [
+        "r4"
+      ]
+    }
+  },
+  {
+    "name": "a table found only after a backward step",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "a",
+          "x"
+        ],
+        "to": [
+          "b",
+          "y"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "c",
+          "k"
+        ],
+        "to": [
+          "a",
+          "k"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "c",
+          "w"
+        ],
+        "to": [
+          "d",
+          "id"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-many",
+      "r2": "one-one",
+      "r3": "one-many"
+    },
+    "base": "a",
+    "reach": {
+      "a": null,
+      "b": "r1",
+      "c": "r2",
+      "d": "r3"
+    },
+    "first": {
+      "b": [
+        "r1"
+      ],
+      "c": [
+        "r2"
+      ],
+      "d": [
+        "r2"
+      ]
+    }
+  },
+  {
+    "name": "two equally short ways: the first made is the default, both are counted",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "a",
+          "p"
+        ],
+        "to": [
+          "b1",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "a",
+          "q"
+        ],
+        "to": [
+          "b2",
+          "id"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "b1",
+          "z"
+        ],
+        "to": [
+          "z",
+          "id"
+        ]
+      },
+      {
+        "id": "r4",
+        "from": [
+          "b2",
+          "z"
+        ],
+        "to": [
+          "z",
+          "id"
+        ]
+      }
+    ],
+    "health": {},
+    "base": "a",
+    "reach": {
+      "a": null,
+      "b1": "r1",
+      "b2": "r2",
+      "z": "r3"
+    },
+    "first": {
+      "b1": [
+        "r1"
+      ],
+      "b2": [
+        "r2"
+      ],
+      "z": [
+        "r1",
+        "r2"
+      ]
+    }
+  }
+]

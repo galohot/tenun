@@ -862,6 +862,7 @@
         table={tile.dims[0]?.table ?? null}
         column={tile.dims[0]?.column ?? null} via={tile.dims[0]?.via}
         placeholder="Pick a field"
+        roles
         onchange={(t, c, v) => setFilterField(t, c, v)}
         onclear={() => set({ dims: [], filter: { style: tile.filter?.style ?? 'list' } })} />
       {#if tile.dims[0]}

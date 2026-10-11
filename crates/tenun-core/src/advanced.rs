@@ -468,6 +468,7 @@ pub fn boxplot(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
         sparks: None,
         pair: None,
         notes: Vec::new(),
+        public_notes: Vec::new(),
     })
 }
 

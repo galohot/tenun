@@ -205,7 +205,7 @@ fn bullet_reads_the_value_and_its_target() {
         json!([]),
         json!({}),
     );
-    assert_eq!(tile_query(&one, &[]).is_some(), true);
+    assert!(tile_query(&one, &[]).is_some());
     assert_eq!(run(&e, &one).rows[0].len(), 1);
 }
 

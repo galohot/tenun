@@ -324,18 +324,33 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
 
 const MAX_CHART_MEASURES: usize = 4;
 
-/// Runs one tile, with number-tile and unfinished-period extras, and a note for every link the
-/// tile crosses whose one side repeats a key (V4-D26). The notes travel with the result into
-/// snapshots, exports and published pages.
+/// Runs one tile, with number-tile and unfinished-period extras, and a note for every link its
+/// queries cross whose joined side repeats a key (V4-D26). Every query the tile runs counts,
+/// its spark line and its side questions too (V4-D45), not only its main one.
+///
+/// The result carries two lists: `notes`, which name the keys and the files and stay in the app,
+/// and `public_notes`, which have no value and no file name, for pictures and exports (V4-D52).
 pub fn run_tile(
     engine: &Engine,
     tile: &Tile,
     filters: &[DashFilter],
 ) -> anyhow::Result<QueryResult> {
-    let mut res = run_tile_inner(engine, tile, filters)?;
-    if let Some(q) = tile_query(tile, filters) {
-        res.notes = engine.link_notes(&q);
-    }
+    let (res, crossed) = engine.collecting(|| run_tile_inner(engine, tile, filters));
+    let mut res = res?;
+    res.notes = engine.link_notes(&crossed);
+    res.public_notes = engine.public_link_notes(&crossed);
+    Ok(res)
+}
+
+/// Like [`run_tile`], for what leaves the computer: a snapshot, an exported page, a published
+/// page, an Excel file. The notes in the result are the ones with no value and no file name.
+pub fn run_tile_public(
+    engine: &Engine,
+    tile: &Tile,
+    filters: &[DashFilter],
+) -> anyhow::Result<QueryResult> {
+    let mut res = run_tile(engine, tile, filters)?;
+    res.notes = std::mem::take(&mut res.public_notes);
     Ok(res)
 }
 
@@ -781,6 +796,9 @@ pub fn js_key(v: &Value) -> String {
 /// by clicking). The dashboard's own filters join them: the ones it saves, the selection of each
 /// filter tile, and its one grain for every time tile.
 pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> anyhow::Result<Value> {
+    // A database changes without a load: the links of live tables are read again, so a page that
+    // is exported or published says what the data says now (V4-D51).
+    engine.recheck_live_links();
     let dash = engine
         .dashboard(dashboard_id)
         .ok_or_else(|| anyhow::anyhow!("no dashboard {dashboard_id}"))?;
@@ -826,7 +844,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
 
     let mut base: BTreeMap<String, QueryResult> = BTreeMap::new();
     for t in tiles.iter().filter(|t| !is_static(&t.kind)) {
-        base.insert(t.id.clone(), run_tile(engine, t, filters)?);
+        base.insert(t.id.clone(), run_tile_public(engine, t, filters)?);
     }
 
     // Offline cross-filtering: each clickable tile, each of its values, every other tile.
@@ -1004,7 +1022,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                     .iter()
                     .filter(|t| t.id != src.id && !is_static(&t.kind) && t.kind != "filter")
                 {
-                    per_tile.insert(t.id.clone(), run_tile(engine, t, &fs)?);
+                    per_tile.insert(t.id.clone(), run_tile_public(engine, t, &fs)?);
                 }
                 per_value.insert(js_key(&v), per_tile);
             }

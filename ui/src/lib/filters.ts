@@ -89,12 +89,23 @@ export function tileFilters(tiles: Tile[], dtypeOf: (table: string, column: stri
 export const isCleared = (f: TileFilter | undefined): boolean =>
   !f || (!f.values?.length && !(f.range && (f.range[0] !== null || f.range[1] !== null)) && !f.preset);
 
+/** The same field: its table, its column and the link it crosses (V4-D28). One table read through two links is two fields. */
+export const sameField = (a: { table: string; column: string; via?: string }, b: { table: string; column: string; via?: string }): boolean =>
+  a.table === b.table && a.column === b.column && (a.via || undefined) === (b.via || undefined);
+
+/** A filter that came from a click on the column header of a pivot: it names the column field of its tile, link included. */
+export const isColFilter = (tile: Pick<Tile, 'cols'> | undefined, f: Filter): boolean => !!tile?.cols && sameField(tile.cols, f);
+
+/** The stage of a Sankey node a filter came from, link included; 0 for every other tile. */
+export function stageOf(tile: Pick<Tile, 'type' | 'dims'> | undefined, f: Filter): number {
+  const i = tile?.type === 'sankey' ? tile.dims.findIndex((d) => sameField(d, f)) : 0;
+  return Math.max(0, i);
+}
+
 /** The same question on the same field: a second click on a mark takes the filter off. */
 export function sameFilter(a: Filter, b: Filter): boolean {
   return (
-    a.table === b.table &&
-    a.column === b.column &&
-    a.via === b.via &&
+    sameField(a, b) &&
     a.op === b.op &&
     a.values.length === b.values.length &&
     a.values.every((v, i) => keyOf(v) === keyOf(b.values[i]))

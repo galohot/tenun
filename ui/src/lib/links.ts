@@ -34,36 +34,84 @@ export const hasWarning = (h: LinkHealth | undefined): boolean => !!h?.note;
 
 // ---- which tables can be reached -----------------------------------------------------------
 
-/** The edges out of a table, in the order the links were made: forward first, then the other way. */
-function edgesOf(table: string, rels: Relationship[], health: Health): { rel: string; to: string }[] {
-  const out: { rel: string; to: string }[] = [];
-  for (const r of rels) {
-    const h = health?.[r.id];
-    if (!usable(h)) continue;
-    if (r.from.table === table && forwardOk(h)) out.push({ rel: r.id, to: r.to.table });
+/** What one search from a base table finds. The Rust `search` in `links.rs` is the definition. */
+export interface Found {
+  /** Every reachable table and the link that reaches it by the default path (null for the base). */
+  edge: Map<string, string | null>;
+  /** Every reachable table and the first link of every shortest path to it, in the order the links were made. */
+  firsts: Map<string, string[]>;
+}
+
+/**
+ * The one definition of "the shortest way", the same as `search` in `crates/tenun-core/src/links.rs`;
+ * both are tested against `tests/fixtures/paths.json`.
+ *
+ * Pass 1 crosses links from the many side to the one side only, breadth first, so a table that was
+ * reachable keeps its path. Pass 2 starts from every table pass 1 found, in the order it found them,
+ * and crosses links both ways, to find the tables pass 1 did not. In each pass the links are tried
+ * in the order they were made, the stored way first. The first to reach a table is its default way;
+ * the links that reach it as quickly are all counted in `firsts`.
+ */
+export function search(base: string, rels: Relationship[], health?: Health): Found {
+  const edge = new Map<string, string | null>([[base, null]]);
+  const firsts = new Map<string, string[]>();
+  const dist = new Map<string, number>([[base, 0]]);
+  const order = [base];
+  const usableRels = rels.filter((r) => usable(health?.[r.id]));
+  const start = (t: string, r: Relationship): string[] => (t === base ? [r.id] : [...(firsts.get(t) ?? [])]);
+  const join = (into: string[], from: string[]) => {
+    for (const id of from) if (!into.includes(id)) into.push(id);
+  };
+  // Pass 1.
+  const queue = [base];
+  for (let i = 0; i < queue.length; i++) {
+    const t = queue[i];
+    const d = dist.get(t)!;
+    for (const r of usableRels) {
+      if (r.from.table !== t || !forwardOk(health?.[r.id])) continue;
+      const next = r.to.table;
+      const here = start(t, r);
+      const nd = dist.get(next);
+      if (nd === undefined) {
+        dist.set(next, d + 1);
+        edge.set(next, r.id);
+        firsts.set(next, here);
+        order.push(next);
+        queue.push(next);
+      } else if (nd === d + 1) join(firsts.get(next)!, here);
+    }
   }
-  for (const r of rels) {
-    const h = health?.[r.id];
-    if (!usable(h)) continue;
-    if (r.to.table === table && backwardOk(h)) out.push({ rel: r.id, to: r.from.table });
+  // Pass 2.
+  const dist2 = new Map<string, number>(order.map((t) => [t, 0]));
+  const queue2 = [...order];
+  for (let i = 0; i < queue2.length; i++) {
+    const t = queue2[i];
+    const d = dist2.get(t)!;
+    for (const r of usableRels) {
+      const h = health?.[r.id];
+      const steps: string[] = [];
+      if (r.from.table === t && forwardOk(h)) steps.push(r.to.table);
+      if (r.to.table === t && backwardOk(h)) steps.push(r.from.table);
+      for (const next of steps) {
+        const here = start(t, r);
+        const nd = dist2.get(next);
+        if (nd === undefined) {
+          dist2.set(next, d + 1);
+          edge.set(next, r.id);
+          firsts.set(next, here);
+          queue2.push(next);
+        } else if (nd === d + 1) join(firsts.get(next)!, here);
+      }
+    }
   }
-  return out;
+  const rank = new Map(rels.map((r, i) => [r.id, i]));
+  for (const f of firsts.values()) f.sort((a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0));
+  return { edge, firsts };
 }
 
 /** Tables a query based on `base` can use: base plus everything reachable. Same rules as the engine. */
 export function reachableFrom(base: string, rels: Relationship[], health?: Health): Set<string> {
-  const seen = new Set([base]);
-  const queue = [base];
-  while (queue.length) {
-    const t = queue.shift()!;
-    for (const e of edgesOf(t, rels, health)) {
-      if (!seen.has(e.to)) {
-        seen.add(e.to);
-        queue.push(e.to);
-      }
-    }
-  }
-  return seen;
+  return new Set(search(base, rels, health).edge.keys());
 }
 
 /**
@@ -72,27 +120,7 @@ export function reachableFrom(base: string, rels: Relationship[], health?: Healt
  */
 export function firstLinks(base: string, table: string, rels: Relationship[], health?: Health): string[] {
   if (base === table) return [];
-  const dist = new Map<string, number>([[base, 0]]);
-  const first = new Map<string, Set<string>>();
-  const queue = [base];
-  while (queue.length) {
-    const t = queue.shift()!;
-    const d = dist.get(t)!;
-    for (const e of edgesOf(t, rels, health)) {
-      const here = t === base ? new Set([e.rel]) : (first.get(t) ?? new Set<string>());
-      if (!dist.has(e.to)) {
-        dist.set(e.to, d + 1);
-        first.set(e.to, new Set(here));
-        queue.push(e.to);
-      } else if (dist.get(e.to) === d + 1) {
-        for (const id of here) first.get(e.to)!.add(id);
-      }
-    }
-  }
-  const found = first.get(table);
-  if (!found) return [];
-  const order = new Map(rels.map((r, i) => [r.id, i]));
-  return [...found].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  return search(base, rels, health).firsts.get(table) ?? [];
 }
 
 // ---- names ---------------------------------------------------------------------------------
@@ -189,15 +217,32 @@ export interface FieldGroup {
 }
 
 /**
+ * The links that lead to `table` from any other table by two or more ways: what a filter needs,
+ * which has no first value to measure from. Empty when only one way leads to the table from anywhere.
+ */
+function rolesOf(table: string, tables: Table[], rels: Relationship[], health: Health): string[] {
+  const found: string[] = [];
+  for (const b of tables) {
+    if (b.id === table) continue;
+    const ways = firstLinks(b.id, table, rels, health);
+    if (ways.length < 2) continue;
+    for (const id of ways) if (!found.includes(id)) found.push(id);
+  }
+  const rank = new Map(rels.map((r, i) => [r.id, i]));
+  return found.sort((a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0));
+}
+
+/**
  * The tables of the field list. With a `base` (the table of the tile's first value), a table that
  * two or more links lead to is listed once for each link, headed by the name of the link:
- * "Shipped from" and "Sold at" both list the stores. Without a base, or with one path, each table
- * is listed once.
+ * "Shipped from" and "Sold at" both list the stores. With `roles` and no base (a filter tile,
+ * which measures nothing), a table that two or more links lead to from some table is listed once
+ * for each of those links, so a filter can pick either. Otherwise each table is listed once.
  */
-export function fieldGroups(tables: Table[], rels: Relationship[], health: Health, base: string | null): FieldGroup[] {
+export function fieldGroups(tables: Table[], rels: Relationship[], health: Health, base: string | null, roles = false): FieldGroup[] {
   const out: FieldGroup[] = [];
   for (const t of tables) {
-    const links = base && t.id !== base ? firstLinks(base, t.id, rels, health) : [];
+    const links = base && t.id !== base ? firstLinks(base, t.id, rels, health) : !base && roles ? rolesOf(t.id, tables, rels, health) : [];
     if (links.length < 2) {
       out.push({ key: t.id, table: t, title: t.label });
       continue;

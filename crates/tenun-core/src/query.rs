@@ -6,7 +6,7 @@
 //! emits one SQL statement. Identifiers are quoted; every value is a parameter.
 
 use crate::catalog::{Catalog, DType, Table, ident};
-use crate::links::{Edge, Links, PathError, Paths, join_on};
+use crate::links::{Edge, Links, PathError, Paths, join_on, reach};
 use chrono::{Datelike, Duration, Months, NaiveDate};
 use serde::{Deserialize, Serialize};
 
@@ -277,6 +277,9 @@ pub struct Compiled {
     pub columns: Vec<OutColumn>,
     /// Indexes of filters that could not reach the base table and were skipped.
     pub ignored_filters: Vec<usize>,
+    /// The links this query crosses that have something to tell the reader: a key repeats on
+    /// the side it joins into, or the link is read the other way round (relationship ids).
+    pub crossed: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -291,10 +294,15 @@ pub enum QueryError {
     Unreachable(String, String),
     #[error("A field of this tile uses a link that was removed. Pick the field again.")]
     LinkGone,
+    #[error("The link {0} does not lead to {1}. Pick the field again.")]
+    LinkOffPath(String, String),
     #[error(
         "{1} cannot be used with {0} now: the link between them repeats its values on both sides. Open Model to see which file to fix."
     )]
     LinkUnusable(String, String),
+    /// A link joins the two tables, but the data lets it be read only the other way.
+    #[error("{0}")]
+    OneWay(String),
     #[error("{0} cannot be {1}.")]
     BadAgg(String, &'static str),
     #[error("A filter value does not match the column type.")]
@@ -318,6 +326,8 @@ pub struct Scope<'a> {
     pub params: Vec<Param>,
     /// Indexes of filters that could not reach the base table and were skipped.
     pub ignored_filters: Vec<usize>,
+    /// The links the joins cross that have something to tell the reader (see [`Compiled::crossed`]).
+    pub crossed: Vec<String>,
     catalog: &'a Catalog,
     joins: Joins<'a>,
 }
@@ -387,13 +397,9 @@ fn plan<'a>(
         );
     for (t, via) in fields {
         lookup(catalog, t)?;
-        joins.add(t, via).map_err(|e| match e {
-            PathError::Gone => QueryError::LinkGone,
-            PathError::Unusable => {
-                QueryError::LinkUnusable(label(catalog, &base_id), label(catalog, t))
-            }
-            PathError::No => unreachable_error(catalog, links, &base_id, t),
-        })?;
+        joins
+            .add(t, via)
+            .map_err(|e| explain(catalog, links, &base_id, t, e))?;
     }
     // Filters that cannot reach the base table are skipped and reported.
     let mut ignored = Vec::new();
@@ -405,27 +411,97 @@ fn plan<'a>(
     Ok((joins, ignored))
 }
 
-/// "X is not related to Y", or when a link that would relate them repeats its values on both
-/// sides, why that link is not used.
-fn unreachable_error(catalog: &Catalog, links: Links<'_>, base: &str, table: &str) -> QueryError {
-    let all = Links::new(links.rels, None);
-    if crate::links::reach(base, all).contains_key(table) {
-        QueryError::LinkUnusable(label(catalog, base), label(catalog, table))
-    } else {
-        QueryError::Unreachable(label(catalog, base), label(catalog, table))
+/// Why `table` cannot be reached from `base`, in words (V4-D28).
+///
+/// - A link on the way works neither way: it is many to many.
+/// - A link joins the two tables, but the data lets it be read only the other way: say which
+///   table repeats its key.
+/// - A field names a link that is not on any way to its table.
+/// - Otherwise the tables are not related.
+fn explain(
+    catalog: &Catalog,
+    links: Links<'_>,
+    base: &str,
+    table: &str,
+    err: PathError,
+) -> QueryError {
+    let (lb, lt) = (label(catalog, base), label(catalog, table));
+    match err {
+        PathError::Gone => QueryError::LinkGone,
+        PathError::Unusable => QueryError::LinkUnusable(lb, lt),
+        // The field named a link that leads nowhere from here. If the table cannot be read at all
+        // because that link works only the other way, say so; else say where the link does not lead.
+        PathError::OffPath(id) => {
+            one_way(catalog, links, base, table, Some(&id)).unwrap_or_else(|| {
+                match links.find(&id) {
+                    Some(r) => QueryError::LinkOffPath(crate::links::link_label(r, catalog), lt),
+                    None => QueryError::LinkGone,
+                }
+            })
+        }
+        PathError::No => {
+            if reach(base, links.lenient()).contains_key(table) {
+                QueryError::LinkUnusable(lb, lt)
+            } else {
+                one_way(catalog, links, base, table, None)
+                    .unwrap_or(QueryError::Unreachable(lb, lt))
+            }
+        }
     }
 }
 
-/// The links a query crosses that carry a warning: the ones whose far side repeats keys, or that
-/// are read the other way round. A filter that cannot reach the base table crosses nothing.
-pub fn crossed_dirty<'a>(
-    q: &SemanticQuery,
-    catalog: &'a Catalog,
-    links: impl Into<Links<'a>>,
-) -> Vec<String> {
-    let Ok((joins, _)) = plan(q, catalog, links.into()) else {
-        return Vec::new();
-    };
+/// A link joins a table the query reaches to `table`, and the data lets it be crossed only the
+/// other way: the table to read repeats its key. Only said when the data has been read, and,
+/// with `only`, only for that link.
+fn one_way(
+    catalog: &Catalog,
+    links: Links<'_>,
+    base: &str,
+    table: &str,
+    only: Option<&str>,
+) -> Option<QueryError> {
+    let reached: Vec<String> = Paths::new(base, links).reached().cloned().collect();
+    if only.is_some() && reached.iter().any(|x| x == table) {
+        // The table is there by another way: the named link is just not on the way to it.
+        return None;
+    }
+    let near_ok = |t: &str| reached.iter().any(|x| x == t);
+    for r in links.rels.iter().filter(|r| only.is_none_or(|o| r.id == o)) {
+        let Some(h) = links.health(&r.id) else {
+            continue;
+        };
+        // Forward: the one side is the table to read, and it is not a key.
+        let blocked = if near_ok(&r.from.table) && r.to.table == table && !h.forward_ok() {
+            Some((&r.to, &r.from.table, h.sample.first()))
+        // Backward: the many side is the table to read, and it repeats a key.
+        } else if near_ok(&r.to.table) && r.from.table == table && !h.backward_ok() {
+            Some((&r.from, &r.to.table, None))
+        } else {
+            None
+        };
+        if let Some((far, near, key)) = blocked {
+            let col = catalog
+                .table(&far.table)
+                .and_then(|t| t.column(&far.column))
+                .and_then(|c| c.label.clone())
+                .unwrap_or_else(|| far.column.clone());
+            let key = key
+                .map(|k| match k {
+                    serde_json::Value::String(s) => format!(" {s}"),
+                    other => format!(" {other}"),
+                })
+                .unwrap_or_default();
+            let (a, b) = (label(catalog, table), label(catalog, near));
+            return Some(QueryError::OneWay(format!(
+                "Tenun cannot read {a} from {b}: {a} repeats {col}{key}. See the link between them in Model."
+            )));
+        }
+    }
+    None
+}
+
+/// The links of the joins that have something to tell the reader, once each.
+fn crossed_of(joins: &Joins<'_>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for step in &joins.list {
         if step.edge.warn && !out.contains(&step.edge.rel) {
@@ -484,10 +560,12 @@ pub fn scope_on<'a>(
         sql.push_str(" WHERE ");
         sql.push_str(&wheres.join(" AND "));
     }
+    let crossed = crossed_of(&joins);
     Ok(Scope {
         from_where: sql,
         params,
         ignored_filters: ignored,
+        crossed,
         catalog,
         joins,
     })
@@ -603,6 +681,7 @@ pub fn compile_on<'a>(
         params: scope.params,
         columns,
         ignored_filters: scope.ignored_filters,
+        crossed: scope.crossed,
     })
 }
 
@@ -984,7 +1063,8 @@ mod tests {
             rows: None,
             notes: vec![],
             header_row: None,
-            prep: false,
+            // The tables stand for files. A live database table is a test of its own.
+            prep: true,
         }
     }
 
@@ -1659,6 +1739,7 @@ mod tests {
             LinkHealth {
                 one_rows: 4,
                 one_dups: 3,
+                one_keys: 3,
                 many_dups: 5,
                 ..LinkHealth::default()
             },
@@ -1715,22 +1796,110 @@ mod tests {
              GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000"
         );
         // The warning rides with the tile.
-        assert_eq!(
-            crossed_dirty(&q, &cat, Links::new(&rels, Some(&health))),
-            ["r1"]
+        assert_eq!(c.crossed, ["r1"]);
+        assert!(compile(&q, &cat, &rels).unwrap().crossed.is_empty());
+    }
+
+    #[test]
+    fn a_live_database_table_is_always_read_one_row_per_key() {
+        let (mut cat, rels) = fixture();
+        // The check says the keys are clean, and the orders repeat their store, as they do.
+        let mut health = Health::new();
+        health.insert(
+            "r1".into(),
+            LinkHealth {
+                one_rows: 11,
+                many_dups: 30,
+                ..LinkHealth::default()
+            },
         );
-        assert!(crossed_dirty(&q, &cat, &rels).is_empty());
-        // A database table has no file order: it keeps the row that sorts first.
-        let mut live = cat.clone();
-        live.tables[1].prep = false;
-        let c = compile(&q, &live, Links::new(&rels, Some(&health))).unwrap();
+        let by_city = SemanticQuery {
+            measures: vec![sum_amount()],
+            dimensions: vec![Dimension {
+                table: "s2/stores".into(),
+                column: "city".into(),
+                grain: None,
+                via: None,
+            }],
+            ..Default::default()
+        };
+        // Local: joined as it is.
+        let c = compile(&by_city, &cat, Links::new(&rels, Some(&health))).unwrap();
+        assert!(
+            c.sql.contains("LEFT JOIN \"s_s2\".\"stores\" AS t1"),
+            "{}",
+            c.sql
+        );
+        // Live: one row per key by the key alone, and nothing marked for the reader.
+        cat.tables[1].prep = false;
+        let c = compile(&by_city, &cat, Links::new(&rels, Some(&health))).unwrap();
         assert!(
             c.sql.contains(
-                "(SELECT * FROM \"s_s2\".\"stores\" QUALIFY row_number() OVER (PARTITION BY \"id\" \
-                 ORDER BY \"id\", CAST(\"region_code\" AS VARCHAR), CAST(\"city\" AS VARCHAR)) = 1) AS t1"
+                "LEFT JOIN (SELECT DISTINCT ON (\"id\") * FROM \"s_s2\".\"stores\" ORDER BY \"id\") AS t1 ON t0.\"store_id\" = t1.\"id\""
             ),
             "{}",
             c.sql
+        );
+        assert!(c.crossed.is_empty());
+        // The same when the links of this database have not been checked (a reload is running).
+        let unknown = Health::new();
+        let c = compile(&by_city, &cat, Links::new(&rels, Some(&unknown))).unwrap();
+        assert!(c.sql.contains("DISTINCT ON"), "{}", c.sql);
+        // A crossing into a live table from the other side reads one row per key too.
+        let mut one_to_one = Health::new();
+        one_to_one.insert(
+            "r1".into(),
+            LinkHealth {
+                one_rows: 11,
+                many_rows: 11,
+                ..LinkHealth::default()
+            },
+        );
+        cat.tables[0].prep = false;
+        let stores_to_orders = SemanticQuery {
+            measures: vec![Measure {
+                table: "s2/stores".into(),
+                column: None,
+                agg: Agg::Count,
+                per: None,
+                via: None,
+            }],
+            dimensions: vec![Dimension {
+                table: "s1/orders".into(),
+                column: "customer".into(),
+                grain: None,
+                via: None,
+            }],
+            ..Default::default()
+        };
+        let c = compile(
+            &stores_to_orders,
+            &cat,
+            Links::new(&rels, Some(&one_to_one)),
+        )
+        .unwrap();
+        assert!(
+            c.sql.contains(
+                "LEFT JOIN (SELECT DISTINCT ON (\"store_id\") * FROM \"s_s1\".\"orders\" ORDER BY \"store_id\") AS t1 ON t0.\"id\" = t1.\"store_id\""
+            ),
+            "{}",
+            c.sql
+        );
+        // With nothing known about the data at all, a local table is read as it is, as in a unit
+        // test. A live one never is.
+        assert!(
+            compile(&by_city, &cat, &rels)
+                .unwrap()
+                .sql
+                .contains("DISTINCT ON")
+        );
+        cat.tables[1].prep = true;
+        cat.tables[0].prep = true;
+        assert!(
+            !compile(&by_city, &cat, &rels)
+                .unwrap()
+                .sql
+                .contains("DISTINCT")
         );
     }
 
@@ -1774,11 +1943,150 @@ mod tests {
             "{}",
             c.sql
         );
-        // It stops being one to one when the orders side repeats a store: one way again.
+        // It stops being one to one when the orders side repeats a store: one way again, and the
+        // words say which table repeats, not that the tables are not related (case C).
         health.get_mut("r1").unwrap().many_dups = 3;
-        assert!(matches!(
-            compile(&q, &cat, Links::new(&rels, Some(&health))),
-            Err(QueryError::Unreachable(..))
-        ));
+        assert_eq!(
+            compile(&q, &cat, Links::new(&rels, Some(&health))).unwrap_err(),
+            QueryError::OneWay(
+                "Tenun cannot read orders from stores: orders repeats store_id. See the link between them in Model."
+                    .into()
+            )
+        );
+    }
+
+    /// The stores repeat id 1, 2, 3 and 4 (4 of 7 distinct keys), and every order has its own store.
+    fn many_one() -> LinkHealth {
+        LinkHealth {
+            one_rows: 14,
+            one_dups: 7,
+            one_keys: 4,
+            sample: ["1", "2", "3", "4"]
+                .iter()
+                .map(|k| serde_json::json!(k))
+                .collect(),
+            sample_rows: vec![2; 4],
+            many_rows: 14,
+            many_dups: 0,
+            ..LinkHealth::default()
+        }
+    }
+
+    #[test]
+    fn a_link_read_the_other_way_round_says_which_table_repeats_not_both_sides() {
+        // Case A: the many side is unique, the one side repeats. The old words said both sides.
+        let (cat, rels) = fixture();
+        let health = Health::from([("r1".to_string(), many_one())]);
+        let q = SemanticQuery {
+            measures: vec![sum_amount()],
+            dimensions: vec![Dimension {
+                table: "s2/stores".into(),
+                column: "city".into(),
+                grain: None,
+                via: None,
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            compile(&q, &cat, Links::new(&rels, Some(&health))).unwrap_err(),
+            QueryError::OneWay(
+                "Tenun cannot read stores from orders: stores repeats id 1. See the link between them in Model."
+                    .into()
+            )
+        );
+        // The other way works: the stores read the orders (their store ids are unique).
+        let back = SemanticQuery {
+            measures: vec![Measure {
+                table: "s2/stores".into(),
+                column: None,
+                agg: Agg::Count,
+                per: None,
+                via: None,
+            }],
+            dimensions: vec![Dimension {
+                table: "s1/orders".into(),
+                column: "customer".into(),
+                grain: None,
+                via: None,
+            }],
+            ..Default::default()
+        };
+        assert!(compile(&back, &cat, Links::new(&rels, Some(&health))).is_ok());
+        // Many to many is still "both sides", and only then.
+        let both = Health::from([(
+            "r1".to_string(),
+            LinkHealth {
+                many_dups: 9,
+                ..many_one()
+            },
+        )]);
+        assert_eq!(
+            compile(&q, &cat, Links::new(&rels, Some(&both))).unwrap_err(),
+            QueryError::LinkUnusable("orders".into(), "stores".into())
+        );
+        // A link nobody has read the data of says only that the tables are not related.
+        let q2 = SemanticQuery {
+            measures: vec![Measure {
+                table: "s3/regions".into(),
+                column: None,
+                agg: Agg::Count,
+                per: None,
+                via: None,
+            }],
+            dimensions: vec![Dimension {
+                table: "s2/stores".into(),
+                column: "city".into(),
+                grain: None,
+                via: None,
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            compile(&q2, &cat, &rels).unwrap_err(),
+            QueryError::Unreachable("regions".into(), "stores".into())
+        );
+    }
+
+    #[test]
+    fn a_field_that_names_a_link_off_the_way_says_where_the_link_does_not_lead() {
+        // Case B: via a link that no way from the base table to the field crosses.
+        let (cat, rels) = fixture();
+        let health = Health::from([
+            (
+                "r1".to_string(),
+                LinkHealth {
+                    one_rows: 11,
+                    many_dups: 30,
+                    ..LinkHealth::default()
+                },
+            ),
+            (
+                "r2".to_string(),
+                LinkHealth {
+                    one_rows: 11,
+                    many_dups: 30,
+                    ..LinkHealth::default()
+                },
+            ),
+        ]);
+        let q = SemanticQuery {
+            measures: vec![sum_amount()],
+            dimensions: vec![Dimension {
+                table: "s2/stores".into(),
+                column: "city".into(),
+                grain: None,
+                // r2 joins stores and regions: it leads nowhere from the orders to the stores.
+                via: Some("r2".into()),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            compile(&q, &cat, Links::new(&rels, Some(&health))).unwrap_err(),
+            QueryError::LinkOffPath("regions (region_code)".into(), "stores".into())
+        );
+        assert_eq!(
+            QueryError::LinkOffPath("Shipped from".into(), "stores".into()).to_string(),
+            "The link Shipped from does not lead to stores. Pick the field again."
+        );
     }
 }

@@ -48,6 +48,14 @@ fn world() -> (Catalog, Vec<Relationship>) {
             table("s3/regions", &[("code", Text), ("name", Text)]),
             table("s4/customers", &[("name", Text), ("tier", Text)]),
             table("s5/shops", &[("code", Text), ("owner", Text)]),
+            table(
+                "s6/transfers",
+                &[
+                    ("from_store", Number),
+                    ("to_store", Number),
+                    ("qty", Number),
+                ],
+            ),
         ],
     };
     let rel = |id: &str, from: (&str, &str), to: (&str, &str)| -> Relationship {
@@ -64,6 +72,9 @@ fn world() -> (Catalog, Vec<Relationship>) {
         rel("r3", ("s1/orders", "customer"), ("s4/customers", "name")),
         // A number column against a text column: the join compares them as text.
         rel("r4", ("s1/orders", "store_id"), ("s5/shops", "code")),
+        // Two links between the same two tables, as an old file can have them: neither is named.
+        rel("r5", ("s6/transfers", "from_store"), ("s2/stores", "id")),
+        rel("r6", ("s6/transfers", "to_store"), ("s2/stores", "id")),
     ];
     (cat, rels)
 }
@@ -138,6 +149,100 @@ fn existing_queries_compile_to_the_sql_they_always_did() {
             .find(|(m, _)| m == n)
             .unwrap_or_else(|| panic!("no pin for {n}"));
         assert_eq!(o, &want.1.replace("\\n", "\n"), "{n}");
+    }
+}
+
+/// The queries of a file with two links to one table and no names: no `via` means the first link
+/// that was made, and the SQL is what it was before links could be named. Written from the rule of
+/// that code (the first link claims the table), and the engine agrees with it.
+#[test]
+fn two_unnamed_links_to_one_table_read_the_first_link_as_they_always_did() {
+    let (cat, rels) = world();
+    let today = NaiveDate::from_ymd_opt(2026, 10, 14).unwrap();
+    let by_city = |via: Option<&str>| -> SemanticQuery {
+        serde_json::from_value(json!({
+            "measures": [{"table": "s6/transfers", "column": "qty", "agg": "sum"}],
+            "dimensions": [{"table": "s2/stores", "column": "city", "via": via}],
+        }))
+        .unwrap()
+    };
+    let first = "SELECT CAST(t1.\"city\" AS VARCHAR) AS \"d0\", CAST(sum(t0.\"qty\") AS DOUBLE) AS \"m1\" \
+                 FROM \"s_s6\".\"transfers\" AS t0 \
+                 LEFT JOIN \"s_s2\".\"stores\" AS t1 ON t0.\"from_store\" = t1.\"id\" \
+                 GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000";
+    let sql = |q: &SemanticQuery| compile_on(q, &cat, &rels, today).unwrap().sql;
+    assert_eq!(sql(&by_city(None)), first);
+    // The same query with no `via` key at all, as an old file writes it.
+    let old: SemanticQuery = serde_json::from_value(json!({
+        "measures": [{"table": "s6/transfers", "column": "qty", "agg": "sum"}],
+        "dimensions": [{"table": "s2/stores", "column": "city"}],
+    }))
+    .unwrap();
+    assert_eq!(sql(&old), first);
+    // Naming the first link changes nothing.
+    assert_eq!(sql(&by_city(Some("r5"))), first);
+    // The shape of a query through the second link: the same joins, the other column.
+    assert_eq!(
+        sql(&by_city(Some("r6"))),
+        first.replace("t0.\"from_store\"", "t0.\"to_store\"")
+    );
+    // Both links in one query are two joins of one table, each with its own alias.
+    let both: SemanticQuery = serde_json::from_value(json!({
+        "measures": [{"table": "s6/transfers", "column": "qty", "agg": "sum"}],
+        "dimensions": [
+            {"table": "s2/stores", "column": "city", "via": "r5"},
+            {"table": "s2/stores", "column": "city", "via": "r6"}
+        ],
+    }))
+    .unwrap();
+    assert_eq!(
+        sql(&both),
+        "SELECT CAST(t1.\"city\" AS VARCHAR) AS \"d0\", CAST(t2.\"city\" AS VARCHAR) AS \"d1\", \
+         CAST(sum(t0.\"qty\") AS DOUBLE) AS \"m2\" FROM \"s_s6\".\"transfers\" AS t0 \
+         LEFT JOIN \"s_s2\".\"stores\" AS t1 ON t0.\"from_store\" = t1.\"id\" \
+         LEFT JOIN \"s_s2\".\"stores\" AS t2 ON t0.\"to_store\" = t2.\"id\" \
+         GROUP BY 1, 2 ORDER BY 3 DESC NULLS LAST, 1 ASC NULLS LAST, 2 ASC NULLS LAST LIMIT 1000"
+    );
+}
+
+/// A link whose two sides are both unique reads the same way forward as it did when nothing was
+/// known about the data. It also works backward, which is new: a query that could not be
+/// answered can be now.
+#[test]
+fn a_one_to_one_link_joins_forward_exactly_as_before() {
+    let (cat, rels) = world();
+    let today = NaiveDate::from_ymd_opt(2026, 10, 14).unwrap();
+    let health: Health = rels
+        .iter()
+        .map(|r| {
+            (
+                r.id.clone(),
+                LinkHealth {
+                    one_rows: 50,
+                    many_rows: 50,
+                    ..LinkHealth::default()
+                },
+            )
+        })
+        .collect();
+    for (name, q) in queries() {
+        let q: SemanticQuery = serde_json::from_value(q).unwrap();
+        let plain = compile_on(&q, &cat, &rels, today);
+        let both = compile_on(&q, &cat, Links::new(&rels, Some(&health)), today);
+        match plain {
+            // A query that was answered, with every field read, is written as it was.
+            Ok(p) if p.ignored_filters.is_empty() => {
+                let b = both.unwrap_or_else(|e| panic!("{name}: {e}"));
+                assert_eq!((p.sql, p.params), (b.sql, b.params), "{name}");
+            }
+            // A filter that could not reach the table was left out. Now it can: more is read.
+            Ok(p) => {
+                let b = both.unwrap_or_else(|e| panic!("{name}: {e}"));
+                assert!(b.ignored_filters.len() < p.ignored_filters.len(), "{name}");
+            }
+            // Reading the regions through the stores to the orders was not possible, and is now.
+            Err(_) => assert!(both.is_ok(), "{name}"),
+        }
     }
 }
 

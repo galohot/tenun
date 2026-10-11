@@ -12,6 +12,7 @@
   import { filterText } from '../lib/filterText';
   import { partialNote } from '../lib/run';
   import { setLinkNames } from '../lib/links';
+  import { isColFilter, stageOf } from '../lib/filters';
   import { EMPTY_RESULT, isStatic } from '../lib/tiles';
   import { phoneLayout, PHONE_MAX, readingOrder } from '../lib/layout';
 
@@ -95,7 +96,7 @@
     // A histogram bin is a range of its number column.
     const bins = t.type === 'histogram' ? data.base[tileId]?.bins : undefined;
     const m = t.measures[0];
-    const d = col && t.cols ? t.cols : bins && m?.column ? { table: m.table, column: m.column } : (t.dims[stage] ?? t.dims[0]);
+    const d = col && t.cols ? t.cols : bins && m?.column ? { table: m.table, column: m.column, via: m.via } : (t.dims[stage] ?? t.dims[0]);
     const dtype = data.tables.find((x) => x.id === d.table)?.columns.find((c) => c.name === d.column)?.dtype ?? 'text';
     const name = dimLabel(d, data.tables);
     const shown =
@@ -105,18 +106,11 @@
     return `${name.charAt(0).toUpperCase() + name.slice(1)}: ${shown}`;
   }
 
-  /** A filter saved with the export that came from a click on a pivot column header. */
-  const isColFilter = (f: ExportPayload['filters'][number]) => {
-    const c = data.tiles.find((x) => x.id === f.fromTile)?.cols;
-    return !!c && c.table === f.table && c.column === f.column;
-  };
+  /** A filter saved with the export that came from a click on a pivot column header. It names the field of the columns, link included. */
+  const colFilter = (f: ExportPayload['filters'][number]) => isColFilter(data.tiles.find((x) => x.id === f.fromTile), f);
 
-  /** The stage of a Sankey node a saved filter came from; 0 for every other tile. */
-  const stageOf = (f: ExportPayload['filters'][number]) => {
-    const t = data.tiles.find((x) => x.id === f.fromTile);
-    const i = t?.type === 'sankey' ? t.dims.findIndex((d) => d.table === f.table && d.column === f.column) : 0;
-    return Math.max(0, i);
-  };
+  /** The stage of a Sankey node a saved filter came from, link included; 0 for every other tile. */
+  const stageFor = (f: ExportPayload['filters'][number]) => stageOf(data.tiles.find((x) => x.id === f.fromTile), f);
 
   const when = $derived(dateTimeMedium(data.generated));
 
@@ -160,7 +154,7 @@
         <span class="chip static" title="Saved with the dashboard"><Icon name="pin" size={12} /> {filterText(f, data.tables)}</span>
       {/each}
       {#each data.filters as f}
-        <span class="chip static">{label(f.fromTile, f.op === 'not_in' ? OTHER_KEY : f.values[0], isColFilter(f), stageOf(f))}</span>
+        <span class="chip static">{label(f.fromTile, f.op === 'not_in' ? OTHER_KEY : f.values[0], colFilter(f), stageFor(f))}</span>
       {/each}
       {#if pick}
         <span class="chip">

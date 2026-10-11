@@ -25,6 +25,10 @@ pub fn rename_column_qualified(text: &str, table: &str, old: &str, new: &str) ->
 /// Rewrites a formula after the link `old` was renamed `new` (V4-D28): `[Old].[region]` becomes
 /// `[New].[region]`. Only the name of the link changes; the rest of the text stays byte for
 /// byte, as in [`rename_column`].
+///
+/// **Who calls it:** the code that stores formulas, from `Engine::rename_link` (calculated columns
+/// in build 02, measures and group values in 03), for every stored formula, in the same step that
+/// renames the link. Nothing stores a formula yet, so nothing calls it yet.
 pub fn rename_link(text: &str, old: &str, new: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len() + new.len());

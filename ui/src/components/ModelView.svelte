@@ -138,7 +138,7 @@
         onopen: () => (sheet = toName.has(r.id) ? siblings(r, ws.relationships).map((x) => x.id) : [r.id]),
         name: r.name,
         kind: kindWords(h),
-        note: h?.note,
+        note: h?.note ?? app.snap?.link_clashes?.[r.id],
         unusable: h?.unusable,
         needsName: toName.has(r.id),
       });

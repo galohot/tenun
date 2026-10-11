@@ -1,20 +1,22 @@
-//! Links that stay honest (V4-D26 to V4-D28): what the data says about each relationship, and the
-//! paths a query may take across them.
+//! Links that stay honest (V4-D26 to V4-D28, V4-D50, V4-D51): what the data says about each
+//! relationship, and the paths a query may take across them.
 //!
 //! A link is stored one way: many rows of `from` point at one row of `to`. The data decides what
 //! that means today. The engine checks it once for every load and keeps the answer
 //! ([`LinkHealth`]); the query compiler reads it through [`Links`].
 //!
-//! - The `to` side has a few repeated keys: a join into it reads one row per key (the first
-//!   one), so no row multiplies and no total doubles. The link carries a warning.
+//! - The `to` side has a few repeated keys: a join into it reads one row per key, so no row
+//!   multiplies and no total doubles. The link carries a warning.
 //! - The `from` side has no repeated keys: the link also works the other way, because every
 //!   row of `to` then matches at most one row of `from`.
-//! - The `to` side repeats most of its values, so it is not a key any more: the link cannot
-//!   be read the stored way. If the `from` side is unique the link reads the other way round.
-//!   If both sides repeat, the link is many to many: it stays saved and is not used.
+//! - The `to` side is **not a key**: more than half of its distinct keys repeat (V4-D50). The
+//!   link cannot be read the stored way. If the `from` side is unique the link reads the other
+//!   way round. If both sides repeat, the link is many to many: it stays saved and is not used.
 //!
-//! Without a health record (a unit test, or a link that was not checked yet) every link is
-//! read as stored: forward only, joined as it is.
+//! Two things are never left to the check (V4-D51). A join into a live database table always
+//! reads one row per key, whatever the last check said. A join into any table whose link has no
+//! health record (a reload is running, or the check failed) reads one row per key too. A
+//! [`Links`] built with no health at all (a unit test) reads every link as stored, joined as it is.
 
 use crate::catalog::{Catalog, Table, ident};
 use crate::workspace::Relationship;
@@ -34,12 +36,20 @@ pub struct LinkHealth {
     pub one_dups: u64,
     /// How many keys of the `to` side appear more than once.
     pub one_keys: u64,
-    /// Up to [`SAMPLE_KEYS`] of those keys, the most repeated first.
+    /// Up to [`SAMPLE_KEYS`] of those keys as text, the most repeated first.
     pub sample: Vec<serde_json::Value>,
     /// How many rows each key of `sample` has.
     pub sample_rows: Vec<u64>,
+    /// Rows on the `from` side that have a key.
+    pub many_rows: u64,
     /// Rows on the `from` side beyond the first of each key.
     pub many_dups: u64,
+    /// Rows on the `from` side whose key is one of the repeated keys of the `to` side.
+    pub many_hits: u64,
+    /// Only the first rows of a live database table were read: how many (V4-D51).
+    pub limit: Option<u64>,
+    /// The kind this link had before a reload changed it, while it has not changed back.
+    pub was: Option<&'static str>,
 }
 
 impl LinkHealth {
@@ -48,10 +58,15 @@ impl LinkHealth {
         self.one_dups == 0 && self.many_dups == 0
     }
 
-    /// The `to` side repeats at least half of its rows: it is not a key any more, and reading
-    /// one row per key would throw most of it away (V4-D41).
+    /// The keys of the `to` side that are not repeated.
+    pub fn one_distinct(&self) -> u64 {
+        self.one_rows.saturating_sub(self.one_dups)
+    }
+
+    /// The `to` side is not a key any more: more than half of its distinct keys repeat (V4-D50).
+    /// A few repeated keys are a warning; a column that is mostly repeats is another column.
     pub fn to_is_not_a_key(&self) -> bool {
-        self.one_dups > 0 && self.one_dups * 2 >= self.one_rows
+        self.one_keys * 2 > self.one_distinct()
     }
 
     /// The link may be crossed the stored way, from the many side to the one side.
@@ -74,21 +89,62 @@ impl LinkHealth {
     pub fn reversed(&self) -> bool {
         !self.forward_ok() && self.backward_ok()
     }
+
+    /// What the data says the link is. `one-one` only when both sides are unique.
+    pub fn kind(&self) -> &'static str {
+        if self.unusable() {
+            "many-many"
+        } else if self.reversed() {
+            "many-one"
+        } else if self.one_to_one() {
+            "one-one"
+        } else {
+            "one-many"
+        }
+    }
 }
 
-/// The health of every relationship that was checked, by relationship id.
+/// The kind of a link in words.
+pub fn kind_words(kind: &str) -> &'static str {
+    match kind {
+        "one-one" => "one to one",
+        "many-one" => "many to one",
+        "many-many" => "many to many",
+        _ => "one to many",
+    }
+}
+
+/// The health of every relationship that was checked, by relationship id. A link with no record
+/// is **unknown**: a reload is running, or the check failed (V4-D51).
 pub type Health = BTreeMap<String, LinkHealth>;
 
 /// The relationships of a workspace with what the data says about them.
 #[derive(Clone, Copy)]
 pub struct Links<'a> {
     pub rels: &'a [Relationship],
+    /// `None`: nothing is known about the data and every link is read as stored. `Some`: a link
+    /// with no record in it is unknown, and a join into it reads one row per key.
     pub health: Option<&'a Health>,
+    /// Count a link that works neither way as if it worked the stored way. Only to find out
+    /// whether such a link is what stands between two tables.
+    lenient: bool,
 }
 
 impl<'a> Links<'a> {
     pub fn new(rels: &'a [Relationship], health: Option<&'a Health>) -> Self {
-        Links { rels, health }
+        Links {
+            rels,
+            health,
+            lenient: false,
+        }
+    }
+
+    /// The same links, where a link that works neither way still counts the stored way.
+    pub(crate) fn lenient(self) -> Self {
+        Links {
+            lenient: true,
+            ..self
+        }
     }
 
     pub fn find(&self, id: &str) -> Option<&'a Relationship> {
@@ -101,12 +157,13 @@ impl<'a> Links<'a> {
 
     /// A link that works neither way (many to many) is not used.
     pub fn usable(&self, r: &Relationship) -> bool {
-        !self.health(&r.id).is_some_and(LinkHealth::unusable)
+        self.lenient || !self.health(&r.id).is_some_and(LinkHealth::unusable)
     }
 
     /// The link may be crossed the stored way. Without a health record it may.
     pub fn forward_ok(&self, r: &Relationship) -> bool {
-        self.health(&r.id).is_none_or(LinkHealth::forward_ok)
+        self.health(&r.id)
+            .is_none_or(|h| h.forward_ok() || (self.lenient && h.unusable()))
     }
 
     /// The link may be crossed from `to` to `from`: no key repeats on the `from` side.
@@ -114,9 +171,13 @@ impl<'a> Links<'a> {
         self.health(&r.id).is_some_and(LinkHealth::backward_ok)
     }
 
-    /// Joins into the `to` side read one row per key.
+    /// Joins into the `to` side read one row per key: the data says it repeats a key, or the
+    /// data has not been read (V4-D51). With no health at all, nothing is known and nothing changes.
     pub fn dedup(&self, r: &Relationship) -> bool {
-        self.health(&r.id).is_some_and(|h| h.one_dups > 0)
+        match self.health {
+            None => false,
+            Some(h) => h.get(&r.id).is_none_or(|x| x.one_dups > 0),
+        }
     }
 
     /// The relationships a query may cross, in the order they were made.
@@ -134,7 +195,7 @@ impl<'a> Links<'a> {
                 to_table: r.to.table.clone(),
                 to_col: r.to.column.clone(),
                 dedup: self.dedup(r),
-                warn: self.dedup(r),
+                warn: self.health(&r.id).is_some_and(|h| h.one_dups > 0),
             }
         } else {
             Edge {
@@ -199,13 +260,20 @@ pub(crate) fn join_on(
 }
 
 impl Edge {
-    /// What a join reads: the table itself, or when its keys repeat a copy with one row for
-    /// each key (V4-D26). `as_text` is true when the join compares the keys as text.
+    /// What a join reads: the table itself, or a copy of it with one row for each key (V4-D26).
+    /// `as_text` is true when the join compares the keys as text.
+    ///
+    /// A **live database table** (attached, not copied into memory) always reads one row per
+    /// key, `DISTINCT ON` the key and ordered by the key only: the database does the work, and a
+    /// key that is repeated tomorrow cannot double a total today (V4-D51). Which of the rows of
+    /// a key is used is not defined.
     ///
     /// Local data (a file, a sheet, a pasted table, a web link) keeps the first row of each key
-    /// in the order of the file. A database table has no order a person can see, so it keeps the
-    /// row that sorts first when its columns are read left to right: the same row every time.
+    /// in the order of the file, but only when its keys repeat or are not known.
     pub(crate) fn target_sql(&self, to: &Table, as_text: bool) -> String {
+        if !to.prep {
+            return live_one_row_per_key(to, &self.to_col, as_text);
+        }
         if !self.dedup {
             return to.sql_ref.clone();
         }
@@ -213,85 +281,164 @@ impl Edge {
     }
 }
 
-/// The rows of `t` with one row for each value of `key`.
-pub(crate) fn one_row_per_key(t: &Table, key: &str, as_text: bool) -> String {
-    let k = if as_text {
+fn key_expr(key: &str, as_text: bool) -> String {
+    if as_text {
         format!("CAST({} AS VARCHAR)", ident(key))
     } else {
         ident(key)
-    };
-    if t.prep {
-        let n = ident("__tenun_row");
-        format!(
-            "(SELECT * FROM (SELECT *, row_number() OVER () AS {n} FROM {}) \
-             QUALIFY row_number() OVER (PARTITION BY {k} ORDER BY {n}) = 1)",
-            t.sql_ref
-        )
-    } else {
-        let order: Vec<String> = t
-            .columns
-            .iter()
-            .map(|c| match c.dtype {
-                crate::catalog::DType::Text => format!("CAST({} AS VARCHAR)", ident(&c.name)),
-                _ => ident(&c.name),
-            })
-            .collect();
-        format!(
-            "(SELECT * FROM {} QUALIFY row_number() OVER (PARTITION BY {k} ORDER BY {}) = 1)",
-            t.sql_ref,
-            order.join(", ")
-        )
     }
 }
 
-/// Breadth-first from the base table. Maps every reachable table to the edge that reached it.
+/// The rows of a live database table with one row for each value of `key` (V4-D51).
+pub(crate) fn live_one_row_per_key(t: &Table, key: &str, as_text: bool) -> String {
+    let k = key_expr(key, as_text);
+    format!(
+        "(SELECT DISTINCT ON ({k}) * FROM {} ORDER BY {k})",
+        t.sql_ref
+    )
+}
+
+/// The rows of a local table with one row for each value of `key`: the first in the file.
+pub(crate) fn one_row_per_key(t: &Table, key: &str, as_text: bool) -> String {
+    let k = key_expr(key, as_text);
+    let n = ident("__tenun_row");
+    format!(
+        "(SELECT * FROM (SELECT *, row_number() OVER () AS {n} FROM {}) \
+         QUALIFY row_number() OVER (PARTITION BY {k} ORDER BY {n}) = 1)",
+        t.sql_ref
+    )
+}
+
+/// What one search from a base table finds.
+pub(crate) struct Search {
+    /// Every reachable table and the edge that reaches it by the default path.
+    pub(crate) edge: HashMap<String, Option<Edge>>,
+    /// Every reachable table and the first link of **every** shortest path to it, in the order
+    /// the links were made. More than one means a field of that table needs a name.
+    pub(crate) firsts: HashMap<String, Vec<String>>,
+}
+
+fn add_all(into: &mut Vec<String>, from: &[String]) {
+    for id in from {
+        if !into.contains(id) {
+            into.push(id.clone());
+        }
+    }
+}
+
+/// The one definition of "the shortest way" (V4-D28, V4-D42), used for the default path of a
+/// query, for the formulas, and for the field list (the TypeScript mirror in `ui/src/lib/links.ts`
+/// follows it, and both are tested against `ui/tests/fixtures/paths.json`).
 ///
-/// First the links are crossed from the many side to the one side only, exactly as before links
-/// could work both ways, so a table that was reachable keeps its path and its SQL. Then the links
-/// that may also be crossed from the one side to the many side add the tables that were not
-/// reachable before.
-pub(crate) fn reach<'a>(base: &str, links: impl Into<Links<'a>>) -> HashMap<String, Option<Edge>> {
+/// **Pass 1** crosses the links from the many side to the one side only, breadth first, exactly as
+/// before links could work both ways, so a table that was reachable keeps its path and its SQL.
+/// **Pass 2** starts from every table pass 1 found (in the order it found them) and crosses
+/// links both ways, breadth first, to find the tables pass 1 did not. In each pass the links are
+/// tried in the order they were made, the stored way first; the first to reach a table is its
+/// default path, and the links that reach it as quickly as that are all counted in `firsts`.
+pub(crate) fn search<'a>(base: &str, links: impl Into<Links<'a>>) -> Search {
     let links: Links = links.into();
-    let mut seen: HashMap<String, Option<Edge>> = HashMap::new();
-    seen.insert(base.to_string(), None);
+    let mut edge: HashMap<String, Option<Edge>> = HashMap::from([(base.to_string(), None)]);
+    let mut firsts: HashMap<String, Vec<String>> = HashMap::new();
+    let mut dist: HashMap<String, usize> = HashMap::from([(base.to_string(), 0)]);
     let mut order = vec![base.to_string()];
+    // What a path that leaves `t` through the link `r` starts with.
+    let start = |firsts: &HashMap<String, Vec<String>>, t: &str, r: &Relationship| -> Vec<String> {
+        if t == base {
+            vec![r.id.clone()]
+        } else {
+            firsts.get(t).cloned().unwrap_or_default()
+        }
+    };
+    // Pass 1.
     let mut queue = VecDeque::from([base.to_string()]);
     while let Some(t) = queue.pop_front() {
-        for r in links
-            .usable_rels()
-            .filter(|r| r.from.table == t && links.forward_ok(r))
-        {
-            if !seen.contains_key(&r.to.table) {
-                seen.insert(r.to.table.clone(), Some(links.edge(r, true)));
-                order.push(r.to.table.clone());
-                queue.push_back(r.to.table.clone());
+        let d = dist[&t];
+        for r in links.usable_rels() {
+            if r.from.table != t || !links.forward_ok(r) {
+                continue;
+            }
+            let next = &r.to.table;
+            let here = start(&firsts, &t, r);
+            match dist.get(next) {
+                None => {
+                    dist.insert(next.clone(), d + 1);
+                    edge.insert(next.clone(), Some(links.edge(r, true)));
+                    firsts.insert(next.clone(), here);
+                    order.push(next.clone());
+                    queue.push_back(next.clone());
+                }
+                Some(&nd) if nd == d + 1 => {
+                    add_all(firsts.entry(next.clone()).or_default(), &here);
+                }
+                _ => {}
             }
         }
     }
+    // Pass 2.
+    let mut dist2: HashMap<String, usize> = order.iter().map(|t| (t.clone(), 0)).collect();
     let mut queue: VecDeque<String> = order.into();
     while let Some(t) = queue.pop_front() {
+        let d = dist2[&t];
         for r in links.usable_rels() {
-            if r.from.table == t && links.forward_ok(r) && !seen.contains_key(&r.to.table) {
-                seen.insert(r.to.table.clone(), Some(links.edge(r, true)));
-                queue.push_back(r.to.table.clone());
-            } else if r.to.table == t && !seen.contains_key(&r.from.table) && links.backward_ok(r) {
-                seen.insert(r.from.table.clone(), Some(links.edge(r, false)));
-                queue.push_back(r.from.table.clone());
+            let mut steps: Vec<(bool, &String)> = Vec::new();
+            if r.from.table == t && links.forward_ok(r) {
+                steps.push((true, &r.to.table));
+            }
+            if r.to.table == t && links.backward_ok(r) {
+                steps.push((false, &r.from.table));
+            }
+            for (forward, next) in steps {
+                let here = start(&firsts, &t, r);
+                match dist2.get(next) {
+                    None => {
+                        dist2.insert(next.clone(), d + 1);
+                        edge.insert(next.clone(), Some(links.edge(r, forward)));
+                        firsts.insert(next.clone(), here);
+                        queue.push_back(next.clone());
+                    }
+                    Some(&nd) if nd == d + 1 => {
+                        add_all(firsts.entry(next.clone()).or_default(), &here);
+                    }
+                    _ => {}
+                }
             }
         }
     }
-    seen
+    let rank = |id: &String| links.rels.iter().position(|r| &r.id == id);
+    for f in firsts.values_mut() {
+        f.sort_by_key(rank);
+    }
+    Search { edge, firsts }
+}
+
+/// Breadth first from the base table. Maps every reachable table to the edge that reached it.
+/// See [`search`].
+pub(crate) fn reach<'a>(base: &str, links: impl Into<Links<'a>>) -> HashMap<String, Option<Edge>> {
+    search(base, links).edge
+}
+
+/// The links a path to `table` may start with: the first link of every shortest path from `base`.
+/// One entry means the way is clear. Two or more mean a field of `table` can mean either, and
+/// a person has to say which (a named link). See [`search`].
+pub(crate) fn first_links<'a>(base: &str, table: &str, links: impl Into<Links<'a>>) -> Vec<String> {
+    if base == table {
+        return Vec::new();
+    }
+    search(base, links).firsts.remove(table).unwrap_or_default()
 }
 
 /// Why a path could not be made.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PathError {
     /// There is no way from the base table to the table.
     No,
     /// The field names a link that no longer exists.
     Gone,
-    /// The field names a link that cannot be used now (both sides repeat keys).
+    /// The field names a link that cannot be used now (many to many).
     Unusable,
+    /// The field names a link that is not on any way from the base table to the table: its id.
+    OffPath(String),
 }
 
 /// The paths from one base table, with the shortest as the default (V4-D28).
@@ -308,6 +455,11 @@ impl<'a> Paths<'a> {
             base: base.to_string(),
             default: reach(base, links),
         }
+    }
+
+    /// The tables a query based on this table can reach by the default way.
+    pub(crate) fn reached(&self) -> impl Iterator<Item = &String> {
+        self.default.keys()
     }
 
     /// The edges from the base table to `table`, base first. With `via`, the path crosses that
@@ -349,7 +501,7 @@ impl<'a> Paths<'a> {
             path.extend(tail);
             return Ok(path);
         }
-        Err(PathError::No)
+        Err(PathError::OffPath(id.to_string()))
     }
 }
 
@@ -366,57 +518,6 @@ fn chain(map: &HashMap<String, Option<Edge>>, table: &str) -> Option<Vec<Edge>> 
     }
     out.reverse();
     Some(out)
-}
-
-/// The links a path to `table` may start with: the first link of every shortest path from `base`.
-/// One entry means the way is clear. Two or more mean a field of `table` can mean either, and
-/// a person has to say which (a named link).
-pub(crate) fn first_links<'a>(base: &str, table: &str, links: impl Into<Links<'a>>) -> Vec<String> {
-    let links: Links = links.into();
-    if base == table {
-        return Vec::new();
-    }
-    // Distance from the base, and the set of first links of the shortest paths to each table.
-    let mut dist: HashMap<String, usize> = HashMap::from([(base.to_string(), 0)]);
-    let mut first: HashMap<String, Vec<String>> = HashMap::new();
-    let mut queue = VecDeque::from([base.to_string()]);
-    while let Some(t) = queue.pop_front() {
-        let d = dist[&t];
-        let own = first.get(&t).cloned().unwrap_or_default();
-        for r in links.usable_rels() {
-            let steps = [
-                (r.from.table == t && links.forward_ok(r)).then_some(&r.to.table),
-                (r.to.table == t && links.backward_ok(r)).then_some(&r.from.table),
-            ];
-            for next in steps.into_iter().flatten() {
-                let via_here = if t == base {
-                    vec![r.id.clone()]
-                } else {
-                    own.clone()
-                };
-                match dist.get(next) {
-                    None => {
-                        dist.insert(next.clone(), d + 1);
-                        first.insert(next.clone(), via_here);
-                        queue.push_back(next.clone());
-                    }
-                    Some(&nd) if nd == d + 1 => {
-                        let f = first.entry(next.clone()).or_default();
-                        for id in via_here {
-                            if !f.contains(&id) {
-                                f.push(id);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    let mut out = first.remove(table).unwrap_or_default();
-    // In the order the links were made.
-    out.sort_by_key(|id| links.rels.iter().position(|r| &r.id == id));
-    out
 }
 
 /// What a link is called: its name, or the one-side table with the many-side column, like
@@ -447,7 +548,7 @@ pub struct HealthOut {
     pub one_to_one: bool,
     /// Rows on the one side beyond the first of each key.
     pub duplicates: u64,
-    /// Up to five of the keys that repeat.
+    /// Up to five of the keys that repeat, as text.
     pub sample: Vec<serde_json::Value>,
     /// How many rows each of those keys has.
     #[serde(rename = "sampleRows", skip_serializing_if = "Vec::is_empty")]
@@ -458,8 +559,9 @@ pub struct HealthOut {
     /// No key repeats on the many side, so the link also works from the one side.
     #[serde(rename = "fromUnique")]
     pub from_unique: bool,
-    /// What the data says the link is: `one-many` (the usual), `one-one`, `many-one` (the stored
-    /// way does not work, so it reads the other way round) or `many-many` (it is not used).
+    /// What the data says the link is: `one-many` (the usual), `one-one` (both sides unique),
+    /// `many-one` (the stored way does not work, so it reads the other way round) or `many-many`
+    /// (it is not used).
     pub kind: &'static str,
     /// Both ways fail: the link is not used.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -473,9 +575,11 @@ fn is_zero(n: &u64) -> bool {
     *n == 0
 }
 
-/// Where a table lives, for a sentence: the file name when the file holds this table alone,
-/// else the table with its file.
-fn place(t: &Table, sources: &dyn Fn(&str) -> Option<(String, usize)>) -> String {
+type Sources<'a> = &'a dyn Fn(&str) -> Option<(String, usize)>;
+
+/// Where a table lives, for a sentence in the app: the file name when the file holds this table
+/// alone, else the table with its file.
+fn place(t: &Table, sources: Sources) -> String {
     match sources(&t.source_id) {
         Some((name, 1)) => name,
         Some((name, _)) => format!("{} in {name}", t.label),
@@ -492,83 +596,198 @@ fn shown(t: &Table, column: &str) -> String {
 fn key_text(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Number(n) => match n.as_f64() {
-            Some(f) if f.fract() == 0.0 && f.abs() < 1e15 => format!("{}", f as i64),
-            _ => n.to_string(),
-        },
         other => other.to_string(),
     }
 }
 
-/// The warning of one link, or `None` when it is healthy. `sources` gives the name of a source
-/// and the number of tables it holds.
-pub fn note(
-    r: &Relationship,
-    h: &LinkHealth,
-    catalog: &Catalog,
-    sources: &dyn Fn(&str) -> Option<(String, usize)>,
-) -> Option<String> {
-    let one = catalog.table(&r.to.table)?;
-    let many = catalog.table(&r.from.table)?;
-    if h.unusable() {
-        return Some(format!(
-            "{} and {} both repeat the values of this link ({} and {}), so Tenun cannot tell which row to use. The link is not used until one of them is fixed.",
-            place(many, sources),
-            place(one, sources),
-            shown(many, &r.from.column),
-            shown(one, &r.to.column),
-        ));
+/// 3000 as "3,000".
+fn thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
     }
-    if h.reversed() {
-        return Some(format!(
-            "{} repeats most of its values of {}, so it is not a key. Tenun reads this link the other way round: {} is the side with one row for each value. Fix the file to remove this note.",
-            place(one, sources),
-            shown(one, &r.to.column),
-            place(many, sources),
-        ));
-    }
-    if h.one_dups == 0 {
-        return None;
-    }
-    let at = place(one, sources);
-    let col = shown(one, &r.to.column);
-    let pick = if one.prep {
-        "Tenun used the first."
-    } else {
-        "Tenun used one row of each, picked by the order of the columns."
-    };
-    let fix = if one.prep {
-        "Fix the file to remove this note."
-    } else {
-        "Fix the table to remove this note."
-    };
-    if h.one_keys == 1
-        && let (Some(k), Some(n)) = (h.sample.first(), h.sample_rows.first())
-    {
-        return Some(format!(
-            "{at} has {n} rows with {col} {}. {pick} {fix}",
-            key_text(k)
-        ));
-    }
+    out
+}
+
+/// "1, 2 and 3", or "1, 2, 3, 4, 5 and 2 more".
+fn listed_keys(h: &LinkHealth) -> String {
     let mut keys: Vec<String> = h.sample.iter().map(key_text).collect();
     let more = h.one_keys.saturating_sub(keys.len() as u64);
-    let listed = if more > 0 {
+    if more > 0 {
         format!("{} and {more} more", keys.join(", "))
     } else if keys.len() > 1 {
         let last = keys.pop().unwrap_or_default();
         format!("{} and {last}", keys.join(", "))
     } else {
         keys.join(", ")
+    }
+}
+
+/// How many rows of the many side meet a repeated key: the number a reader can weigh.
+fn meeting(many: &Table, h: &LinkHealth) -> String {
+    if h.many_rows == 0 {
+        return String::new();
+    }
+    if h.many_hits == 0 {
+        return format!(" No {} row meets a repeated key.", many.label);
+    }
+    format!(
+        " {} of {} {} rows meet a repeated key.",
+        thousands(h.many_hits),
+        thousands(h.many_rows),
+        many.label
+    )
+}
+
+fn checked(h: &LinkHealth) -> String {
+    match h.limit {
+        Some(n) => format!(" Tenun checked only the first {} rows.", thousands(n)),
+        None => String::new(),
+    }
+}
+
+/// The warning of one link as the app shows it, with the values and the file names: on a tile and
+/// in the sheet of the link. `None` when the link is healthy. `sources` gives the name of a source
+/// and the number of tables it holds.
+pub fn tile_note(
+    r: &Relationship,
+    h: &LinkHealth,
+    catalog: &Catalog,
+    sources: Sources,
+) -> Option<String> {
+    let one = catalog.table(&r.to.table)?;
+    let many = catalog.table(&r.from.table)?;
+    let col = shown(one, &r.to.column);
+    if h.unusable() {
+        return Some(format!(
+            "{} and {} both repeat the values of this link ({} and {}), so Tenun cannot tell which row to use. Repeated {col}: {}. The link is not used until one of them is fixed.{}",
+            place(many, sources),
+            place(one, sources),
+            shown(many, &r.from.column),
+            col,
+            listed_keys(h),
+            checked(h),
+        ));
+    }
+    if h.reversed() {
+        return Some(format!(
+            "{} repeats most of its values of {col} ({}), so it is not a key. Tenun reads this link the other way round: {} is the side with one row for each value. Fix the file to remove this note.{}",
+            place(one, sources),
+            listed_keys(h),
+            place(many, sources),
+            checked(h),
+        ));
+    }
+    if h.one_dups == 0 {
+        return None;
+    }
+    let at = place(one, sources);
+    let (pick_one, pick_many, fix) = if one.prep {
+        (
+            "Tenun used the first.",
+            "Tenun used the first row of each.",
+            "Fix the file to remove this note.",
+        )
+    } else {
+        let p = "Tenun used one row of each. Which one can change.";
+        (p, p, "Fix the table to remove this note.")
+    };
+    let meet = meeting(many, h);
+    let more = checked(h);
+    if h.one_keys == 1
+        && let (Some(k), Some(n)) = (h.sample.first(), h.sample_rows.first())
+    {
+        return Some(format!(
+            "{at} has {n} rows with {col} {}. {pick_one}{meet} {fix}{more}",
+            key_text(k)
+        ));
+    }
+    Some(format!(
+        "{at} repeats {col}: {} ({} rows too many). {pick_many}{meet} {fix}{more}",
+        listed_keys(h),
+        h.one_dups,
+    ))
+}
+
+/// The same warning with no key value and no file name, for what leaves the computer: exported
+/// and published pages, pictures and Excel files (V4-D52). Table labels and column names only.
+pub fn public_note(r: &Relationship, h: &LinkHealth, catalog: &Catalog) -> Option<String> {
+    let one = catalog.table(&r.to.table)?;
+    let many = catalog.table(&r.from.table)?;
+    let col = shown(one, &r.to.column);
+    if h.unusable() {
+        return Some(format!(
+            "The {} and {} tables both repeat the values of this link ({} and {}). The link is not used.",
+            many.label,
+            one.label,
+            shown(many, &r.from.column),
+            col,
+        ));
+    }
+    let values = |n: u64| {
+        if n == 1 {
+            "1 value".to_string()
+        } else {
+            format!("{} values", thousands(n))
+        }
+    };
+    if h.reversed() {
+        return Some(format!(
+            "The {} table repeats {} of {col}, so it is not a key. Tenun reads this link the other way round.",
+            one.label,
+            values(h.one_keys),
+        ));
+    }
+    if h.one_dups == 0 {
+        return None;
+    }
+    let pick = if one.prep {
+        if h.one_keys == 1 {
+            "Tenun used the first row of it."
+        } else {
+            "Tenun used the first row of each."
+        }
+    } else {
+        "Tenun used one row of each."
     };
     Some(format!(
-        "{at} repeats {col}: {listed} ({} rows too many). {} {fix}",
-        h.one_dups,
-        if one.prep {
-            "Tenun used the first row of each."
-        } else {
-            "Tenun used one row of each, picked by the order of the columns."
-        }
+        "The {} table repeats {} of {col}. {pick}{}",
+        one.label,
+        values(h.one_keys),
+        meeting(many, h),
     ))
+}
+
+/// What the Model view and the sheet of a link say: the warning, and what changed since the
+/// link last had another kind.
+pub fn link_note(
+    r: &Relationship,
+    h: &LinkHealth,
+    catalog: &Catalog,
+    sources: Sources,
+) -> Option<String> {
+    let warning = tile_note(r, h, catalog, sources);
+    let Some(was) = h.was.filter(|w| *w != h.kind()) else {
+        return warning;
+    };
+    let changed = format!(
+        "This link was {} and is now {}.{}",
+        kind_words(was),
+        kind_words(h.kind()),
+        if was == "one-one" {
+            " A tile that reads the many side from the one side cannot do it now."
+        } else {
+            ""
+        }
+    );
+    Some(match warning {
+        Some(w) => format!("{changed} {w}"),
+        None => changed,
+    })
 }
 
 /// The health of a link as the app shows it.
@@ -576,7 +795,7 @@ pub fn health_out(
     r: &Relationship,
     h: &LinkHealth,
     catalog: &Catalog,
-    sources: &dyn Fn(&str) -> Option<(String, usize)>,
+    sources: Sources,
 ) -> HealthOut {
     HealthOut {
         one_to_one: h.one_to_one(),
@@ -585,17 +804,9 @@ pub fn health_out(
         sample_rows: h.sample_rows.clone(),
         keys: h.one_keys,
         from_unique: h.many_dups == 0,
-        kind: if h.unusable() {
-            "many-many"
-        } else if h.reversed() {
-            "many-one"
-        } else if h.many_dups == 0 {
-            "one-one"
-        } else {
-            "one-many"
-        },
+        kind: h.kind(),
         unusable: h.unusable(),
-        note: note(r, h, catalog, sources),
+        note: link_note(r, h, catalog, sources),
     }
 }
 
@@ -604,6 +815,7 @@ pub fn health_out(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::{Column, DType};
     use crate::workspace::FieldRef;
 
     fn rel(id: &str, from: (&str, &str), to: (&str, &str)) -> Relationship {
@@ -621,21 +833,126 @@ mod tests {
         }
     }
 
-    /// A health record for a one side of 100 rows with `one` repeated rows.
+    /// A health record for a one side of 100 rows where `one` rows repeat a key that another
+    /// row has, each repeated key twice.
     fn health(one: u64, many: u64) -> LinkHealth {
         LinkHealth {
             one_rows: 100,
             one_dups: one,
+            one_keys: one,
+            many_rows: 500,
             many_dups: many,
             ..LinkHealth::default()
         }
     }
 
     #[test]
-    fn without_health_a_link_is_read_as_stored() {
+    fn without_health_a_link_is_read_as_stored_and_joined_as_it_is() {
         let rels = vec![rel("r1", ("a", "x"), ("b", "y"))];
         assert!(reach("a", &rels).contains_key("b"));
         assert!(!reach("b", &rels).contains_key("a"));
+        let none = Links::from(&rels);
+        assert!(!none.dedup(&rels[0]));
+        assert!(!none.edge(&rels[0], true).dedup);
+    }
+
+    #[test]
+    fn a_link_with_no_record_is_unknown_and_joins_one_row_per_key() {
+        let rels = vec![rel("r1", ("a", "x"), ("b", "y"))];
+        let mut h = Health::new();
+        let unknown = Links::new(&rels, Some(&h));
+        assert!(unknown.dedup(&rels[0]));
+        assert!(unknown.edge(&rels[0], true).dedup);
+        // It still crosses the stored way and no other, and it has nothing to say yet.
+        assert!(reach("a", unknown).contains_key("b"));
+        assert!(!reach("b", unknown).contains_key("a"));
+        assert!(!unknown.edge(&rels[0], true).warn);
+        // A record that says the keys are unique takes the dedupe away; a repeat brings it back.
+        h.insert("r1".into(), health(0, 0));
+        assert!(!Links::new(&rels, Some(&h)).dedup(&rels[0]));
+        h.insert("r1".into(), health(1, 0));
+        assert!(Links::new(&rels, Some(&h)).dedup(&rels[0]));
+        // A crossing the other way never needs one row per key: the many side is unique.
+        assert!(!Links::new(&rels, Some(&h)).edge(&rels[0], false).dedup);
+    }
+
+    fn table(prep: bool) -> Table {
+        Table {
+            id: "s1/stores".into(),
+            source_id: "s1".into(),
+            name: "stores".into(),
+            label: "stores".into(),
+            sql_ref: "\"s_s1\".\"stores\"".into(),
+            columns: vec![Column::new("id".into(), DType::Number, String::new())],
+            rows: None,
+            notes: vec![],
+            header_row: None,
+            prep,
+        }
+    }
+
+    #[test]
+    fn a_live_table_is_always_read_one_row_per_key_by_the_key_alone() {
+        let rels = vec![rel("r1", ("a", "x"), ("s1/stores", "id"))];
+        let clean = Health::from([("r1".to_string(), health(0, 3))]);
+        let links = Links::new(&rels, Some(&clean));
+        let forward = links.edge(&rels[0], true);
+        let backward = links.edge(&rels[0], false);
+        // A local table with clean keys is joined as it is.
+        assert_eq!(
+            forward.target_sql(&table(true), false),
+            "\"s_s1\".\"stores\""
+        );
+        // A live table is not, whatever the check said, and a crossing into it from the other
+        // side is no different.
+        let live = "(SELECT DISTINCT ON (\"id\") * FROM \"s_s1\".\"stores\" ORDER BY \"id\")";
+        assert_eq!(forward.target_sql(&table(false), false), live);
+        // The crossing from the other side joins into the many side, by its own column.
+        assert_eq!(
+            backward.target_sql(&table(false), false),
+            "(SELECT DISTINCT ON (\"x\") * FROM \"s_s1\".\"stores\" ORDER BY \"x\")"
+        );
+        assert_eq!(
+            forward.target_sql(&table(false), true),
+            "(SELECT DISTINCT ON (CAST(\"id\" AS VARCHAR)) * FROM \"s_s1\".\"stores\" ORDER BY CAST(\"id\" AS VARCHAR))"
+        );
+    }
+
+    #[test]
+    fn the_rule_for_not_a_key_counts_keys_not_rows() {
+        // Five real ids and ten rows of one key: one key repeats, six keys are distinct.
+        let mut h = LinkHealth {
+            one_rows: 15,
+            one_dups: 9,
+            one_keys: 1,
+            many_dups: 40,
+            ..LinkHealth::default()
+        };
+        assert!(h.forward_ok() && !h.reversed() && !h.unusable());
+        assert_eq!(h.kind(), "one-many");
+        // Four of seven distinct keys repeat: more than half.
+        h = LinkHealth {
+            one_rows: 14,
+            one_dups: 7,
+            one_keys: 4,
+            many_dups: 40,
+            ..LinkHealth::default()
+        };
+        assert!(h.to_is_not_a_key() && h.unusable());
+        assert_eq!(h.kind(), "many-many");
+        // Exactly half does not count.
+        h = LinkHealth {
+            one_rows: 8,
+            one_dups: 4,
+            one_keys: 2,
+            ..LinkHealth::default()
+        };
+        assert!(!h.to_is_not_a_key());
+        // The kind says one to one only when both sides are unique.
+        assert_eq!(health(0, 0).kind(), "one-one");
+        assert_eq!(health(1, 0).kind(), "one-many");
+        assert_eq!(health(0, 5).kind(), "one-many");
+        assert_eq!(health(40, 0).kind(), "many-one");
     }
 
     #[test]
@@ -657,14 +974,15 @@ mod tests {
         let usual_with_a_typo = Links::new(&rels, Some(&h));
         assert!(reach("a", usual_with_a_typo).contains_key("b"));
         assert!(!reach("b", usual_with_a_typo).contains_key("a"));
-        // The one side is mostly repeats: it is not a key. Both sides repeat: many to many,
-        // not used either way.
-        h.insert("r1".into(), health(60, 3));
+        // The one side is not a key. Both sides repeat: many to many, not used either way.
+        h.insert("r1".into(), health(40, 3));
         let none = Links::new(&rels, Some(&h));
         assert!(!reach("a", none).contains_key("b"));
         assert!(!reach("b", none).contains_key("a"));
-        // The one side is mostly repeats but the many side is unique: it reads the other way.
-        h.insert("r1".into(), health(60, 0));
+        // Seen as stored, the same link would connect them: that is how an error learns it.
+        assert!(reach("a", none.lenient()).contains_key("b"));
+        // The one side is not a key but the many side is unique: it reads the other way.
+        h.insert("r1".into(), health(40, 0));
         let flipped = Links::new(&rels, Some(&h));
         assert!(!reach("a", flipped).contains_key("b"));
         assert!(reach("b", flipped).contains_key("a"));
@@ -704,6 +1022,25 @@ mod tests {
     }
 
     #[test]
+    fn the_default_path_always_starts_with_one_of_the_first_links() {
+        // The field list and the default path must agree: one search makes both.
+        let rels = vec![
+            rel("r1", ("t", "a"), ("s", "id")),
+            rel("r2", ("t", "b"), ("s", "id")),
+            rel("r3", ("s", "region"), ("g", "code")),
+            rel("r4", ("g", "owner"), ("o", "id")),
+        ];
+        let links = Links::from(&rels);
+        let found = search("t", links);
+        for table in ["s", "g", "o"] {
+            let first_of_default = chain(&found.edge, table).unwrap()[0].rel.clone();
+            assert!(found.firsts[table].contains(&first_of_default), "{table}");
+        }
+        assert_eq!(found.firsts["o"], ["r1", "r2"]);
+        assert!(!found.firsts.contains_key("t"));
+    }
+
+    #[test]
     fn a_path_through_a_named_link_crosses_that_link() {
         let rels = vec![
             rel("r1", ("t", "from_store"), ("s", "id")),
@@ -723,6 +1060,24 @@ mod tests {
     }
 
     #[test]
+    fn a_link_that_is_not_on_the_way_is_told_apart() {
+        let rels = vec![
+            rel("r1", ("t", "a"), ("s", "id")),
+            rel("r2", ("u", "k"), ("v", "id")),
+        ];
+        let paths = Paths::new("t", Links::from(&rels));
+        assert_eq!(
+            paths.path("s", Some("r2")).unwrap_err(),
+            PathError::OffPath("r2".into())
+        );
+        assert_eq!(
+            paths.path("v", Some("r2")).unwrap_err(),
+            PathError::OffPath("r2".into())
+        );
+        assert_eq!(paths.path("v", None).unwrap_err(), PathError::No);
+    }
+
+    #[test]
     fn a_link_with_a_via_continues_down_the_chain() {
         let rels = vec![
             rel("r1", ("t", "a"), ("s", "id")),
@@ -739,77 +1094,254 @@ mod tests {
         assert_eq!(first_links("t", "g", &rels), ["r1", "r2"]);
     }
 
-    #[test]
-    fn words_for_one_repeated_key_and_for_several() {
+    fn world() -> (Catalog, Relationship) {
         let mut cat = Catalog::default();
-        let mk = |id: &str, label: &str, cols: &[&str]| Table {
+        let mk = |id: &str, label: &str, col: &str| Table {
             id: id.into(),
             source_id: id.split('/').next().unwrap().into(),
             name: label.into(),
             label: label.into(),
             sql_ref: String::new(),
-            columns: cols
-                .iter()
-                .map(|c| {
-                    crate::catalog::Column::new(
-                        c.to_string(),
-                        crate::catalog::DType::Number,
-                        String::new(),
-                    )
-                })
-                .collect(),
+            columns: vec![Column::new(col.to_string(), DType::Number, String::new())],
             rows: None,
             notes: vec![],
             header_row: None,
             prep: true,
         };
-        cat.tables.push(mk("s1/orders", "orders", &["store_id"]));
-        cat.tables.push(mk("s2/stores", "stores", &["id"]));
+        cat.tables.push(mk("s1/orders", "orders", "store_id"));
+        cat.tables.push(mk("s2/stores", "stores", "id"));
         let r = rel("r1", ("s1/orders", "store_id"), ("s2/stores", "id"));
-        let files = |id: &str| match id {
+        (cat, r)
+    }
+
+    fn files(id: &str) -> Option<(String, usize)> {
+        match id {
             "s2" => Some(("stores.csv".to_string(), 1)),
             "s1" => Some(("orders.xlsx".to_string(), 3)),
             _ => None,
-        };
+        }
+    }
+
+    #[test]
+    fn words_for_one_repeated_key_and_for_several_name_the_keys_and_the_rows_they_touch() {
+        let (cat, r) = world();
         let mut h = LinkHealth {
             one_rows: 10,
             one_dups: 1,
             one_keys: 1,
-            sample: vec![serde_json::json!(7)],
+            sample: vec![serde_json::json!("7")],
             sample_rows: vec![2],
-            many_dups: 0,
+            many_rows: 40,
+            many_hits: 12,
+            ..LinkHealth::default()
         };
         assert_eq!(
-            note(&r, &h, &cat, &files).unwrap(),
-            "stores.csv has 2 rows with id 7. Tenun used the first. Fix the file to remove this note."
+            tile_note(&r, &h, &cat, &files).unwrap(),
+            "stores.csv has 2 rows with id 7. Tenun used the first. 12 of 40 orders rows meet a repeated key. Fix the file to remove this note."
+        );
+        assert_eq!(
+            public_note(&r, &h, &cat).unwrap(),
+            "The stores table repeats 1 value of id. Tenun used the first row of it. 12 of 40 orders rows meet a repeated key."
         );
         h.one_rows = 100;
         h.one_dups = 7;
         h.one_keys = 7;
-        h.sample = vec![1, 2, 3, 4, 5]
-            .into_iter()
+        h.many_rows = 3000;
+        h.many_hits = 0;
+        h.sample = ["1", "2", "3", "4", "5"]
+            .iter()
             .map(|n| serde_json::json!(n))
             .collect();
         h.sample_rows = vec![2; 5];
         assert_eq!(
-            note(&r, &h, &cat, &files).unwrap(),
-            "stores.csv repeats id: 1, 2, 3, 4, 5 and 2 more (7 rows too many). Tenun used the first row of each. Fix the file to remove this note."
+            tile_note(&r, &h, &cat, &files).unwrap(),
+            "stores.csv repeats id: 1, 2, 3, 4, 5 and 2 more (7 rows too many). Tenun used the first row of each. No orders row meets a repeated key. Fix the file to remove this note."
         );
         h.one_keys = 3;
         h.one_dups = 3;
+        h.many_hits = 1200;
         h.sample.truncate(3);
         assert_eq!(
-            note(&r, &h, &cat, &files).unwrap(),
-            "stores.csv repeats id: 1, 2 and 3 (3 rows too many). Tenun used the first row of each. Fix the file to remove this note."
+            tile_note(&r, &h, &cat, &files).unwrap(),
+            "stores.csv repeats id: 1, 2 and 3 (3 rows too many). Tenun used the first row of each. 1,200 of 3,000 orders rows meet a repeated key. Fix the file to remove this note."
         );
-        // Mostly repeated, and the many side repeats too: not used.
-        h.many_dups = 4;
-        h.one_rows = 4;
-        h.one_dups = 3;
+        // What leaves the computer has no key and no file name (V4-D52).
+        let public = public_note(&r, &h, &cat).unwrap();
         assert_eq!(
-            note(&r, &h, &cat, &files).unwrap(),
-            "orders in orders.xlsx and stores.csv both repeat the values of this link (store_id and id), so Tenun cannot tell which row to use. The link is not used until one of them is fixed."
+            public,
+            "The stores table repeats 3 values of id. Tenun used the first row of each. 1,200 of 3,000 orders rows meet a repeated key."
         );
-        assert!(note(&r, &LinkHealth::default(), &cat, &files).is_none());
+        assert!(!public.contains("stores.csv") && !public.contains("1, 2"));
+        assert!(tile_note(&r, &LinkHealth::default(), &cat, &files).is_none());
+        // A table in a live database says the row it used is not defined.
+        let mut live = cat.clone();
+        live.tables[1].prep = false;
+        let n = tile_note(&r, &h, &live, &files).unwrap();
+        assert!(
+            n.contains("Tenun used one row of each. Which one can change."),
+            "{n}"
+        );
+        assert!(n.ends_with("Fix the table to remove this note."), "{n}");
+    }
+
+    #[test]
+    fn a_link_that_is_not_used_still_names_the_keys() {
+        let (cat, r) = world();
+        let h = LinkHealth {
+            one_rows: 14,
+            one_dups: 7,
+            one_keys: 4,
+            sample: ["1", "2", "4", "5"]
+                .iter()
+                .map(|k| serde_json::json!(k))
+                .collect(),
+            sample_rows: vec![3, 2, 2, 2],
+            many_rows: 40,
+            many_dups: 30,
+            ..LinkHealth::default()
+        };
+        assert!(h.unusable());
+        assert_eq!(
+            tile_note(&r, &h, &cat, &files).unwrap(),
+            "orders in orders.xlsx and stores.csv both repeat the values of this link (store_id and id), so Tenun cannot tell which row to use. Repeated id: 1, 2, 4 and 5. The link is not used until one of them is fixed."
+        );
+        assert_eq!(
+            public_note(&r, &h, &cat).unwrap(),
+            "The orders and stores tables both repeat the values of this link (store_id and id). The link is not used."
+        );
+        // The other way round, with the keys too.
+        let flipped = LinkHealth { many_dups: 0, ..h };
+        let n = tile_note(&r, &flipped, &cat, &files).unwrap();
+        assert!(
+            n.contains("(1, 2, 4 and 5)") && n.contains("the other way round"),
+            "{n}"
+        );
+        assert_eq!(
+            public_note(&r, &flipped, &cat).unwrap(),
+            "The stores table repeats 4 values of id, so it is not a key. Tenun reads this link the other way round."
+        );
+    }
+
+    #[test]
+    fn a_link_that_changed_kind_says_so() {
+        let (cat, r) = world();
+        let mut h = health(0, 4);
+        assert!(link_note(&r, &h, &cat, &files).is_none());
+        h.was = Some("one-one");
+        assert_eq!(
+            link_note(&r, &h, &cat, &files).unwrap(),
+            "This link was one to one and is now one to many. A tile that reads the many side from the one side cannot do it now."
+        );
+        // Back to what it was: nothing to say.
+        h.was = Some("one-many");
+        assert!(link_note(&r, &h, &cat, &files).is_none());
+    }
+
+    /// The vectors of `ui/tests/fixtures/paths.json`: the TypeScript mirror of the search reads
+    /// the same file and must give the same answers.
+    #[test]
+    fn the_search_gives_the_answers_of_the_shared_vectors() {
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../../../ui/tests/fixtures/paths.json")).unwrap();
+        assert!(cases.len() >= 10);
+        let of_kind = |kind: &str| match kind {
+            "one-many" => LinkHealth {
+                one_rows: 100,
+                many_rows: 100,
+                many_dups: 50,
+                ..LinkHealth::default()
+            },
+            "one-one" => LinkHealth {
+                one_rows: 100,
+                many_rows: 100,
+                ..LinkHealth::default()
+            },
+            "many-one" => LinkHealth {
+                one_rows: 14,
+                one_dups: 7,
+                one_keys: 4,
+                many_rows: 14,
+                ..LinkHealth::default()
+            },
+            "many-many" => LinkHealth {
+                one_rows: 14,
+                one_dups: 7,
+                one_keys: 4,
+                many_rows: 14,
+                many_dups: 9,
+                ..LinkHealth::default()
+            },
+            other => panic!("no such kind {other}"),
+        };
+        for case in &cases {
+            let name = case["name"].as_str().unwrap();
+            fn field(v: &serde_json::Value) -> (&str, &str) {
+                (v[0].as_str().unwrap(), v[1].as_str().unwrap())
+            }
+            let rels: Vec<Relationship> = case["rels"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    rel(
+                        r["id"].as_str().unwrap(),
+                        field(&r["from"]),
+                        field(&r["to"]),
+                    )
+                })
+                .collect();
+            let health: Health = case["health"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(id, kind)| {
+                    let h = of_kind(kind.as_str().unwrap());
+                    assert_eq!(h.kind(), kind.as_str().unwrap(), "{name}");
+                    (id.clone(), h)
+                })
+                .collect();
+            let base = case["base"].as_str().unwrap();
+            let found = search(base, Links::new(&rels, Some(&health)));
+            let got_reach: std::collections::BTreeMap<String, Option<String>> = found
+                .edge
+                .iter()
+                .map(|(t, e)| (t.clone(), e.as_ref().map(|e| e.rel.clone())))
+                .collect();
+            let want_reach: std::collections::BTreeMap<String, Option<String>> = case["reach"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(t, e)| (t.clone(), e.as_str().map(str::to_string)))
+                .collect();
+            assert_eq!(got_reach, want_reach, "{name}: the way to each table");
+            let got_first: std::collections::BTreeMap<String, Vec<String>> = found
+                .firsts
+                .iter()
+                .map(|(t, f)| (t.clone(), f.clone()))
+                .collect();
+            let want_first: std::collections::BTreeMap<String, Vec<String>> = case["first"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(t, f)| {
+                    (
+                        t.clone(),
+                        f.as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|x| x.as_str().unwrap().to_string())
+                            .collect(),
+                    )
+                })
+                .collect();
+            assert_eq!(got_first, want_first, "{name}: the first links");
+            for (t, f) in &want_first {
+                assert_eq!(
+                    &first_links(base, t, Links::new(&rels, Some(&health))),
+                    f,
+                    "{name}"
+                );
+            }
+        }
     }
 }

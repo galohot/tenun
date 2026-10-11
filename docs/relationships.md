@@ -23,9 +23,9 @@ The line in the Model view shows what the data says, next to the dot of the one 
 
 | Label | Meaning |
 |---|---|
-| **1 – many** | The usual link. One store, many orders. |
+| **1 – many** | The usual link. One store, many orders. The one side may have a few repeated keys (see below). |
 | **1 – 1** | Both sides are all different. |
-| **many – 1** | The stored direction stopped working, so Tenun reads the link the other way round. |
+| **many – 1** | The one side is not a key any more, and the many side is all different. Tenun reads the link the other way round. |
 | **many – many** | Neither direction works. The link is saved and not used. |
 
 ## What happens when a key stops being unique
@@ -34,31 +34,50 @@ Files change while the app is open. Someone adds a row to `stores.csv` with a st
 already there. A plain join would then count every order of that store twice, and the totals would
 be too big.
 
-Tenun checks every link each time a table loads: when you open the workspace, when a file is saved,
-when you press reload, and when a database refreshes. It does not check again for each tile. The
-answer is kept until the table loads again.
+**When Tenun checks.** A link between files, sheets, pasted tables and web links is checked each
+time one of its tables loads: when you open the workspace, when a file is saved, when you press
+reload, and when a web link is fetched again. The check is quick and finishes before the load does.
+It does not run again for each tile. The answer is kept until the table loads again.
+
+A link that touches a **database** table (PostgreSQL, MySQL, or a DuckDB file that Tenun reads where
+it is) is checked in the background, so opening the workspace or pressing reload never waits for the
+database. The check reads at most the first 1,000,000 rows of each side, and the note says so when it
+stopped there. It runs again when you open or reload, each time a dashboard refreshes (the
+interval, or **Refresh now**), and before a page is exported or published, because a database
+changes without a load.
+
+While a table is loading, and while a check has not finished or could not read the data, Tenun does
+not know the link. It reads one row for each key then, so a total is never counted twice in that
+time. A join into a database table always reads one row for each key, whatever the last check said.
 
 When the one side repeats a key:
 
 1. Tenun reads **one row for each key**. For a file, a sheet, a pasted table or a web link, this is
-   the first row in the file. For a database table, which has no order a person can see, it is the
-   row that sorts first when its columns are read from left to right. It is the same row every time.
+   the first row in the file. For a database table, which has no order a person can see, it is one
+   of the rows of the key, and which one can change.
 2. **The totals do not change.** An order is counted once.
 3. The line in the Model view shows a warning mark, and the key column shows one too. Open the line
    to read the sentence and the repeated keys.
-4. Every tile that crosses the link shows the same sentence under it. The sentence also goes into
-   exported files, published pages, PNG pictures and Excel files of the tile.
-
-Example: `stores.csv has 2 rows with id 7. Tenun used the first. Fix the file to remove this note.`
+4. Every tile that crosses the link shows the same sentence under it, from every question the tile
+   asks, its trend column too. The sentence says which keys repeat, and how many rows of the
+   many side meet one of them: `stores.csv has 2 rows with id 7. Tenun used the first. 12 of 3,000
+   orders rows meet a repeated key. Fix the file to remove this note.`
+5. A picture, an exported or published page and an Excel file carry the sentence **without the key
+   values and without file names**, because they leave your computer: `The stores table repeats 1
+   value of id. Tenun used the first row of it. 12 of 3,000 orders rows meet a repeated key.`
 
 When you remove the repeated row and save, the warning goes away within a second.
 
-If the one side repeats most of its values (half of its rows or more), it is not a list of unique
-things any more, and Tenun does not use one row for each key:
+**When the one side is not a key.** A few repeated keys are a warning. A column in which more than
+half of the distinct keys repeat is another kind of column, and one row for each key would throw
+most of it away. For example, four of the seven distinct ids repeat. Then:
 
 - If the many side is all different, Tenun reads the link the other way round (**many – 1**).
-- If the many side repeats too, the link is **many – many**. Tiles that need it say why. The link
-  stays in the file and works again when the file is fixed.
+- If the many side repeats too, the link is **many – many**. Tiles that need it say why, and the
+  note names the repeated keys. The link stays in the file and works again when the file is fixed.
+
+One id written ten times next to five real ids is one repeated key out of six. That is a warning
+with the first row used, not a link that stops.
 
 ## One to one
 
@@ -66,9 +85,14 @@ When both sides are all different, a tile can go along the link from either tabl
 orders can show the card of each store, and a table of stores can show the number of cards. The line
 stays as it was drawn: you do not need to change the file.
 
-If a later reload makes a column repeat a value, the link goes back to one direction. The line in
-the Model view changes its label, and a tile that needs the other direction says it cannot reach
-the table.
+A link works from the one side as long as the many side (the column you dragged from) is all
+different. If a later reload makes **that** column repeat a value, the link goes back to one
+direction, the line changes its label to **1 – many**, and the link says what it was and what it is:
+"This link was one to one and is now one to many." A tile that needs the other direction says which
+table repeats which column, and does not say that the tables are not related.
+
+If the **one** side gains a repeated key instead, the link still works in both directions. It
+shows a warning, and the way into the one side reads one row for each key.
 
 ## Two links to one table
 
@@ -78,8 +102,10 @@ one needs a name.
 
 1. Drag the second line. Tenun opens the sheet **Name these links** and proposes a name from the
    column: `Stores (from_store)` and `Stores (to_store)`.
-2. Type better names: **Shipped from** and **Sold at**. A name is new: it cannot be the name of a
-   table or of another link.
+2. Type better names: **Shipped from** and **Sold at**. A name is new: it cannot be the label or the
+   id of a table, or the name of another link. Both names are saved together, so two links can swap
+   their names. If a table arrives later with the name of a link, a formula would read the table, so
+   the Model view says so on that link.
 3. To rename a link later, click its label in the Model view.
 
 A tile picks the link when you pick the field. The list of fields shows the stores once for each
@@ -95,6 +121,8 @@ A tile with **Quantity** grouped by **Shipped from › kota** adds up the quanti
 store that sent it. Grouped by **Sold at › kota**, it adds up the quantity by the city of the store
 that received it. The two are different numbers. Both can be in one tile: a pivot with the sending
 city in the rows and the receiving city in the columns.
+
+A filter tile measures nothing, but its field list also shows the stores once for each link, so a filter can read either one.
 
 A click on a bar filters by the same link as the field of the bar. A click on a **Sold at** bar
 does not filter the **Shipped from** numbers.

@@ -12,6 +12,7 @@
     column,
     via,
     base = null,
+    roles = false,
     placeholder = 'Choose a field',
     reachable,
     numbersOnly = false,
@@ -26,6 +27,8 @@
     via?: string;
     /** The table of the tile's first value. Two links to one table list it once for each link, seen from here. */
     base?: string | null;
+    /** No first value to measure from (a filter tile): list a table once for each link that leads to it from some table. */
+    roles?: boolean;
     placeholder?: string;
     /** Tables that can be used together with the tile's other fields. */
     reachable?: Set<string> | null;
@@ -51,7 +54,7 @@
   );
 
   /** Every table once, or once for each link that leads to it (V4-D28). */
-  const all = $derived(fieldGroups(app.tables, app.snap?.workspace.relationships ?? [], app.linkHealth, base));
+  const all = $derived(fieldGroups(app.tables, app.snap?.workspace.relationships ?? [], app.linkHealth, base, roles));
   const here = $derived(groupOf(all, table, via));
 
   const groups = $derived(

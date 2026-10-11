@@ -117,8 +117,11 @@ pub enum Kind {
 pub struct Context<'a> {
     pub catalog: &'a Catalog,
     pub rels: &'a [Relationship],
-    /// What the data says about each relationship (V4-D26). `None`: every link is read as stored.
-    pub health: Option<&'a Health>,
+    /// What the data says about each relationship (V4-D26). It is required: a join into a link
+    /// with no record, or into a live database table, reads one row per key (V4-D51), and a
+    /// context with no health could lose that without a sign. Use the engine's own, or an empty
+    /// map to read every link as unknown.
+    pub health: &'a Health,
     /// What `TODAY()` is. A date literal goes into the SQL, so a view is stable while it is used.
     pub today: NaiveDate,
     /// What `NOW()` is.
@@ -127,12 +130,12 @@ pub struct Context<'a> {
 
 impl<'a> Context<'a> {
     /// A context that reads the computer's clock.
-    pub fn new(catalog: &'a Catalog, rels: &'a [Relationship]) -> Self {
+    pub fn new(catalog: &'a Catalog, rels: &'a [Relationship], health: &'a Health) -> Self {
         let now = chrono::Local::now().naive_local();
         Context {
             catalog,
             rels,
-            health: None,
+            health,
             today: now.date(),
             now,
         }
@@ -140,7 +143,7 @@ impl<'a> Context<'a> {
 
     /// The relationships with what the data says about them.
     pub fn links(&self) -> Links<'a> {
-        Links::new(self.rels, self.health)
+        Links::new(self.rels, Some(self.health))
     }
 }
 
