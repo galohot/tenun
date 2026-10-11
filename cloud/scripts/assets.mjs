@@ -12,7 +12,7 @@ const viewer = join(root, '..', 'ui', 'dist-viewer');
 for (const f of ['index.html', '404.html', 'style.css', 'icon.svg', 'favicon-32.png', 'apple-touch-icon.png', 'og.png', 'robots.txt', 'sitemap.xml']) {
   cpSync(join(site, f), join(pub, f));
 }
-for (const f of ['dashboard-light.webp', 'dashboard-dark.webp', 'model-light.webp', 'model-dark.webp']) {
+for (const f of ['dashboard-light.webp', 'dashboard-dark.webp', 'model-light.webp', 'model-dark.webp', 'more-views-light.webp', 'more-views-dark.webp']) {
   if (existsSync(join(site, f))) cpSync(join(site, f), join(pub, f));
 }
 if (!existsSync(join(viewer, 'viewer.js'))) {
