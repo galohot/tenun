@@ -1,0 +1,363 @@
+//! Formulas: the language of calculated columns and measures.
+//!
+//! A formula is written the way Excel writes it, with `[Column]` and `[Table].[Column]` for
+//! data. It goes through four steps, one file each:
+//!
+//! 1. `lex` cuts the text into tokens, each with its character offset.
+//! 2. `parse` builds a syntax tree (a Pratt parser, written by hand).
+//! 3. `check` resolves every name against the catalog and the relationships, infers a type for
+//!    every part, and enforces the rules of the context. Its errors are plain English with the
+//!    place of the culprit (`at` and `len`, in characters).
+//! 4. `sql` writes a DuckDB expression. Column names are quoted identifiers that came from the
+//!    catalog, never from the user. The only user text in the SQL is a number or an escaped
+//!    string literal. `functions` holds the function list and what each one does.
+//!
+//! Failures give blank, never an error: dividing by zero, `VALUE("abc")`, a date that does not
+//! exist. A query must never stop because one row holds odd data.
+//!
+//! # The three contexts
+//!
+//! - `Kind::Column` is row-wise over one table. The table is required. Aggregates are errors.
+//!   `[Table].[Column]` reads one row of a related table, when the table is reached from this
+//!   one on the many side of a relationship (many to one, any number of steps).
+//! - `Kind::Measure` is a formula of aggregates. Every column sits inside one, so
+//!   `SUM([Orders].[amount]) / SUM([Targets].[target])` works across tables. The table is
+//!   optional: with it, `[amount]` means a column of that table.
+//! - `Kind::Group` is a measure for a group (a new table). The table is required, and every
+//!   aggregate reads that table, or tables related to it.
+//!
+//! # What the compiler hands to the next build files
+//!
+//! `compile` returns `Compiled { dtype, uses, body }`.
+//!
+//! **A column** (`Body::Column`) is one SQL expression plus the joins it needs. The current
+//! table is the alias `t0`. A related table is `r1`, `r2`, … (each is a `LEFT JOIN` on the
+//! many-to-one path, so the row count never changes). A view is
+//! `SELECT t0.*, <sql> AS "name" FROM <table> AS t0 <joins>`. The `r` aliases never clash with
+//! the `t` aliases of the query compiler.
+//!
+//! **A measure or a group value** (`Body::Aggregate`) is a list of **parts** and an expression
+//! that combines them. Each part is one aggregate, with the table whose rows it reads
+//! (`home_table`, a table id), as the alias `t0`, and the joins it needs to reach related
+//! tables (`r1`…). The combining expression holds the placeholders `$p0`, `$p1`… for the
+//! parts, in order. The caller runs each part on its own, grouped by the tile's groups, then
+//! joins the results on the group values and fills the placeholders (see
+//! `AggregateSql::fill`). The combining expression must read the results as columns of an
+//! outer query. DuckDB does not allow `TRY` (which keeps failures blank) around an aggregate.
+//! This is V4-D4: every table is totalled on its own, so a number on the one side of a
+//! relationship is never counted once per row on the many side.
+//! `AggregateSql::grand_total` gives the one-cell answer with no groups.
+
+pub mod check;
+pub mod functions;
+pub mod lex;
+pub mod parse;
+pub mod sql;
+
+#[cfg(test)]
+mod tests;
+
+use crate::catalog::{Catalog, DType};
+use crate::workspace::Relationship;
+use chrono::{NaiveDate, NaiveDateTime};
+use duckdb::Connection;
+use serde::{Deserialize, Serialize};
+
+/// A problem in a formula, in plain words, with the place to underline. `at` and `len` count
+/// characters (not bytes) from the start of the formula.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, thiserror::Error)]
+#[error("{message}")]
+pub struct FormulaError {
+    pub message: String,
+    pub at: usize,
+    pub len: usize,
+}
+
+impl FormulaError {
+    pub fn new(message: impl Into<String>, at: usize, len: usize) -> Self {
+        FormulaError {
+            message: message.into(),
+            at,
+            len,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    Column,
+    Measure,
+    Group,
+}
+
+/// What a formula is read against: the tables, how they relate, and the clock.
+pub struct Context<'a> {
+    pub catalog: &'a Catalog,
+    pub rels: &'a [Relationship],
+    /// What `TODAY()` is. A date literal goes into the SQL, so a view is stable while it is used.
+    pub today: NaiveDate,
+    /// What `NOW()` is.
+    pub now: NaiveDateTime,
+}
+
+impl<'a> Context<'a> {
+    /// A context that reads the computer's clock.
+    pub fn new(catalog: &'a Catalog, rels: &'a [Relationship]) -> Self {
+        let now = chrono::Local::now().naive_local();
+        Context {
+            catalog,
+            rels,
+            today: now.date(),
+            now,
+        }
+    }
+}
+
+/// A formula, checked and written as SQL.
+#[derive(Debug, Clone)]
+pub struct Compiled {
+    pub dtype: DType,
+    /// The ids of the tables the formula reads, in the order it first reads them.
+    pub uses: Vec<String>,
+    pub body: Body,
+}
+
+#[derive(Debug, Clone)]
+pub enum Body {
+    Column(ColumnSql),
+    Aggregate(AggregateSql),
+}
+
+/// A row-wise expression over the alias `t0` (the table of the formula) and the joins to the
+/// related tables it reads.
+#[derive(Debug, Clone)]
+pub struct ColumnSql {
+    pub sql: String,
+    pub joins: Vec<Join>,
+}
+
+/// One `LEFT JOIN` along a many-to-one relationship.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Join {
+    /// The id of the table that is joined.
+    pub table: String,
+    /// Its fully quoted DuckDB reference.
+    pub sql_ref: String,
+    pub alias: String,
+    /// The condition after `ON`, with the aliases of both sides.
+    pub on: String,
+}
+
+impl Join {
+    /// ` LEFT JOIN <table> AS <alias> ON <condition>`, with a leading space.
+    pub fn to_sql(&self) -> String {
+        format!(
+            " LEFT JOIN {} AS {} ON {}",
+            self.sql_ref, self.alias, self.on
+        )
+    }
+}
+
+/// The aggregates of a measure and the expression that combines them.
+#[derive(Debug, Clone)]
+pub struct AggregateSql {
+    pub parts: Vec<Part>,
+    /// SQL over the placeholders `$p0`, `$p1`… (one for each part). Row-wise functions,
+    /// operators and literals are in it; aggregates are not.
+    pub combine: String,
+}
+
+/// One aggregate, such as `sum(t0."amount")`, over the rows of one table.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Part {
+    /// The id of the table whose rows are aggregated. It is the alias `t0` in `sql`.
+    pub home_table: String,
+    pub sql: String,
+    /// The joins `sql` needs to reach related tables (`r1`…).
+    pub joins: Vec<Join>,
+    pub dtype: DType,
+}
+
+impl AggregateSql {
+    /// The combining expression with each placeholder replaced by `values[n]`.
+    pub fn fill(&self, values: &[String]) -> String {
+        fill(&self.combine, values)
+    }
+
+    /// A whole SELECT for the answer with no groups and no filters: one cell, shown as `ty`
+    /// shows it. Each part is a scalar subquery over its own table, so nothing is counted
+    /// twice, and the combining expression reads the results as plain columns.
+    pub fn grand_total(&self, catalog: &Catalog, ty: check::Ty) -> Option<String> {
+        let mut parts = Vec::new();
+        let mut names = Vec::new();
+        for (i, p) in self.parts.iter().enumerate() {
+            let home = catalog.table(&p.home_table)?;
+            let joins: String = p.joins.iter().map(Join::to_sql).collect();
+            parts.push(format!(
+                "(SELECT {} FROM {} AS t0{joins}) AS p{i}",
+                p.sql, home.sql_ref
+            ));
+            names.push(format!("g.p{i}"));
+        }
+        Some(format!(
+            "SELECT {} FROM (SELECT {}) AS g",
+            sql::display(&self.fill(&names), ty),
+            parts.join(", ")
+        ))
+    }
+}
+
+/// Replaces `$p0`, `$p1`… in `text`. A number is read to its last digit, so `$p1` never cuts
+/// into `$p10`. Text between quotes is left alone, so a user's `"$p0"` stays what they wrote.
+pub fn fill(text: &str, values: &[String]) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut quote: Option<char> = None;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        match quote {
+            // A doubled quote closes the text and opens it again, which keeps it inside.
+            Some(q) => {
+                out.push(c);
+                if c == q {
+                    quote = None;
+                }
+                i += 1;
+            }
+            None if c == '\'' || c == '"' => {
+                quote = Some(c);
+                out.push(c);
+                i += 1;
+            }
+            None if c == '$' && chars.get(i + 1) == Some(&'p') => {
+                let mut j = i + 2;
+                while chars.get(j).is_some_and(char::is_ascii_digit) {
+                    j += 1;
+                }
+                let digits: String = chars[i + 2..j].iter().collect();
+                match digits.parse::<usize>().ok().and_then(|n| values.get(n)) {
+                    Some(v) => out.push_str(v),
+                    None => out.extend(&chars[i..j]),
+                }
+                i = j;
+            }
+            None => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Checks a formula and writes it as SQL. `table` is a table label or id.
+pub fn compile(
+    src: &str,
+    kind: Kind,
+    table: Option<&str>,
+    cx: &Context<'_>,
+) -> Result<Compiled, FormulaError> {
+    let typed = check::check(src, kind, table, cx)?;
+    Ok(sql::compile(&typed, cx))
+}
+
+// ---- POST /api/formula/check ---------------------------------------------------------
+
+/// The body of `POST /api/formula/check`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CheckRequest {
+    pub formula: String,
+    pub kind: Kind,
+    /// A table id (or label). Required for a column and a group.
+    #[serde(default)]
+    pub table: Option<String>,
+}
+
+/// The answer. It holds a type, a preview and the tables read, or a plain error. It never
+/// holds SQL.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CheckReply {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dtype: Option<DType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<FormulaError>,
+    /// A column: the first 5 values of the table. A measure: the grand total, one cell.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uses: Option<Vec<String>>,
+}
+
+impl CheckReply {
+    fn failed(e: FormulaError) -> Self {
+        CheckReply {
+            ok: false,
+            dtype: None,
+            error: Some(e),
+            preview: None,
+            uses: None,
+        }
+    }
+}
+
+/// Answers a check request. The formula is compiled, and run on the database for a preview.
+/// A formula that is fine but fails on the data (it should not happen) says so without
+/// showing the database's own message, which would hold SQL.
+pub fn answer(req: &CheckRequest, cx: &Context<'_>, db: &Connection) -> CheckReply {
+    let len = req.formula.chars().count();
+    let compiled = match compile(&req.formula, req.kind, req.table.as_deref(), cx) {
+        Ok(c) => c,
+        Err(e) => return CheckReply::failed(e),
+    };
+    let select = match preview_sql(&compiled, req.table.as_deref(), cx) {
+        Some(s) => s,
+        None => {
+            return CheckReply::failed(FormulaError::new(
+                "The table of this formula is not loaded.",
+                0,
+                len,
+            ));
+        }
+    };
+    match crate::engine::run(db, &select, &[]) {
+        Ok(rows) => CheckReply {
+            ok: true,
+            dtype: Some(compiled.dtype),
+            error: None,
+            preview: Some(
+                rows.into_iter()
+                    .filter_map(|r| r.into_iter().next())
+                    .collect(),
+            ),
+            uses: Some(compiled.uses),
+        },
+        Err(e) => {
+            tracing::warn!("formula preview failed: {e:#}");
+            CheckReply::failed(FormulaError::new(
+                "The data could not be read with this formula. Check the kinds of the columns it uses.",
+                0,
+                len,
+            ))
+        }
+    }
+}
+
+/// The SELECT for the preview: 5 rows of a column, or the grand total of a measure.
+fn preview_sql(c: &Compiled, table: Option<&str>, cx: &Context<'_>) -> Option<String> {
+    let ty = check::Ty::from_dtype(c.dtype);
+    match &c.body {
+        Body::Column(col) => {
+            let t = check::find_table(cx.catalog, table?)?;
+            let joins: String = col.joins.iter().map(Join::to_sql).collect();
+            Some(format!(
+                "SELECT {} FROM {} AS t0{joins} LIMIT 5",
+                sql::display(&col.sql, ty),
+                t.sql_ref
+            ))
+        }
+        Body::Aggregate(agg) => agg.grand_total(cx.catalog, ty),
+    }
+}

@@ -397,11 +397,7 @@ pub fn scope_on<'a>(
             format!("{}.{}", joins.alias(&j.from_table), ident(&j.from_col)),
             format!("{}.{}", joins.alias(&j.to_table), ident(&j.to_col)),
         );
-        let on = if fc.dtype == tc.dtype {
-            format!("{l} = {r}")
-        } else {
-            format!("CAST({l} AS VARCHAR) = CAST({r} AS VARCHAR)")
-        };
+        let on = join_on(&l, &r, fc.dtype, tc.dtype);
         sql.push_str(&format!(
             " LEFT JOIN {} AS {} ON {on}",
             to.sql_ref,
@@ -552,17 +548,26 @@ fn col<'a>(t: &'a Table, c: &str) -> Result<&'a crate::catalog::Column, QueryErr
         .ok_or_else(|| QueryError::UnknownColumn(t.label.clone(), c.to_string()))
 }
 
+/// The condition of a join. Columns of different types meet as text.
+pub(crate) fn join_on(left: &str, right: &str, left_type: DType, right_type: DType) -> String {
+    if left_type == right_type {
+        format!("{left} = {right}")
+    } else {
+        format!("CAST({left} AS VARCHAR) = CAST({right} AS VARCHAR)")
+    }
+}
+
 #[derive(Debug, Clone)]
-struct Edge {
-    from_table: String,
-    from_col: String,
-    to_table: String,
-    to_col: String,
+pub(crate) struct Edge {
+    pub(crate) from_table: String,
+    pub(crate) from_col: String,
+    pub(crate) to_table: String,
+    pub(crate) to_col: String,
 }
 
 /// Breadth-first from the base table, many side → one side. Maps every
 /// reachable table to the edge that reached it.
-fn reach(base: &str, rels: &[Relationship]) -> HashMap<String, Option<Edge>> {
+pub(crate) fn reach(base: &str, rels: &[Relationship]) -> HashMap<String, Option<Edge>> {
     let mut seen: HashMap<String, Option<Edge>> = HashMap::new();
     seen.insert(base.to_string(), None);
     let mut queue = VecDeque::from([base.to_string()]);

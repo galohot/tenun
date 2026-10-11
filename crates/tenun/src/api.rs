@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tenun_core::engine::{AddSource, KeyEdit, KeyIn, LinkPreview};
+use tenun_core::formula::CheckRequest;
 use tenun_core::paste;
 use tenun_core::query::{Filter, SemanticQuery};
 use tenun_core::snapshot::{self, DashFilter, Tile, run_tile};
@@ -79,6 +80,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/dashboards", put(put_dashboards))
         .route("/layout", put(put_layout))
         .route("/query", post(query))
+        .route("/formula/check", post(formula_check))
         .route("/fs", get(fs))
         .route("/settings", get(get_settings).put(put_settings))
         .route("/viewer", get(viewer))
@@ -554,6 +556,18 @@ async fn query(State(s): S, Json(q): Json<SemanticQuery>) -> R<Json<Value>> {
     Ok(Json(
         blocking(&s, move |st| {
             Ok(serde_json::to_value(st.engine.query(&q)?)?)
+        })
+        .await?,
+    ))
+}
+
+/// Checks a formula. A wrong formula is a normal answer (`ok: false`, a plain message and the
+/// place to underline), not an error. A good one comes with its type and a preview. The answer
+/// never holds SQL.
+async fn formula_check(State(s): S, Json(b): Json<CheckRequest>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            Ok(serde_json::to_value(st.engine.check_formula(&b)?)?)
         })
         .await?,
     ))

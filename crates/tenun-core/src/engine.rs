@@ -4,6 +4,7 @@ use crate::catalog::{Catalog, Column, DType, Table, ident, lit};
 use crate::excel::{self, Cell, ColType};
 use crate::fetch;
 use crate::folder;
+use crate::formula;
 use crate::paste;
 use crate::prep::{self, ColInfo};
 use crate::query::{self, Param, SemanticQuery};
@@ -1404,6 +1405,26 @@ impl Engine {
 
     pub fn catalog(&self) -> Catalog {
         self.state.read().unwrap().catalog.clone()
+    }
+
+    /// Checks a formula against the open workspace and runs a preview of it (the first 5 values
+    /// of a column, the grand total of a measure). The answer holds no SQL.
+    pub fn check_formula(
+        &self,
+        req: &formula::CheckRequest,
+    ) -> anyhow::Result<formula::CheckReply> {
+        let (catalog, rels) = {
+            let s = self.state.read().unwrap();
+            (s.catalog.clone(), s.ws.relationships.clone())
+        };
+        let today = self.today();
+        let cx = formula::Context {
+            catalog: &catalog,
+            rels: &rels,
+            today,
+            now: today.and_time(chrono::Local::now().time()),
+        };
+        Ok(formula::answer(req, &cx, &self.conn()?))
     }
 }
 
