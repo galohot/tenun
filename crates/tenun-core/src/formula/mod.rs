@@ -52,7 +52,10 @@ pub mod check;
 pub mod functions;
 pub mod lex;
 pub mod parse;
+pub mod rename;
 pub mod sql;
+
+pub use rename::{rename_column, rename_column_qualified};
 
 #[cfg(test)]
 mod tests;
@@ -63,8 +66,13 @@ use chrono::{NaiveDate, NaiveDateTime};
 use duckdb::Connection;
 use serde::{Deserialize, Serialize};
 
-/// A problem in a formula, in plain words, with the place to underline. `at` and `len` count
-/// characters (not bytes) from the start of the formula.
+/// A problem in a formula, in plain words, with the place to underline.
+///
+/// `at` and `len` count Unicode code points (what Rust calls `char`) from the start of the
+/// formula, everywhere inside Rust. `POST /api/formula/check` converts them once, at the edge,
+/// to UTF-16 code units with [`FormulaError::in_utf16`], so JavaScript's `slice` underlines the
+/// right characters (V4-D23). A `len` of 0 means a place, not a range: the formula stops here,
+/// or there is nothing to underline.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, thiserror::Error)]
 #[error("{message}")]
 pub struct FormulaError {
@@ -79,6 +87,19 @@ impl FormulaError {
             message: message.into(),
             at,
             len,
+        }
+    }
+
+    /// The same error with `at` and `len` counted in UTF-16 code units of `formula`. A
+    /// character outside the Basic Multilingual Plane, such as an emoji, takes two. A place
+    /// past the end of the text counts one unit for each missing character.
+    pub fn in_utf16(&self, formula: &str) -> FormulaError {
+        let chars: Vec<char> = formula.chars().collect();
+        let unit = |i: usize| chars.get(i).map_or(1, |c| c.len_utf16());
+        FormulaError {
+            message: self.message.clone(),
+            at: (0..self.at).map(unit).sum(),
+            len: (self.at..self.at + self.len).map(unit).sum(),
         }
     }
 }
@@ -177,12 +198,25 @@ pub struct Part {
     /// The joins `sql` needs to reach related tables (`r1`…).
     pub joins: Vec<Join>,
     pub dtype: DType,
+    /// A sum or a count: over no rows it is 0, not blank (V4-D22). `fill` and `grand_total`
+    /// wrap such a part as `COALESCE(part, 0)`; the join on group values in 03 does the same
+    /// for a group that has no rows in this part's table.
+    pub zero_when_empty: bool,
 }
 
 impl AggregateSql {
-    /// The combining expression with each placeholder replaced by `values[n]`.
+    /// The combining expression with each placeholder replaced by `values[n]`. A part that is a
+    /// sum or a count gives 0 where `values[n]` is blank.
     pub fn fill(&self, values: &[String]) -> String {
-        fill(&self.combine, values)
+        let wrapped: Vec<String> = values
+            .iter()
+            .enumerate()
+            .map(|(i, v)| match self.parts.get(i) {
+                Some(p) if p.zero_when_empty => format!("COALESCE({v}, 0e0)"),
+                _ => v.clone(),
+            })
+            .collect();
+        fill(&self.combine, &wrapped)
     }
 
     /// A whole SELECT for the answer with no groups and no filters: one cell, shown as `ty`
@@ -260,7 +294,7 @@ pub fn compile(
     cx: &Context<'_>,
 ) -> Result<Compiled, FormulaError> {
     let typed = check::check(src, kind, table, cx)?;
-    Ok(sql::compile(&typed, cx))
+    sql::compile(&typed, cx)
 }
 
 // ---- POST /api/formula/check ---------------------------------------------------------
@@ -304,21 +338,24 @@ impl CheckReply {
 }
 
 /// Answers a check request. The formula is compiled, and run on the database for a preview.
-/// A formula that is fine but fails on the data (it should not happen) says so without
-/// showing the database's own message, which would hold SQL.
+/// Every error leaves here with its place in UTF-16 units (V4-D23). A formula that is fine
+/// but fails on the data says so without showing the database's own message, which would
+/// hold SQL: a problem with the kinds of the columns is underlined over the formula, a
+/// problem with the source (offline, missing) has no place to underline (`len` 0).
 pub fn answer(req: &CheckRequest, cx: &Context<'_>, db: &Connection) -> CheckReply {
+    let fail = |e: FormulaError| CheckReply::failed(e.in_utf16(&req.formula));
     let len = req.formula.chars().count();
     let compiled = match compile(&req.formula, req.kind, req.table.as_deref(), cx) {
         Ok(c) => c,
-        Err(e) => return CheckReply::failed(e),
+        Err(e) => return fail(e),
     };
     let select = match preview_sql(&compiled, req.table.as_deref(), cx) {
         Some(s) => s,
         None => {
-            return CheckReply::failed(FormulaError::new(
+            return fail(FormulaError::new(
                 "The table of this formula is not loaded.",
                 0,
-                len,
+                0,
             ));
         }
     };
@@ -336,13 +373,34 @@ pub fn answer(req: &CheckRequest, cx: &Context<'_>, db: &Connection) -> CheckRep
         },
         Err(e) => {
             tracing::warn!("formula preview failed: {e:#}");
-            CheckReply::failed(FormulaError::new(
-                "The data could not be read with this formula. Check the kinds of the columns it uses.",
-                0,
-                len,
-            ))
+            fail(if source_problem(&format!("{e:#}")) {
+                FormulaError::new(
+                    "The data of this table could not be read. Check that its source is there, then try again.",
+                    0,
+                    0,
+                )
+            } else {
+                FormulaError::new(
+                    "The data could not be read with this formula. Check the kinds of the columns it uses.",
+                    0,
+                    len,
+                )
+            })
         }
     }
+}
+
+/// True when DuckDB's complaint is about where the data lives, not about what it holds.
+fn source_problem(message: &str) -> bool {
+    [
+        "Catalog Error",
+        "IO Error",
+        "Connection Error",
+        "HTTP Error",
+        "does not exist",
+    ]
+    .iter()
+    .any(|w| message.contains(w))
 }
 
 /// The SELECT for the preview: 5 rows of a column, or the grand total of a measure.

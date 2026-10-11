@@ -5,7 +5,15 @@
 //! minus binds tighter than the power.
 
 use super::FormulaError;
+use super::functions;
 use super::lex::{Tok, Token, lex};
+
+/// The longest formula, in characters (V4-D24).
+pub const MAX_CHARS: usize = 10_000;
+/// How deep a formula may nest: brackets, function values, minus signs and operators in a
+/// chain each count. The checker and the SQL writer walk the tree, so this keeps their
+/// stack small however the text is written (V4-D24).
+pub const MAX_DEPTH: usize = 100;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expr {
@@ -13,6 +21,8 @@ pub struct Expr {
     /// Character offset of the first character, and how many characters it covers.
     pub at: usize,
     pub len: usize,
+    /// The height of the tree under this node: 0 for a number or a reference.
+    pub depth: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -110,9 +120,17 @@ fn infix(tok: &Tok) -> Option<(BinOp, u8, u8)> {
     })
 }
 
-/// The formula as a syntax tree. An empty formula is an error.
+/// The formula as a syntax tree. An empty formula is an error, and so is one that is too long
+/// or nested too deeply. One `=` in front is allowed, as in Excel.
 pub fn parse(src: &str) -> Result<Expr, FormulaError> {
     let end = src.chars().count();
+    if end > MAX_CHARS {
+        return Err(FormulaError::new(
+            "This formula is too long.",
+            MAX_CHARS,
+            end - MAX_CHARS,
+        ));
+    }
     if src.trim().is_empty() {
         return Err(FormulaError::new(
             "Write a formula, like [amount] * 2.",
@@ -120,10 +138,25 @@ pub fn parse(src: &str) -> Result<Expr, FormulaError> {
             0,
         ));
     }
+    let toks = lex(src);
+    let mut pos = 0;
+    if let Some(first) = toks.first()
+        && first.tok == Tok::Eq
+    {
+        if toks.len() == 1 {
+            return Err(FormulaError::new(
+                "Write a formula after the =.",
+                first.at,
+                first.len,
+            ));
+        }
+        pos = 1;
+    }
     let mut p = Parser {
-        toks: lex(src),
-        pos: 0,
+        toks,
+        pos,
         end,
+        level: 0,
     };
     let e = p.expr(0)?;
     match p.toks.get(p.pos) {
@@ -137,6 +170,8 @@ struct Parser {
     pos: usize,
     /// The length of the formula, where "the end" sits.
     end: usize,
+    /// How many `expr` calls are open now.
+    level: usize,
 }
 
 impl Parser {
@@ -144,7 +179,30 @@ impl Parser {
         self.toks.get(self.pos)
     }
 
+    fn too_deep(&self, at: usize, len: usize) -> FormulaError {
+        FormulaError::new("This formula is nested too deeply.", at, len)
+    }
+
+    /// A node that grew past the depth limit is an error at that node.
+    fn within_depth(&self, e: Expr) -> Result<Expr, FormulaError> {
+        if e.depth > MAX_DEPTH {
+            return Err(self.too_deep(e.at, e.len));
+        }
+        Ok(e)
+    }
+
     fn expr(&mut self, min_bp: u8) -> Result<Expr, FormulaError> {
+        if self.level > MAX_DEPTH {
+            let (at, len) = self.peek().map_or((self.end, 0), |t| (t.at, t.len));
+            return Err(self.too_deep(at, len));
+        }
+        self.level += 1;
+        let r = self.expr_inner(min_bp);
+        self.level -= 1;
+        r
+    }
+
+    fn expr_inner(&mut self, min_bp: u8) -> Result<Expr, FormulaError> {
         let mut left = self.prefix()?;
         while let Some(t) = self.peek() {
             let Some((op, lbp, rbp)) = infix(&t.tok) else {
@@ -156,7 +214,8 @@ impl Parser {
             self.pos += 1;
             let right = self.expr(rbp)?;
             let (at, len) = (left.at, right.at + right.len - left.at);
-            left = Expr {
+            let depth = 1 + left.depth.max(right.depth);
+            left = self.within_depth(Expr {
                 kind: ExprKind::Binary {
                     op,
                     left: Box::new(left),
@@ -164,7 +223,8 @@ impl Parser {
                 },
                 at,
                 len,
-            };
+                depth,
+            })?;
         }
         Ok(left)
     }
@@ -183,6 +243,7 @@ impl Parser {
                 kind,
                 at: t.at,
                 len: t.len,
+                depth: 0,
             })
         };
         match &t.tok {
@@ -196,9 +257,19 @@ impl Parser {
                 if matches!(self.peek(), Some(n) if n.tok == Tok::LParen) {
                     return self.call(name.clone(), &t);
                 }
-                match name.to_ascii_uppercase().as_str() {
+                let upper = name.to_uppercase();
+                match upper.as_str() {
                     "TRUE" => leaf(ExprKind::Bool(true)),
                     "FALSE" => leaf(ExprKind::Bool(false)),
+                    _ if functions::lookup(&upper).is_some() => Err(FormulaError::new(
+                        if functions::lookup(&upper).is_some_and(|d| d.min == 0) {
+                            format!("{upper} needs brackets: {upper}().")
+                        } else {
+                            format!("{upper} needs brackets and its values, like {upper}(...).")
+                        },
+                        t.at,
+                        t.len,
+                    )),
                     _ => Err(FormulaError::new(
                         format!(
                             "{name} is not a column or a function. Write column names in square brackets, like [{name}]."
@@ -234,13 +305,15 @@ impl Parser {
                     UnOp::Pos
                 };
                 let len = operand.at + operand.len - t.at;
-                Ok(Expr {
+                let depth = 1 + operand.depth;
+                self.within_depth(Expr {
                     kind: ExprKind::Unary {
                         op,
                         expr: Box::new(operand),
                     },
                     at: t.at,
                     len,
+                    depth,
                 })
             }
             _ => Err(self.stray_before(&t)),
@@ -255,7 +328,7 @@ impl Parser {
         if matches!(self.peek(), Some(t) if t.tok == Tok::RParen) {
             let close = self.toks[self.pos].clone();
             self.pos += 1;
-            return Ok(call_expr(name, args, open, &close));
+            return self.within_depth(call_expr(name, args, open, &close));
         }
         loop {
             if let Some(t) = self.peek()
@@ -286,7 +359,7 @@ impl Parser {
                         ));
                     }
                 }
-                Tok::RParen => return Ok(call_expr(name, args, open, &t)),
+                Tok::RParen => return self.within_depth(call_expr(name, args, open, &t)),
                 Tok::Semi | Tok::Bad(_) => return Err(self.stray(&t)),
                 _ => {
                     return Err(FormulaError::new(
@@ -333,10 +406,12 @@ impl Parser {
 }
 
 fn call_expr(name: String, args: Vec<Expr>, open: &Token, close: &Token) -> Expr {
+    let depth = 1 + args.iter().map(|a| a.depth).max().unwrap_or(0);
     Expr {
         kind: ExprKind::Call { name, args },
         at: open.at,
         len: close.at + close.len - open.at,
+        depth,
     }
 }
 

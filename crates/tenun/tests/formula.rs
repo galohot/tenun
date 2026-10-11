@@ -308,3 +308,104 @@ async fn the_route_refuses_an_unknown_kind() {
     .await;
     assert!(status == 400 || status == 422, "{status}");
 }
+
+// ---- the review of build 01 -----------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_route_refuses_a_formula_nested_to_the_length_limit_and_lives_on() {
+    let (s, ids) = server("route-deep").await;
+    for formula in [
+        format!("{}1{}", "(".repeat(3000), ")".repeat(3000)),
+        format!("{}1", "-".repeat(9000)),
+        format!("{}TRUE{}", "NOT(".repeat(1500), ")".repeat(1500)),
+    ] {
+        let (status, v) = post(
+            &s,
+            "/api/formula/check",
+            json!({ "formula": formula, "kind": "column", "table": ids[0] }),
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["error"]["message"], "This formula is nested too deeply.");
+    }
+    let (_, v) = post(
+        &s,
+        "/api/formula/check",
+        json!({ "formula": "1".repeat(10_001), "kind": "column", "table": ids[0] }),
+    )
+    .await;
+    assert_eq!(v["error"]["message"], "This formula is too long.");
+    // The server is still there.
+    let (_, v) = post(
+        &s,
+        "/api/formula/check",
+        json!({ "formula": "[amount] * 2", "kind": "column", "table": ids[0] }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_route_answers_a_chain_of_carets_at_once() {
+    let (s, ids) = server("route-carets").await;
+    let formula = format!("{}2", "2^".repeat(25));
+    let start = std::time::Instant::now();
+    let (_, v) = post(
+        &s,
+        "/api/formula/check",
+        json!({ "formula": formula, "kind": "column", "table": ids[0] }),
+    )
+    .await;
+    assert!(start.elapsed() < std::time::Duration::from_secs(10));
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["dtype"], "number");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_route_counts_offsets_in_utf16_units() {
+    let (s, ids) = server("route-utf16").await;
+    let (_, v) = post(
+        &s,
+        "/api/formula/check",
+        json!({ "formula": "\"😀\" & [amout]", "kind": "column", "table": ids[0] }),
+    )
+    .await;
+    // The emoji is two UTF-16 units, so [amout] starts at 7, not 6.
+    assert_eq!(v["error"]["at"], 7);
+    assert_eq!(v["error"]["len"], 7);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_route_ignores_one_leading_equals_sign() {
+    let (s, ids) = server("route-equals").await;
+    let (_, v) = post(
+        &s,
+        "/api/formula/check",
+        json!({ "formula": "= [amount] * 2", "kind": "column", "table": ids[0] }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["preview"][0], json!(200.0));
+}
+
+#[test]
+fn a_sum_of_nothing_is_zero_through_the_engine() {
+    let (e, _) = engine("zero");
+    let r = check(
+        &e,
+        "SUM([orders].[amount]) - SUMIF([orders].[amount], [orders].[id] > 100)",
+        Kind::Measure,
+        None,
+    );
+    assert!(r.ok, "{r:?}");
+    assert_eq!(r.preview.unwrap(), [json!(475.5)]);
+    // An average of nothing stays blank.
+    let r = check(
+        &e,
+        "AVERAGEIF([orders].[amount], [orders].[id] > 100)",
+        Kind::Measure,
+        None,
+    );
+    assert_eq!(r.preview.unwrap(), [Value::Null]);
+}

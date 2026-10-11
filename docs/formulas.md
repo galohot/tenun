@@ -17,6 +17,7 @@ Formulas arrive with calculated columns and measures in Tenun 0.4. This page des
 - **Operators:** `+ - * / ^ & = <> < > <= >=`. The `&` joins text.
 - **Brackets** `( )` change the order. Powers go before products, and products before sums.
 - **A comma** separates the parts of a function. A semicolon is an error.
+- **A leading `=`** is ignored, as in Excel: `=[amount] * 2` is the same as `[amount] * 2`.
 
 Names do not care about case: `[Amount]`, `[amount]` and `sum` all work. A column is found by the
 name you see in the app, or by its real name in the file.
@@ -63,14 +64,29 @@ but it reads one table: the table that is grouped, and the tables related to it.
   a blank. One odd row never stops a chart.
 - **A blank in a calculation makes the result blank.** `[amount] + BLANK()` is blank. Use `IFERROR`
   or `IF(ISBLANK(...))` to give it a value.
+- **A total of nothing is 0 for sums and counts, and blank for the rest.** `SUM`, `SUMIF`, `COUNT`,
+  `COUNTA`, `COUNTD`, `COUNTIF` and `COUNTROWS` give 0 when there are no rows. `AVERAGE`, `MEDIAN`,
+  `MIN`, `MAX`, `STDEV`, `VAR` and `PERCENTILE` give a blank. So `SUM([Sales].[amount]) -
+  SUM([Refunds].[amount])` still works for a store with no refunds.
+- **Empty text is blank.** `ISBLANK`, `IFERROR`, `COUNTA`, `COUNTD` and `[note] = ""` treat empty
+  text the same as a cell with nothing in it. `LEN` of a blank cell is 0.
 - **`=` and `<>` never give a blank.** A blank cell equals only another blank, and `[note] = ""` is
   true for a blank cell. The other comparisons (`<`, `>`) give a blank when one side is blank.
 - **`IF` treats a blank test as false.**
+- **The two results of `IF` must be the same kind.** `IF([amount] > 0, [amount], "n/a")` is an
+  error, because one result is a number and the other is text. Turn the number into text:
+  `IF([amount] > 0, TEXT([amount], "0"), "n/a")`.
 - **Text ignores case** when it is compared: `"Ana" = "ana"` is true. `FIND` and `SUBSTITUTE` do care.
 - **`&` writes a number without a trailing zero:** `"n=" & 1` is `n=1`. A blank adds nothing.
 - **Dates move by days.** `[date] + 30` is 30 days later. `[date2] - [date1]` is the number of days.
+- **`TODAY()` and `NOW()` are the date and time when the workspace was loaded or last refreshed,**
+  not the moment you look at a chart. A dashboard that stays open overnight shows yesterday until
+  its data refreshes.
+- **A minus sign binds tighter than a power, as in Excel.** `-2^2` is 4. Write `-(2^2)` for -4.
 - **Only the four formats of `TEXT` exist,** and they always use a comma for thousands and a dot
   for decimals.
+- **A formula has limits.** At most 10,000 characters and 100 levels of nesting. A chain of
+  more than 100 `+` signs counts as nesting too. Past a limit you see "too long" or "nested too deeply".
 
 ## Functions
 
@@ -88,7 +104,7 @@ but it reads one table: the table that is grouped, and the tables related to it.
   Example: `OR([region] = "Java", [region] = "Bali")`
 - `NOT(test)`: the opposite.
   Example: `NOT([paid])`
-- `IFERROR(x, alt)`: `alt` when `x` is blank. Failures such as a division by zero are blank.
+- `IFERROR(x, alt)`: `alt` when `x` is blank or empty text. Failures such as a division by zero are blank.
   Example: `IFERROR([amount] / [qty], 0)`
 - `ISBLANK(x)`: true when the value is blank. Empty text counts as blank.
   Example: `ISBLANK([note])`
@@ -143,7 +159,7 @@ Where a function wants text, a number or a date is turned into text the same way
   Example: `RIGHT([region], 2)`
 - `MID(text, start, n)`: `n` characters from position `start`. The first character is 1.
   Example: `MID([region], 2, 3)`
-- `LEN(text)`: the number of characters.
+- `LEN(text)`: the number of characters. A blank cell has 0.
   Example: `LEN([note])`
 - `UPPER(text)`: capital letters.
   Example: `UPPER([region])`
@@ -159,8 +175,12 @@ Where a function wants text, a number or a date is turned into text the same way
   Example: `FIND("o", [note])`
 - `SEARCH(find, text, start)`: the same, but case does not matter. No wildcards.
   Example: `SEARCH("WORLD", [note])`
-- `VALUE(text)`: reads text as a number. Text that is not a number gives a blank.
+- `VALUE(text)`: reads text as a number. Only plain numbers with a dot for decimals work, like
+  `"1234.5"` or `"1e3"`. Anything else gives a blank, including `"1,234"`, `"12%"`, `"1,5"` and
+  `"1.500,50"`. For numbers written the Indonesian way, take the dots out and change the comma:
+  `VALUE(SUBSTITUTE(SUBSTITUTE(text, ".", ""), ",", "."))` reads `"1.500,50"` as 1500.5.
   Example: `VALUE([note])`
+  Example: `VALUE(SUBSTITUTE(SUBSTITUTE([note], ".", ""), ",", "."))`
 - `TEXT(x, format)`: a number as text. The formats are `"0"`, `"0.0"`, `"#,##0"` and `"0%"`.
   Example: `TEXT([amount], "#,##0")`
 
@@ -175,7 +195,9 @@ Where a function wants text, a number or a date is turned into text the same way
   Example: `DAY([date])`
 - `WEEKDAY(date)`: 1 for Monday to 7 for Sunday. This differs from Excel's default.
   Example: `WEEKDAY([date])`
-- `WEEKNUM(date)`: the ISO week number, 1 to 53.
+- `WEEKNUM(date)`: the ISO week number, 1 to 53. Week 1 is the week with the first Thursday of the
+  year, and weeks start on Monday. This differs from Excel's default: 2026-01-04 is in week 1 here
+  and in week 2 in Excel.
   Example: `WEEKNUM([date])`
 - `QUARTER(date)`: 1 to 4.
   Example: `QUARTER([date])`
@@ -184,13 +206,14 @@ Where a function wants text, a number or a date is turned into text the same way
 - `EDATE(date, months)`: the same day, `months` months later. The day is cut to the end of a short month.
   Example: `EDATE([date], 1)`
 - `DATEDIF(from, to, unit)`: whole days (`"D"`), months (`"M"`) or years (`"Y"`) between two dates.
-  If `to` is before `from`, the result is blank.
+  A month is complete when the day of the month has come round again, as in Excel: from
+  2000-01-31 to 2000-02-29 is 0 months. If `to` is before `from`, the result is blank.
   Example: `DATEDIF([date], TODAY(), "M")`
 - `DAYS(end, start)`: the days from `start` to `end`.
   Example: `DAYS(TODAY(), [date])`
-- `TODAY()`: today's date.
+- `TODAY()`: the date when the workspace was loaded or last refreshed.
   Example: `TODAY()`
-- `NOW()`: the date and time now.
+- `NOW()`: the date and time when the workspace was loaded or last refreshed.
   Example: `NOW()`
 
 ### Totals (measures and group values)

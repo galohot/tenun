@@ -89,6 +89,12 @@ pub enum TNode {
         table: String,
         column: String,
     },
+    /// SQL that is already written. The SQL writer uses it for a value it has bound to a name,
+    /// or built itself. `atomic` is true when it is a name or a literal, which is safe to repeat.
+    Sql {
+        sql: String,
+        atomic: bool,
+    },
     Un(UnOp, Box<TExpr>),
     Bin(BinOp, Box<TExpr>, Box<TExpr>),
     /// A row-wise function. `name` is the canonical upper-case name.
@@ -159,21 +165,43 @@ pub fn find_table<'a>(catalog: &'a Catalog, name: &str) -> Option<&'a Table> {
         .or_else(|| catalog.tables.iter().find(|t| same(&t.id)))
 }
 
+/// How a name was found in a table.
+pub(crate) enum Found<'a> {
+    No,
+    One(&'a crate::catalog::Column),
+    /// Two columns answer to the name: one by its real name, the other by the name the app shows
+    /// (or two columns show the same name). The first is the real-name match when there is one.
+    Two(&'a crate::catalog::Column, &'a crate::catalog::Column),
+}
+
 /// The column a name stands for: its real name or the name the app shows, exact first, then
-/// whatever the case.
-fn find_column<'a>(t: &'a Table, name: &str) -> Option<&'a crate::catalog::Column> {
+/// whatever the case. When two columns answer to the name, that is an ambiguity, not a choice.
+pub(crate) fn find_column<'a>(t: &'a Table, name: &str) -> Found<'a> {
     let n = name.trim();
     let lower = n.to_lowercase();
-    t.columns
-        .iter()
-        .find(|c| c.name == n)
-        .or_else(|| t.columns.iter().find(|c| c.label.as_deref() == Some(n)))
-        .or_else(|| t.columns.iter().find(|c| c.name.to_lowercase() == lower))
-        .or_else(|| {
-            t.columns
-                .iter()
-                .find(|c| c.label.as_ref().is_some_and(|l| l.to_lowercase() == lower))
-        })
+    for exact in [true, false] {
+        let same = |a: &str| {
+            if exact {
+                a == n
+            } else {
+                a.to_lowercase() == lower
+            }
+        };
+        // Columns that answer by their real name come first, then those by the shown name.
+        let mut found: Vec<&crate::catalog::Column> =
+            t.columns.iter().filter(|c| same(&c.name)).collect();
+        for c in &t.columns {
+            if c.label.as_deref().is_some_and(same) && !found.iter().any(|f| std::ptr::eq(*f, c)) {
+                found.push(c);
+            }
+        }
+        match found.as_slice() {
+            [] => {}
+            [one] => return Found::One(one),
+            [a, b, ..] => return Found::Two(a, b),
+        }
+    }
+    Found::No
 }
 
 /// The name closest to `wanted`, when it is close enough to be a typing slip.
@@ -347,19 +375,43 @@ impl<'a> Checker<'a> {
                 }
             },
         };
-        let Some(col) = find_column(t, column) else {
-            let names = t
-                .columns
-                .iter()
-                .flat_map(|c| std::iter::once(c.name.as_str()).chain(c.label.as_deref()));
-            return Err(FormulaError::new(
-                match closest(column, names) {
-                    Some(s) => format!("No column [{column}]. Did you mean [{s}]?"),
-                    None => format!("No column [{column}] in {}.", t.label),
-                },
-                e.at,
-                e.len,
-            ));
+        let col = match find_column(t, column) {
+            Found::One(c) => c,
+            Found::Two(a, b) => {
+                // How each column answers to the name: by its real name, or by the name the
+                // app shows for it.
+                let wanted = column.trim().to_lowercase();
+                let how = |c: &crate::catalog::Column| {
+                    let by_name = c.name.to_lowercase() == wanted;
+                    match (by_name, c.label.as_deref()) {
+                        (false, Some(l)) => format!("[{}], which the app shows as [{l}]", c.name),
+                        _ => format!("[{}] by its name in the file", c.name),
+                    }
+                };
+                return Err(FormulaError::new(
+                    format!(
+                        "{text} matches two columns: {}, and {}. Rename one of them so a formula can tell them apart.",
+                        how(a),
+                        how(b)
+                    ),
+                    e.at,
+                    e.len,
+                ));
+            }
+            Found::No => {
+                let names = t
+                    .columns
+                    .iter()
+                    .flat_map(|c| std::iter::once(c.name.as_str()).chain(c.label.as_deref()));
+                return Err(FormulaError::new(
+                    match closest(column, names) {
+                        Some(s) => format!("No column [{column}]. Did you mean [{s}]?"),
+                        None => format!("No column [{column}] in {}.", t.label),
+                    },
+                    e.at,
+                    e.len,
+                ));
+            }
         };
         // A column or a group reads related tables through the many-to-one path from its own.
         if self.kind != Kind::Measure
@@ -443,8 +495,11 @@ impl<'a> Checker<'a> {
             return self.comparison(op, l, r);
         }
         // BLANK() does the work of the other side.
+        // A blank next to a date is days (to add) or a date (to take a date from).
         let (a, b) = match (a, b) {
             (Any, Any) => (Num, Num),
+            (Any, x) if x.is_temporal() && op == BinOp::Add => (Num, x),
+            (x, Any) if x.is_temporal() => (x, Num),
             (Any, x) => (x, x),
             (x, Any) => (x, x),
             pair => pair,
@@ -532,10 +587,27 @@ impl<'a> Checker<'a> {
         }
         let hint = match (l.ty, r.ty) {
             (Text, Num) | (Num, Text) => {
-                " Use VALUE() to read text as a number, or put the number in quotes to compare it as text."
+                " Use VALUE() to read text as a number, or put the number in quotes to compare it as text.".to_string()
             }
-            (Bool, Bool) => " True and false can only be compared with = and <>.",
-            _ => "",
+            (Bool, Bool) => " True and false can only be compared with = and <>.".to_string(),
+            (Text, d) | (d, Text) if d.is_temporal() => {
+                // A date written in quotes is text. Show how to write it as a date.
+                let text = if l.ty == Text { l } else { r };
+                match &text.node {
+                    TNode::Str(s) => match chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d") {
+                        Ok(d) => format!(
+                            " Use DATE({}, {}, {}).",
+                            chrono::Datelike::year(&d),
+                            chrono::Datelike::month(&d),
+                            chrono::Datelike::day(&d)
+                        ),
+                        Err(_) => " Use DATE(2026, 1, 1) to write a date.".to_string(),
+                    },
+                    _ => " Set the column to the Date type in Data, or write a date as DATE(2026, 1, 1)."
+                        .to_string(),
+                }
+            }
+            _ => String::new(),
         };
         Err(FormulaError::new(
             format!(

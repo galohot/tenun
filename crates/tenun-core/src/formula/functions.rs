@@ -10,7 +10,7 @@
 use super::FormulaError;
 use super::check::{Src, TExpr, TNode, Ty, unify};
 use super::parse::BinOp;
-use super::sql::{Gen, Round, finite, int_of, num_lit, round_sql};
+use super::sql::{Gen, Round, int_of, num_lit, sql_expr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {
@@ -398,6 +398,17 @@ pub fn type_of(def: &Def, args: &[TExpr], src: &Src) -> Result<Ty, FormulaError>
             Ty::Num
         }
         "TEXT" => {
+            if args[0].ty.is_temporal() {
+                return Err(FormulaError::new(
+                    format!(
+                        "TEXT formats numbers only, and {} is {}. To write a date as text, join its parts with &, like YEAR({0}) & \"-\" & MONTH({0}).",
+                        src.of(&args[0]),
+                        args[0].ty.words()
+                    ),
+                    args[0].at,
+                    args[0].len,
+                ));
+            }
             c.num(0)?;
             let f = c.literal_text(1, "the format in double quotes, like \"0.0\"")?;
             if !TEXT_FORMATS.contains(&f) {
@@ -499,6 +510,20 @@ fn comparable(a: Ty, b: Ty) -> bool {
 }
 
 // ---- SQL ------------------------------------------------------------------------------
+//
+// No function writes one of its values twice, and none puts one value inside the body of a
+// lambda. A function that needs a value more than once computes all its values together with
+// `Gen::bind_all`, and its body reads only names (V4-D24, see `sql.rs`).
+
+fn number(n: f64) -> TExpr {
+    sql_expr(num_lit(n), Ty::Num, true)
+}
+
+/// A date as a value of its own: a date or a date and time cut to a date.
+fn date_expr(g: &mut Gen<'_>, e: &TExpr) -> TExpr {
+    let d = g.date(e);
+    sql_expr(format!("CAST({d} AS DATE)"), Ty::Date, false)
+}
 
 /// The SQL of a row-wise function. `ty` is the kind it gives back.
 pub(crate) fn emit(g: &mut Gen<'_>, name: &str, args: &[TExpr], ty: Ty) -> String {
@@ -506,7 +531,7 @@ pub(crate) fn emit(g: &mut Gen<'_>, name: &str, args: &[TExpr], ty: Ty) -> Strin
     match name {
         // ---- logic
         "IF" => {
-            let c = g.expr(&args[0]);
+            let c = g.as_ty(&args[0], Ty::Bool);
             let a = g.as_ty(&args[1], ty);
             match args.get(2) {
                 Some(b) => {
@@ -519,7 +544,7 @@ pub(crate) fn emit(g: &mut Gen<'_>, name: &str, args: &[TExpr], ty: Ty) -> Strin
         "IFS" => {
             let mut s = String::from("CASE");
             for pair in args.chunks(2) {
-                let c = g.expr(&pair[0]);
+                let c = g.as_ty(&pair[0], Ty::Bool);
                 let v = g.as_ty(&pair[1], ty);
                 s.push_str(&format!(" WHEN {c} THEN {v}"));
             }
@@ -528,77 +553,92 @@ pub(crate) fn emit(g: &mut Gen<'_>, name: &str, args: &[TExpr], ty: Ty) -> Strin
         }
         "SWITCH" => {
             let pairs = (n - 1) / 2;
-            let mut s = String::from("CASE");
-            for k in 0..pairs {
-                let test = g.compare(BinOp::Eq, &args[0], &args[1 + 2 * k]);
-                let v = g.as_ty(&args[2 + 2 * k], ty);
-                s.push_str(&format!(" WHEN {test} THEN {v}"));
-            }
-            if (n - 1) % 2 == 1 {
-                let d = g.as_ty(&args[n - 1], ty);
-                s.push_str(&format!(" ELSE {d}"));
-            }
-            s.push_str(" END");
-            s
+            // The value and every key and result are computed together, once.
+            let all: Vec<&TExpr> = args.iter().collect();
+            g.bind_all(&all, |g, v| {
+                let mut s = String::from("CASE");
+                for k in 0..pairs {
+                    let test = g.compare(BinOp::Eq, &v[0], &v[1 + 2 * k]);
+                    let r = g.as_ty(&v[2 + 2 * k], ty);
+                    s.push_str(&format!(" WHEN {test} THEN {r}"));
+                }
+                if (n - 1) % 2 == 1 {
+                    let d = g.as_ty(&v[n - 1], ty);
+                    s.push_str(&format!(" ELSE {d}"));
+                }
+                s.push_str(" END");
+                s
+            })
         }
         "AND" | "OR" => {
-            let parts: Vec<String> = args.iter().map(|a| g.expr(a)).collect();
-            format!(
-                "({})",
-                parts.join(if name == "AND" { " AND " } else { " OR " })
-            )
+            let parts: Vec<String> = args.iter().map(|a| g.as_ty(a, Ty::Bool)).collect();
+            format!("({})", parts.join(if name == "AND" { " AND " } else { " OR " }))
         }
-        "NOT" => format!("(NOT {})", g.expr(&args[0])),
+        "NOT" => format!("(NOT {})", g.as_ty(&args[0], Ty::Bool)),
         "IFERROR" => {
-            let (a, b) = (g.as_ty(&args[0], ty), g.as_ty(&args[1], ty));
-            format!("COALESCE({a}, {b})")
+            if ty == Ty::Text && args[0].ty == Ty::Text {
+                // Empty text is blank here, as it is for ISBLANK.
+                g.bind_all(&[&args[0], &args[1]], |g, v| {
+                    let (x, alt) = (g.expr(&v[0]), g.as_ty(&v[1], ty));
+                    format!("COALESCE(NULLIF({x}, ''), {alt})")
+                })
+            } else {
+                let (a, alt) = (g.as_ty(&args[0], ty), g.as_ty(&args[1], ty));
+                format!("COALESCE({a}, {alt})")
+            }
         }
         "ISBLANK" => {
             let a = g.expr(&args[0]);
             if args[0].ty == Ty::Text {
-                format!("({a} IS NULL OR {a} = '')")
+                format!("(COALESCE({a}, '') = '')")
             } else {
                 format!("({a} IS NULL)")
             }
         }
         "BLANK" => "NULL".into(),
         // ---- math
-        "ABS" => format!("abs({})", g.expr(&args[0])),
-        "INT" => format!("floor({})", g.expr(&args[0])),
-        "SIGN" => format!("CAST(sign({}) AS DOUBLE)", g.expr(&args[0])),
-        "SQRT" => format!("TRY(sqrt({}))", g.expr(&args[0])),
-        "LN" => format!("TRY(ln({}))", g.expr(&args[0])),
-        "LOG10" => format!("TRY(log10({}))", g.expr(&args[0])),
-        "EXP" => finite(&format!("exp({})", g.expr(&args[0]))),
+        "ABS" => format!("abs({})", g.num(&args[0])),
+        "INT" => format!("floor({})", g.num(&args[0])),
+        "SIGN" => format!("CAST(sign({}) AS DOUBLE)", g.num(&args[0])),
+        "SQRT" => format!("TRY(sqrt({}))", g.num(&args[0])),
+        "LN" => format!("TRY(ln({}))", g.num(&args[0])),
+        "LOG10" => format!("TRY(log10({}))", g.num(&args[0])),
+        "EXP" => {
+            let e = format!("exp({})", g.num(&args[0]));
+            g.finite(e)
+        }
         "POWER" => {
-            let (a, b) = (g.expr(&args[0]), g.expr(&args[1]));
-            finite(&format!("pow({a}, {b})"))
+            let p = format!("pow({}, {})", g.num(&args[0]), g.num(&args[1]));
+            g.finite(p)
         }
-        "MOD" => {
-            let (a, b) = (g.expr(&args[0]), g.expr(&args[1]));
-            format!("({a} - {b} * floor({a} / NULLIF({b}, 0e0)))")
-        }
-        "DIVIDE" => {
-            let (a, b) = (g.expr(&args[0]), g.expr(&args[1]));
-            match args.get(2) {
-                Some(alt) => {
-                    let alt = g.expr(alt);
-                    format!("CASE WHEN {b} IS NULL OR {b} = 0e0 THEN {alt} ELSE ({a} / {b}) END")
-                }
-                None => format!("({a} / NULLIF({b}, 0e0))"),
-            }
-        }
+        "MOD" => g.bind_all(&[&args[0], &args[1]], |g, v| {
+            let (a, b) = (g.num(&v[0]), g.num(&v[1]));
+            // Excel's MOD takes the sign of the divisor. The result is cleaned to the digits
+            // the two numbers can hold, so MOD(5.1, 1) is 0.1.
+            let places = format!(
+                "CAST(least(greatest(14e0 - floor(log10(greatest(abs({a}), abs({b})))), 0e0), 300e0) AS INTEGER)"
+            );
+            format!(
+                "CASE WHEN {b} = 0e0 THEN NULL ELSE TRY(round({a} - {b} * floor({a} / {b}), {places}) + 0e0) END"
+            )
+        }),
+        "DIVIDE" => match args.get(2) {
+            Some(alt) => g.bind_all(&[&args[0], &args[1], alt], |g, v| {
+                let (a, b, alt) = (g.num(&v[0]), g.num(&v[1]), g.num(&v[2]));
+                format!("CASE WHEN {b} IS NULL OR {b} = 0e0 THEN {alt} ELSE ({a} / {b}) END")
+            }),
+            None => g.divide(&args[0], &args[1]),
+        },
         "ROUND" | "ROUNDUP" | "ROUNDDOWN" => {
-            let x = g.expr(&args[0]);
-            let digits = args.get(1).map_or_else(|| "0e0".to_string(), |d| g.expr(d));
             let mode = match name {
                 "ROUND" => Round::Half,
                 "ROUNDUP" => Round::Up,
                 _ => Round::Down,
             };
-            round_sql(&x, &digits, mode)
+            g.round(&args[0], args.get(1), mode)
         }
         "MIN" | "MAX" => {
+            let ty = if ty == Ty::Any { Ty::Num } else { ty };
             let parts: Vec<String> = args.iter().map(|a| g.as_ty(a, ty)).collect();
             let f = if name == "MIN" { "least" } else { "greatest" };
             format!("{f}({})", parts.join(", "))
@@ -609,26 +649,29 @@ pub(crate) fn emit(g: &mut Gen<'_>, name: &str, args: &[TExpr], ty: Ty) -> Strin
             format!("concat({})", parts.join(", "))
         }
         "LEFT" | "RIGHT" => {
-            let t = g.text(&args[0]);
+            let t = g.text_expr(&args[0]);
             let f = if name == "LEFT" { "left" } else { "right" };
             match args.get(1) {
-                Some(k) => {
-                    let k = g.expr(k);
+                Some(k) => g.bind_all(&[&t, k], |g, v| {
+                    let (t, k) = (g.expr(&v[0]), g.num(&v[1]));
                     format!("CASE WHEN {k} >= 0e0 THEN {f}({t}, {}) END", int_of(&k))
-                }
-                None => format!("{f}({t}, 1)"),
+                }),
+                None => format!("{f}({}, 1)", g.expr(&t)),
             }
         }
         "MID" => {
-            let t = g.text(&args[0]);
-            let (s, k) = (g.expr(&args[1]), g.expr(&args[2]));
-            format!(
-                "CASE WHEN {s} >= 1e0 AND {k} >= 0e0 THEN substring({t}, {}, {}) END",
-                int_of(&s),
-                int_of(&k)
-            )
+            let t = g.text_expr(&args[0]);
+            g.bind_all(&[&t, &args[1], &args[2]], |g, v| {
+                let (t, s, k) = (g.expr(&v[0]), g.num(&v[1]), g.num(&v[2]));
+                format!(
+                    "CASE WHEN {s} >= 1e0 AND {k} >= 0e0 THEN substring({t}, {}, {}) END",
+                    int_of(&s),
+                    int_of(&k)
+                )
+            })
         }
-        "LEN" => format!("CAST(length({}) AS DOUBLE)", g.text(&args[0])),
+        // A blank cell has no characters.
+        "LEN" => format!("CAST(length(COALESCE({}, '')) AS DOUBLE)", g.text(&args[0])),
         "UPPER" => format!("upper({})", g.text(&args[0])),
         "LOWER" => format!("lower({})", g.text(&args[0])),
         "PROPER" => {
@@ -643,51 +686,69 @@ pub(crate) fn emit(g: &mut Gen<'_>, name: &str, args: &[TExpr], ty: Ty) -> Strin
             format!("replace({t}, {old}, {new})")
         }
         "FIND" | "SEARCH" => {
-            let (mut f, mut w) = (g.text(&args[0]), g.text(&args[1]));
+            let (mut f, mut w) = (g.text_expr(&args[0]), g.text_expr(&args[1]));
             if name == "SEARCH" {
-                f = format!("lower({f})");
-                w = format!("lower({w})");
+                for t in [&mut f, &mut w] {
+                    let lower = format!("lower({})", g.expr(t));
+                    *t = sql_expr(lower, Ty::Text, false);
+                }
             }
             match args.get(2) {
-                Some(st) => {
-                    let st = g.expr(st);
+                Some(st) => g.bind_all(&[&f, &w, st], |g, v| {
+                    let (f, w, st) = (g.expr(&v[0]), g.expr(&v[1]), g.num(&v[2]));
                     let i = int_of(&st);
-                    format!(
-                        "CASE WHEN {st} >= 1e0 THEN CAST(NULLIF(instr(substring({w}, {i}), {f}), 0) + {i} - 1 AS DOUBLE) END"
-                    )
+                    let found = format!("instr(substring({w}, {i}), {f})");
+                    let at = g.bind_sql(found, Ty::Num, |g, p| {
+                        let p = g.expr(p);
+                        format!("CASE WHEN {p} = 0 THEN NULL ELSE CAST({p} + {i} - 1 AS DOUBLE) END")
+                    });
+                    format!("CASE WHEN {st} >= 1e0 THEN {at} END")
+                }),
+                None => {
+                    let found = format!("instr({}, {})", g.expr(&w), g.expr(&f));
+                    g.bind_sql(found, Ty::Num, |g, p| {
+                        let p = g.expr(p);
+                        format!("CASE WHEN {p} = 0 THEN NULL ELSE CAST({p} AS DOUBLE) END")
+                    })
                 }
-                None => format!("CAST(NULLIF(instr({w}, {f}), 0) AS DOUBLE)"),
             }
         }
         "VALUE" => {
-            let a = g.expr(&args[0]);
             if args[0].ty == Ty::Text {
-                finite(&format!("TRY_CAST(trim({a}) AS DOUBLE)"))
+                let a = g.expr(&args[0]);
+                g.finite(format!("TRY_CAST(trim({a}) AS DOUBLE)"))
             } else {
-                a
+                g.num(&args[0])
             }
         }
         "TEXT" => {
-            let x = g.expr(&args[0]);
             let TNode::Str(f) = &args[1].node else {
                 unreachable!("checked: the format is written in the formula")
             };
             match f.as_str() {
-                "0" => format!("printf('%.0f', {})", round_sql(&x, "0e0", Round::Half)),
-                "0.0" => format!("printf('%.1f', {})", round_sql(&x, "1e0", Round::Half)),
-                "#,##0" => format!(
-                    "TRY(format('{{:,}}', CAST({} AS BIGINT)))",
-                    round_sql(&x, "0e0", Round::Half)
-                ),
-                _ => format!(
-                    "(printf('%.0f', {}) || '%')",
-                    round_sql(&format!("({x} * 1e2)"), "0e0", Round::Half)
-                ),
+                "0" => {
+                    let r = g.round(&args[0], Some(&number(0.0)), Round::Half);
+                    format!("printf('%.0f', {r})")
+                }
+                "0.0" => {
+                    let r = g.round(&args[0], Some(&number(1.0)), Round::Half);
+                    format!("printf('%.1f', {r})")
+                }
+                "#,##0" => {
+                    let r = g.round(&args[0], Some(&number(0.0)), Round::Half);
+                    format!("TRY(format('{{:,}}', CAST({r} AS BIGINT)))")
+                }
+                _ => {
+                    let x = g.num(&args[0]);
+                    let hundred = sql_expr(format!("({x} * 1e2)"), Ty::Num, false);
+                    let r = g.round(&hundred, Some(&number(0.0)), Round::Half);
+                    format!("(printf('%.0f', {r}) || '%')")
+                }
             }
         }
         // ---- dates
         "DATE" => {
-            let (y, m, d) = (g.expr(&args[0]), g.expr(&args[1]), g.expr(&args[2]));
+            let (y, m, d) = (g.num(&args[0]), g.num(&args[1]), g.num(&args[2]));
             // Counted from the first of January, so month 13 and day 32 roll over as in Excel.
             format!(
                 "TRY(CAST(make_date(CAST(trunc({y}) AS INTEGER), 1, 1) + to_months(CAST(trunc({m}) AS INTEGER) - 1) + to_days(CAST(trunc({d}) AS INTEGER) - 1) AS DATE))"
@@ -702,10 +763,10 @@ pub(crate) fn emit(g: &mut Gen<'_>, name: &str, args: &[TExpr], ty: Ty) -> Strin
                 "WEEKNUM" => "week",
                 _ => "quarter",
             };
-            format!("CAST({f}({}) AS DOUBLE)", g.expr(&args[0]))
+            format!("CAST({f}({}) AS DOUBLE)", g.date(&args[0]))
         }
         "EOMONTH" | "EDATE" => {
-            let (d, m) = (g.expr(&args[0]), g.expr(&args[1]));
+            let (d, m) = (g.date(&args[0]), g.num(&args[1]));
             let moved = format!("CAST({d} AS DATE) + to_months(CAST(trunc({m}) AS INTEGER))");
             if name == "EOMONTH" {
                 format!("TRY(last_day({moved}))")
@@ -714,20 +775,29 @@ pub(crate) fn emit(g: &mut Gen<'_>, name: &str, args: &[TExpr], ty: Ty) -> Strin
             }
         }
         "DATEDIF" => {
-            let (a, b) = (g.expr(&args[0]), g.expr(&args[1]));
             let TNode::Str(u) = &args[2].node else {
                 unreachable!("checked: the unit is written in the formula")
             };
-            let unit = match u.to_uppercase().as_str() {
-                "D" => "day",
-                "M" => "month",
-                _ => "year",
-            };
-            let (a, b) = (format!("CAST({a} AS DATE)"), format!("CAST({b} AS DATE)"));
-            format!("CASE WHEN {b} >= {a} THEN CAST(date_sub('{unit}', {a}, {b}) AS DOUBLE) END")
+            let unit = u.to_uppercase();
+            let (a, b) = (date_expr(g, &args[0]), date_expr(g, &args[1]));
+            g.bind_all(&[&a, &b], |g, v| {
+                let (a, b) = (g.expr(&v[0]), g.expr(&v[1]));
+                // Whole months and years, as Excel counts them: a month is not complete until
+                // the day of the month has come round again.
+                let count = match unit.as_str() {
+                    "D" => format!("{b} - {a}"),
+                    "M" => format!(
+                        "(year({b}) - year({a})) * 12 + (month({b}) - month({a})) - (CASE WHEN day({b}) < day({a}) THEN 1 ELSE 0 END)"
+                    ),
+                    _ => format!(
+                        "(year({b}) - year({a})) - (CASE WHEN (month({b}) * 100 + day({b})) < (month({a}) * 100 + day({a})) THEN 1 ELSE 0 END)"
+                    ),
+                };
+                format!("CASE WHEN {b} >= {a} THEN CAST({count} AS DOUBLE) END")
+            })
         }
         "DAYS" => {
-            let (e, s) = (g.expr(&args[0]), g.expr(&args[1]));
+            let (e, s) = (g.date(&args[0]), g.date(&args[1]));
             format!("CAST(CAST({e} AS DATE) - CAST({s} AS DATE) AS DOUBLE)")
         }
         "TODAY" => format!("DATE '{}'", g.cx.today.format("%Y-%m-%d")),
@@ -740,8 +810,8 @@ pub(crate) fn emit(g: &mut Gen<'_>, name: &str, args: &[TExpr], ty: Ty) -> Strin
 pub(crate) fn emit_aggregate(g: &mut Gen<'_>, name: &str, args: &[TExpr]) -> String {
     match name {
         "COUNTROWS" => "CAST(count(*) AS DOUBLE)".into(),
-        "SUM" => format!("sum({})", g.expr(&args[0])),
-        "AVERAGE" => format!("avg({})", g.expr(&args[0])),
+        "SUM" => format!("sum({})", g.num(&args[0])),
+        "AVERAGE" => format!("avg({})", g.num(&args[0])),
         "MIN" | "MAX" => format!("{}({})", name.to_lowercase(), g.expr(&args[0])),
         "COUNT" => format!("CAST(count({}) AS DOUBLE)", g.expr(&args[0])),
         "COUNTA" => format!(
@@ -752,33 +822,37 @@ pub(crate) fn emit_aggregate(g: &mut Gen<'_>, name: &str, args: &[TExpr]) -> Str
             "CAST(count(DISTINCT {}) AS DOUBLE)",
             non_blank(&g.expr(&args[0]), args[0].ty)
         ),
-        "MEDIAN" => format!("CAST(median({}) AS DOUBLE)", g.expr(&args[0])),
+        "MEDIAN" => format!("CAST(median({}) AS DOUBLE)", g.num(&args[0])),
         "PERCENTILE" => {
             let TNode::Num(p) = &args[1].node else {
                 unreachable!("checked: the share is written in the formula")
             };
             format!(
                 "CAST(quantile_cont({}, {}) AS DOUBLE)",
-                g.expr(&args[0]),
+                g.num(&args[0]),
                 num_lit(*p)
             )
         }
-        "STDEV" => format!("stddev_samp({})", g.expr(&args[0])),
-        "VAR" => format!("var_samp({})", g.expr(&args[0])),
+        "STDEV" => format!("stddev_samp({})", g.num(&args[0])),
+        "VAR" => format!("var_samp({})", g.num(&args[0])),
         "SUMIF" | "AVERAGEIF" => {
-            let (x, c) = (g.expr(&args[0]), g.expr(&args[1]));
+            let (x, c) = (g.num(&args[0]), g.as_ty(&args[1], Ty::Bool));
             let f = if name == "SUMIF" { "sum" } else { "avg" };
             format!("{f}({x}) FILTER (WHERE {c})")
         }
         "COUNTIF" => {
-            let (x, c) = (non_blank(&g.expr(&args[0]), args[0].ty), g.expr(&args[1]));
+            let (x, c) = (
+                non_blank(&g.expr(&args[0]), args[0].ty),
+                g.as_ty(&args[1], Ty::Bool),
+            );
             format!("CAST(count({x}) FILTER (WHERE {c}) AS DOUBLE)")
         }
         other => unreachable!("{other} has no aggregate SQL"),
     }
 }
 
-/// Empty text counts as blank when filled cells are counted.
+/// Empty text counts as blank when filled cells are counted. The value is the column of one
+/// aggregate argument, so `NULLIF` copying it once does no harm.
 fn non_blank(sql: &str, ty: Ty) -> String {
     if ty == Ty::Text {
         format!("NULLIF({sql}, '')")
