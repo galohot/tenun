@@ -17,6 +17,11 @@
 
 <div class="card" style:left="{x}px" style:top="{y}px" role="tooltip">
   <div class="name">{column.label ?? column.name}</div>
+  {#if column.calc}
+    <p class="calc">
+      {#if column.error}Could not be computed. Its values are blank.{:else}Calculated column{/if}{#if column.as_of}, as of {column.as_of}{/if}
+    </p>
+  {/if}
   {#if !profile}
     <p class="muted">Reading the column…</p>
   {:else}
@@ -60,6 +65,7 @@
   .name { font-weight: 600; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   p { margin: 2px 0; }
   .line { color: var(--text); }
+  .calc { color: var(--text-2); }
   .mixed { color: var(--text); font-weight: 500; }
   .hist { display: flex; align-items: flex-end; gap: 2px; height: 36px; margin-top: 8px; }
   .hist span { flex: 1; background: var(--s1); border-radius: 1px 1px 0 0; min-height: 0; }

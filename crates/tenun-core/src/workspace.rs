@@ -104,11 +104,34 @@ pub struct TableSetup {
     /// Applied in order, before the column types.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transforms: Vec<Transform>,
+    /// Calculated columns (V4-D3): formulas that become real columns at the end of the view, in
+    /// order. A column may use an earlier one, never a later one. Not written until one is added
+    /// (V3-D11), so a file made before this field existed is written back as it was.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calc: Vec<CalcColumn>,
+}
+
+/// A column that is computed from the others, in the view of its table (V4-D3).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct CalcColumn {
+    /// The name of the column. It is also its real name: a chart that uses the column keeps it.
+    /// It must not be a column of the table, nor the name of another calculated column.
+    pub name: String,
+    /// A formula in the language of build 01, or raw DuckDB SQL when `sql` is set.
+    pub formula: String,
+    /// The formula is one DuckDB expression over the columns of the table (Advanced, V4-D62).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sql: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 impl TableSetup {
     pub fn is_empty(&self) -> bool {
-        self.header_row.is_none() && self.columns.is_empty() && self.transforms.is_empty()
+        self.header_row.is_none()
+            && self.columns.is_empty()
+            && self.transforms.is_empty()
+            && self.calc.is_empty()
     }
 
     /// Drops overrides that say nothing, so a cleared menu leaves no trace in the file.
@@ -134,6 +157,16 @@ impl TableSetup {
             }
         }
         self.columns.retain(|_, c| *c != ColumnSetup::default());
+        for c in &mut self.calc {
+            c.name = c.name.trim().to_string();
+            c.formula = c.formula.trim().to_string();
+            if c.description
+                .as_deref()
+                .is_some_and(|s| s.trim().is_empty())
+            {
+                c.description = None;
+            }
+        }
     }
 
     /// True when the view of the table (not only its labels) depends on this setup.

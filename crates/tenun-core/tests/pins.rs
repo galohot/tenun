@@ -305,3 +305,238 @@ const PINS: &[(&str, &str)] = &[
         "error: orders is not related to regions. Draw a line between them in Model.",
     ),
 ];
+
+/// A file made before calculated columns existed: a Tenun 0.3.0 file, and one from the build that
+/// added named links. Each is read and written back byte for byte, so opening and saving an old
+/// workspace never changes it (V3-D11). The texts are written out by hand; they are the pin.
+const FILE_V3: &str = r##"{
+  "version": 1,
+  "name": "Coffee",
+  "sources": [
+    {
+      "id": "s1",
+      "name": "coffee.xlsx",
+      "kind": "excel",
+      "path": "coffee.xlsx"
+    },
+    {
+      "id": "s2",
+      "name": "stores.csv",
+      "kind": "csv",
+      "path": "stores.csv"
+    }
+  ],
+  "relationships": [
+    {
+      "id": "r1",
+      "from": {
+        "table": "s1/Orders",
+        "column": "store_id"
+      },
+      "to": {
+        "table": "s2/stores",
+        "column": "id"
+      }
+    }
+  ],
+  "dashboards": [
+    {
+      "id": "d1",
+      "refresh": 60,
+      "tiles": [
+        {
+          "dims": [],
+          "h": 2,
+          "id": "t1",
+          "measures": [
+            {
+              "agg": "sum",
+              "column": "amount",
+              "table": "s1/Orders"
+            }
+          ],
+          "title": "",
+          "type": "kpi",
+          "w": 3,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "title": "Coffee overview"
+    }
+  ],
+  "layout": {
+    "model": {
+      "s1/Orders": {
+        "x": 0,
+        "y": 60
+      }
+    }
+  },
+  "locale": "id",
+  "tables": {
+    "s1/Orders": {
+      "header_row": 4,
+      "columns": {
+        "amount": {
+          "label": "Sales",
+          "dtype": "number",
+          "hidden": true,
+          "description": "What the customer paid"
+        },
+        "date": {
+          "dtype": "date",
+          "date_format": "dmy"
+        }
+      },
+      "transforms": [
+        {
+          "kind": "unpivot",
+          "keep": [
+            "store_id"
+          ],
+          "name": "Month",
+          "value": "Sales"
+        }
+      ]
+    },
+    "s2/stores": {
+      "columns": {
+        "id": {
+          "label": "Store"
+        }
+      }
+    }
+  }
+}"##;
+
+const FILE_NAMED_LINKS: &str = r##"{
+  "version": 1,
+  "name": "Coffee",
+  "sources": [
+    {
+      "id": "s1",
+      "name": "coffee.xlsx",
+      "kind": "excel",
+      "path": "coffee.xlsx"
+    },
+    {
+      "id": "s2",
+      "name": "stores.csv",
+      "kind": "csv",
+      "path": "stores.csv"
+    }
+  ],
+  "relationships": [
+    {
+      "id": "r1",
+      "from": {
+        "table": "s1/Orders",
+        "column": "store_id"
+      },
+      "to": {
+        "table": "s2/stores",
+        "column": "id"
+      },
+      "name": "Sold at"
+    },
+    {
+      "id": "r2",
+      "from": {
+        "table": "s1/Orders",
+        "column": "ship_store_id"
+      },
+      "to": {
+        "table": "s2/stores",
+        "column": "id"
+      },
+      "name": "Shipped from"
+    }
+  ],
+  "dashboards": [
+    {
+      "id": "d1",
+      "refresh": 60,
+      "tiles": [
+        {
+          "dims": [],
+          "h": 2,
+          "id": "t1",
+          "measures": [
+            {
+              "agg": "sum",
+              "column": "amount",
+              "table": "s1/Orders"
+            }
+          ],
+          "title": "",
+          "type": "kpi",
+          "w": 3,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "title": "Coffee overview"
+    }
+  ],
+  "layout": {
+    "model": {
+      "s1/Orders": {
+        "x": 0,
+        "y": 60
+      }
+    }
+  },
+  "locale": "id",
+  "tables": {
+    "s1/Orders": {
+      "header_row": 4,
+      "columns": {
+        "amount": {
+          "label": "Sales",
+          "dtype": "number",
+          "hidden": true,
+          "description": "What the customer paid"
+        },
+        "date": {
+          "dtype": "date",
+          "date_format": "dmy"
+        }
+      },
+      "transforms": [
+        {
+          "kind": "unpivot",
+          "keep": [
+            "store_id"
+          ],
+          "name": "Month",
+          "value": "Sales"
+        }
+      ]
+    },
+    "s2/stores": {
+      "columns": {
+        "id": {
+          "label": "Store"
+        }
+      }
+    }
+  }
+}"##;
+
+#[test]
+fn an_old_file_is_written_back_byte_for_byte_when_no_calculated_column_is_added() {
+    use tenun_core::workspace::Workspace;
+    let dir = std::env::temp_dir().join(format!("tenun-pin-file-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, text) in [("v3", FILE_V3), ("named-links", FILE_NAMED_LINKS)] {
+        let path = dir.join(format!("{name}.tenun"));
+        std::fs::write(&path, text).unwrap();
+        let ws = Workspace::load(&path).unwrap();
+        // Nothing of the new field is in the file, and the setup of a table has none.
+        assert!(ws.tables.values().all(|t| t.calc.is_empty()), "{name}");
+        let back = dir.join(format!("{name}-again.tenun"));
+        ws.save(&back).unwrap();
+        assert_eq!(std::fs::read_to_string(&back).unwrap(), text, "{name}");
+    }
+}

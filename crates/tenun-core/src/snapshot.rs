@@ -799,6 +799,8 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
     // A database changes without a load: the links of live tables are read again, so a page that
     // is exported or published says what the data says now (V4-D51).
     engine.recheck_live_links();
+    // A calculated column with `TODAY()` is as of today in what leaves the computer (V4-D34).
+    engine.refresh_dates();
     let dash = engine
         .dashboard(dashboard_id)
         .ok_or_else(|| anyhow::anyhow!("no dashboard {dashboard_id}"))?;
@@ -1048,10 +1050,11 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         .iter()
         .filter(|t| used.contains(t.id.as_str()))
         .map(|t| {
-            // The viewer needs the names, types and the column overrides, not the data checks.
+            // The viewer needs the names, types and the column overrides, not the data checks. The
+            // reason a calculated column is blank can quote its formula, so it stays at home (V4-D52).
             let mut columns = json!(t.columns);
             for c in columns.as_array_mut().into_iter().flatten() {
-                for k in ["blank", "mixed", "failed"] {
+                for k in ["blank", "mixed", "failed", "error"] {
                     c.as_object_mut().map(|o| o.remove(k));
                 }
             }

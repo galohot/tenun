@@ -128,6 +128,10 @@ pub struct Links<'a> {
     /// Count a link that works neither way as if it worked the stored way. Only to find out
     /// whether such a link is what stands between two tables.
     lenient: bool,
+    /// Every join into a table reads one row per key, whatever the health says, in both
+    /// directions. The SQL of a view is fixed when the view is made and cannot follow a later
+    /// change of the data, so it must be safe for any data (V4-D63).
+    one_row: bool,
 }
 
 impl<'a> Links<'a> {
@@ -136,6 +140,15 @@ impl<'a> Links<'a> {
             rels,
             health,
             lenient: false,
+            one_row: false,
+        }
+    }
+
+    /// The same links, where every join reads one row per key (V4-D63). For the SQL of a view.
+    pub fn one_row_per_key(self) -> Self {
+        Links {
+            one_row: true,
+            ..self
         }
     }
 
@@ -174,6 +187,9 @@ impl<'a> Links<'a> {
     /// Joins into the `to` side read one row per key: the data says it repeats a key, or the
     /// data has not been read (V4-D51). With no health at all, nothing is known and nothing changes.
     pub fn dedup(&self, r: &Relationship) -> bool {
+        if self.one_row {
+            return true;
+        }
         match self.health {
             None => false,
             Some(h) => h.get(&r.id).is_none_or(|x| x.one_dups > 0),
@@ -204,7 +220,8 @@ impl<'a> Links<'a> {
                 from_col: r.to.column.clone(),
                 to_table: r.from.table.clone(),
                 to_col: r.from.column.clone(),
-                dedup: false,
+                // No key repeats on this side today; a view cannot count on that tomorrow.
+                dedup: self.one_row,
                 // The link is read this way because the stored way stopped working.
                 warn: self.health(&r.id).is_some_and(LinkHealth::reversed),
             }

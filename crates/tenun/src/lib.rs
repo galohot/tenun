@@ -181,6 +181,11 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
             tick.tick().await;
             let st = sched.clone();
             let _ = tokio::task::spawn_blocking(move || {
+                // Calculated columns with `TODAY()` are built again when the day has changed.
+                if st.engine.refresh_dates() {
+                    st.schedule.lock().unwrap().mark_changed(&st.engine);
+                    st.emit(serde_json::json!({ "type": "data-changed" }));
+                }
                 // CSV links whose time has come are fetched again.
                 let urls = st.engine.refresh_due_urls();
                 if !urls.is_empty() {

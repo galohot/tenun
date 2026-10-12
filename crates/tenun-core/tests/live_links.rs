@@ -217,3 +217,54 @@ fn a_listener_is_told_when_a_background_check_has_written_its_answer() {
     }
     assert_eq!(told.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
+
+fn calc_column(name: &str, formula: &str) -> tenun_core::workspace::CalcColumn {
+    tenun_core::workspace::CalcColumn {
+        name: name.into(),
+        formula: formula.into(),
+        sql: false,
+        description: None,
+    }
+}
+
+#[test]
+fn a_calculated_column_works_on_a_live_table_and_reads_one_row_per_key_from_one() {
+    use tenun_core::workspace::TableSetup;
+    let e = engine("calc");
+    wait_for_checks(&e);
+    let setup = TableSetup {
+        calc: vec![
+            calc_column("Double", "[amount] * 2"),
+            // The stores table repeats store 1. The view keeps one row of it for each order.
+            calc_column("Region", "[stores].[region]"),
+        ],
+        ..TableSetup::default()
+    };
+    e.set_table_setup("s1/orders", Some(setup)).unwrap();
+    assert!(e.snapshot().errors.is_empty(), "{:?}", e.snapshot().errors);
+    let count = |col: Option<&str>, agg: &str| -> f64 {
+        let t: Tile = serde_json::from_value(json!({
+            "id": "t", "type": "kpi", "title": "", "x": 0, "y": 0, "w": 3, "h": 2,
+            "measures": [{ "table": "s1/orders", "column": col, "agg": agg }],
+            "dims": [],
+        }))
+        .unwrap();
+        run_tile(&e, &t, &[]).unwrap().rows[0][0].as_f64().unwrap()
+    };
+    // Five orders stay five, and nothing is added twice.
+    assert_eq!(count(None, "count"), 5.0);
+    assert_eq!(count(Some("Double"), "sum"), 951.0);
+    assert_eq!(count(Some("Region"), "count"), 5.0);
+    // The database is read again: the views are still there and still right.
+    e.load("s1");
+    wait_for_checks(&e);
+    assert!(e.snapshot().errors.is_empty(), "{:?}", e.snapshot().errors);
+    assert_eq!(count(Some("Double"), "sum"), 951.0);
+    assert_eq!(count(None, "count"), 5.0);
+    // The table is still live: the column list shows the calculated columns after its own.
+    let t = e.catalog().table("s1/orders").unwrap().clone();
+    assert!(!t.prep);
+    assert_eq!(t.rows, Some(5));
+    let names: Vec<&str> = t.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["id", "store_id", "amount", "Double", "Region"]);
+}

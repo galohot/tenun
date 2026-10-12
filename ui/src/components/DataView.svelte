@@ -2,10 +2,13 @@
   import { api, type Cell, type Column, type Profile, type Source, type TableSetup, type UnpivotPlan, type UrlEvery } from '../lib/api';
   import { typeIcon } from '../lib/ui';
   import { app, go } from '../lib/state.svelte';
-  import { cell, full } from '../lib/format';
-  import { failedText, hasUnpivot, isEmptySetup, withHeaderRow, withUnpivot, withoutUnpivot } from '../lib/prep';
+  import { cell, full, tileTitle } from '../lib/format';
+  import { listWords, tilesUsing, useWords } from '../lib/formula';
+  import { failedText, hasUnpivot, isEmptySetup, withCalc, withHeaderRow, withUnpivot, withoutUnpivot } from '../lib/prep';
   import { looksTabular, sinceWords, EVERY_CHOICES } from '../lib/sources';
   import Icon from './Icon.svelte';
+  import Modal from './Modal.svelte';
+  import CalcSheet from './data/CalcSheet.svelte';
   import ColumnMenu from './data/ColumnMenu.svelte';
   import ProfileCard from './data/ProfileCard.svelte';
   import UnpivotSheet from './data/UnpivotSheet.svelte';
@@ -146,8 +149,61 @@
     save(withUnpivot(setup, plan, name, value));
   }
 
-  // The notes: what was detected, then the cells a type override could not read.
-  const problems = $derived((table?.columns ?? []).filter((c) => c.failed).map((c) => `${c.label ?? c.name}: ${failedText(c)}`));
+  // The notes: what was detected, then the cells a type override could not read, then the
+  // calculated columns that could not be computed.
+  const problems = $derived([
+    ...(table?.columns ?? []).filter((c) => c.failed).map((c) => `${c.label ?? c.name}: ${failedText(c)}`),
+    ...(table?.columns ?? []).filter((c) => c.error).map((c) => `${c.label ?? c.name} could not be computed, so its values are blank. ${c.error}`),
+  ]);
+
+  // --- Calculated columns (build 02) ---------------------------------------------------------
+  // Advanced (V4-D20). A dashboard that uses a calculated column opens and works with the switch off (V3-D2).
+  const canCalc = $derived(app.settings?.advanced === true);
+  let calcSheet = $state<{ editing?: string } | null>(null);
+  /** The column to delete and what uses it, while the question is open. */
+  let askDelete = $state<{ name: string; shown: string; tiles: string[]; columns: string[] } | null>(null);
+
+  /** The tip of a column: its description, what it is, and the day a calculated one is as of. */
+  function tip(c: Column): string {
+    const parts = [c.description || (c.calc ? '' : c.raw_type)];
+    if (c.calc) parts.push(c.error ? 'Calculated column. It could not be computed.' : 'Calculated column.');
+    if (c.as_of) parts.push(`As of ${c.as_of}.`);
+    return parts.filter(Boolean).join(' ');
+  }
+
+  /** The other calculated columns whose formula names this one, as "Table › Column". */
+  function readers(name: string): string[] {
+    if (!table) return [];
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // In the table itself the name stands alone; in another table it follows the table.
+    const bare = new RegExp(`\\[${esc(name)}\\]`, 'i');
+    const named = new RegExp(`\\[(${esc(table.label)}|${esc(table.id)})\\]\\s*\\.\\s*\\[${esc(name)}\\]`, 'i');
+    const out: string[] = [];
+    for (const [id, s] of Object.entries(app.snap!.workspace.tables ?? {})) {
+      const t = app.table(id);
+      for (const c of s.calc ?? []) {
+        if (c.sql || (id === table.id && c.name === name)) continue;
+        if ((id === table.id ? bare : named).test(c.formula)) out.push(`${t?.label ?? id} › ${c.name}`);
+      }
+    }
+    return out;
+  }
+
+  function wantDelete(name: string) {
+    if (!table) return;
+    const shown = colOf(name)?.label ?? name;
+    const uses = tilesUsing(app.dashboards, table.id, name, (t) => tileTitle(t, app.tables));
+    const columns = readers(name);
+    // Nothing uses it: it goes without a question. The only question in this file is for a column that tiles use.
+    if (!uses.length) removeCalc(name);
+    else askDelete = { name, shown, tiles: uses.map(useWords), columns };
+  }
+
+  async function removeCalc(name: string) {
+    askDelete = null;
+    if (!table) return;
+    await save(withCalc(setup, (setup?.calc ?? []).filter((c) => c.name !== name)));
+  }
 
   // Column menu and hover profile.
   let menu = $state<{ column: string; x: number; y: number } | null>(null);
@@ -257,9 +313,12 @@
               </ul>
             {/if}
           </div>
-          {#if table.prep}
+          {#if table.prep || canCalc}
             <div class="tools">
-              {#if isExcel}
+              {#if canCalc}
+                <button class="btn" title="Add a column that is computed from the others" onclick={() => (calcSheet = {})}><Icon name="fx" size={13} /> Add column</button>
+              {/if}
+              {#if table.prep && isExcel}
                 <label class="hdr" title="The sheet row that holds the column names">
                   <span class="label">Header row</span>
                   <input
@@ -275,7 +334,7 @@
                   <button class="btn plain" onclick={() => save(withHeaderRow(setup, undefined))}>Detect it again</button>
                 {/if}
               {/if}
-              {#if plan || turned}
+              {#if table.prep && (plan || turned)}
                 <div class="prep">
                   <button class="btn" aria-expanded={prepareOpen} onclick={() => (prepareOpen = !prepareOpen)}>Prepare <Icon name="chevronDown" size={12} /></button>
                   {#if prepareOpen}
@@ -307,7 +366,9 @@
         {/if}
         <div class="cols">
           {#each table.columns as c}
-            <span class="col" class:hid={c.hidden} title={c.description ?? c.raw_type}><Icon name={typeIcon[c.dtype]} size={12} />{c.label ?? c.name}{#if c.hidden}<em>hidden</em>{/if}</span>
+            <span class="col" class:hid={c.hidden} class:calc={c.calc} class:err={!!c.error} title={tip(c)}>
+              <Icon name={typeIcon[c.dtype]} size={12} />{c.label ?? c.name}{#if c.calc}<span class="fx" aria-label="Calculated column"><Icon name="fx" size={11} /></span>{/if}{#if c.hidden}<em>hidden</em>{/if}
+            </span>
           {/each}
         </div>
         <div class="grid-wrap">
@@ -323,7 +384,7 @@
                     {@const col = colOf(c.name)}
                     <th class:num={c.dtype === 'number'} class:hid={col?.hidden}>
                       <button class="hd" onclick={(e) => openMenu(e, c.name)} onmouseenter={(e) => enter(e, c.name)} onmouseleave={leave} title="">
-                        {col?.label ?? c.name}<Icon name="chevronDown" size={11} />
+                        {#if col?.calc}<span class="fx" aria-label="Calculated column"><Icon name="fx" size={11} /></span>{/if}{col?.label ?? c.name}<Icon name="chevronDown" size={11} />
                       </button>
                     </th>
                   {/each}
@@ -362,11 +423,36 @@
   <ColumnMenu
     column={menuColumn}
     {setup}
-    canRetype={!!table.prep}
+    canRetype={!!table.prep && !menuColumn.calc}
     x={menu.x}
     y={menu.y}
     onsave={save}
-    onclose={() => (menu = null)} />
+    onclose={() => (menu = null)}
+    onedit={canCalc ? (name) => (calcSheet = { editing: name }) : undefined}
+    ondelete={canCalc ? (name) => wantDelete(name) : undefined} />
+{/if}
+
+{#if calcSheet && table}
+  <CalcSheet {table} {setup} editing={calcSheet.editing} onclose={() => (calcSheet = null)} />
+{/if}
+
+{#if askDelete}
+  {@const d = askDelete}
+  <Modal title="Delete {d.shown}?" width={460} onclose={() => (askDelete = null)}>
+    <p class="lead">
+      {d.tiles.length === 1 ? 'This tile uses' : `These ${d.tiles.length} tiles use`} the column. {d.tiles.length === 1 ? 'It' : 'They'} will show an error until you pick another field.
+    </p>
+    <ul class="uses">
+      {#each d.tiles as t, i (i)}<li>{t}</li>{/each}
+    </ul>
+    {#if d.columns.length}
+      <p class="lead">These calculated columns read it too and will be blank: {listWords(d.columns)}.</p>
+    {/if}
+    {#snippet footer()}
+      <button class="btn" onclick={() => (askDelete = null)}>Keep the column</button>
+      <button class="btn danger" onclick={() => removeCalc(d.name)}>Delete column</button>
+    {/snippet}
+  </Modal>
 {/if}
 
 {#if pasted !== null}
@@ -476,6 +562,15 @@
   .offer span { flex: 1; }
   .col.hid, th.hid .hd { opacity: 0.6; }
   .col em { font-style: normal; font-size: 11px; color: var(--text-2); margin-left: 2px; }
+  .col.calc { background: var(--selected); }
+  .col.err { box-shadow: inset 0 0 0 1px var(--danger); }
+  .fx { display: inline-flex; align-items: center; color: var(--accent-text); }
+  .hd .fx { margin-right: 4px; }
+  .col .fx :global(svg), .hd .fx :global(svg) { color: var(--accent-text); opacity: 1; }
+  .col .fx { margin-left: 1px; }
+  .lead { margin: 0 0 10px; }
+  .uses { margin: 0 0 10px; padding-left: 18px; font-size: 13px; }
+  .uses li { margin: 2px 0; }
   .hd {
     display: inline-flex;
     align-items: center;

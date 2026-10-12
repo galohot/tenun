@@ -148,6 +148,11 @@ pub fn run(file: &Path) -> anyhow::Result<()> {
     loop {
         // CSV links are fetched again on their own schedule, and dashboards that publish
         // "on change" are due when one of them gave new data.
+        // A calculated column with `TODAY()` is built again when the day has changed (V4-D34).
+        if engine.refresh_dates() {
+            log("a new day: calculated columns built again");
+            schedule.lock().unwrap().mark_changed(&engine);
+        }
         let urls = engine.refresh_due_urls();
         if !urls.is_empty() {
             log(&format!("fetched {}", urls.join(", ")));

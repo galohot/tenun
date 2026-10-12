@@ -11,6 +11,8 @@
     y,
     onsave,
     onclose,
+    onedit,
+    ondelete,
   }: {
     column: Column;
     setup: TableSetup | undefined;
@@ -20,6 +22,10 @@
     y: number;
     onsave: (next: TableSetup) => void;
     onclose: () => void;
+    /** A calculated column, with Advanced on: change its formula. */
+    onedit?: (name: string) => void;
+    /** A calculated column, with Advanced on: remove it. */
+    ondelete?: (name: string) => void;
   } = $props();
 
   type Mode = 'main' | 'rename' | 'type' | 'description';
@@ -44,6 +50,19 @@
     if (close) onclose();
   }
 
+  // The menu closes first, and the column it named is out of the page by then, so the name goes along.
+  function edit() {
+    const name = column.name;
+    onclose();
+    onedit?.(name);
+  }
+
+  function remove() {
+    const name = column.name;
+    onclose();
+    ondelete?.(name);
+  }
+
   function pickType(dtype: Column['dtype']) {
     if (dtype === column.dtype) return;
     // A date column asks for its format next, so the menu stays open.
@@ -66,6 +85,15 @@
       <Icon name={column.hidden ? 'check' : 'x'} size={13} /> {column.hidden ? 'Show in field lists' : 'Hide from field lists'}
     </button>
     <button role="menuitem" onclick={() => (mode = 'description')}><Icon name="info" size={13} /> Description</button>
+    {#if column.calc && (onedit || ondelete)}
+      <div class="rule" role="separator"></div>
+      {#if onedit}
+        <button role="menuitem" onclick={edit}><Icon name="fx" size={13} /> Edit formula</button>
+      {/if}
+      {#if ondelete}
+        <button role="menuitem" class="danger" onclick={remove}><Icon name="trash" size={13} /> Delete column</button>
+      {/if}
+    {/if}
   {:else if mode === 'rename'}
     <form
       onsubmit={(e) => {
@@ -155,6 +183,10 @@
   button[role^='menuitem']:hover :global(svg), button[role^='menuitem']:hover .more { color: #fff; }
   .more { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; color: var(--text-2); }
   .on { font-weight: 600; }
+  .rule { height: 1px; margin: 4px 6px; background: var(--sep); }
+  button.danger { color: var(--danger); }
+  button.danger :global(svg) { color: var(--danger); }
+  button.danger:hover, button.danger:hover :global(svg) { color: #fff; }
   .tick { width: 14px; display: inline-grid; place-items: center; }
   .head { display: flex; align-items: center; gap: 4px; padding: 0 4px 4px; font-weight: 600; }
   .sub { padding: 8px 8px 2px; font-size: 11px; font-weight: 600; color: var(--text-2); }

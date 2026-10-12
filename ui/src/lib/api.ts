@@ -19,6 +19,12 @@ export interface Column {
   mixed?: boolean;
   /** After a type override: how many cells could not be read as that type and became blank. */
   failed?: number;
+  /** A calculated column: a formula of the table's setup, not a column of the file (V4-D3). */
+  calc?: boolean;
+  /** A calculated column that could not be computed: the reason, in words. Its values are blank. */
+  error?: string;
+  /** A calculated column that uses TODAY() or NOW(): the day its view was built, `2026-10-11`. */
+  as_of?: string;
 }
 
 export interface Table {
@@ -50,12 +56,66 @@ export interface ColumnSetup {
 
 export type Transform = { kind: 'unpivot'; keep: string[]; name: string; value: string };
 
+/** A column that is computed from the others, in the view of its table. */
+export interface CalcColumn {
+  /** The name of the column. Tiles keep it, so it does not change after the column is made. */
+  name: string;
+  /** A formula, or raw DuckDB SQL when `sql` is set (Advanced). */
+  formula: string;
+  sql?: boolean;
+  description?: string;
+}
+
 /** How one table is prepared. Stored in the workspace by table id. */
 export interface TableSetup {
   /** Excel: the sheet row that holds the column names. Overrides detection. */
   header_row?: number;
   columns?: Record<string, ColumnSetup>;
   transforms?: Transform[];
+  /** Calculated columns, in order. A column may use an earlier one, never a later one. */
+  calc?: CalcColumn[];
+}
+
+/** The place of a problem in a formula, in UTF-16 units: `formula.slice(at, at + len)` is the culprit. */
+export interface FormulaError {
+  message: string;
+  at: number;
+  len: number;
+}
+
+/** The answer of `POST /api/formula/check`. A wrong formula is a normal answer (`ok: false`). */
+export interface FormulaCheck {
+  ok: boolean;
+  dtype?: DType;
+  error?: FormulaError;
+  /** The first 5 values of a column. */
+  preview?: Cell[];
+  /** The ids of the tables the formula reads. */
+  uses?: string[];
+}
+
+export interface FormulaCheckRequest {
+  formula: string;
+  kind: 'column' | 'measure' | 'group';
+  table?: string;
+  /** The calculated column being edited: the columns of the table from it on are not there. */
+  before?: string;
+  /** The formula is raw DuckDB SQL (Advanced). */
+  sql?: boolean;
+}
+
+/** A calculated column that cannot be saved. Nothing was saved. */
+export class SetupRefused extends Error {
+  /** The index of the column in the list that was sent. */
+  calc: number;
+  column: string;
+  error: FormulaError;
+  constructor(r: { calc: number; name: string; error: FormulaError }) {
+    super(r.error.message);
+    this.calc = r.calc;
+    this.column = r.name;
+    this.error = r.error;
+  }
 }
 
 /** A wide sheet: months, quarters or years across the top. */
@@ -655,7 +715,14 @@ export const api = {
   preview: (id: string, limit = 200) =>
     call<{ columns: Column[]; rows: Cell[][] }>('GET', `/tables/preview?id=${encodeURIComponent(id)}&limit=${limit}`),
   /** Sets how a table is prepared (header row, column overrides, unpivot); null clears it. */
-  setTableSetup: (table: string, setup: TableSetup | null) => call<Snapshot>('PUT', '/tables/setup', { table, setup }),
+  setTableSetup: async (table: string, setup: TableSetup | null): Promise<Snapshot> => {
+    const r = await call<Snapshot | { ok: false; calc: number; name: string; error: FormulaError }>('PUT', '/tables/setup', { table, setup });
+    // A calculated column that cannot be saved is a normal answer, not an HTTP error (V4-D35).
+    if ('ok' in r && r.ok === false) throw new SetupRefused(r);
+    return r as Snapshot;
+  },
+  /** Checks a formula and gives its type and first values, or the place of the problem. */
+  checkFormula: (req: FormulaCheckRequest) => call<FormulaCheck>('POST', '/formula/check', req),
   profile: (table: string, column: string) =>
     call<Profile>('GET', `/profile?table=${encodeURIComponent(table)}&column=${encodeURIComponent(column)}`),
   /** The columns of a wide sheet that could turn into rows, or null. */

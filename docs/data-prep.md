@@ -27,8 +27,17 @@ Click a column heading in the **Data** view. The menu has:
 - **Hide:** the column leaves the field pickers. Relationships can still use it.
 - **Description:** shows as a tooltip in the field pickers.
 
+- **Edit formula** and **Delete column** (Advanced, calculated columns only): see
+  [Add a column](formulas.md#add-a-column).
+
 Hover a heading to see a **column profile**: the share of blanks, the number of different values,
 the smallest and biggest value, and the top values or a small histogram.
+
+## A column that is calculated
+
+With Advanced features on, **Add column** at the top of a table adds a column made from a formula,
+such as `[amount] * 1.11` or `[stores].[region]`. It works everywhere a column works, and your file
+is not changed. It is written in [formulas](formulas.md#add-a-column).
 
 ## Months as columns (unpivot)
 

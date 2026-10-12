@@ -1,0 +1,386 @@
+[
+ {
+  "name": "IF",
+  "args": "test, a, [b]",
+  "class": "row",
+  "hint": "a when the test is true, else b."
+ },
+ {
+  "name": "IFS",
+  "args": "test, value, …",
+  "class": "row",
+  "hint": "The value of the first test that is true."
+ },
+ {
+  "name": "SWITCH",
+  "args": "x, key, value, …",
+  "class": "row",
+  "hint": "The value of the first key that equals x; the last value is the default."
+ },
+ {
+  "name": "AND",
+  "args": "test, …",
+  "class": "row",
+  "hint": "True when every test is true."
+ },
+ {
+  "name": "OR",
+  "args": "test, …",
+  "class": "row",
+  "hint": "True when one test is true."
+ },
+ {
+  "name": "NOT",
+  "args": "test",
+  "class": "row",
+  "hint": "The opposite of the test."
+ },
+ {
+  "name": "IFERROR",
+  "args": "x, alt",
+  "class": "row",
+  "hint": "alt when x is blank."
+ },
+ {
+  "name": "ISBLANK",
+  "args": "x",
+  "class": "row",
+  "hint": "True when the value is blank."
+ },
+ {
+  "name": "BLANK",
+  "args": "",
+  "class": "row",
+  "hint": "A blank value."
+ },
+ {
+  "name": "ABS",
+  "args": "x",
+  "class": "row",
+  "hint": "The number without its sign."
+ },
+ {
+  "name": "ROUND",
+  "args": "x, [n]",
+  "class": "row",
+  "hint": "Rounds to n places."
+ },
+ {
+  "name": "ROUNDUP",
+  "args": "x, [n]",
+  "class": "row",
+  "hint": "Rounds away from zero."
+ },
+ {
+  "name": "ROUNDDOWN",
+  "args": "x, [n]",
+  "class": "row",
+  "hint": "Rounds toward zero."
+ },
+ {
+  "name": "INT",
+  "args": "x",
+  "class": "row",
+  "hint": "Rounds down to a whole number."
+ },
+ {
+  "name": "MOD",
+  "args": "a, b",
+  "class": "row",
+  "hint": "The rest of a divided by b."
+ },
+ {
+  "name": "POWER",
+  "args": "a, b",
+  "class": "row",
+  "hint": "a to the power of b."
+ },
+ {
+  "name": "SQRT",
+  "args": "x",
+  "class": "row",
+  "hint": "The square root."
+ },
+ {
+  "name": "EXP",
+  "args": "x",
+  "class": "row",
+  "hint": "e to the power of x."
+ },
+ {
+  "name": "LN",
+  "args": "x",
+  "class": "row",
+  "hint": "The natural logarithm."
+ },
+ {
+  "name": "LOG10",
+  "args": "x",
+  "class": "row",
+  "hint": "The logarithm to base 10."
+ },
+ {
+  "name": "SIGN",
+  "args": "x",
+  "class": "row",
+  "hint": "-1, 0 or 1."
+ },
+ {
+  "name": "MIN",
+  "args": "a, …",
+  "class": "either",
+  "hint": "The smaller of two or more values."
+ },
+ {
+  "name": "MAX",
+  "args": "a, …",
+  "class": "either",
+  "hint": "The larger of two or more values."
+ },
+ {
+  "name": "DIVIDE",
+  "args": "a, b, [alt]",
+  "class": "row",
+  "hint": "a divided by b; alt when b is zero."
+ },
+ {
+  "name": "CONCAT",
+  "args": "text, …",
+  "class": "row",
+  "hint": "Joins text, like &."
+ },
+ {
+  "name": "LEFT",
+  "args": "text, [n]",
+  "class": "row",
+  "hint": "The first n characters."
+ },
+ {
+  "name": "RIGHT",
+  "args": "text, [n]",
+  "class": "row",
+  "hint": "The last n characters."
+ },
+ {
+  "name": "MID",
+  "args": "text, start, n",
+  "class": "row",
+  "hint": "n characters from position start."
+ },
+ {
+  "name": "LEN",
+  "args": "text",
+  "class": "row",
+  "hint": "The number of characters."
+ },
+ {
+  "name": "UPPER",
+  "args": "text",
+  "class": "row",
+  "hint": "Capital letters."
+ },
+ {
+  "name": "LOWER",
+  "args": "text",
+  "class": "row",
+  "hint": "Small letters."
+ },
+ {
+  "name": "PROPER",
+  "args": "text",
+  "class": "row",
+  "hint": "A capital letter at the start of each word."
+ },
+ {
+  "name": "TRIM",
+  "args": "text",
+  "class": "row",
+  "hint": "Removes extra spaces."
+ },
+ {
+  "name": "SUBSTITUTE",
+  "args": "text, old, new",
+  "class": "row",
+  "hint": "Replaces every old with new."
+ },
+ {
+  "name": "FIND",
+  "args": "find, text, [start]",
+  "class": "row",
+  "hint": "Where find starts in text; case matters."
+ },
+ {
+  "name": "SEARCH",
+  "args": "find, text, [start]",
+  "class": "row",
+  "hint": "Where find starts in text; case does not matter."
+ },
+ {
+  "name": "VALUE",
+  "args": "text",
+  "class": "row",
+  "hint": "Reads text as a number."
+ },
+ {
+  "name": "TEXT",
+  "args": "x, format",
+  "class": "row",
+  "hint": "A number as text: \"0\", \"0.0\", \"#,##0\" or \"0%\"."
+ },
+ {
+  "name": "DATE",
+  "args": "year, month, day",
+  "class": "row",
+  "hint": "Builds a date."
+ },
+ {
+  "name": "YEAR",
+  "args": "date",
+  "class": "row",
+  "hint": "The year of a date."
+ },
+ {
+  "name": "MONTH",
+  "args": "date",
+  "class": "row",
+  "hint": "The month of a date, 1 to 12."
+ },
+ {
+  "name": "DAY",
+  "args": "date",
+  "class": "row",
+  "hint": "The day of the month."
+ },
+ {
+  "name": "WEEKDAY",
+  "args": "date",
+  "class": "row",
+  "hint": "1 for Monday to 7 for Sunday."
+ },
+ {
+  "name": "WEEKNUM",
+  "args": "date",
+  "class": "row",
+  "hint": "The ISO week number."
+ },
+ {
+  "name": "QUARTER",
+  "args": "date",
+  "class": "row",
+  "hint": "The quarter, 1 to 4."
+ },
+ {
+  "name": "EOMONTH",
+  "args": "date, months",
+  "class": "row",
+  "hint": "The last day of the month, some months later."
+ },
+ {
+  "name": "EDATE",
+  "args": "date, months",
+  "class": "row",
+  "hint": "The same day, some months later."
+ },
+ {
+  "name": "DATEDIF",
+  "args": "from, to, unit",
+  "class": "row",
+  "hint": "Days (\"D\"), months (\"M\") or years (\"Y\") between two dates."
+ },
+ {
+  "name": "DAYS",
+  "args": "end, start",
+  "class": "row",
+  "hint": "The days from start to end."
+ },
+ {
+  "name": "TODAY",
+  "args": "",
+  "class": "row",
+  "hint": "Today's date, as of when the view was built."
+ },
+ {
+  "name": "NOW",
+  "args": "",
+  "class": "row",
+  "hint": "The date and time, as of when the view was built."
+ },
+ {
+  "name": "SUM",
+  "args": "x",
+  "class": "agg",
+  "hint": "The sum of a column."
+ },
+ {
+  "name": "AVERAGE",
+  "args": "x",
+  "class": "agg",
+  "hint": "The mean of a column."
+ },
+ {
+  "name": "COUNT",
+  "args": "x",
+  "class": "agg",
+  "hint": "How many numbers or dates are filled."
+ },
+ {
+  "name": "COUNTA",
+  "args": "x",
+  "class": "agg",
+  "hint": "How many values are filled."
+ },
+ {
+  "name": "COUNTD",
+  "args": "x",
+  "class": "agg",
+  "hint": "How many different values."
+ },
+ {
+  "name": "MEDIAN",
+  "args": "x",
+  "class": "agg",
+  "hint": "The middle value."
+ },
+ {
+  "name": "PERCENTILE",
+  "args": "x, p",
+  "class": "agg",
+  "hint": "The value below which the share p of the rows lie."
+ },
+ {
+  "name": "STDEV",
+  "args": "x",
+  "class": "agg",
+  "hint": "The spread of the values, on the sample."
+ },
+ {
+  "name": "VAR",
+  "args": "x",
+  "class": "agg",
+  "hint": "The variance of the values, on the sample."
+ },
+ {
+  "name": "SUMIF",
+  "args": "x, test",
+  "class": "agg",
+  "hint": "The sum of x where the test is true."
+ },
+ {
+  "name": "COUNTIF",
+  "args": "x, test",
+  "class": "agg",
+  "hint": "How many filled values of x where the test is true."
+ },
+ {
+  "name": "AVERAGEIF",
+  "args": "x, test",
+  "class": "agg",
+  "hint": "The mean of x where the test is true."
+ },
+ {
+  "name": "COUNTROWS",
+  "args": "table",
+  "class": "agg",
+  "hint": "The number of rows of a table."
+ }
+]

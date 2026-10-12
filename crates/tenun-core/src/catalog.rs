@@ -77,6 +77,15 @@ pub struct Column {
     /// After a type override: how many cells could not be read as that type and became blank.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed: Option<u64>,
+    /// A calculated column (V4-D3): a formula of the table's setup, not a column of the file.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub calc: bool,
+    /// A calculated column that could not be computed: the reason, in words. Its values are blank.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// A calculated column that uses `TODAY()` or `NOW()`: the day its view was built (V4-D34).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub as_of: Option<String>,
 }
 
 impl Column {
@@ -91,6 +100,9 @@ impl Column {
             blank: None,
             mixed: false,
             failed: None,
+            calc: false,
+            error: None,
+            as_of: None,
         }
     }
 }

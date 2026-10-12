@@ -54,6 +54,7 @@ pub mod lex;
 pub mod parse;
 pub mod rename;
 pub mod sql;
+pub mod sqlcheck;
 
 pub use rename::{rename_column, rename_column_qualified, rename_link};
 
@@ -126,6 +127,10 @@ pub struct Context<'a> {
     pub today: NaiveDate,
     /// What `NOW()` is.
     pub now: NaiveDateTime,
+    /// The formula becomes part of a view, a calculated column (V4-D63): every join into another
+    /// table reads one row per key, whatever the health says, because the SQL of a view cannot
+    /// follow a later change of the data.
+    pub view: bool,
 }
 
 impl<'a> Context<'a> {
@@ -138,12 +143,18 @@ impl<'a> Context<'a> {
             health,
             today: now.date(),
             now,
+            view: false,
         }
     }
 
     /// The relationships with what the data says about them.
     pub fn links(&self) -> Links<'a> {
-        Links::new(self.rels, Some(self.health))
+        let links = Links::new(self.rels, Some(self.health));
+        if self.view {
+            links.one_row_per_key()
+        } else {
+            links
+        }
     }
 }
 
@@ -338,7 +349,7 @@ pub struct CheckReply {
 }
 
 impl CheckReply {
-    fn failed(e: FormulaError) -> Self {
+    pub(crate) fn failed(e: FormulaError) -> Self {
         CheckReply {
             ok: false,
             dtype: None,
@@ -385,6 +396,87 @@ pub fn answer(req: &CheckRequest, cx: &Context<'_>, db: &Connection) -> CheckRep
         },
         Err(e) => {
             tracing::warn!("formula preview failed: {e:#}");
+            fail(if source_problem(&format!("{e:#}")) {
+                FormulaError::new(
+                    "The data of this table could not be read. Check that its source is there, then try again.",
+                    0,
+                    0,
+                )
+            } else {
+                FormulaError::new(
+                    "The data could not be read with this formula. Check the kinds of the columns it uses.",
+                    0,
+                    len,
+                )
+            })
+        }
+    }
+}
+
+/// Answers a check request for a column written as SQL (Advanced, V4-D62): the rules of
+/// `sqlcheck`, then the type and the first 5 values. Like [`answer`], it never shows the
+/// database's own message about the data.
+pub fn answer_sql(req: &CheckRequest, cx: &Context<'_>, db: &Connection) -> CheckReply {
+    let fail = |e: FormulaError| CheckReply::failed(e.in_utf16(&req.formula));
+    let len = req.formula.chars().count();
+    if req.kind != Kind::Column {
+        return fail(FormulaError::new("SQL works in a column only.", 0, 0));
+    }
+    let Some(t) = req
+        .table
+        .as_deref()
+        .and_then(|t| check::find_table(cx.catalog, t))
+    else {
+        return fail(FormulaError::new(
+            "Pick the table this formula belongs to first.",
+            0,
+            0,
+        ));
+    };
+    let columns: Vec<String> = t.columns.iter().map(|c| c.name.clone()).collect();
+    let source = format!("SELECT * FROM {}", t.sql_ref);
+    if let Err(e) = sqlcheck::check(db, &req.formula, &columns, &t.label, &source) {
+        return fail(e);
+    }
+    let wrapped = sqlcheck::wrap(&req.formula);
+    let dtype = match sqlcheck::describe(
+        db,
+        &format!("SELECT {wrapped} AS v FROM ({source}) AS t0"),
+    ) {
+        Ok(cols) => cols
+            .first()
+            .map_or(DType::Text, |c| DType::from_duckdb(&c.1)),
+        Err(_) => {
+            return fail(FormulaError::new(
+                "The data could not be read with this formula. Check the kinds of the columns it uses.",
+                0,
+                len,
+            ));
+        }
+    };
+    let shown = match dtype {
+        DType::Number => format!("CAST({wrapped} AS DOUBLE)"),
+        DType::Text => format!("CAST({wrapped} AS VARCHAR)"),
+        other => sql::display(&wrapped, check::Ty::from_dtype(other)),
+    };
+    match crate::engine::run(
+        db,
+        &format!("SELECT {shown} FROM ({source}) AS t0 LIMIT 5"),
+        &[],
+    ) {
+        Ok(rows) => CheckReply {
+            ok: true,
+            dtype: Some(dtype),
+            error: None,
+            preview: Some(
+                rows.into_iter()
+                    .filter_map(|r| r.into_iter().next())
+                    .collect(),
+            ),
+            uses: Some(vec![t.id.clone()]),
+        },
+        Err(e) => {
+            tracing::warn!("sql preview failed: {e:#}");
             fail(if source_problem(&format!("{e:#}")) {
                 FormulaError::new(
                     "The data of this table could not be read. Check that its source is there, then try again.",

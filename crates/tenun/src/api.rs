@@ -432,16 +432,25 @@ struct SetupBody {
     setup: Option<TableSetup>,
 }
 
-/// Sets the header row, the column overrides and the unpivot of one table. The source loads
-/// again when the data changes, and the tiles ask again.
+/// Sets the header row, the column overrides, the unpivot and the calculated columns of one
+/// table. The source loads again when the data changes, and the tiles ask again.
+///
+/// A calculated column that cannot be saved is a normal answer (V4-D35): `{ ok: false, calc, name,
+/// error: { message, at, len } }`, the same error as `POST /api/formula/check`, with `calc` the
+/// index of the column in the list that was sent. Nothing is saved then.
 async fn table_setup(State(s): S, Json(b): Json<SetupBody>) -> R<Json<Value>> {
     Ok(Json(
         blocking(&s, move |st| {
             let table = b.table.clone();
-            if st.engine.set_table_setup(&b.table, b.setup)? {
-                st.emit(json!({ "type": "data-changed", "tables": [table] }));
-            } else {
-                st.emit(json!({ "type": "workspace-changed" }));
+            match st.engine.set_table_setup(&b.table, b.setup) {
+                Ok(true) => st.emit(json!({ "type": "data-changed", "tables": [table] })),
+                Ok(false) => st.emit(json!({ "type": "workspace-changed" })),
+                Err(e) => {
+                    return match e.downcast_ref::<tenun_core::calc::CalcRefused>() {
+                        Some(refused) => Ok(refused.reply()),
+                        None => Err(e),
+                    };
+                }
             }
             Ok(serde_json::to_value(st.engine.snapshot())?)
         })
@@ -559,10 +568,15 @@ async fn rename_rels(State(s): S, Json(b): Json<RenameRelsBody>) -> R<Json<Value
 async fn check_links(State(s): S) -> R<Json<Value>> {
     Ok(Json(
         blocking(&s, |st| {
-            let changed = st.engine.recheck_live_links();
-            if changed {
+            let mut changed = st.engine.recheck_live_links();
+            // A calculated column with `TODAY()` is built again when the day has changed (V4-D34).
+            let dated = st.engine.refresh_dates();
+            if dated {
+                st.emit(json!({ "type": "data-changed" }));
+            } else if changed {
                 st.emit(json!({ "type": "workspace-changed" }));
             }
+            changed |= dated;
             Ok(json!({ "changed": changed }))
         })
         .await?,
@@ -613,13 +627,31 @@ async fn query(State(s): S, Json(q): Json<SemanticQuery>) -> R<Json<Value>> {
     ))
 }
 
+/// The body of `POST /api/formula/check`: the formula, and, for a calculated column that is being
+/// written, which column it is and whether it is SQL.
+#[derive(Deserialize)]
+struct CheckBody {
+    #[serde(flatten)]
+    check: CheckRequest,
+    /// The calculated column being edited: the columns of the table from it on are not there.
+    #[serde(default)]
+    before: Option<String>,
+    /// The formula is raw DuckDB SQL (Advanced, a column only).
+    #[serde(default)]
+    sql: bool,
+}
+
 /// Checks a formula. A wrong formula is a normal answer (`ok: false`, a plain message and the
 /// place to underline), not an error. A good one comes with its type and a preview. The answer
 /// never holds SQL.
-async fn formula_check(State(s): S, Json(b): Json<CheckRequest>) -> R<Json<Value>> {
+async fn formula_check(State(s): S, Json(b): Json<CheckBody>) -> R<Json<Value>> {
     Ok(Json(
         blocking(&s, move |st| {
-            Ok(serde_json::to_value(st.engine.check_formula(&b)?)?)
+            Ok(serde_json::to_value(st.engine.check_calc(
+                &b.check,
+                b.before.as_deref(),
+                b.sql,
+            )?)?)
         })
         .await?,
     ))

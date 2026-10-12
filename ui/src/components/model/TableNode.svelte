@@ -20,6 +20,7 @@
         <Handle type="source" position={Position.Left} id={`L:${c.name}`} class="h" />
         <Icon name={typeIcon[c.dtype]} size={11} />
         <span class="c" title={c.label ? c.name : undefined}>{c.label ?? c.name}</span>
+        {#if c.calc}<span class="fx" title="A calculated column"><Icon name="fx" size={11} /></span>{/if}
         {#if data.warned.has(c.name)}<span class="warn" title="This column repeats values. See the line."><Icon name="warning" size={11} /></span>{/if}
         <Handle type="source" position={Position.Right} id={`R:${c.name}`} class="h" />
       </li>

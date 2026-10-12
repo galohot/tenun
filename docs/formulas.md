@@ -3,7 +3,8 @@
 A formula is a small calculation written the way Excel writes it. Tenun reads it, checks it, and
 asks the database to do the work. Your files are never changed.
 
-Formulas arrive with calculated columns and measures in Tenun 0.4. This page describes the language.
+Formulas arrive with calculated columns and measures in Tenun 0.4. This page describes the language,
+and how to [add a column](#add-a-column) with one.
 
 ## Writing a formula
 
@@ -84,7 +85,9 @@ but it reads one table: the table that is grouped, and the tables related to it.
 - **Dates move by days.** `[date] + 30` is 30 days later. `[date2] - [date1]` is the number of days.
 - **`TODAY()` and `NOW()` are the date and time when the workspace was loaded or last refreshed,**
   not the moment you look at a chart. A dashboard that stays open overnight shows yesterday until
-  its data refreshes.
+  its data refreshes. In a calculated column they are fixed when the column is built. It is built
+  again when the day changes: when a dashboard refreshes, before a page is published or exported,
+  and on each run of the agent. The column says "as of" and the day.
 - **A minus sign binds tighter than a power, as in Excel.** `-2^2` is 4. Write `-(2^2)` for -4.
 - **Only the four formats of `TEXT` exist,** and they always use a comma for thousands and a dot
   for decimals.
@@ -261,3 +264,93 @@ The same total written twice is worked out once.
 In a calculated column, `[Table].[Column]` reads the one row it relates to, like `RELATED` in Power BI.
 
 Example: `[amount] / [Stores].[rent]`
+
+## Add a column
+
+A calculated column is a formula that becomes a real column of a table. It works in a chart, a
+filter, a map, a link, the column profile and an export, like any column from your file. Your file
+is never changed.
+
+1. Turn on **Advanced features** in Settings.
+2. Open the **Data** view and pick the table.
+3. Choose **Add column** (the ƒ button at the top of the table).
+4. Give the column a name, and write the formula. Type `[` to see the columns and the related
+   tables. Type the start of a function to see its name, what it takes and what it does. Use the
+   arrow keys to move, **Enter** or **Tab** to insert and **Esc** to close the list.
+5. Tenun checks the formula as you type. If it is wrong, the part that is wrong is underlined and
+   a sentence says why. If it is right, you see its type and the first five values.
+6. Choose **Add column**.
+
+Examples for the Coffee sample:
+
+- `Revenue incl. tax` is `[amount] * 1.11`.
+- `Region` is `[stores].[region]`. The order reads the region of its store, from another file.
+
+The column shows with an ƒ mark in the column list, in the field lists and in the Model view. Open
+its menu for **Edit formula** and **Delete column**. A column menu can still **Rename** it. The name
+you gave stays the real name, so tiles that use the column keep working. Rename changes only the
+name shown.
+
+### How a calculated column works
+
+- **It is computed by the database each time the table loads.** The result is not stored in your file.
+- **A column may use the ones above it,** never itself and never the ones below. The editor
+  offers only the columns above. If you write the name of a later one, you are told.
+- **A column of a related table gives one value for each row.** `[stores].[region]` is blank for
+  an order whose store is not in the stores file. If the other table repeats a key, Tenun uses the
+  first row of it (the first in the file; for a database, the row that sorts first by the key).
+  A table never gets more rows from a calculated column, so no total is counted twice. The link
+  keeps its warning in the Model view.
+- **Two links to one table:** write the name of the link, `[Shipped from].[region]`. Name the links
+  in the Model view first. See [relationships](relationships.md).
+- **A table that reads another table's calculated column** is built after it. A chain across three
+  tables works. Two tables that read each other are refused, and the message names both columns.
+- **A column that reads another table cannot be the key of a link.** Its value would depend on
+  another link. A calculated column that reads only its own table can be a key.
+- **A column that cannot be computed is blank, and the table says why.** This happens when the file
+  loses a column the formula reads, when a link is removed, or when the kinds no longer fit. The
+  rest of the table loads. A tile that uses the column says so in a note. A published page, an
+  exported file and a picture say only "The table: the column could not be computed", with no
+  formula.
+- **Names follow renames.** If you change the name shown for a column, every formula that wrote the
+  old name is rewritten. The same happens when you rename a link. The text between the names does not change.
+- **A name** may not be the name of a column of the table, may not hold `[` or `]`, and has at most
+  100 letters.
+- **A table can have up to 50 calculated columns.**
+- **A database table works too.** The calculated column is made in Tenun. Nothing is written to the database.
+- **An old workspace opens as it was.** A file without calculated columns is saved back exactly
+  as it was read.
+
+### Use SQL instead (Advanced)
+
+For something the function list cannot do, choose **Use SQL instead** in the sheet. The formula is
+then one DuckDB expression over the columns of the table, for example `strftime(date, '%Y-%m')` or
+`CASE WHEN amount > 100 THEN 'big' ELSE 'small' END`. A name with spaces or capitals goes between
+double quotes: `"Total sales" / 2`. A cell that cannot be worked out is blank, as in a formula.
+
+A workspace file can come from someone else, and a published page may show what a column holds. So
+SQL in a column is limited to **one expression**, checked before it is saved and every time the file
+opens:
+
+- **Allowed:** numbers, text (a `;` inside a text is only a character), the columns of the table,
+  `+ - * / % ^ // || = <> < > <= >=`, `AND OR NOT`, `CASE`, `CAST` and `::`, `IN`, `BETWEEN`, `LIKE`,
+  `IS [NOT] NULL`, `IS [NOT] DISTINCT FROM`, `DATE '2026-01-31'`, `INTERVAL`, and the functions that
+  DuckDB lists as plain built-in functions (the list is read from DuckDB, so it follows the version):
+  `lower`, `round`, `coalesce`, `strftime`, `date_part`, `regexp_matches`, and many more.
+- **Refused:** a `;`, a comment (`--` or `/* */`), a subquery, `SELECT`, `FROM`, `WITH`, `VALUES`,
+  `JOIN`, `UNION`, `OVER` and any other word that starts a query. Any function that reads a file,
+  the environment or the network (`read_text`, `read_csv`, `glob`, `getenv`, `current_setting`,
+  `query`, `query_table`, `sniff_csv`, names that start with `http` or `s3`, names that end in
+  `_scan`), any function that has side effects or changes from one call to the next (`random`,
+  `uuid`, `nextval`), totals such as `sum` (they belong to measures), and any name that is not a
+  column of the table. The message names the word and the place is underlined.
+- **Write `date_part('year', d)`, not `EXTRACT(year FROM d)`,** and `substr(s, 2, 3)`, not
+  `SUBSTRING(s FROM 2 FOR 3)`. The word `FROM` is refused everywhere except in `IS DISTINCT FROM`.
+
+How the limit works: Tenun reads the text itself and **denies by default.** Every word must be on the
+short list above, a function DuckDB marks as plain, or a column. A subquery needs a word that is not
+on the list, and a table function can only follow `FROM`, so neither can be written. The expression
+is then bound by DuckDB (`EXPLAIN`) and runs inside `TRY`. The limit is the language of the list:
+an expression that needs something outside it is not possible in a column, and the other tools of
+Tenun (formulas, links, measures) are the way to do it.
+

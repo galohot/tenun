@@ -1,7 +1,7 @@
 // Data prep helpers (build 08): column labels, the words for what was detected, and small
 // edits of a table's setup. Pure functions, so the node tests can load them.
 
-import type { Column, ColumnSetup, DType, Table, TableSetup, Transform, UnpivotPlan } from './api';
+import type { CalcColumn, Column, ColumnSetup, DType, Table, TableSetup, Transform, UnpivotPlan } from './api';
 
 type WithColumns = Pick<Table, 'id'> & { columns?: Column[] };
 
@@ -104,6 +104,7 @@ function tidy(s: TableSetup): TableSetup {
   if (s.header_row) out.header_row = s.header_row;
   if (s.columns && Object.keys(s.columns).length) out.columns = s.columns;
   if (s.transforms?.length) out.transforms = s.transforms;
+  if (s.calc?.length) out.calc = s.calc;
   return out;
 }
 
@@ -114,3 +115,6 @@ export function barHeights(counts: number[]): number[] {
   const top = Math.max(0, ...counts);
   return counts.map((n) => (top ? n / top : 0));
 }
+
+/** The setup with its calculated columns replaced. An empty list leaves none in the file. */
+export const withCalc = (setup: TableSetup | undefined, calc: CalcColumn[]): TableSetup => tidy({ ...setup, calc });

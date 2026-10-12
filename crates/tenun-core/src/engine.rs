@@ -1,5 +1,6 @@
 //! The engine: one in-memory DuckDB, the open workspace, and its catalog.
 
+use crate::calc::{self, CalcRefused};
 use crate::catalog::{Catalog, Column, DType, Table, ident, lit};
 use crate::excel::{self, Cell, ColType};
 use crate::fetch;
@@ -12,8 +13,8 @@ use crate::query::{self, Param, SemanticQuery};
 use crate::secrets::Secrets;
 use crate::suggest::{self, Suggestion};
 use crate::workspace::{
-    DEFAULT_PATTERN, DbConn, Every, FieldRef, KeyPlace, LinkKey, Locale, Paging, Relationship,
-    Source, SourceKind, TableSetup, Transform, Workspace, resolve_path, store_path,
+    CalcColumn, DEFAULT_PATTERN, DbConn, Every, FieldRef, KeyPlace, LinkKey, Locale, Paging,
+    Relationship, Source, SourceKind, TableSetup, Transform, Workspace, resolve_path, store_path,
 };
 use chrono::NaiveDate;
 use duckdb::Connection;
@@ -89,6 +90,18 @@ struct State {
     /// Relationship id → the kind the link had at its last check, and the kind it had before the
     /// data changed it (while it has not changed back).
     kinds: BTreeMap<String, (&'static str, Option<&'static str>)>,
+    /// Table id → the reference of the table under its calculated-column view (V4-D3). A table
+    /// has an entry only while its catalog entry points at such a view.
+    calc_base: BTreeMap<String, String>,
+    /// The calculated columns that read another table, as (table id, column). Such a column cannot
+    /// be the key of a link (V4-D63).
+    calc_related: BTreeSet<(String, String)>,
+    /// Table id → the day its calculated-column view was built, for a table with `TODAY()` or
+    /// `NOW()` in a formula (V4-D34). The view is built again when the day changes.
+    calc_day: BTreeMap<String, NaiveDate>,
+    /// Bumped when a load puts new tables in the catalog, so a pass that began before it is
+    /// thrown away instead of writing old tables back.
+    tables_gen: u64,
     dirty: bool,
 }
 
@@ -98,6 +111,8 @@ pub struct Snapshot {
     pub workspace: Workspace,
     pub path: Option<String>,
     pub tables: Vec<Table>,
+    /// Source id → why it did not load. Table id → the calculated columns of the table that
+    /// could not be computed, in words; their values are blank.
     pub errors: BTreeMap<String, String>,
     /// Source id → when it last loaded without error (ISO 8601, UTC). Kept
     /// out of the source itself so it never reaches the `.tenun` file.
@@ -378,7 +393,7 @@ impl Engine {
             workspace: s.ws.clone(),
             path: s.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
             tables: s.catalog.tables.clone(),
-            errors: s.errors.clone(),
+            errors: errors_of(&s),
             loaded_at: s.loaded_at.clone(),
             link_keys: s
                 .ws
@@ -679,7 +694,13 @@ impl Engine {
             s.ws.tables.retain(|k, _| !k.starts_with(&prefix));
             s.errors.remove(id);
             s.loaded_at.remove(id);
+            s.calc_base.retain(|k, _| !k.starts_with(&prefix));
+            s.calc_related.retain(|(k, _)| !k.starts_with(&prefix));
+            s.calc_day.retain(|k, _| !k.starts_with(&prefix));
+            s.tables_gen += 1;
         }
+        // Tables that read the removed ones now say so.
+        self.rebuild_calc(calc::Roots::All);
         self.persist();
     }
 
@@ -737,9 +758,97 @@ impl Engine {
             let mut s = self.state.write().unwrap();
             self.finish_load(&mut s, id, result, fetched, fetch_error)
         };
+        // The calculated columns come before the links are checked, because a link may use one
+        // as its key. A column that reads another table is built again after the check, because a
+        // link that was unknown during the first pass is known now (V4-D3, V4-D63).
+        let related = self.rebuild_calc(calc::Roots::Source(id));
         // The links of this source's tables are checked once per load (V4-D26), never per query.
         self.check_links(id);
+        if !related.is_empty() {
+            self.rebuild_calc(calc::Roots::Tables(&related));
+        }
         ids
+    }
+
+    /// Builds the calculated-column views of the tables `roots` names and of the tables that read
+    /// them (V4-D3). Returns the tables that have a column which reads another table.
+    fn rebuild_calc(&self, roots: calc::Roots<'_>) -> Vec<String> {
+        for _ in 0..3 {
+            let (catalog, rels, health, setups, bases, generation) = {
+                let s = self.state.read().unwrap();
+                (
+                    s.catalog.clone(),
+                    s.ws.relationships.clone(),
+                    s.health.clone(),
+                    s.ws.tables.clone(),
+                    s.calc_base.clone(),
+                    s.tables_gen,
+                )
+            };
+            let today = self.today();
+            let world = calc::World {
+                catalog: &catalog,
+                rels: &rels,
+                health: &health,
+                setups: &setups,
+                bases: &bases,
+                today,
+                now: today.and_time(chrono::Local::now().time()),
+            };
+            let out = {
+                let db = self.db.lock().unwrap();
+                calc::rebuild(&db, &world, &roots, true, true)
+            };
+            let mut s = self.state.write().unwrap();
+            if s.tables_gen != generation {
+                // A load put new tables in while this pass ran. Do it again on them.
+                continue;
+            }
+            for b in out.built {
+                let id = b.table.id.clone();
+                let Some(slot) = s.catalog.tables.iter_mut().find(|t| t.id == id) else {
+                    continue;
+                };
+                *slot = b.table;
+                match b.base {
+                    Some(base) => s.calc_base.insert(id.clone(), base),
+                    None => s.calc_base.remove(&id),
+                };
+                s.calc_related.retain(|(t, _)| *t != id);
+                for m in b.columns.iter().filter(|m| m.related && m.error.is_none()) {
+                    s.calc_related.insert((id.clone(), m.name.clone()));
+                }
+                if b.columns.iter().any(|m| m.uses_time) {
+                    s.calc_day.insert(id, today);
+                } else {
+                    s.calc_day.remove(&id);
+                }
+            }
+            return out.related_tables;
+        }
+        Vec::new()
+    }
+
+    /// Builds the calculated columns that use `TODAY()` or `NOW()` again when the day has changed
+    /// since their view was made (V4-D34). The app calls it when a dashboard refreshes, the
+    /// publisher before it publishes, and the agent on each run. Returns whether anything was
+    /// built again.
+    pub fn refresh_dates(&self) -> bool {
+        let today = self.today();
+        let stale: Vec<String> = self
+            .state
+            .read()
+            .unwrap()
+            .calc_day
+            .iter()
+            .filter(|(_, day)| **day != today)
+            .map(|(id, _)| id.clone())
+            .collect();
+        if stale.is_empty() {
+            return false;
+        }
+        self.rebuild_calc(calc::Roots::Tables(&stale));
+        true
     }
 
     /// Puts what a load found into the state. Returns the ids of the tables.
@@ -758,6 +867,12 @@ impl Engine {
         // until the check has read them. A check that began earlier writes nothing (V4-D51).
         forget_links(s, id);
         s.catalog.tables.retain(|t| t.source_id != id);
+        // The tables are new, so they have no calculated columns until the next pass.
+        let prefix = format!("{id}/");
+        s.calc_base.retain(|k, _| !k.starts_with(&prefix));
+        s.calc_related.retain(|(k, _)| !k.starts_with(&prefix));
+        s.calc_day.retain(|k, _| !k.starts_with(&prefix));
+        s.tables_gen += 1;
         match result {
             Ok(mut tables) => {
                 for t in &mut tables {
@@ -1194,6 +1309,22 @@ impl Engine {
     /// is unique the join would multiply rows and every sum would be wrong, so
     /// it is refused with an explanation.
     pub fn add_relationship(&self, a: FieldRef, b: FieldRef) -> anyhow::Result<String> {
+        {
+            // A calculated column that reads another table cannot be a key: its value would depend
+            // on the health of another link (V4-D63).
+            let s = self.state.read().unwrap();
+            for f in [&a, &b] {
+                if s.calc_related
+                    .contains(&(f.table.clone(), f.column.clone()))
+                {
+                    let label = s.catalog.table(&f.table).map_or(&f.table, |t| &t.label);
+                    anyhow::bail!(
+                        "The column {} of {label} reads another table, so it cannot be the key of a link. Use a column from the file, or a calculated column that reads only its own table.",
+                        f.column
+                    );
+                }
+            }
+        }
         let rows = self.live_rows.load(Ordering::Relaxed);
         let (from, to, health) = {
             let s = self.state.read().unwrap();
@@ -1263,6 +1394,8 @@ impl Engine {
             record(&mut s, &id, health);
             id
         };
+        // A calculated column may have been waiting for this link.
+        self.rebuild_calc(calc::Roots::All);
         self.persist();
         Ok(id)
     }
@@ -1275,6 +1408,8 @@ impl Engine {
             s.epoch.remove(id);
             s.kinds.remove(id);
         }
+        // A calculated column that read across this link says so now.
+        self.rebuild_calc(calc::Roots::All);
         self.persist();
     }
 
@@ -1290,10 +1425,10 @@ impl Engine {
     /// spaces at its ends and doubled spaces go. An empty name clears it, unless another link joins
     /// the same two tables.
     ///
-    /// **Whoever stores formulas must follow a rename here.** Calculated columns (02), measures
-    /// and group values (03) call `formula::rename_link(text, old, new)` for every stored formula,
-    /// from this function, as `formula::rename_column` is called when a column is renamed
-    /// (V4-D25). No formula is stored yet, so nothing is rewritten today.
+    /// **Whoever stores formulas must follow a rename here.** The formulas of calculated columns
+    /// are rewritten from this function with `formula::rename_link(text, old, new)`, in the same
+    /// step that names the link (V4-D46). Measures and group values (03) join them when they
+    /// exist. A link that gives up its name leaves its formulas as they are: they say so.
     pub fn rename_links(&self, names: BTreeMap<String, Option<String>>) -> anyhow::Result<()> {
         {
             let mut s = self.state.write().unwrap();
@@ -1357,12 +1492,34 @@ impl Engine {
                     }
                 }
             }
+            // The formulas that use a link by its name follow the name.
+            let renames: Vec<(String, String)> = next
+                .iter()
+                .filter_map(|(id, new)| {
+                    let old =
+                        s.ws.relationships
+                            .iter()
+                            .find(|r| &r.id == id)?
+                            .name
+                            .clone()?;
+                    let new = new.clone()?;
+                    (old != new).then_some((old, new))
+                })
+                .collect();
             for (id, name) in next {
                 if let Some(r) = s.ws.relationships.iter_mut().find(|r| r.id == id) {
                     r.name = name;
                 }
             }
+            if !renames.is_empty() {
+                for setup in s.ws.tables.values_mut() {
+                    for c in setup.calc.iter_mut().filter(|c| !c.sql) {
+                        c.formula = calc::rename_links_in(&c.formula, &renames);
+                    }
+                }
+            }
         }
+        self.rebuild_calc(calc::Roots::All);
         self.persist();
         Ok(())
     }
@@ -1430,6 +1587,7 @@ impl Engine {
         let today = self.today();
         let compiled = {
             let s = self.state.read().unwrap();
+            note_blank_calc(&s, q);
             query::compile_on(
                 q,
                 &s.catalog,
@@ -1475,6 +1633,7 @@ impl Engine {
         let today = self.today();
         let (sql, params, ignored) = {
             let s = self.state.read().unwrap();
+            note_blank_calc(&s, q);
             let sc = query::scope_on(
                 q,
                 &s.catalog,
@@ -1559,6 +1718,7 @@ impl Engine {
         let cols: Vec<(String, DType)> = t
             .columns
             .iter()
+            .filter(|c| !c.calc)
             .map(|c| (c.name.clone(), c.dtype))
             .collect();
         prep::detect_unpivot(&cols)
@@ -1585,15 +1745,22 @@ impl Engine {
             transforms: vec![Transform::Unpivot { keep, name, value }],
             ..TableSetup::default()
         };
+        // The table as the file gives it, under its calculated columns.
+        let base_ref = {
+            let s = self.state.read().unwrap();
+            s.calc_base.get(table_id).cloned()
+        }
+        .unwrap_or_else(|| table.sql_ref.clone());
         let cols: Vec<ColInfo> = table
             .columns
             .iter()
+            .filter(|c| !c.calc)
             .map(|c| ColInfo {
                 name: c.name.clone(),
                 dtype: c.dtype,
             })
             .collect();
-        let plan = prep::plan_view(&table.sql_ref, &cols, &setup)
+        let plan = prep::plan_view(&base_ref, &cols, &setup)
             .ok_or_else(|| anyhow::anyhow!("There is nothing to turn into rows."))?;
         let columns = plan
             .columns
@@ -1624,10 +1791,19 @@ impl Engine {
         prep::profile(&self.conn()?, &sql_ref, &col.name, col.dtype, col.mixed)
     }
 
-    /// Sets how one table is prepared: the header row, column overrides and the unpivot. `None`
-    /// clears them. The table's source loads again when the data changes (header row, types,
-    /// unpivot); labels, hidden flags and descriptions apply at once. Returns whether it loaded
-    /// again.
+    /// Sets how one table is prepared: the header row, column overrides, the unpivot and the
+    /// calculated columns. `None` clears them. The table's source loads again when the data changes
+    /// (header row, types, unpivot); labels, hidden flags and descriptions apply at once; a change
+    /// of the calculated columns builds the view of the table again. Returns whether the data of
+    /// any table changed, so the tiles should ask again.
+    ///
+    /// The calculated columns are checked first, each with the checker of build 01 (or the SQL
+    /// check of V4-D62). A new or changed one that fails is refused with a [`CalcRefused`] error
+    /// that has the place to underline. One that was saved before and fails now is kept: it shows
+    /// as blank with a sentence on the table.
+    ///
+    /// A column that is renamed (the name shown, or the name an unpivot gives) rewrites the formulas
+    /// that use the old name, in this table and in the others (V4-D25).
     pub fn set_table_setup(
         &self,
         table_id: &str,
@@ -1641,8 +1817,8 @@ impl Engine {
                 anyhow::bail!("Give the two new columns different names.");
             }
         }
-        let reload = {
-            let mut s = self.state.write().unwrap();
+        let (table, old) = {
+            let s = self.state.read().unwrap();
             let t = s
                 .catalog
                 .table(table_id)
@@ -1650,14 +1826,46 @@ impl Engine {
             if !t.prep && (setup.header_row.is_some() || setup.changes_view()) {
                 anyhow::bail!("This table is read live, so its columns cannot be changed here.");
             }
-            let source_id = t.source_id.clone();
+            (
+                t.clone(),
+                s.ws.tables.get(table_id).cloned().unwrap_or_default(),
+            )
+        };
+        // The formulas follow the names that changed. The check below judges what was sent.
+        let sent = setup.calc.clone();
+        let renames = calc::renamed_columns(&table, &old, &setup);
+        for c in setup.calc.iter_mut().filter(|c| !c.sql) {
+            c.formula = calc::follow_renames(&c.formula, &table, &renames, true);
+        }
+        if setup.calc != old.calc {
+            self.check_calc_setup(&table, &old, &setup, &sent)?;
+        }
+        let calc_changed = setup.calc != old.calc;
+        let (reload, touched) = {
+            let mut s = self.state.write().unwrap();
+            // The other tables' formulas that name this table's column.
+            let mut touched = Vec::new();
+            if !renames.is_empty() {
+                for (id, other) in
+                    s.ws.tables
+                        .iter_mut()
+                        .filter(|(id, _)| id.as_str() != table_id)
+                {
+                    let before = other.calc.clone();
+                    for c in other.calc.iter_mut().filter(|c| !c.sql) {
+                        c.formula = calc::follow_renames(&c.formula, &table, &renames, false);
+                    }
+                    if other.calc != before {
+                        touched.push(id.clone());
+                    }
+                }
+            }
             let retyped = |x: &TableSetup| -> BTreeMap<String, _> {
                 x.columns
                     .iter()
                     .filter_map(|(n, c)| Some((n.clone(), (c.dtype?, c.date_format))))
                     .collect()
             };
-            let old = s.ws.tables.get(table_id).cloned().unwrap_or_default();
             let reload = old.header_row != setup.header_row
                 || old.transforms != setup.transforms
                 || retyped(&old) != retyped(&setup);
@@ -1673,15 +1881,121 @@ impl Engine {
                     stamp_setup(t, setup);
                 }
             }
-            reload.then_some(source_id)
+            (reload.then(|| table.source_id.clone()), touched)
         };
         let reloaded = reload.is_some();
         if let Some(id) = reload {
             // A link that is still fresh is read from its copy, not downloaded inside this request.
             self.load_with(&id, false);
+        } else if calc_changed || !renames.is_empty() {
+            // The view of the table, and of the tables that read it, are made again.
+            let mut ids = touched;
+            ids.push(table_id.to_string());
+            self.rebuild_calc(calc::Roots::Tables(&ids));
         }
         self.persist();
-        Ok(reloaded)
+        Ok(reloaded || calc_changed || !renames.is_empty())
+    }
+
+    /// The check of a setup's calculated columns before it is saved (see [`Engine::set_table_setup`]).
+    fn check_calc_setup(
+        &self,
+        table: &Table,
+        old: &TableSetup,
+        new: &TableSetup,
+        sent: &[CalcColumn],
+    ) -> anyhow::Result<()> {
+        let (mut catalog, rels, health, mut setups, bases) = {
+            let s = self.state.read().unwrap();
+            (
+                s.catalog.clone(),
+                s.ws.relationships.clone(),
+                s.health.clone(),
+                s.ws.tables.clone(),
+                s.calc_base.clone(),
+            )
+        };
+        if new.calc.len() > calc::MAX_COLUMNS {
+            anyhow::bail!(
+                "A table can have up to {} calculated columns. Remove some, or put a part of the work in a measure.",
+                calc::MAX_COLUMNS
+            );
+        }
+        // A column that a link uses as its key stays.
+        for r in &rels {
+            for f in [&r.from, &r.to].into_iter().filter(|f| f.table == table.id) {
+                let was = old.calc.iter().any(|c| c.name == f.column);
+                if was && !new.calc.iter().any(|c| c.name == f.column) {
+                    anyhow::bail!(
+                        "The column {} is the key of a link ({}). Remove the link in Model first.",
+                        f.column,
+                        links::link_label(r, &catalog)
+                    );
+                }
+            }
+        }
+        if new.is_empty() {
+            setups.remove(&table.id);
+        } else {
+            setups.insert(table.id.clone(), new.clone());
+        }
+        // The formulas are read with the names the table will show.
+        if let Some(t) = catalog.tables.iter_mut().find(|t| t.id == table.id) {
+            stamp_setup(t, Some(new));
+        }
+        let today = self.today();
+        let world = calc::World {
+            catalog: &catalog,
+            rels: &rels,
+            health: &health,
+            setups: &setups,
+            bases: &bases,
+            today,
+            now: today.and_time(chrono::Local::now().time()),
+        };
+        let checked = {
+            let db = self.db.lock().unwrap();
+            calc::check_columns(&db, &world, &table.id)
+        };
+        for bad in checked.failing {
+            let c = &new.calc[bad.index];
+            // Saved before, as it is, and what it can read has not moved: not this save's doing.
+            let as_sent = sent.get(bad.index).unwrap_or(c);
+            let unchanged = old
+                .calc
+                .iter()
+                .position(|o| o.name == c.name && o.formula == as_sent.formula && o.sql == c.sql)
+                .is_some_and(|at| {
+                    // Every column that was above it is still above it, or gone. A column that
+                    // moved below it changes what the formula can read.
+                    old.calc[..at].iter().all(|o| {
+                        new.calc[..bad.index].iter().any(|n| n.name == o.name)
+                            || !new.calc.iter().any(|n| n.name == o.name)
+                    })
+                });
+            if !unchanged {
+                return Err(CalcRefused {
+                    index: bad.index,
+                    name: c.name.clone(),
+                    formula: c.formula.clone(),
+                    error: bad.error,
+                }
+                .into());
+            }
+        }
+        // A column that reads another table is not a key.
+        for r in &rels {
+            for f in [&r.from, &r.to].into_iter().filter(|f| f.table == table.id) {
+                if checked.related.contains(&f.column) {
+                    anyhow::bail!(
+                        "The column {} reads another table, so it cannot be the key of a link ({}). Remove the link in Model first.",
+                        f.column,
+                        links::link_label(r, &catalog)
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn suggest(&self) -> anyhow::Result<Vec<Suggestion>> {
@@ -1735,7 +2049,7 @@ impl Engine {
     pub fn link_notes(&self, crossed: &[String]) -> Vec<String> {
         let s = self.state.read().unwrap();
         let sources = source_lookup(&s);
-        notes_of(&s, crossed, |r, h| {
+        notes_of(&s, crossed, false, |r, h| {
             links::tile_note(r, h, &s.catalog, &sources)
         })
     }
@@ -1743,7 +2057,9 @@ impl Engine {
     /// The same notes with no key value and no file name, for what leaves the computer (V4-D52).
     pub fn public_link_notes(&self, crossed: &[String]) -> Vec<String> {
         let s = self.state.read().unwrap();
-        notes_of(&s, crossed, |r, h| links::public_note(r, h, &s.catalog))
+        notes_of(&s, crossed, true, |r, h| {
+            links::public_note(r, h, &s.catalog)
+        })
     }
 
     /// Checks a formula against the open workspace and runs a preview of it (the first 5 values
@@ -1752,7 +2068,21 @@ impl Engine {
         &self,
         req: &formula::CheckRequest,
     ) -> anyhow::Result<formula::CheckReply> {
-        let (catalog, rels, health) = {
+        self.check_calc(req, None, false)
+    }
+
+    /// Like [`Engine::check_formula`], for a calculated column that is being written. `before` is
+    /// the name of the column being edited: the columns of the table from it on are not there for
+    /// the formula, because a calculated column may use an earlier one, never itself or a later
+    /// one (V4-D3). Not given: every column is there. With `sql` the formula is raw DuckDB SQL,
+    /// checked by the rules of V4-D62.
+    pub fn check_calc(
+        &self,
+        req: &formula::CheckRequest,
+        before: Option<&str>,
+        sql: bool,
+    ) -> anyhow::Result<formula::CheckReply> {
+        let (mut catalog, rels, health) = {
             let s = self.state.read().unwrap();
             (
                 s.catalog.clone(),
@@ -1760,6 +2090,22 @@ impl Engine {
                 s.health.clone(),
             )
         };
+        let table_id = req
+            .table
+            .as_deref()
+            .and_then(|t| formula::check::find_table(&catalog, t))
+            .map(|t| t.id.clone());
+        // The table is seen as it is above the column being written.
+        if let (Some(id), Some(name)) = (&table_id, before)
+            && let Some(t) = catalog.tables.iter_mut().find(|t| &t.id == id)
+            && let Some(at) = t
+                .columns
+                .iter()
+                .position(|c| c.calc && c.name == name.trim())
+        {
+            let keep = t.columns[..at].to_vec();
+            t.columns = keep;
+        }
         let today = self.today();
         let cx = formula::Context {
             catalog: &catalog,
@@ -1767,9 +2113,32 @@ impl Engine {
             health: &health,
             today,
             now: today.and_time(chrono::Local::now().time()),
+            // A column formula is read the way a view reads it: one row per key (V4-D63).
+            view: req.kind == formula::Kind::Column,
         };
-        Ok(formula::answer(req, &cx, &self.conn()?))
+        let conn = self.conn()?;
+        if sql {
+            return Ok(formula::answer_sql(req, &cx, &conn));
+        }
+        Ok(formula::answer(req, &cx, &conn))
     }
+}
+
+/// The errors of the workspace: why a source did not load, and, by table id, which calculated
+/// columns of a table could not be computed (their values are blank).
+fn errors_of(s: &State) -> BTreeMap<String, String> {
+    let mut out = s.errors.clone();
+    for t in &s.catalog.tables {
+        let bad: Vec<String> = t
+            .columns
+            .iter()
+            .filter_map(|c| Some(format!("{}: {}", c.name, c.error.as_ref()?)))
+            .collect();
+        if !bad.is_empty() {
+            out.insert(t.id.clone(), bad.join(" "));
+        }
+    }
+    out
 }
 
 /// The name of a source and how many tables it holds, for the sentences about a link.
@@ -1798,14 +2167,84 @@ fn health_out(s: &State) -> BTreeMap<String, HealthOut> {
         .collect()
 }
 
+/// The id a tile note uses for a calculated column that could not be computed.
+const CALC_NOTE: &str = "calc:";
+
+/// Tells the tile that a calculated column it reads is blank because it could not be computed.
+fn note_blank_calc(s: &State, q: &SemanticQuery) {
+    let mut fields: Vec<(&str, &str)> = Vec::new();
+    for m in &q.measures {
+        if let Some(c) = &m.column {
+            fields.push((&m.table, c));
+        }
+        if let Some(p) = m
+            .per
+            .as_ref()
+            .and_then(|p| p.column.as_ref().map(|c| (&p.table, c)))
+        {
+            fields.push((p.0, p.1));
+        }
+    }
+    fields.extend(
+        q.dimensions
+            .iter()
+            .map(|d| (d.table.as_str(), d.column.as_str())),
+    );
+    fields.extend(
+        q.filters
+            .iter()
+            .map(|f| (f.table.as_str(), f.column.as_str())),
+    );
+    let ids: Vec<String> = fields
+        .into_iter()
+        .filter(|(t, c)| {
+            s.catalog
+                .table(t)
+                .and_then(|t| t.column(c))
+                .is_some_and(|c| c.error.is_some())
+        })
+        .map(|(t, c)| format!("{CALC_NOTE}{t}\u{1f}{c}"))
+        .collect();
+    if !ids.is_empty() {
+        note_crossed(&ids);
+    }
+}
+
+/// What the reader should know about a blank calculated column, in the app (`public` false: the
+/// reason, in words) or anywhere else (`public` true: the table and the column only, because a
+/// formula can hold a text the author typed).
+fn blank_calc_note(s: &State, id: &str, public: bool) -> Option<String> {
+    let (table, column) = id.strip_prefix(CALC_NOTE)?.split_once('\u{1f}')?;
+    let t = s.catalog.table(table)?;
+    let c = t.column(column)?;
+    let reason = c.error.as_deref()?;
+    Some(if public {
+        format!("{}: {} could not be computed.", t.label, column)
+    } else {
+        format!(
+            "{}: {} could not be computed, so its values are blank. {}",
+            t.label, column, reason
+        )
+    })
+}
+
 /// The sentences of the links in `crossed` that have one, once each.
 fn notes_of(
     s: &State,
     crossed: &[String],
+    public: bool,
     say: impl Fn(&Relationship, &LinkHealth) -> Option<String>,
 ) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for id in crossed {
+        if id.starts_with(CALC_NOTE) {
+            if let Some(n) = blank_calc_note(s, id, public)
+                && !out.contains(&n)
+            {
+                out.push(n);
+            }
+            continue;
+        }
         if let (Some(r), Some(h)) = (
             s.ws.relationships.iter().find(|r| &r.id == id),
             s.health.get(id),
@@ -2263,7 +2702,7 @@ pub fn url_due(every: Every, last: Option<SystemTime>, now: SystemTime) -> bool 
 }
 
 fn schema_of(id: &str) -> String {
-    format!("s_{id}")
+    calc::schema_of(id)
 }
 
 fn attach_name(id: &str) -> String {
@@ -2319,8 +2758,21 @@ fn stamp_setup(t: &mut Table, setup: Option<&TableSetup>) {
         let o = setup.and_then(|s| s.columns.get(&c.name));
         c.label = o.and_then(|o| o.label.clone()).filter(|l| !l.is_empty());
         c.hidden = o.is_some_and(|o| o.hidden == Some(true));
+        // A calculated column carries its own description when the column menu has none.
+        let own = c
+            .calc
+            .then(|| {
+                setup.and_then(|s| {
+                    s.calc
+                        .iter()
+                        .find(|x| x.name == c.name)
+                        .and_then(|x| x.description.clone())
+                })
+            })
+            .flatten();
         c.description = o
             .and_then(|o| o.description.clone())
+            .or(own)
             .filter(|d| !d.is_empty());
     }
 }
@@ -2992,7 +3444,8 @@ fn catalog_local(db: &Connection, src: &Source, schema: &str) -> anyhow::Result<
     )?;
     let mut tables = Vec::new();
     for (s, name, mut columns) in group(rows) {
-        if name.starts_with("__stage_") || name.starts_with("__raw_") {
+        if name.starts_with("__stage_") || name.starts_with("__raw_") || name.starts_with("__calc_")
+        {
             continue;
         }
         let sql_ref = format!("{}.{}", ident(&s), ident(&name));

@@ -16,7 +16,7 @@
     const prev = document.activeElement as HTMLElement | null;
     // The first thing to type in, else the main button: never the Close button of the header.
     const first =
-      dialog?.querySelector<HTMLElement>('.content input:not([type=hidden]), .content select, .content textarea') ??
+      dialog?.querySelector<HTMLElement>('.content input:not([type=hidden]):not([disabled]), .content select:not([disabled]), .content textarea:not([disabled])') ??
       dialog?.querySelector<HTMLElement>('button.primary') ??
       dialog?.querySelector<HTMLElement>('.content button, footer button');
     first?.focus();

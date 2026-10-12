@@ -64,6 +64,8 @@
     expand: 'M12 3.5h4.5V8M8 16.5H3.5V12M16.5 3.5l-5 5M3.5 16.5l5-5',
     rows: 'M4 5.5h12M4 10h12M4 14.5h12',
     info: 'M10 3.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM10 9v4.5M10 6.5h.01',
+    // A slanted f with a crossbar: a formula (build 02).
+    fx: 'M12.6 3.9c-2.2-.6-3.5.5-3.8 2.6L7.7 16.1M5.6 9.3h6.1',
   };
   export type IconName = keyof typeof paths;
 </script>

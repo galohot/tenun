@@ -124,9 +124,10 @@
               </button>
             {/if}
             {#each cols as c (c.name)}
-              <button class="opt" class:on={here?.key === g.key && column === c.name} title={c.description} onclick={() => pick(g.table.id, c.name, g.via)}>
+              <button class="opt" class:on={here?.key === g.key && column === c.name} title={[c.description, c.as_of ? `As of ${c.as_of}.` : ''].filter(Boolean).join(' ') || undefined} onclick={() => pick(g.table.id, c.name, g.via)}>
                 <Icon name={typeIcon[dim(c.dtype)]} size={12} />
                 <span class="nm">{c.label ?? c.name}</span>
+                {#if c.calc}<span class="fx" title={c.error ? 'A calculated column that could not be computed' : 'A calculated column'}><Icon name="fx" size={11} /></span>{/if}
                 {#if blankNote(c)}<span class="blank">{blankNote(c)}</span>{/if}
               </button>
             {/each}
@@ -198,6 +199,8 @@
   .opt:hover :global(svg) { color: #fff; }
   .opt.on { font-weight: 600; }
   .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fx { display: inline-flex; flex: none; color: var(--text-2); }
+  .opt:hover .fx, .opt:hover .fx :global(svg) { color: #fff; }
   .blank { margin-left: auto; flex: none; font-size: 11px; color: var(--text-2); }
   .opt:hover .blank { color: #fff; }
   .nothing { margin: 8px; color: var(--text-2); font-size: 12px; }

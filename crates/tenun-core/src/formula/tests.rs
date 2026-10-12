@@ -178,6 +178,7 @@ fn cx() -> Context<'static> {
         health: &w.health,
         today,
         now: today.and_hms_opt(14, 3, 22).unwrap(),
+        view: false,
     }
 }
 
