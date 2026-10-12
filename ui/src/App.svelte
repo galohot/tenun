@@ -9,6 +9,8 @@
   import DashboardView from './components/DashboardView.svelte';
   import AddSource from './components/AddSource.svelte';
   import SettingsSheet from './components/SettingsSheet.svelte';
+  import SiteSheet from './components/site/SiteSheet.svelte';
+  import SitePreview from './components/site/SitePreview.svelte';
   import Toasts from './components/Toasts.svelte';
   import Icon from './components/Icon.svelte';
 
@@ -68,6 +70,12 @@
   {/if}
   {#if app.settingsOpen}
     <SettingsSheet onclose={() => (app.settingsOpen = false)} />
+  {/if}
+  {#if app.siteOpen}
+    <SiteSheet onclose={() => (app.siteOpen = false)} />
+  {/if}
+  {#if app.preview}
+    <SitePreview />
   {/if}
 {:else}
   <div class="boot">Starting Tenun…</div>

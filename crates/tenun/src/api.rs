@@ -62,6 +62,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/workspace/locale", put(ws_locale))
         .route("/workspace/measures", put(put_measures))
         .route("/workspace/card-styles", put(put_card_styles))
+        .route("/workspace/site", put(put_site))
         .route("/sample", post(open_sample))
         .route("/sources", post(add_source))
         .route("/sources/{id}", delete(remove_source))
@@ -709,6 +710,17 @@ async fn suggest(State(s): S) -> R<Json<Value>> {
 async fn put_dashboards(State(s): S, Json(b): Json<Vec<Value>>) -> R<Json<Value>> {
     blocking(&s, move |st| {
         st.engine.set_dashboards(b);
+        st.emit(json!({ "type": "dashboards-changed" }));
+        Ok(())
+    })
+    .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// The workspace as a site (build 12).
+async fn put_site(State(s): S, Json(b): Json<Value>) -> R<Json<Value>> {
+    blocking(&s, move |st| {
+        st.engine.set_site(b)?;
         st.emit(json!({ "type": "dashboards-changed" }));
         Ok(())
     })

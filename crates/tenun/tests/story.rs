@@ -46,3 +46,27 @@ fn an_exported_story_keeps_its_layout_and_order() {
         Some(2)
     );
 }
+
+#[test]
+fn site_settings_are_kept_in_the_workspace_file() {
+    let d = std::env::temp_dir().join(format!("tenun-site-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let e = Engine::new(Secrets::new(d.join("config").join("secrets.json"))).unwrap();
+    let path = d.join("site.tenun");
+    // Not a site: the file says nothing about it, as a v3 file did.
+    e.save(Some(path.clone())).unwrap();
+    assert!(
+        !std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("\"site\":")
+    );
+    let site = json!({ "on": true, "title": "Coffee", "nav": "side", "home": "d1",
+        "groups": [{ "name": "Sales", "pages": ["d1"] }], "footer": "Made by the team" });
+    e.set_site(site.clone()).unwrap();
+    assert!(e.set_site(json!("not settings")).is_err());
+    e.save(Some(path.clone())).unwrap();
+    let back = Engine::new(Secrets::new(d.join("config2").join("secrets.json"))).unwrap();
+    back.open(&path).unwrap();
+    assert_eq!(back.site(), Some(site));
+}

@@ -20,6 +20,7 @@
   import { drawnTile } from '../lib/card';
   import { flowOrder, insertInOrder, isFlow, moveInOrder } from '../lib/flow';
   import FlowLayout from './dash/FlowLayout.svelte';
+  import { DRILL, drillOf } from '../lib/site';
   import { buildClip, clipText, dashboardCopy, freeName, joinMeasures, joinStyles, landTiles, measureIds, placeBelow, readClip, renamesFor, rewriteFormula, sameWorkspace, type Clip, type Matches } from '../lib/clipboard';
   import MatchFields from './dash/MatchFields.svelte';
   import CardStyles from './dash/CardStyles.svelte';
@@ -33,6 +34,15 @@
 
   const dash = $derived(app.dashboards.find((d) => d.id === id));
   let filters = $state<DashFilter[]>([]);
+  /** A drill-through that opened this page: its filter is the first, and Back returns where it came from (build 12). */
+  let drillFrom = $state<{ id: string; title: string } | null>(null);
+  // This view is made again for each page (App keys it by the page), so reading the page once is right.
+  // svelte-ignore state_referenced_locally
+  if (app.drill && app.drill.page === id) {
+    filters = [app.drill.filter];
+    drillFrom = app.drill.from;
+    app.drill = null;
+  }
   let selectedTile = $state<string | null>(null);
   let gridEl = $state<HTMLDivElement>();
   let width = $state(1000);
@@ -339,6 +349,14 @@
     dash.order = moveInOrder(flowOrder(dash), from, to);
     app.saveDashboards();
   }
+  /** What a click on a tile's mark does: filter this page (null), or open a page (drill-through, build 12). */
+  function setAction(id: string, page: string | null) {
+    const t = dash?.tiles.find((x) => x.id === id);
+    if (!t) return;
+    const { action: _old, ...rest } = t;
+    change(page ? { ...rest, action: { page } } : rest);
+  }
+
   /** A tile's width or height in a story. */
   function setFlow(id: string, f: NonNullable<Tile['flow']>) {
     const t = dash?.tiles.find((x) => x.id === id);
@@ -354,6 +372,13 @@
 
   /** `otherOf` comes with a click on the "Other" group of a top N: everything except those groups. */
   function pick(tile: Tile, value: Cell, otherOf?: Cell[], bins?: Bins, stage?: number) {
+    // A tile with an action opens its page, keeping only the clicked value; it does not filter this page (build 12).
+    const drill = dash ? drillOf(tile, dash, app.dashboards, value, otherOf, bins, stage, results[tile.id]?.res?.geo) : null;
+    if (drill) {
+      app.drill = drill;
+      go({ view: 'dashboard', id: drill.page });
+      return;
+    }
     const f = markFilter(tile, value, otherOf, bins, stage, results[tile.id]?.res?.geo);
     if (!f) return;
     clicked(tile.id, f);
@@ -833,11 +858,14 @@
               const r = e.currentTarget.getBoundingClientRect();
               chipMenu = chipMenu?.id === f.fromTile ? null : { id: f.fromTile, x: r.left, y: r.bottom + 4 };
             }}>
-            {filterText(f, app.tables)}
+            {f.fromTile === DRILL && drillFrom ? `From ${drillFrom.title}: ` : ''}{filterText(f, app.tables)}
           </button>
           <button aria-label="Clear filter" onclick={() => (filters = filters.filter((x) => x !== f))}><Icon name="x" size={11} /></button>
         </span>
       {/each}
+      {#if drillFrom}
+        <button class="btn plain small" title="Back to {drillFrom.title}" onclick={() => drillFrom && go({ view: 'dashboard', id: drillFrom.id })}><Icon name="chevronLeft" size={12} /> Back</button>
+      {/if}
       {#if filters.length > 1}
         <button class="btn plain small" onclick={() => (filters = [])}>Clear all</button>
       {/if}
@@ -944,6 +972,7 @@
         { label: 'Duplicate dashboard', run: duplicateDashboard },
         { label: 'Paste', run: pasteFromMenu },
         { label: 'Card styles…', run: () => (stylesOpen = true) },
+        ...(app.snap?.workspace.site?.on ? [{ label: 'Preview site', run: () => (app.preview = dash!.id) }] : [{ label: 'Site…', run: () => (app.siteOpen = true) }]),
         { label: 'Layout', sub: [{ label: story ? 'Grid' : 'Grid  ✓', run: () => setLayout('grid') }, { label: story ? 'Story  ✓' : 'Story', run: () => setLayout('flow') }] },
       ]}
       onclose={() => (dashMenu = null)} />
@@ -1039,7 +1068,8 @@
           dashboards={app.dashboards.filter((d) => d.id !== dash.id).map((d) => ({ id: d.id, title: d.title }))}
           onduplicate={() => duplicate(t.id)}
           oncopy={(to) => copyTo(t.id, to)}
-          onclip={() => {
+          onaction={(page) => setAction(t.id, page)}
+      onclip={() => {
             const tiles = picked.includes(t.id) ? copyTargets() : dash.tiles.filter((x) => x.id === t.id);
             copyToClipboard(clipOf(tiles), copiedWords(tiles.length));
           }}

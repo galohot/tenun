@@ -1,6 +1,8 @@
 // Typed calls to the Tenun server. Every change sends X-Tenun, which the server
 // requires so that another web page cannot post to it.
 
+import type { ExportPayload } from './export';
+
 export type DType = 'number' | 'date' | 'datetime' | 'text' | 'bool';
 
 export interface Column {
@@ -644,6 +646,8 @@ export interface Tile {
   /** Text tiles: a style for the whole text, and its alignment (build 10). Not set: body, left. */
   textStyle?: 'body' | 'lead' | 'note';
   textAlign?: 'start' | 'center';
+  /** A click on a mark opens this page, keeping only the clicked value (drill-through, build 12). Not set: it filters this page. */
+  action?: { page: string };
   /** In a story (build 11): full or half width, and a chart's height. The grid place stays, for a switch back. */
   flow?: { width?: 'full' | 'half'; height?: 's' | 'm' | 'l' };
   /** Table: add a total row. Pivot: totals are on unless this is false. */
@@ -698,6 +702,20 @@ export interface Dashboard {
   layout?: 'grid' | 'flow';
   /** A story's order of tiles, by id (build 11). Tiles it does not name follow in reading order. */
   order?: string[];
+  /** Left out of a site's navigation (build 12). A link still reaches it. */
+  hidden?: boolean;
+}
+
+/** The workspace as a site (build 12, GRANDPLAN §4.1). Off by default (V4-D14). */
+export interface SiteSettings {
+  on: boolean;
+  title: string;
+  nav: 'top' | 'side';
+  /** The page the site opens on. Not set: the first page in the navigation. */
+  home?: string;
+  groups?: { name: string; pages: string[] }[];
+  /** One line of plain text under every page. */
+  footer?: string;
 }
 
 /** The raw rows behind a tile or one of its marks. */
@@ -732,6 +750,8 @@ export interface Workspace {
   measures?: NamedMeasure[];
   /** Card styles of number tiles (build 08). */
   cardStyles?: CardStyle[];
+  /** The workspace as a site (build 12). Not set: not a site. */
+  site?: SiteSettings;
 }
 
 export interface Snapshot {
@@ -970,6 +990,9 @@ export const api = {
   suggest: () => call<Suggestion[]>('GET', '/relationships/suggest'),
   putDashboards: (d: Dashboard[]) => call<{ ok: boolean }>('PUT', '/dashboards', d),
   putCardStyles: (list: CardStyle[]) => call<{ ok: boolean }>('PUT', '/workspace/card-styles', list),
+  putSite: (site: SiteSettings) => call<{ ok: boolean }>('PUT', '/workspace/site', site),
+  /** What an exported page holds (the site preview draws it, build 12). */
+  snapshot: (dashboard: string, filters: DashFilter[] = []) => call<ExportPayload>('POST', '/snapshot', { dashboard, filters }),
   putLayout: (l: unknown) => call<{ ok: boolean }>('PUT', '/layout', l),
   query: (q: SemanticQuery) => call<QueryResult>('POST', '/query', q),
   fs: (path?: string) => call<FsListing>('GET', `/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`),

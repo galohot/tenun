@@ -38,6 +38,7 @@
     onclip,
     flow,
     onflow,
+    onaction,
     onremove,
     onnav,
     onopen,
@@ -76,6 +77,8 @@
     /** In a story (build 11): its width and height there, and how to change them. Not set: a grid tile. */
     flow?: NonNullable<Tile['flow']>;
     onflow?: (f: NonNullable<Tile['flow']>) => void;
+    /** What a click on a mark does: filter this page (null), or open another page (drill-through, build 12). */
+    onaction?: (page: string | null) => void;
     onremove: () => void;
     /** An arrow key on the tile: 1 for the next tile in reading order, -1 for the one before. */
     onnav: (step: 1 | -1) => void;
@@ -197,6 +200,17 @@
             ...(tile.type === 'text'
               ? []
               : [{ label: 'Height', sub: (['s', 'm', 'l'] as const).map((h) => ({ label: `${{ s: 'Small', m: 'Medium', l: 'Large' }[h]}${(flow.height ?? (tile.type === 'kpi' ? 's' : 'm')) === h ? '  ✓' : ''}`, run: () => onflow({ height: h }) })) }]),
+          ]
+        : []),
+      ...(onaction && canPick && dashboards.length
+        ? [
+            {
+              label: tile.action ? `On click: opens ${dashboards.find((d) => d.id === tile.action?.page)?.title || 'a page'}` : 'On click: filters this page',
+              sub: [
+                { label: `Filter this page${tile.action ? '' : '  ✓'}`, run: () => onaction(null) },
+                ...dashboards.map((d) => ({ label: `Open ${d.title || 'Untitled'}, keeping only the clicked value${tile.action?.page === d.id ? '  ✓' : ''}`, run: () => onaction(d.id) })),
+              ],
+            },
           ]
         : []),
       { label: 'Duplicate', run: onduplicate },

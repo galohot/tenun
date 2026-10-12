@@ -82,6 +82,10 @@ pub struct Workspace {
     /// the dashboards are; the app reads them, and an export merges them into its cards. Not written until one is made.
     #[serde(default, rename = "cardStyles", skip_serializing_if = "Vec::is_empty")]
     pub card_styles: Vec<serde_json::Value>,
+    /// The workspace as a site (build 12, V4-D14): title, navigation, home, groups, footer. Kept as JSON, as the
+    /// dashboards are; the app owns it. Not written until it is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<serde_json::Value>,
 }
 
 /// A measure with a name: a formula of totals, such as `SUM([Sales].[amount]) / SUM([Targets].[target])`,
@@ -118,6 +122,7 @@ impl Default for Workspace {
             tables: BTreeMap::new(),
             measures: Vec::new(),
             card_styles: Vec::new(),
+            site: None,
         }
     }
 }

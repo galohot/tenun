@@ -157,6 +157,9 @@
       <p class="empty">No dashboards yet.</p>
     {/each}
   </div>
+  <button class="site-link" onclick={() => (app.siteOpen = true)}>
+    <Icon name="globe" size={14} /> Site…{#if app.snap?.workspace.site?.on}<span class="on-dot" title="This workspace is a site"></span>{/if}
+  </button>
 
   <div class="foot">
     <div class="theme-row">
@@ -196,6 +199,9 @@
 {/if}
 
 <style>
+  .site-link { display: flex; align-items: center; gap: 8px; margin: 4px 10px 0; height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: none; font-size: 12px; color: var(--text-2); cursor: pointer; }
+  .site-link:hover { background: var(--hover); color: var(--text); }
+  .on-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
   .side {
     display: flex;
     flex-direction: column;

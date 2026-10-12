@@ -4,7 +4,8 @@ import { guessLocale } from './locale';
 import { PHONE_MAX } from './layout';
 import { linkTablesOf, setLinkLabels } from './links';
 import { setKnownMeasures } from './measures';
-import { api, type CardStyle, type CloudStatus, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
+import type { Drill } from './site';
+import { api, type CardStyle, type CloudStatus, type SiteSettings, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
 
 export type Route =
   | { view: 'home' }
@@ -59,6 +60,11 @@ class App {
   /** This computer's settings; null until they load. */
   settings = $state<Settings | null>(null);
   settingsOpen = $state(false);
+  /** The site sheet, and the site preview on a page (build 12). */
+  siteOpen = $state(false);
+  preview = $state<string | null>(null);
+  /** A drill-through on its way to its page: the page shows its filter as "From <page>: …" with Back (build 12). */
+  drill = $state<Drill | null>(null);
   /** A narrow screen (a phone in browser mode): one column, no editing, and the sidebar is a drawer. */
   phone = $state(matchMedia(`(max-width: ${PHONE_MAX - 1}px)`).matches);
   navOpen = $state(false);
@@ -208,6 +214,20 @@ class App {
     }
   }
 
+  /** The site settings (build 12), cleaned up by the sheet, applied here at once and saved. */
+  async saveSite(site: SiteSettings) {
+    if (!this.snap) return;
+    this.#localEdits++;
+    this.snap.workspace.site = site;
+    this.#lastLocalSave = Date.now();
+    try {
+      await api.putSite($state.snapshot(site));
+      if (this.snap.path === null) this.snap.dirty = true;
+    } catch (e) {
+      this.error(e);
+    }
+  }
+
   async refresh() {
     const edits = this.#localEdits;
     try {
@@ -217,6 +237,7 @@ class App {
       if (this.snap && edits !== this.#localEdits) {
         next.workspace.dashboards = this.snap.workspace.dashboards;
         next.workspace.cardStyles = this.snap.workspace.cardStyles;
+        next.workspace.site = this.snap.workspace.site;
       }
       this.snap = next;
     } catch (e) {

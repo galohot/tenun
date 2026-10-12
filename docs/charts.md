@@ -106,6 +106,19 @@ dashboard into one with its **⋯** menu › **Layout** › **Story**.
 - An exported file shows the story as a column. **Export** › **PDF** prints it on A4 pages, cut between tiles: never
   through a chart.
 
+## Sites and drill-through
+
+A workspace can be a site: its dashboards become pages with a navigation. Open **Site…** under the dashboards in the
+sidebar and switch on **Make this workspace a site**. It is off unless you switch it on.
+
+- **Title**, **Navigation** (a top bar or a sidebar), the **Home page**, and a **Footer** line.
+- **Groups:** add a group, name it, and pick a group for each page. Pages in no group come first. A page that is not
+  **In the navigation** is still reached by a link in a text, or by a click that opens it.
+- **Preview site** shows the site as an export will draw it. On a phone the navigation is a **Pages** button.
+- **Drill-through:** a chart's **⋯** menu › **On click** › **Open** a page. A click on a bar, a slice, a point, a place
+  on a map or a table row then opens that page, keeping only the clicked value. The page says where you came from
+  ("From Coffee overview: Store: Senja Menteng") and has a **Back** button. The click no longer filters its own page.
+
 ## Advanced
 
 | Type | Use it when | Fields |

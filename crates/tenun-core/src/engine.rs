@@ -2162,6 +2162,21 @@ impl Engine {
         self.persist();
     }
 
+    /// The workspace as a site (build 12), as the app wrote it.
+    pub fn site(&self) -> Option<serde_json::Value> {
+        self.state.read().unwrap().ws.site.clone()
+    }
+
+    /// Keeps the site settings (build 12). They must be an object; the app cleans them up (`site.ts normaliseSite`).
+    pub fn set_site(&self, site: serde_json::Value) -> anyhow::Result<()> {
+        if !site.is_object() {
+            anyhow::bail!("The site settings are not readable.");
+        }
+        self.state.write().unwrap().ws.site = Some(site);
+        self.persist();
+        Ok(())
+    }
+
     /// The card styles of the workspace (build 08).
     pub fn card_styles(&self) -> Vec<serde_json::Value> {
         self.state.read().unwrap().ws.card_styles.clone()

@@ -23,10 +23,18 @@
   let {
     data,
     hosted = null,
+    embedded = false,
+    pages,
+    onpage,
   }: {
     data: ExportPayload;
     /** Set on tenun.cloud: when and where the snapshot was published, and how often it should update. */
     hosted?: { updated: string; source: string; every: number | null } | null;
+    /** Drawn inside the app (the site preview, build 12): the app keeps its own theme. */
+    embedded?: boolean;
+    /** A site's pages: a page link in a text opens one (build 12). Not set: page links are plain text. */
+    pages?: ReadonlySet<string>;
+    onpage?: (id: string) => void;
   } = $props();
   const ROW = 76;
   const GAP = 12;
@@ -55,7 +63,7 @@
   $effect.pre(() => setKnownFromFile(data.measures));
 
   $effect(() => {
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    if (!embedded) document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     requestAnimationFrame(() => (colors = readColors()));
   });
 
@@ -215,6 +223,8 @@
             colors={colors!}
             tables={data.tables}
             title={name}
+            {pages}
+            {onpage}
             selected={pick?.tile === t.id && !pick.col ? [pick.value] : null}
             selectedCol={pick?.tile === t.id && pick.col ? [pick.value] : null}
             selectedStage={pick?.tile === t.id && !pick.col ? (pick.stage ?? null) : null}
@@ -275,7 +285,7 @@
 
 <style>
   :global(body) { background: var(--window); }
-  .page { max-width: 1440px; margin: 0 auto; padding: 24px; }
+  .page { width: 100%; max-width: 1440px; margin: 0 auto; padding: 24px; }
   @media (max-width: 699px) {
     .page { padding: 12px; }
     h1 { font-size: 19px; }
