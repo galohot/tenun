@@ -36,6 +36,8 @@
     selectedStage = null,
     editing = false,
     tables = [],
+    pages,
+    onpage,
     title = '',
     onpick,
     onpickcol,
@@ -58,6 +60,9 @@
     editing?: boolean;
     /** For naming the values of a chart with several. */
     tables?: Named[];
+    /** Text tiles: the dashboards a page link may open, and how (build 10). Not set: page links are plain text. */
+    pages?: ReadonlySet<string>;
+    onpage?: (id: string) => void;
     /** The tile's name, for the sentence a screen reader gets for a chart. */
     title?: string;
     onpick?: (value: Cell, stage?: number) => void;
@@ -251,7 +256,7 @@
 </script>
 
 {#if tile.type === 'text'}
-  <TextView text={tile.text ?? ''} {editing} />
+  <TextView text={tile.text ?? ''} {editing} values={res.values} style={tile.textStyle} align={tile.textAlign} {pages} {onpage} />
 {:else if tile.type === 'image'}
   <ImageView image={tile.image} {editing} />
 {:else if tile.type === 'filter'}

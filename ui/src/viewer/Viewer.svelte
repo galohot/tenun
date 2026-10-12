@@ -73,7 +73,7 @@
     if (e.target !== e.currentTarget) return;
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (resultFor(t).res && !isStatic(t) && t.type !== 'filter') focusId = t.id;
+      if (resultFor(t).res && !isStatic(t.type) && t.type !== 'filter') focusId = t.id;
       return;
     }
     const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
@@ -199,10 +199,10 @@
           {#if name !== '' && !ground}
             <h3>{name}</h3>
           {/if}
-          {#if r.res && !isStatic(l.t) && l.t.type !== 'filter'}
+          {#if r.res && !isStatic(l.t.type) && l.t.type !== 'filter'}
             <button class="expand" title="Open large" aria-label="Open large" onclick={() => (focusId = l.t.id)}><Icon name="expand" size={14} /></button>
           {/if}
-          <div class="body" class:bare={((isStatic(l.t) || l.t.type === 'filter') && !l.t.title) || !!ground}>
+          <div class="body" class:bare={((isStatic(l.t.type) || l.t.type === 'filter') && !l.t.title) || !!ground}>
             {#if r.res || isStatic(l.t)}
               <TileBody
                 tile={l.t}

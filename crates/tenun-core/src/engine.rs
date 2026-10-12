@@ -358,7 +358,7 @@ pub struct DerivedPreview {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct QueryResult {
     pub columns: Vec<query::OutColumn>,
     pub rows: Vec<Vec<serde_json::Value>>,
@@ -424,6 +424,10 @@ pub struct QueryResult {
     /// Map tiles (build 06): the place of each row, the names that are not on the map.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub geo: Option<crate::maptile::GeoInfo>,
+    /// A text tile's live numbers (build 10): `"<measure id>"` is the value, `"<id>|compare"` the change against the
+    /// period before (0.063 for +6.3 %), `"<id>|period"` the name of the period. A measure that is gone has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub values: Option<BTreeMap<String, serde_json::Value>>,
 }
 
 /// A compare chart with one value reads two periods of a field. `periods` are those two values, in
@@ -458,6 +462,7 @@ impl QueryResult {
             public_notes: Vec::new(),
             parts: Vec::new(),
             geo: None,
+            values: None,
         }
     }
 }
@@ -2743,6 +2748,12 @@ impl Engine {
     pub fn column_dtype(&self, table: &str, column: &str) -> Option<DType> {
         let s = self.state.read().unwrap();
         s.catalog.table(table)?.column(column).map(|c| c.dtype)
+    }
+
+    /// The date column a time group of `table` uses (V4-D5): the one picked, else its only date column.
+    pub fn main_date_of(&self, table: &str) -> Option<String> {
+        let s = self.state.read().unwrap();
+        measures::main_date(&s.catalog, &s.ws.tables, table).map(|c| c.name.clone())
     }
 
     pub fn catalog(&self) -> Catalog {

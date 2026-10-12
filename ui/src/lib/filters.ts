@@ -27,7 +27,9 @@ export const presetLabel = (id: string | undefined): string => DATE_PRESETS.find
 export const keyOf = (v: Cell): string => (v === null || v === undefined ? '\u0000null' : String(v));
 
 /** Gives a tile the dashboard's grain when its first group is a date cut into periods. */
-export function withGrain<T extends Pick<Tile, 'dims'>>(tile: T, grain: Grain | null | undefined): T {
+export function withGrain<T extends Pick<Tile, 'dims'> & Partial<Pick<Tile, 'type' | 'grain'>>>(tile: T, grain: Grain | null | undefined): T {
+  // A text tile's live numbers cover a period of the dashboard's grain (build 10).
+  if (tile.type === 'text') return grain && isPeriod(grain) && tile.grain !== grain ? { ...tile, grain } : tile;
   const d = tile.dims[0];
   if (!grain || !isPeriod(grain) || !d || !isPeriod(d.grain) || d.grain === grain) return tile;
   return { ...tile, dims: [{ ...d, grain }, ...tile.dims.slice(1)] };

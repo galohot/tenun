@@ -33,6 +33,9 @@ export const isNamed = (m: Pick<Measure, 'named'> | undefined | null): boolean =
 /** The measure a tile stores to use a named measure. The other fields mean nothing then. */
 export const namedMeasure = (id: string): Measure => ({ named: id, table: '', column: null, agg: 'sum' });
 
+/** True when the workspace (or the exported file) has this named measure. */
+export const isKnown = (id: string): boolean => known.some((m) => m.id === id);
+
 /** The name of a named measure. One that is gone reads as "A deleted measure", so a title never breaks. */
 export function nameOf(id: string): string {
   return known.find((m) => m.id === id)?.name ?? 'A deleted measure';

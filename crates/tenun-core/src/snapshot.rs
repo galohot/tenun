@@ -67,6 +67,12 @@ pub struct Tile {
     /// Map tile (build 06): the level, the country, filled or points.
     #[serde(default)]
     pub map: Option<crate::maptile::MapSpec>,
+    /// Text tile: its words, in the Markdown subset. Live numbers in it (`{{measure:<id>}}`) make it ask the engine.
+    #[serde(default)]
+    pub text: Option<String>,
+    /// Text tile: the period its live numbers cover (the dashboard's grain). Not set: by month.
+    #[serde(default)]
+    pub grain: Option<Grain>,
 }
 
 /// The fields a card style gives and a card may set itself (build 08), as `card.ts CARD_FIELDS`.
@@ -104,6 +110,42 @@ pub fn resolve_card(tile: &mut Value, styles: &[Value]) {
 /// (A filter tile has one: the values it offers.)
 pub fn is_static(kind: &str) -> bool {
     matches!(kind, "text" | "image")
+}
+
+/// Like [`is_static`], for one tile: a text tile with live numbers asks the engine for them (build 10), so it has a
+/// result, follows the dashboard's filters and is worked out for every click of an exported file.
+pub fn is_static_tile(t: &Tile) -> bool {
+    is_static(&t.kind)
+        && !(t.kind == "text" && !live_numbers(t.text.as_deref().unwrap_or("")).is_empty())
+}
+
+/// The named measures a text names as live numbers (`{{measure:<id>}}`, `|compare`, `|period`), each once, in order.
+/// A token after a backslash is text (`markdown.ts`), and so is one with an id of other characters.
+pub fn live_numbers(text: &str) -> Vec<String> {
+    const OPEN: &str = "{{measure:";
+    let mut out: Vec<String> = Vec::new();
+    let mut from = 0;
+    while let Some(at) = text[from..].find(OPEN).map(|i| from + i) {
+        from = at + OPEN.len();
+        let slashes = text[..at].chars().rev().take_while(|c| *c == '\\').count();
+        if slashes % 2 == 1 {
+            continue;
+        }
+        let Some(end) = text[from..].find("}}").map(|i| from + i) else {
+            break;
+        };
+        let body = &text[from..end];
+        let (id, part) = body.split_once('|').unwrap_or((body, ""));
+        let ok_id = !id.is_empty()
+            && id.len() <= 64
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if ok_id && matches!(part, "" | "compare" | "period") && !out.iter().any(|x| x == id) {
+            out.push(id.to_string());
+        }
+    }
+    out
 }
 
 /// Histogram options. No width means the engine picks one.
@@ -438,6 +480,9 @@ fn run_tile_inner(
     if tile.kind == "kpi" {
         return run_kpi(engine, tile, filters);
     }
+    if tile.kind == "text" {
+        return run_text(engine, tile, filters);
+    }
     if tile.kind == "histogram" {
         return shape::histogram(engine, tile, &own_excluded(tile, filters));
     }
@@ -574,6 +619,40 @@ fn first_str(r: &QueryResult) -> Option<String> {
 fn first_num(r: &QueryResult) -> Option<f64> {
     let i = r.columns.iter().position(|c| c.role == "measure")?;
     r.rows.first()?.get(i)?.as_f64()
+}
+
+/// A text tile's live numbers (build 10): each named measure it names, worked out as a number tile would show it, over
+/// the main date of the measure's first table (by month, or the dashboard's grain), so "|compare" and "|period" read as
+/// on a number tile. A measure without a date there is the total of every row. A measure that is gone, or that cannot
+/// be worked out, has no value: the tile shows a dash.
+fn run_text(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Result<QueryResult> {
+    let infos = engine.measure_info();
+    let mut values = BTreeMap::new();
+    for id in live_numbers(tile.text.as_deref().unwrap_or("")) {
+        let Some(home) = infos.get(&id).and_then(|i| i.tables.first().cloned()) else {
+            continue;
+        };
+        let dims: Vec<Value> = engine
+            .main_date_of(&home)
+            .map(|c| json!({ "table": home, "column": c, "grain": tile.grain.unwrap_or(Grain::Month) }))
+            .into_iter()
+            .collect();
+        let number: Tile = serde_json::from_value(json!({
+            "id": tile.id, "type": "kpi",
+            "measures": [{ "table": home, "column": null, "agg": "count", "named": id }],
+            "dims": dims
+        }))?;
+        let Ok(Some(k)) = run_kpi(engine, &number, filters).map(|r| r.kpi) else {
+            continue;
+        };
+        values.insert(id.clone(), json!(k.value));
+        values.insert(format!("{id}|compare"), json!(k.delta));
+        values.insert(format!("{id}|period"), json!(k.period));
+    }
+    Ok(QueryResult {
+        values: Some(values),
+        ..QueryResult::default()
+    })
 }
 
 fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Result<QueryResult> {
@@ -979,7 +1058,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
     }
 
     let mut base: BTreeMap<String, QueryResult> = BTreeMap::new();
-    for t in tiles.iter().filter(|t| !is_static(&t.kind)) {
+    for t in tiles.iter().filter(|t| !is_static_tile(t)) {
         base.insert(t.id.clone(), run_tile_public(engine, t, filters)?);
     }
 
@@ -1185,7 +1264,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                 let mut per_tile = BTreeMap::new();
                 for t in tiles
                     .iter()
-                    .filter(|t| t.id != src.id && !is_static(&t.kind) && t.kind != "filter")
+                    .filter(|t| t.id != src.id && !is_static_tile(t) && t.kind != "filter")
                 {
                     per_tile.insert(t.id.clone(), run_tile_public(engine, t, &fs)?);
                 }
@@ -1202,6 +1281,14 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
             && !named.contains(id)
         {
             named.push(id.clone());
+        }
+    }
+    // So do a text tile's live numbers (build 10): the viewer writes them with the measure's name and format.
+    for t in tiles.iter().filter(|t| t.kind == "text") {
+        for id in live_numbers(t.text.as_deref().unwrap_or("")) {
+            if !named.contains(&id) {
+                named.push(id);
+            }
         }
     }
     let info = engine.measure_info();

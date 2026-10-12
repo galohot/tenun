@@ -29,7 +29,7 @@ to every good or bad colour.
 | **Histogram** | You want to see how a number is spread. | One number field. Tenun picks the bin width. You can type your own. |
 | **Waterfall** | You explain how a total builds up or changes. | One value and a field. With a category, each bar adds to the total. With a date, each bar is the change from the period before. |
 | **Filter** | You want a control on the dashboard. | One field. Style: list, dropdown, number range or dates. |
-| **Text** | You want a title or a note. | A short text. It supports headings, bold, italic, lists and links. |
+| **Text** | You want a title, a note or a short story about the numbers. | Blocks of text: three sizes of heading, lists, quotes, callouts, a line, bold, italic, links to the web or to another dashboard, and live numbers. See [Text and live numbers](#text-and-live-numbers). |
 | **Image** | You want a logo or a picture. | A PNG, JPEG or WebP file up to 1 MB. Add alt text. |
 
 ### Options that most charts share
@@ -73,6 +73,25 @@ A number tile can be laid out as a card. Select the tile and open **Card** in th
   renames, copies and deletes styles. A card whose style is deleted keeps its look.
 
 An exported file and a published dashboard carry every card as it looks, so they need no styles.
+
+## Text and live numbers
+
+A text tile is written in blocks. Select the tile: the Inspector shows each block with its kind on the left.
+
+- **Kinds:** text, three headings, a bulleted or numbered list (one item on each line), a quote, a callout (Note,
+  Good news or Warning: a tinted block with an icon and a word), and a line across. Click the kind to change it, type
+  **/** in an empty block, or click **+** between blocks. Drag a block by its handle to move it.
+- **Words:** select words, then **B**, **I**, the link button, or Ctrl+B, Ctrl+I, Ctrl+K (⌘ on a Mac). A link goes to
+  a web address or to another dashboard of the workspace.
+- **Live numbers:** **Insert number** picks a named measure and what to show: its value, its change against the period
+  before ("▲ 6.3 %"), or the name of the period ("Oct 1–14, 2026"). The number follows the dashboard's filters and its
+  grain, and a click on a bar changes it, as it changes every tile. Point at a number to see which measure it is. A
+  measure that was deleted shows "—".
+- **Style:** Body, Lead (a larger first paragraph) or Note (small and muted), left or centred.
+- **Edit as text** shows the text itself, for people who like to type the marks: `###`, `1.`, `>`, `> [!note]`,
+  `---`, `[a page](page:<dashboard id>)` and `{{measure:<id>}}`, with `|compare` or `|period`.
+
+In an exported file the numbers are there and follow a click; a link to another dashboard is plain text.
 
 ## Advanced
 

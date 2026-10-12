@@ -151,6 +151,11 @@ pub fn dashboard_grain(dash: &Value) -> Option<Grain> {
 
 /// Gives a tile the dashboard's grain when its first group is a date cut into periods.
 pub fn apply_grain(tile: &mut Value, grain: Grain) {
+    // A text tile's live numbers cover a period of this grain (build 10).
+    if tile.get("type").and_then(Value::as_str) == Some("text") && !grain.is_part() {
+        tile["grain"] = serde_json::to_value(grain).unwrap_or(Value::Null);
+        return;
+    }
     let first = tile
         .get_mut("dims")
         .and_then(Value::as_array_mut)

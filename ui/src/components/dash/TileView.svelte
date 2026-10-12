@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import type { Bins, Cell, QueryResult, Tile, TileFilter } from '../../lib/api';
   import { partialNote, runTile } from '../../lib/run';
-  import { app } from '../../lib/state.svelte';
+  import { app, go } from '../../lib/state.svelte';
   import { readColors, type Colors } from '../../lib/chart';
   import { OTHER_KEY, tileTitle } from '../../lib/format';
   import { appliedFilters, EMPTY_RESULT, isPivotLike, isStatic, resultKey, tileQuery, type DashFilter } from '../../lib/tiles';
@@ -154,11 +154,15 @@
   // A number card (build 08) is drawn with its style merged in; it fills the tile with its ground and draws its own title.
   const drawn = $derived(drawnTile(tile, app.snap?.workspace.cardStyles));
   const ground = $derived(cardGround(drawn));
-  // A note or a picture with no title has no header, so the whole tile drags. Nor has a card.
-  const bare = $derived(((fixed || tile.type === 'filter') && !title) || !!ground);
+  // A note or a picture with no title has no header, so the whole tile drags. Nor has a card. A text with live numbers
+  // asks the engine, but it is still a note (build 10).
+  const bare = $derived(((isStatic(tile.type) || tile.type === 'filter') && !title) || !!ground);
+  /** A page link in a text opens that dashboard (build 10). */
+  const pages = $derived(new Set(app.dashboards.map((d) => d.id)));
+  const openPage = (id: string) => go({ view: 'dashboard', id });
   const canPick = $derived(tile.type === 'histogram' ? tile.measures.length > 0 : tile.type !== 'kpi' && tile.type !== 'cohort' && tile.type !== 'filter' && tile.dims.length > 0);
   // Tiles with a result to open large and rows behind them.
-  const hasData = $derived(!fixed && tile.type !== 'filter' && !!q && !!res && !error);
+  const hasData = $derived(!fixed && !isStatic(tile.type) && tile.type !== 'filter' && !!q && !!res && !error);
 
   let el = $state<HTMLElement>();
 
@@ -235,8 +239,9 @@
   </header>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="body" onpointerdown={bare && !phone ? (e) => !(e.target as HTMLElement).closest('a, button') && ondragstart(e) : undefined}>
-    {#if fixed}
-      <TileBody {tile} res={EMPTY_RESULT} {colors} selected={null} editing tables={app.tables} />
+    {#if fixed || (tile.type === 'text' && !res)}
+      <!-- A text with live numbers draws at once; its numbers come in when the engine has them. -->
+      <TileBody {tile} res={EMPTY_RESULT} {colors} selected={null} editing tables={app.tables} {pages} onpage={openPage} />
     {:else if !q}
       <button class="setup" onclick={onselect}>
         <Icon name="plus" />
@@ -255,6 +260,8 @@
           {selectedCol}
           {selectedStage}
           tables={app.tables}
+          {pages}
+          onpage={openPage}
           onpick={canPick ? (v, stage) => onpick(v, res?.otherOf, res?.bins, stage) : undefined}
           onpickcol={isPivotLike(tile.type) && tile.cols ? onpickcol : undefined}
           oncontext={canPick ? (v, e) => (menu = { x: e.clientX, y: e.clientY, mark: { value: v } }) : undefined}

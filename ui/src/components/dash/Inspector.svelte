@@ -16,6 +16,7 @@
   import PlaceNames from '../PlaceNames.svelte';
   import Suggestions from './Suggestions.svelte';
   import CardEditor from './CardEditor.svelte';
+  import TextEditor from './TextEditor.svelte';
   import { readColors } from '../../lib/chart';
   import { normalisePicture } from '../../lib/image';
   import { MAX_BANDS } from '../../lib/charts/bullet';
@@ -893,17 +894,7 @@
   </div>
 
   {#if isText}
-    <div class="sec">
-      <span class="label">Text</span>
-      <textarea
-        class="field text"
-        rows="8"
-        placeholder="# A heading&#10;Some **bold** words, a [link](https://example.com)&#10;- a list item"
-        aria-label="Text of this tile"
-        value={tile.text ?? ''}
-        oninput={(e) => set({ text: e.currentTarget.value })}></textarea>
-      <p class="hint tight">Headings start with # or ##, lists with -. Use **bold**, *italic* and [links](https://…). Anything else shows as it is.</p>
-    </div>
+    <TextEditor {tile} {set} />
   {/if}
 
   {#if isImage}
@@ -1729,7 +1720,6 @@
   .withunit { display: flex; align-items: center; gap: 6px; }
   .withunit .field { flex: 1; min-width: 0; }
   .unit { color: var(--text-2); font-size: 12px; }
-  textarea.field { height: auto; padding: 8px 10px; line-height: 1.4; resize: vertical; font-family: inherit; }
   .hidden { display: none; }
   .label.sub { margin-top: 8px; font-size: 11px; }
   .sec.adv { padding-top: 12px; border-top: 1px solid var(--sep); }

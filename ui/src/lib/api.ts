@@ -402,6 +402,8 @@ export interface QueryResult {
   parts?: { measure: number; note: string; repeats?: boolean; overlap?: boolean; splitOnly?: boolean }[];
   /** Map tiles: the place of each row and the names not on the map (build 06). */
   geo?: GeoInfo;
+  /** Text tiles: live numbers by `<measure id>`, `<id>|compare` and `<id>|period` (build 10). */
+  values?: Record<string, Cell>;
 }
 
 /**
@@ -637,6 +639,11 @@ export interface Tile {
   target?: { value: number };
   /** Number tiles: the card's parts, size, ground and rules, or a card style it uses (build 08). Not set: the number tile as it always was. */
   card?: CardSpec;
+  /** Text tiles: the period the live numbers cover, set from the dashboard's grain (build 10). Not set: by month. */
+  grain?: Grain | null;
+  /** Text tiles: a style for the whole text, and its alignment (build 10). Not set: body, left. */
+  textStyle?: 'body' | 'lead' | 'note';
+  textAlign?: 'start' | 'center';
   /** Table: add a total row. Pivot: totals are on unless this is false. */
   totals?: boolean;
   /** Pivot: the field whose values become the columns. The rows are `dims`. */

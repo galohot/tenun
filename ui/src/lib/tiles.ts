@@ -1,6 +1,7 @@
 // Tile helpers: the query a tile sends, sensible defaults, and grid layout.
 
 import type { Dashboard, Dim, DashFilter, DType, Measure, QueryResult, SemanticQuery, Table, Tile, TileType } from './api';
+import { liveNumbers } from './markdown.ts';
 
 export const COLS = 12;
 
@@ -18,7 +19,12 @@ export const MAX_GANTT_ROWS = 100;
 
 /** Tiles that show something the author typed or picked. They ask nothing and have no result. */
 export const STATIC_TYPES: readonly TileType[] = ['text', 'image'];
-export const isStatic = (t: Tile | TileType): boolean => STATIC_TYPES.includes(typeof t === 'string' ? t : t.type);
+/**
+ * A tile with no result: text and pictures. A text tile with live numbers (build 10) asks the engine for them, so it is
+ * not static; asked by its type alone, a text tile is.
+ */
+export const isStatic = (t: Tile | TileType): boolean =>
+  typeof t === 'string' ? STATIC_TYPES.includes(t) : STATIC_TYPES.includes(t.type) && !(t.type === 'text' && liveNumbers(t.text ?? '').length > 0);
 
 /** What a static tile is drawn from: it has no rows. */
 export const EMPTY_RESULT: QueryResult = { columns: [], rows: [], ignored_filters: [], ms: 0 };
@@ -41,6 +47,11 @@ export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | nu
   // A map of points can have only a latitude and a longitude (build 06).
   const points = tile.type === 'map' && tile.map?.style === 'points' ? tile.map : null;
   if (points && !(points.lat && points.lon)) return null;
+  // A text tile asks for its live numbers: the named measures it names, with the dashboard's filters (build 10).
+  if (tile.type === 'text') {
+    const ids = [...new Set(liveNumbers(tile.text ?? '').map((n) => n.id))];
+    return ids.length ? { measures: ids.map((id) => ({ table: '', column: null, agg: 'count', named: id })), dimensions: [], filters: appliedFilters(tile, filters) } : null;
+  }
   if (isStatic(tile) || (!tile.measures.length && !tile.dims.length && !points)) return null;
   const one = ['kpi', 'share', 'donut', 'pie', 'waterfall', 'funnel', 'box', 'bullet', 'gantt', 'cohort', 'filter', 'map'].includes(tile.type);
   const many = hasManyValues(tile);
@@ -111,6 +122,7 @@ export function resultKey(tile: Tile, filters: DashFilter[]): string {
     tileQuery(tile, filters),
     tile.type,
     tile.type === 'kpi' ? tile.dims : null,
+    tile.type === 'text' ? (tile.grain ?? null) : null,
     tile.type === 'filter' ? (tile.filter?.style ?? 'list') : null,
     tile.top ?? null,
     tile.bins ?? null,
