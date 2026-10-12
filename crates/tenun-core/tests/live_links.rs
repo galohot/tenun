@@ -415,3 +415,133 @@ fn a_named_measure_never_doubles_a_total_across_a_live_table_with_a_repeated_key
     assert_eq!(kpi("m1"), 475.5);
     assert_eq!(by_region_named(), 475.5);
 }
+
+// ---- a link table over live tables (build 03b, V4-D112) --------------------------------------------
+
+/// Spending by programme, and the funders of each programme, in a database. Funder 3 is in the table
+/// twice. Spending: programme 1 has 35, 2 has 30, 3 has 90, 4 has 60. Programme 1 has funders 1 and 2,
+/// 2 has 1 and 4, 3 has 2 and 3 (the pair is written twice), and 4 has none.
+fn grants(d: &std::path::Path) -> PathBuf {
+    let path = d.join("grants.duckdb");
+    let db = duckdb::Connection::open(&path).unwrap();
+    db.execute_batch(
+        "CREATE TABLE spending (id INTEGER, programme_id INTEGER, amount DOUBLE);
+         INSERT INTO spending VALUES (1,1,10),(2,1,20),(3,2,30),(4,3,40),(5,3,50),(6,4,60),(7,1,5);
+         CREATE TABLE programmes (id INTEGER, name VARCHAR);
+         INSERT INTO programmes VALUES (1,'A'),(2,'B'),(3,'C'),(4,'D');
+         CREATE TABLE funders (id INTEGER, name VARCHAR);
+         INSERT INTO funders VALUES (1,'Ford'),(2,'Gates'),(3,'EU'),(3,'EU old'),(4,'Wellcome');
+         CREATE TABLE programme_funders (programme_id INTEGER, funder_id INTEGER);
+         INSERT INTO programme_funders VALUES (1,1),(1,2),(2,1),(2,4),(3,2),(3,3),(3,3);",
+    )
+    .unwrap();
+    path
+}
+
+fn grants_engine(tag: &str) -> Engine {
+    let d = dir(tag);
+    let db = grants(&d);
+    let rel = |id: &str, from: (&str, &str), to: (&str, &str)| Relationship {
+        id: id.into(),
+        from: FieldRef {
+            table: from.0.into(),
+            column: from.1.into(),
+        },
+        to: FieldRef {
+            table: to.0.into(),
+            column: to.1.into(),
+        },
+        name: None,
+    };
+    let ws = Workspace {
+        name: "Grants".into(),
+        sources: vec![Source {
+            id: "s1".into(),
+            name: "grants.duckdb".into(),
+            kind: SourceKind::Duckdb {
+                path: db.to_string_lossy().into_owned(),
+            },
+        }],
+        relationships: vec![
+            rel(
+                "r1",
+                ("s1/spending", "programme_id"),
+                ("s1/programmes", "id"),
+            ),
+            rel(
+                "r2",
+                ("s1/programme_funders", "programme_id"),
+                ("s1/programmes", "id"),
+            ),
+            rel(
+                "r3",
+                ("s1/programme_funders", "funder_id"),
+                ("s1/funders", "id"),
+            ),
+        ],
+        tables: std::collections::BTreeMap::from([(
+            "s1/programme_funders".to_string(),
+            tenun_core::workspace::TableSetup {
+                link_table: true,
+                ..Default::default()
+            },
+        )]),
+        ..Workspace::default()
+    };
+    let e = Engine::new(Secrets::new(d.join("secrets.json"))).unwrap();
+    e.replace(ws, Some(d.join("grants.tenun")));
+    assert!(e.snapshot().errors.is_empty(), "{:?}", e.snapshot().errors);
+    e
+}
+
+fn spending_tile(dims: Value) -> Tile {
+    serde_json::from_value(json!({
+        "id": "t", "type": "bar", "title": "", "x": 0, "y": 0, "w": 6, "h": 4,
+        "measures": [{ "table": "s1/spending", "column": "amount", "agg": "sum" }],
+        "dims": dims,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_funder_listed_twice_in_a_live_database_never_doubles_a_row_before_during_or_after_its_check() {
+    let e = grants_engine("link-table");
+    let by_funder = |e: &Engine| -> Vec<(String, f64)> {
+        let t = spending_tile(json!([{ "table": "s1/funders", "column": "name" }]));
+        let r = run_tile(e, &t, &[]).unwrap();
+        r.rows
+            .iter()
+            .map(|r| {
+                (
+                    r[0].as_str().unwrap_or("").to_string(),
+                    r[1].as_f64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    let bars = |rows: &[(String, f64)]| rows.iter().map(|r| r.1).sum::<f64>();
+    // Ford 65, Gates 125, Wellcome 30, no funder 60, and 90 under one of the two names of funder 3:
+    // which one is not defined, so the numbers do not name it.
+    let during = by_funder(&e);
+    assert_eq!(during.len(), 5, "{during:?}");
+    assert_eq!(bars(&during), 370.0, "{during:?}");
+    wait_for_checks(&e);
+    let after = by_funder(&e);
+    assert_eq!(after.len(), 5, "{after:?}");
+    assert_eq!(bars(&after), 370.0, "{after:?}");
+    let get = |rows: &[(String, f64)], k: &str| rows.iter().find(|r| r.0 == k).map(|r| r.1);
+    assert_eq!(get(&after, "Ford"), Some(65.0));
+    assert_eq!(get(&after, "Gates"), Some(125.0));
+    assert_eq!(get(&after, "Wellcome"), Some(30.0));
+    assert_eq!(get(&after, ""), Some(60.0));
+    // A filter on the funders keeps each row once, whichever of the two rows of funder 3 it meets.
+    let q: tenun_core::query::SemanticQuery = serde_json::from_value(json!({
+        "measures": [{ "table": "s1/spending", "column": "amount", "agg": "sum" }],
+        "filters": [{ "table": "s1/funders", "column": "name", "op": "in", "values": ["EU", "EU old"] }],
+    }))
+    .unwrap();
+    assert_eq!(e.query(&q).unwrap().rows[0][0].as_f64(), Some(90.0));
+    // The check found the repeated key of the funders.
+    let snap = e.snapshot();
+    assert_eq!(snap.health["r3"].duplicates, 1);
+}

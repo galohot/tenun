@@ -4,10 +4,11 @@
 
 use chrono::NaiveDate;
 use serde_json::json;
+use std::collections::BTreeMap;
 use tenun_core::catalog::{Catalog, Column, DType, Table};
 use tenun_core::links::{Health, LinkHealth, Links};
 use tenun_core::query::{SemanticQuery, compile_on};
-use tenun_core::workspace::Relationship;
+use tenun_core::workspace::{Relationship, TableSetup};
 
 fn table(id: &str, cols: &[(&str, DType)]) -> Table {
     let (src, name) = id.split_once('/').unwrap();
@@ -935,5 +936,297 @@ const NAMED_PINS: &[(&str, &str)] = &[
     (
         "a time group one table reads from its main date",
         "WITH g0 AS (SELECT strftime(date_trunc('month', t0.\"moved\"), '%Y-%m-%d') AS \"d0\", sum(CAST(t0.\"qty\" AS DOUBLE)) AS \"v0\" FROM \"s_s6\".\"transfers\" AS t0 GROUP BY 1), g1 AS (SELECT strftime(date_trunc('month', t0.\"date\"), '%Y-%m-%d') AS \"d0\", sum(CAST(t0.\"amount\" AS DOUBLE)) AS \"v0\" FROM \"s_s1\".\"orders\" AS t0 WHERE (CAST(t0.\"customer\" AS VARCHAR) IN (?)) GROUP BY 1) SELECT COALESCE(g0.\"d0\", g1.\"d0\") AS \"d0\", CAST(list_transform([(COALESCE(g0.\"v0\", 0e0) / COALESCE(g1.\"v0\", 0e0))], v0 -> CASE WHEN isfinite(v0) THEN v0 END)[1] AS DOUBLE) AS \"m1\" FROM g0 FULL OUTER JOIN g1 ON g1.\"d0\" IS NOT DISTINCT FROM g0.\"d0\" ORDER BY 1 ASC LIMIT 1000\\n  params: [Text(\"x\")]\\n  parts: [PartNote { measure: 0, note: \"transfers is not filtered by customer.\", repeats: false }]",
+    ),
+];
+
+// ---- link tables (build 03b) ---------------------------------------------------------------------
+
+/// Spending by programme, programmes and funders, and the table that says which funders a programme
+/// has. Marked as a link table, a query may cross it from the programmes (V4-D112).
+fn link_world() -> (
+    Catalog,
+    Vec<Relationship>,
+    Health,
+    BTreeMap<String, TableSetup>,
+) {
+    use DType::*;
+    let cat = Catalog {
+        tables: vec![
+            table(
+                "s1/spending",
+                &[
+                    ("id", Number),
+                    ("programme_id", Number),
+                    ("date", Date),
+                    ("amount", Number),
+                ],
+            ),
+            table(
+                "s2/programmes",
+                &[("id", Number), ("name", Text), ("budget", Number)],
+            ),
+            table(
+                "s3/funders",
+                &[("id", Number), ("name", Text), ("kind", Text)],
+            ),
+            table(
+                "s4/programme_funders",
+                &[
+                    ("programme_id", Number),
+                    ("funder_id", Number),
+                    ("share", Number),
+                ],
+            ),
+        ],
+    };
+    let rel = |id: &str, from: (&str, &str), to: (&str, &str)| -> Relationship {
+        serde_json::from_value(json!({
+            "id": id,
+            "from": {"table": from.0, "column": from.1},
+            "to": {"table": to.0, "column": to.1},
+        }))
+        .unwrap()
+    };
+    let rels = vec![
+        rel(
+            "r1",
+            ("s1/spending", "programme_id"),
+            ("s2/programmes", "id"),
+        ),
+        rel(
+            "r2",
+            ("s4/programme_funders", "programme_id"),
+            ("s2/programmes", "id"),
+        ),
+        rel(
+            "r3",
+            ("s4/programme_funders", "funder_id"),
+            ("s3/funders", "id"),
+        ),
+    ];
+    // Clean keys on the one sides; the many sides repeat, as they do.
+    let health: Health = rels
+        .iter()
+        .map(|r| {
+            (
+                r.id.clone(),
+                LinkHealth {
+                    one_rows: 50,
+                    many_rows: 90,
+                    many_dups: 40,
+                    ..LinkHealth::default()
+                },
+            )
+        })
+        .collect();
+    let marks = BTreeMap::from([(
+        "s4/programme_funders".to_string(),
+        TableSetup {
+            link_table: true,
+            ..Default::default()
+        },
+    )]);
+    (cat, rels, health, marks)
+}
+
+fn link_queries() -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        (
+            "spending by funder",
+            json!({"measures": [{"table": "s1/spending", "column": "amount", "agg": "sum"}],
+                   "dimensions": [{"table": "s3/funders", "column": "name"}]}),
+        ),
+        (
+            "spending by month and by kind of funder",
+            json!({"measures": [{"table": "s1/spending", "column": "amount", "agg": "sum"}],
+                   "dimensions": [{"table": "s1/spending", "column": "date", "grain": "month"},
+                                  {"table": "s3/funders", "column": "kind"}]}),
+        ),
+        (
+            "a filter on a funder is a semi-join on the row",
+            json!({"measures": [{"table": "s1/spending", "column": "amount", "agg": "sum"}],
+                   "dimensions": [{"table": "s1/spending", "column": "date", "grain": "month"}],
+                   "filters": [{"table": "s3/funders", "column": "name", "op": "in", "values": ["Ford", null]},
+                               {"table": "s3/funders", "column": "kind", "op": "not_in", "values": ["Public"]},
+                               {"table": "s1/spending", "column": "amount", "op": "gte", "values": [10]}]}),
+        ),
+        (
+            "a filter on the field the chart groups by reads the same pairs",
+            json!({"measures": [{"table": "s1/spending", "column": "amount", "agg": "sum"}],
+                   "dimensions": [{"table": "s3/funders", "column": "name"}],
+                   "filters": [{"table": "s3/funders", "column": "name", "op": "not_in", "values": ["Ford"]},
+                               {"table": "s3/funders", "column": "kind", "op": "in", "values": ["Private"]}]}),
+        ),
+        (
+            "budget by funder starts from the programmes",
+            json!({"measures": [{"table": "s2/programmes", "column": "budget", "agg": "sum"}],
+                   "dimensions": [{"table": "s3/funders", "column": "name"}]}),
+        ),
+        (
+            "a group on the link table itself",
+            json!({"measures": [{"table": "s1/spending", "column": "amount", "agg": "sum"}],
+                   "dimensions": [{"table": "s4/programme_funders", "column": "share"}]}),
+        ),
+        (
+            "a value behind the link table",
+            json!({"measures": [{"table": "s1/spending", "column": "amount", "agg": "sum"},
+                                {"table": "s3/funders", "column": null, "agg": "count"}]}),
+        ),
+    ]
+}
+
+#[test]
+fn queries_across_a_link_table_compile_to_the_sql_they_are_pinned_to() {
+    let (cat, rels, health, marks) = link_world();
+    let today = NaiveDate::from_ymd_opt(2026, 10, 14).unwrap();
+    let links = Links::new(&rels, Some(&health)).with_link_tables(&marks);
+    let mut got = Vec::new();
+    for (name, q) in link_queries() {
+        let q: SemanticQuery = serde_json::from_value(q).unwrap();
+        let out = match compile_on(&q, &cat, links, today) {
+            Ok(c) => format!(
+                "{}\n  params: {:?}\n  parts: {:?}",
+                c.sql, c.params, c.parts
+            ),
+            Err(e) => format!("error: {e}"),
+        };
+        got.push((name, out));
+    }
+    // The link health of the funders is not known (a reload is running): their rows are read one for each key.
+    let mut unknown = health.clone();
+    unknown.remove("r3");
+    let q: SemanticQuery = serde_json::from_value(link_queries()[0].1.clone()).unwrap();
+    let out = compile_on(
+        &q,
+        &cat,
+        Links::new(&rels, Some(&unknown)).with_link_tables(&marks),
+        today,
+    )
+    .map(|c| c.sql)
+    .unwrap();
+    got.push(("spending by funder, the funders not known yet", out));
+    // Nothing marked: the funders cannot be reached, as before.
+    let none = compile_on(&q, &cat, Links::new(&rels, Some(&health)), today).unwrap_err();
+    got.push((
+        "spending by funder, nothing marked",
+        format!("error: {none}"),
+    ));
+    if std::env::var("PRINT_PINS").is_ok() {
+        for (n, o) in &got {
+            println!("PIN\t{n}\t{}", o.replace('\n', "\\n"));
+        }
+        return;
+    }
+    for (n, o) in &got {
+        let want = LINK_PINS
+            .iter()
+            .find(|(m, _)| m == n)
+            .unwrap_or_else(|| panic!("no pin for {n}"));
+        assert_eq!(o, &want.1.replace("\\n", "\n"), "{n}");
+    }
+}
+
+/// A file from the build of link tables: a table is marked, and the mark is written only then.
+const FILE_LINK_TABLE: &str = r##"{
+  "version": 1,
+  "name": "Grants",
+  "sources": [
+    {
+      "id": "s1",
+      "name": "spending.csv",
+      "kind": "csv",
+      "path": "spending.csv"
+    },
+    {
+      "id": "s2",
+      "name": "programme_funders.csv",
+      "kind": "csv",
+      "path": "programme_funders.csv"
+    }
+  ],
+  "relationships": [],
+  "dashboards": [],
+  "layout": {},
+  "locale": "en",
+  "tables": {
+    "s1/spending": {
+      "mainDate": "date"
+    },
+    "s2/programme_funders": {
+      "columns": {
+        "share": {
+          "label": "Share of the grant"
+        }
+      },
+      "linkTable": true
+    }
+  }
+}"##;
+
+#[test]
+fn a_link_table_mark_is_written_back_byte_for_byte_and_only_where_it_is_set() {
+    use tenun_core::workspace::Workspace;
+    let dir = std::env::temp_dir().join(format!("tenun-pin-file-03b-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("grants.tenun");
+    std::fs::write(&path, FILE_LINK_TABLE).unwrap();
+    let ws = Workspace::load(&path).unwrap();
+    assert!(ws.tables["s2/programme_funders"].link_table);
+    assert!(!ws.tables["s1/spending"].link_table);
+    let back = dir.join("grants-again.tenun");
+    ws.save(&back).unwrap();
+    assert_eq!(std::fs::read_to_string(&back).unwrap(), FILE_LINK_TABLE);
+    // Every older file has no mark, and a setup with only the mark is not empty.
+    for text in [FILE_V3, FILE_NAMED_LINKS, FILE_CALC, FILE_MEASURES] {
+        let old = dir.join("old.tenun");
+        std::fs::write(&old, text).unwrap();
+        let ws = Workspace::load(&old).unwrap();
+        assert!(ws.tables.values().all(|t| !t.link_table));
+        assert!(!text.contains("linkTable"));
+    }
+    let marked = TableSetup {
+        link_table: true,
+        ..Default::default()
+    };
+    assert!(!marked.is_empty());
+    assert!(TableSetup::default().is_empty());
+}
+
+const LINK_PINS: &[(&str, &str)] = &[
+    (
+        "spending by funder",
+        "SELECT t2.\"c0\" AS \"d0\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m1\" FROM \"s_s1\".\"spending\" AS t0 LEFT JOIN \"s_s2\".\"programmes\" AS t1 ON t0.\"programme_id\" = t1.\"id\" LEFT JOIN (SELECT DISTINCT t2.\"programme_id\" AS \"k\", CAST(t3.\"name\" AS VARCHAR) AS \"c0\" FROM \"s_s4\".\"programme_funders\" AS t2 LEFT JOIN \"s_s3\".\"funders\" AS t3 ON t2.\"funder_id\" = t3.\"id\") AS t2 ON t1.\"id\" = t2.\"k\" GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000\\n  params: []\\n  parts: [PartNote { measure: 0, note: \"A row of spending with two funders is under both. The total counts it once.\", repeats: false, overlap: true }]",
+    ),
+    (
+        "spending by month and by kind of funder",
+        "SELECT strftime(date_trunc('month', t0.\"date\"), '%Y-%m-%d') AS \"d0\", t2.\"c0\" AS \"d1\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m2\" FROM \"s_s1\".\"spending\" AS t0 LEFT JOIN \"s_s2\".\"programmes\" AS t1 ON t0.\"programme_id\" = t1.\"id\" LEFT JOIN (SELECT DISTINCT t2.\"programme_id\" AS \"k\", CAST(t3.\"kind\" AS VARCHAR) AS \"c0\" FROM \"s_s4\".\"programme_funders\" AS t2 LEFT JOIN \"s_s3\".\"funders\" AS t3 ON t2.\"funder_id\" = t3.\"id\") AS t2 ON t1.\"id\" = t2.\"k\" GROUP BY 1, 2 ORDER BY 1 ASC, 2 ASC NULLS LAST LIMIT 1000\\n  params: []\\n  parts: [PartNote { measure: 0, note: \"A row of spending with two funders is under both. The total counts it once.\", repeats: false, overlap: true }]",
+    ),
+    (
+        "a filter on a funder is a semi-join on the row",
+        "SELECT strftime(date_trunc('month', t0.\"date\"), '%Y-%m-%d') AS \"d0\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m1\" FROM \"s_s1\".\"spending\" AS t0 LEFT JOIN \"s_s2\".\"programmes\" AS t1 ON t0.\"programme_id\" = t1.\"id\" WHERE CAST(t0.\"amount\" AS DOUBLE) >= ? AND EXISTS (SELECT 1 FROM (SELECT t1.\"id\" AS \"k\") AS p LEFT JOIN \"s_s4\".\"programme_funders\" AS s0 ON p.\"k\" = s0.\"programme_id\" LEFT JOIN \"s_s3\".\"funders\" AS s1 ON s0.\"funder_id\" = s1.\"id\" WHERE (CAST(s1.\"name\" AS VARCHAR) IN (?) OR CAST(s1.\"name\" AS VARCHAR) IS NULL) AND NOT COALESCE((CAST(s1.\"kind\" AS VARCHAR) IN (?)), FALSE)) GROUP BY 1 ORDER BY 1 ASC LIMIT 1000\\n  params: [Double(10.0), Text(\"Ford\"), Text(\"Public\")]\\n  parts: []",
+    ),
+    (
+        "a filter on the field the chart groups by reads the same pairs",
+        "SELECT t2.\"c0\" AS \"d0\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m1\" FROM \"s_s1\".\"spending\" AS t0 LEFT JOIN \"s_s2\".\"programmes\" AS t1 ON t0.\"programme_id\" = t1.\"id\" LEFT JOIN (SELECT DISTINCT t2.\"programme_id\" AS \"k\", CAST(t3.\"name\" AS VARCHAR) AS \"c0\", CAST(t3.\"kind\" AS VARCHAR) AS \"c1\" FROM \"s_s4\".\"programme_funders\" AS t2 LEFT JOIN \"s_s3\".\"funders\" AS t3 ON t2.\"funder_id\" = t3.\"id\") AS t2 ON t1.\"id\" = t2.\"k\" WHERE NOT COALESCE((t2.\"c0\" IN (?)), FALSE) AND (t2.\"c1\" IN (?)) GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000\\n  params: [Text(\"Ford\"), Text(\"Private\")]\\n  parts: [PartNote { measure: 0, note: \"A row of spending with two funders is under both. The total counts it once.\", repeats: false, overlap: true }]",
+    ),
+    (
+        "budget by funder starts from the programmes",
+        "SELECT t1.\"c0\" AS \"d0\", CAST(sum(t0.\"budget\") AS DOUBLE) AS \"m1\" FROM \"s_s2\".\"programmes\" AS t0 LEFT JOIN (SELECT DISTINCT t1.\"programme_id\" AS \"k\", CAST(t2.\"name\" AS VARCHAR) AS \"c0\" FROM \"s_s4\".\"programme_funders\" AS t1 LEFT JOIN \"s_s3\".\"funders\" AS t2 ON t1.\"funder_id\" = t2.\"id\") AS t1 ON t0.\"id\" = t1.\"k\" GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000\\n  params: []\\n  parts: [PartNote { measure: 0, note: \"A row of programmes with two funders is under both. The total counts it once.\", repeats: false, overlap: true }]",
+    ),
+    (
+        "a group on the link table itself",
+        "SELECT t2.\"c0\" AS \"d0\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m1\" FROM \"s_s1\".\"spending\" AS t0 LEFT JOIN \"s_s2\".\"programmes\" AS t1 ON t0.\"programme_id\" = t1.\"id\" LEFT JOIN (SELECT DISTINCT t2.\"programme_id\" AS \"k\", CAST(t2.\"share\" AS DOUBLE) AS \"c0\" FROM \"s_s4\".\"programme_funders\" AS t2) AS t2 ON t1.\"id\" = t2.\"k\" GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000\\n  params: []\\n  parts: [PartNote { measure: 0, note: \"A row of spending with two programme_funders is under both. The total counts it once.\", repeats: false, overlap: true }]",
+    ),
+    (
+        "a value behind the link table",
+        "error: funders sits behind the link table programme_funders, so a value of it would be counted once for each row of programme_funders. Use funders as a group or a filter, not as a value.",
+    ),
+    (
+        "spending by funder, the funders not known yet",
+        "SELECT t2.\"c0\" AS \"d0\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m1\" FROM \"s_s1\".\"spending\" AS t0 LEFT JOIN \"s_s2\".\"programmes\" AS t1 ON t0.\"programme_id\" = t1.\"id\" LEFT JOIN (SELECT DISTINCT t2.\"programme_id\" AS \"k\", CAST(t3.\"name\" AS VARCHAR) AS \"c0\" FROM \"s_s4\".\"programme_funders\" AS t2 LEFT JOIN (SELECT * FROM (SELECT *, row_number() OVER () AS \"__tenun_row\" FROM \"s_s3\".\"funders\") QUALIFY row_number() OVER (PARTITION BY \"id\" ORDER BY \"__tenun_row\") = 1) AS t3 ON t2.\"funder_id\" = t3.\"id\") AS t2 ON t1.\"id\" = t2.\"k\" GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000",
+    ),
+    (
+        "spending by funder, nothing marked",
+        "error: funders is not related to spending. Draw a line between them in Model.",
     ),
 ];

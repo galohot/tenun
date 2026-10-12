@@ -17,11 +17,16 @@
 //! reads one row per key, whatever the last check said. A join into any table whose link has no
 //! health record (a reload is running, or the check failed) reads one row per key too. A
 //! [`Links`] built with no health at all (a unit test) reads every link as stored, joined as it is.
+//!
+//! A table marked as a **link table** (`TableSetup.link_table`, V4-D29, V4-D112) may be crossed from the
+//! one side of one of its links to the table itself, which is the many side: a programme has several
+//! funders through the table `programme_funders`. A path crosses one link table at most. A [`Links`]
+//! built without the marks (a formula, a calculated column) never crosses one.
 
 use crate::catalog::{Catalog, Table, ident};
-use crate::workspace::Relationship;
+use crate::workspace::{Relationship, TableSetup};
 use serde::Serialize;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 /// The most repeated keys a health record names.
 pub const SAMPLE_KEYS: usize = 5;
@@ -132,6 +137,10 @@ pub struct Links<'a> {
     /// directions. The SQL of a view is fixed when the view is made and cannot follow a later
     /// change of the data, so it must be safe for any data (V4-D63).
     one_row: bool,
+    /// The setup of each table, for the marks of link tables. `None`: no table is crossed this way.
+    marks: Option<&'a BTreeMap<String, TableSetup>>,
+    /// The path already crossed a link table, so it may not cross another (V4-D112).
+    crossed: bool,
 }
 
 impl<'a> Links<'a> {
@@ -141,7 +150,41 @@ impl<'a> Links<'a> {
             health,
             lenient: false,
             one_row: false,
+            marks: None,
+            crossed: false,
         }
+    }
+
+    /// The same links, where a table marked as a link table may be crossed from the one side of
+    /// one of its links (V4-D112). Only a question to the data does this; a formula never does.
+    pub fn with_link_tables(self, setups: &'a BTreeMap<String, TableSetup>) -> Self {
+        Links {
+            marks: Some(setups),
+            ..self
+        }
+    }
+
+    /// The same links, where no link table is crossed any more: the rest of a path that has
+    /// crossed one (V4-D112).
+    pub(crate) fn no_crossing(self) -> Self {
+        Links {
+            crossed: true,
+            ..self
+        }
+    }
+
+    /// The table is marked as a link table and a path may still cross one.
+    pub(crate) fn crosses(&self, table: &str) -> bool {
+        !self.crossed
+            && self
+                .marks
+                .and_then(|m| m.get(table))
+                .is_some_and(|s| s.link_table)
+    }
+
+    /// Some table is marked, so a search has more to find.
+    fn any_link_table(&self) -> bool {
+        !self.crossed && self.marks.is_some_and(|m| m.values().any(|s| s.link_table))
     }
 
     /// The same links, where every join reads one row per key (V4-D63). For the SQL of a view.
@@ -212,6 +255,7 @@ impl<'a> Links<'a> {
                 to_col: r.to.column.clone(),
                 dedup: self.dedup(r),
                 warn: self.health(&r.id).is_some_and(|h| h.one_dups > 0),
+                cross: false,
             }
         } else {
             Edge {
@@ -224,7 +268,24 @@ impl<'a> Links<'a> {
                 dedup: self.one_row,
                 // The link is read this way because the stored way stopped working.
                 warn: self.health(&r.id).is_some_and(LinkHealth::reversed),
+                cross: false,
             }
+        }
+    }
+
+    /// The crossing of a link into its many side, which is a link table: from the one side to
+    /// every row of the link table that names it (V4-D112). Rows are not multiplied here: the
+    /// query reads the link table as distinct pairs, so a pair written twice counts once.
+    pub(crate) fn cross_edge(&self, r: &Relationship) -> Edge {
+        Edge {
+            rel: r.id.clone(),
+            from_table: r.to.table.clone(),
+            from_col: r.to.column.clone(),
+            to_table: r.from.table.clone(),
+            to_col: r.from.column.clone(),
+            dedup: false,
+            warn: false,
+            cross: true,
         }
     }
 }
@@ -260,6 +321,9 @@ pub(crate) struct Edge {
     pub(crate) dedup: bool,
     /// The reader of a result that crosses this link should be told what the data did to it.
     pub(crate) warn: bool,
+    /// The edge goes from the one side of a link into a link table, its many side (V4-D112). What
+    /// follows is behind the link table: a row can be under several of its values.
+    pub(crate) cross: bool,
 }
 
 /// The condition of a join. Columns of different types meet as text.
@@ -333,6 +397,11 @@ pub(crate) struct Search {
     /// Every reachable table and the first link of **every** shortest path to it, in the order
     /// the links were made. More than one means a field of that table needs a name.
     pub(crate) firsts: HashMap<String, Vec<String>>,
+    /// The tables the default path reaches by crossing a link table, the link table included
+    /// (V4-D112). A row of the base table can be under several values of any of them. The
+    /// TypeScript search returns the same set, and the shared vectors check both.
+    #[allow(dead_code)]
+    pub(crate) behind: HashSet<String>,
 }
 
 fn add_all(into: &mut Vec<String>, from: &[String]) {
@@ -343,14 +412,17 @@ fn add_all(into: &mut Vec<String>, from: &[String]) {
     }
 }
 
-/// The one definition of "the shortest way" (V4-D28, V4-D42), used for the default path of a
+/// The one definition of "the shortest way" (V4-D28, V4-D42, V4-D112), used for the default path of a
 /// query, for the formulas, and for the field list (the TypeScript mirror in `ui/src/lib/links.ts`
 /// follows it, and both are tested against `ui/tests/fixtures/paths.json`).
 ///
 /// **Pass 1** crosses the links from the many side to the one side only, breadth first, exactly as
 /// before links could work both ways, so a table that was reachable keeps its path and its SQL.
 /// **Pass 2** starts from every table pass 1 found (in the order it found them) and crosses
-/// links both ways, breadth first, to find the tables pass 1 did not. In each pass the links are
+/// links both ways, breadth first, to find the tables pass 1 did not. **Pass 3** runs only when a
+/// table is marked as a link table: from every table the first two passes found, a path may cross a
+/// marked table from the one side of one of its links, then goes on as pass 2 does, and crosses no
+/// second link table. A table the first two passes found keeps its path. In each pass the links are
 /// tried in the order they were made, the stored way first; the first to reach a table is its
 /// default path, and the links that reach it as quickly as that are all counted in `firsts`.
 pub(crate) fn search<'a>(base: &str, links: impl Into<Links<'a>>) -> Search {
@@ -394,6 +466,7 @@ pub(crate) fn search<'a>(base: &str, links: impl Into<Links<'a>>) -> Search {
     }
     // Pass 2.
     let mut dist2: HashMap<String, usize> = order.iter().map(|t| (t.clone(), 0)).collect();
+    let mut found = order.clone();
     let mut queue: VecDeque<String> = order.into();
     while let Some(t) = queue.pop_front() {
         let d = dist2[&t];
@@ -412,6 +485,7 @@ pub(crate) fn search<'a>(base: &str, links: impl Into<Links<'a>>) -> Search {
                         dist2.insert(next.clone(), d + 1);
                         edge.insert(next.clone(), Some(links.edge(r, forward)));
                         firsts.insert(next.clone(), here);
+                        found.push(next.clone());
                         queue.push_back(next.clone());
                     }
                     Some(&nd) if nd == d + 1 => {
@@ -422,11 +496,55 @@ pub(crate) fn search<'a>(base: &str, links: impl Into<Links<'a>>) -> Search {
             }
         }
     }
+    // Pass 3.
+    let mut behind: HashSet<String> = HashSet::new();
+    if links.any_link_table() {
+        let mut dist3: HashMap<String, usize> = found.iter().map(|t| (t.clone(), 0)).collect();
+        let mut queue: VecDeque<String> = found.into();
+        while let Some(t) = queue.pop_front() {
+            let d = dist3[&t];
+            let inside = behind.contains(&t);
+            for r in links.usable_rels() {
+                // Before a crossing, the only new step is the crossing; after it, the steps of pass 2.
+                let mut steps: Vec<(Edge, &String)> = Vec::new();
+                if inside {
+                    if r.from.table == t && links.forward_ok(r) {
+                        steps.push((links.edge(r, true), &r.to.table));
+                    }
+                    if r.to.table == t && links.backward_ok(r) {
+                        steps.push((links.edge(r, false), &r.from.table));
+                    }
+                } else if r.to.table == t && links.crosses(&r.from.table) && links.forward_ok(r) {
+                    steps.push((links.cross_edge(r), &r.from.table));
+                }
+                for (e, next) in steps {
+                    let here = start(&firsts, &t, r);
+                    match dist3.get(next) {
+                        None => {
+                            dist3.insert(next.clone(), d + 1);
+                            edge.insert(next.clone(), Some(e));
+                            firsts.insert(next.clone(), here);
+                            behind.insert(next.clone());
+                            queue.push_back(next.clone());
+                        }
+                        Some(&nd) if nd == d + 1 => {
+                            add_all(firsts.entry(next.clone()).or_default(), &here);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
     let rank = |id: &String| links.rels.iter().position(|r| &r.id == id);
     for f in firsts.values_mut() {
         f.sort_by_key(rank);
     }
-    Search { edge, firsts }
+    Search {
+        edge,
+        firsts,
+        behind,
+    }
 }
 
 /// Breadth first from the base table. Maps every reachable table to the edge that reached it.
@@ -496,26 +614,44 @@ impl<'a> Paths<'a> {
         if !self.links.usable(r) {
             return Err(PathError::Unusable);
         }
+        // The ways to cross the link: the stored way, the other way when the many side is unique,
+        // and into a link table from its one side (V4-D112).
         let mut ways = Vec::new();
         if self.links.forward_ok(r) {
-            ways.push(true);
+            ways.push((true, false));
         }
         if self.links.backward_ok(r) {
-            ways.push(false);
+            ways.push((false, false));
         }
-        for forward in ways {
-            let e = self.links.edge(r, forward);
+        if self.links.crosses(&r.from.table) && self.links.forward_ok(r) {
+            ways.push((false, true));
+        }
+        for (forward, cross) in ways {
+            let e = if cross {
+                self.links.cross_edge(r)
+            } else {
+                self.links.edge(r, forward)
+            };
             let Some(mut path) = chain(&self.default, &e.from_table) else {
                 continue;
+            };
+            // A path crosses one link table at most: after the crossing, the rest may not cross.
+            let after = if e.cross || path.iter().any(|x| x.cross) {
+                self.links.no_crossing()
+            } else {
+                self.links
             };
             let tail = if e.to_table == table {
                 Some(Vec::new())
             } else {
-                chain(&reach(&e.to_table, self.links), table)
+                chain(&reach(&e.to_table, after), table)
             };
             let Some(tail) = tail else { continue };
             path.push(e);
             path.extend(tail);
+            if path.iter().filter(|x| x.cross).count() > 1 {
+                continue;
+            }
             return Ok(path);
         }
         Err(PathError::OffPath(id.to_string()))
@@ -1111,6 +1247,92 @@ mod tests {
         assert_eq!(first_links("t", "g", &rels), ["r1", "r2"]);
     }
 
+    fn marks(ids: &[&str]) -> BTreeMap<String, TableSetup> {
+        ids.iter()
+            .map(|id| {
+                (
+                    id.to_string(),
+                    TableSetup {
+                        link_table: true,
+                        ..TableSetup::default()
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn steps(path: Vec<Edge>) -> Vec<(String, bool)> {
+        path.into_iter().map(|e| (e.rel, e.cross)).collect()
+    }
+
+    #[test]
+    fn a_link_table_is_crossed_once_on_the_default_path_and_on_a_named_one() {
+        let rels = vec![
+            rel("r1", ("s", "programme"), ("p", "id")),
+            rel("r2", ("pf", "programme"), ("p", "id")),
+            rel("r3", ("pf", "funder"), ("f", "id")),
+            rel("r4", ("pf2", "funder"), ("f", "id")),
+            rel("r5", ("pf2", "region"), ("g", "code")),
+        ];
+        let setups = marks(&["pf", "pf2"]);
+        // Nobody has read the data yet: every link is read as stored, and a crossing is allowed.
+        let links = Links::from(&rels).with_link_tables(&setups);
+        let paths = Paths::new("s", links);
+        let want = vec![
+            ("r1".to_string(), false),
+            ("r2".to_string(), true),
+            ("r3".to_string(), false),
+        ];
+        assert_eq!(steps(paths.path("f", None).unwrap()), want);
+        assert_eq!(steps(paths.path("f", Some("r3")).unwrap()), want);
+        // The second link table would be a second crossing, so the table behind it is out of reach,
+        // and naming its link does not change that.
+        assert_eq!(paths.path("g", None).unwrap_err(), PathError::No);
+        assert_eq!(paths.path("pf2", None).unwrap_err(), PathError::No);
+        assert_eq!(
+            paths.path("g", Some("r5")).unwrap_err(),
+            PathError::OffPath("r5".into())
+        );
+        // From a table that is not behind one, each link table is crossed alone.
+        let from_funders = Paths::new("f", links);
+        assert_eq!(
+            steps(from_funders.path("g", None).unwrap()),
+            vec![("r4".to_string(), true), ("r5".to_string(), false)]
+        );
+        // Without the marks, none of it is reachable, and a formula (no marks) never crosses.
+        let plain = Paths::new("s", Links::from(&rels));
+        assert_eq!(plain.path("f", None).unwrap_err(), PathError::No);
+        // The tables found behind a link table.
+        let found = search("s", links);
+        let mut behind: Vec<&String> = found.behind.iter().collect();
+        behind.sort();
+        assert_eq!(behind, ["f", "pf"]);
+    }
+
+    #[test]
+    fn a_link_table_with_a_link_that_is_not_a_key_is_not_crossed() {
+        let rels = vec![
+            rel("r1", ("s", "programme"), ("p", "id")),
+            rel("r2", ("pf", "programme"), ("p", "id")),
+            rel("r3", ("pf", "funder"), ("f", "id")),
+        ];
+        let setups = marks(&["pf"]);
+        let mut h = Health::new();
+        for id in ["r1", "r2", "r3"] {
+            h.insert(id.into(), health(0, 40));
+        }
+        let ok = Links::new(&rels, Some(&h)).with_link_tables(&setups);
+        assert!(reach("s", ok).contains_key("f"));
+        // The link table is the start of the query: its own links are crossed the usual way.
+        let own = search("pf", ok);
+        assert!(own.behind.is_empty());
+        assert!(own.edge.contains_key("p") && own.edge.contains_key("f"));
+        // The programmes repeat their ids and so does the link table: that link is not used at all.
+        h.insert("r2".into(), health(40, 3));
+        let flipped = Links::new(&rels, Some(&h)).with_link_tables(&setups);
+        assert!(!reach("s", flipped).contains_key("f"));
+    }
+
     fn world() -> (Catalog, Relationship) {
         let mut cat = Catalog::default();
         let mk = |id: &str, label: &str, col: &str| Table {
@@ -1260,7 +1482,7 @@ mod tests {
     fn the_search_gives_the_answers_of_the_shared_vectors() {
         let cases: Vec<serde_json::Value> =
             serde_json::from_str(include_str!("../../../ui/tests/fixtures/paths.json")).unwrap();
-        assert!(cases.len() >= 10);
+        assert!(cases.len() >= 20);
         let of_kind = |kind: &str| match kind {
             "one-many" => LinkHealth {
                 one_rows: 100,
@@ -1318,7 +1540,35 @@ mod tests {
                 })
                 .collect();
             let base = case["base"].as_str().unwrap();
-            let found = search(base, Links::new(&rels, Some(&health)));
+            // The tables the vector marks as link tables.
+            let setups: BTreeMap<String, TableSetup> = case["linkTables"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|t| {
+                    (
+                        t.as_str().unwrap().to_string(),
+                        TableSetup {
+                            link_table: true,
+                            ..TableSetup::default()
+                        },
+                    )
+                })
+                .collect();
+            let links = Links::new(&rels, Some(&health)).with_link_tables(&setups);
+            let found = search(base, links);
+            let mut got_behind: Vec<String> = found.behind.iter().cloned().collect();
+            got_behind.sort();
+            let want_behind: Vec<String> = case["behind"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|t| t.as_str().unwrap().to_string())
+                .collect();
+            assert_eq!(
+                got_behind, want_behind,
+                "{name}: the tables behind a link table"
+            );
             let got_reach: std::collections::BTreeMap<String, Option<String>> = found
                 .edge
                 .iter()
@@ -1353,11 +1603,7 @@ mod tests {
                 .collect();
             assert_eq!(got_first, want_first, "{name}: the first links");
             for (t, f) in &want_first {
-                assert_eq!(
-                    &first_links(base, t, Links::new(&rels, Some(&health))),
-                    f,
-                    "{name}"
-                );
+                assert_eq!(&first_links(base, t, links), f, "{name}");
             }
         }
     }

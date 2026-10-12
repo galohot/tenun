@@ -619,11 +619,12 @@ pub fn show_as(tile: &Tile, q: &SemanticQuery, engine: &Engine, res: &mut QueryR
         // A share of the whole, a running total and a year to date add the values up. A named
         // measure whose values do not add up (a ratio, an average) is shown as it is, with words
         // (V4-D85d).
-        if let Some(why) = refuses_to_add(engine, &q.measures[j], how, repeats_at(res, j)) {
+        if let Some(why) = refuses_to_add(engine, &q.measures[j], how, blocked_at(res, j)) {
             res.parts.push(PartNote {
                 measure: j,
                 note: why,
                 repeats: false,
+                overlap: false,
             });
             continue;
         }
@@ -697,21 +698,30 @@ fn adds_up(how: ShowAs) -> bool {
     )
 }
 
-/// Why a value cannot be shown this way, or `None` when it can (V4-D85d, V4-D99). A share of the whole, a
+/// Why a value cannot be shown this way, or `None` when it can (V4-D85d, V4-D99, V4-D112). A share of the whole, a
 /// running total and a year to date add values up. A value whose groups do not add up to the whole is shown
 /// as it is, with words: an average, a middle value, a distinct count, a least or a most, a ratio, a named
-/// formula that is not a sum, and any measure that repeats a table across the groups of the tile (`repeats`).
-fn refuses_to_add(engine: &Engine, m: &Measure, how: ShowAs, repeats: bool) -> Option<String> {
+/// formula that is not a sum, any measure that repeats a table across the groups of the tile (`repeats`), and
+/// any value of a tile whose groups sit behind a link table, where one row is under several groups (`overlap`).
+fn refuses_to_add(
+    engine: &Engine,
+    m: &Measure,
+    how: ShowAs,
+    blocked: Option<Blocked>,
+) -> Option<String> {
     if !adds_up(how) {
         return None;
     }
     let f = engine.measure_facts(m).ok()?;
     let why = if !f.additive {
         "its values do not add up"
-    } else if repeats {
-        "a table it reads is not split by these groups, so its values do not add up"
     } else {
-        return None;
+        match blocked? {
+            Blocked::Repeats => {
+                "a table it reads is not split by these groups, so its values do not add up"
+            }
+            Blocked::Overlap => "one row can be in two groups, so its values do not add up",
+        }
     };
     Some(format!(
         "{} is not shown as {}: {why}. The value is shown instead.",
@@ -720,9 +730,24 @@ fn refuses_to_add(engine: &Engine, m: &Measure, how: ShowAs, repeats: bool) -> O
     ))
 }
 
-/// A table of the value has the same number for every group of the tile (V4-D99a).
-fn repeats_at(res: &QueryResult, j: usize) -> bool {
-    res.parts.iter().any(|p| p.measure == j && p.repeats)
+/// Why the groups of a tile do not add up to the whole for a value, when the engine said so in `parts`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Blocked {
+    /// A table of the value has the same number for every group of the tile (V4-D99a).
+    Repeats,
+    /// A group sits behind a link table, so one row is under several groups (V4-D112).
+    Overlap,
+}
+
+/// Whether the groups of the tile add up to the whole for value `j`.
+fn blocked_at(res: &QueryResult, j: usize) -> Option<Blocked> {
+    if res.parts.iter().any(|p| p.measure == j && p.overlap) {
+        Some(Blocked::Overlap)
+    } else if res.parts.iter().any(|p| p.measure == j && p.repeats) {
+        Some(Blocked::Repeats)
+    } else {
+        None
+    }
 }
 
 /// Orders the first-column values of a time chart: dates (ISO text) and date parts (numbers).
@@ -950,7 +975,7 @@ pub fn compare(
         .as_ref()
         .and_then(|l| l.first().copied().flatten())
         .filter(|h| !matches!(h, ShowAs::Value | ShowAs::Unknown))
-        .filter(|h| refuses_to_add(engine, &q.measures[0], *h, repeats_at(res, 0)).is_none())
+        .filter(|h| refuses_to_add(engine, &q.measures[0], *h, blocked_at(res, 0)).is_none())
         .map(|h| {
             if h == ShowAs::PctGroup {
                 ShowAs::PctTotal

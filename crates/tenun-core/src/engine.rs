@@ -2058,10 +2058,11 @@ impl Engine {
             let sc = query::scope_on(
                 q,
                 &s.catalog,
-                Links::new(&s.ws.relationships, Some(&s.health)),
+                Links::new(&s.ws.relationships, Some(&s.health)).with_link_tables(&s.ws.tables),
                 today,
             )?;
             note_crossed(&sc.crossed);
+            note_overlap(&sc);
             let (sql, params) = build(&sc)?;
             (sql, params, sc.ignored_filters.clone())
         };
@@ -2293,6 +2294,8 @@ impl Engine {
         let calc_changed = setup.calc != old.calc;
         // A tile that adds up this table reads its main date, so the tiles ask again.
         let main_changed = setup.main_date != old.main_date;
+        // A table that is marked as a link table (or no longer) changes what a tile can reach.
+        let link_changed = setup.link_table != old.link_table;
         let (reload, touched) = {
             let mut s = self.state.write().unwrap();
             // The other tables' formulas that name this table's column, and the measures.
@@ -2351,7 +2354,7 @@ impl Engine {
             self.rebuild_calc(calc::Roots::Tables(&ids));
         }
         self.persist();
-        Ok(reloaded || calc_changed || main_changed || !renames.is_empty())
+        Ok(reloaded || calc_changed || main_changed || link_changed || !renames.is_empty())
     }
 
     /// The check of a setup's calculated columns before it is saved (see [`Engine::set_table_setup`]).
@@ -2775,6 +2778,23 @@ static NO_GRAINS: BTreeMap<(String, String), measures::Period> = BTreeMap::new()
 /// The id a tile note uses for a calculated column that could not be computed.
 const CALC_NOTE: &str = "calc:";
 
+/// The id a tile note uses for a sentence that is its own words: the groups of a question that sit behind
+/// a link table put a row under several of them (V4-D112). The sentence names table labels only.
+const OVERLAP_NOTE: &str = "overlap:";
+
+/// Tells the tile that its groups overlap, for a question that runs as a custom SELECT and has no
+/// `parts` to say it with.
+fn note_overlap(sc: &query::Scope<'_>) {
+    let notes: Vec<String> = sc
+        .overlap_notes()
+        .into_iter()
+        .map(|n| format!("{OVERLAP_NOTE}{n}"))
+        .collect();
+    if !notes.is_empty() {
+        note_crossed(&notes);
+    }
+}
+
 /// Tells the tile that a calculated column it reads is blank because it could not be computed.
 fn note_blank_calc(s: &State, q: &SemanticQuery) {
     let mut fields: Vec<(&str, &str)> = Vec::new();
@@ -2842,6 +2862,12 @@ fn notes_of(
 ) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for id in crossed {
+        if let Some(n) = id.strip_prefix(OVERLAP_NOTE) {
+            if !out.iter().any(|x| x == n) {
+                out.push(n.to_string());
+            }
+            continue;
+        }
         if id.starts_with(CALC_NOTE) {
             if let Some(n) = blank_calc_note(s, id, public)
                 && !out.contains(&n)

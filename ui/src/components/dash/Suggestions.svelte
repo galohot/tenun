@@ -49,7 +49,7 @@
     if (res.partial || res.other) return null;
     return new Set(res.rows.map((r) => String(r[0]))).size;
   });
-  const candidates = $derived(suggestTypes($state.snapshot(tile) as Tile, app.tables, groups));
+  const candidates = $derived(suggestTypes($state.snapshot(tile) as Tile, app.tables, groups, res?.parts));
   const sig = $derived(JSON.stringify([candidates.map((c) => c.variant), filters, app.dataVersion, app.locale]));
 
   let got = $state.raw<Record<string, QueryResult>>({});

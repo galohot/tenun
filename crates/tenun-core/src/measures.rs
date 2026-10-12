@@ -159,7 +159,7 @@ pub fn period_of(row: &[serde_json::Value]) -> Option<Period> {
 
 impl<'a> Env<'a> {
     fn links(&self) -> Links<'a> {
-        Links::new(self.rels, Some(self.health))
+        Links::new(self.rels, Some(self.health)).with_link_tables(self.tables)
     }
 }
 
@@ -594,7 +594,10 @@ fn is_main(catalog: &Catalog, env: &Env<'_>, table: &str, column: &str) -> bool 
         .get(table)
         .and_then(|s| s.main_date.as_deref())
         .is_some();
-    picked || env.rels.iter().any(|r| r.from.table == table)
+    // A table that others point at and that points at none is a table of things. Any other is of events.
+    picked
+        || env.rels.iter().any(|r| r.from.table == table)
+        || !env.rels.iter().any(|r| r.to.table == table)
 }
 
 fn reads(
@@ -1075,6 +1078,30 @@ pub fn compile(
                     measure: j,
                     note: n.clone(),
                     repeats: *repeats,
+                    overlap: false,
+                };
+                if !parts.contains(&p) {
+                    parts.push(p);
+                }
+            }
+        }
+    }
+
+    // A group behind a link table puts a row under several groups: the values of every part that
+    // is split by it do not add up on this tile (V4-D112).
+    for (j, mine) in slots.iter().enumerate() {
+        let mut seen: Vec<usize> = Vec::new();
+        for s in mine {
+            if seen.contains(&s.group) {
+                continue;
+            }
+            seen.push(s.group);
+            for note in scopes[s.group].overlap_notes() {
+                let p = PartNote {
+                    measure: j,
+                    note,
+                    repeats: false,
+                    overlap: true,
                 };
                 if !parts.contains(&p) {
                     parts.push(p);

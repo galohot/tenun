@@ -3,7 +3,7 @@
   import { app } from '../../lib/state.svelte';
   import { typeIcon } from '../../lib/ui';
   import { blankNote, isShown } from '../../lib/prep';
-  import { fieldGroups, groupOf, labelOfLink } from '../../lib/links';
+  import { behindFrom, fieldGroups, groupOf, labelOfLink } from '../../lib/links';
   import { nameOf } from '../../lib/measures';
   import Icon from '../Icon.svelte';
 
@@ -67,7 +67,9 @@
   );
 
   /** Every table once, or once for each link that leads to it (V4-D28). */
-  const all = $derived(fieldGroups(app.tables, app.snap?.workspace.relationships ?? [], app.linkHealth, base, roles));
+  const all = $derived(fieldGroups(app.tables, app.snap?.workspace.relationships ?? [], app.linkHealth, base, roles, app.linkTables));
+  /** The tables behind a link table, seen from the table of the first value: a group or a filter can be read from them, a value cannot (V4-D112). */
+  const behind = $derived(base ? behindFrom(base, app.snap?.workspace.relationships ?? [], app.linkHealth, app.linkTables) : new Set<string>());
   const here = $derived(groupOf(all, table, via));
 
   const groups = $derived(
@@ -162,19 +164,20 @@
         {/if}
         {#each groups as { g, cols } (g.key)}
           {@const far = reachable && !reachable.has(g.table.id)}
-          <div class="group" class:far>
+          {@const hidden = mode === 'measure' && behind.has(g.table.id)}
+          <div class="group" class:far={far || hidden}>
             <div class="gh">
               <Icon name="table" size={12} />{g.title}
               {#if g.sub}<span class="sub">{g.sub}</span>{/if}
-              {#if far}<span class="note">not related</span>{/if}
+              {#if far}<span class="note">not related</span>{:else if hidden}<span class="note" title="A value from here would be added up once for each row of the link table. Use it as a group or a filter.">behind a link table</span>{/if}
             </div>
             {#if mode === 'measure' && !q && !numbersOnly && !datesOnly}
-              <button class="opt" onclick={() => pick(g.table.id, null, g.via)}>
+              <button class="opt" class:off={hidden} disabled={hidden} onclick={() => pick(g.table.id, null, g.via)}>
                 <Icon name="hash" size={12} /> Number of {g.table.label.toLowerCase()}
               </button>
             {/if}
             {#each cols as c (c.name)}
-              <button class="opt" class:on={here?.key === g.key && column === c.name} title={[c.description, c.as_of ? `As of ${c.as_of}.` : ''].filter(Boolean).join(' ') || undefined} onclick={() => pick(g.table.id, c.name, g.via)}>
+              <button class="opt" class:on={here?.key === g.key && column === c.name} class:off={hidden} disabled={hidden} title={[c.description, c.as_of ? `As of ${c.as_of}.` : ''].filter(Boolean).join(' ') || undefined} onclick={() => pick(g.table.id, c.name, g.via)}>
                 <Icon name={typeIcon[dim(c.dtype)]} size={12} />
                 <span class="nm">{c.label ?? c.name}</span>
                 {#if c.calc}<span class="fx" title={c.error ? 'A calculated column that could not be computed' : 'A calculated column'}><Icon name="fx" size={11} /></span>{/if}

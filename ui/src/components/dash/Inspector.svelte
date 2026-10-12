@@ -10,7 +10,7 @@
   import { isCleared, isPeriod } from '../../lib/filters';
   import { defaultDim, defaultMeasure, dtypeOf, isRepeated, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, type DashFilter } from '../../lib/tiles';
   import { reachableFrom } from '../../lib/links';
-  import { addsUpHere, baseFormat, formatOf, namedMeasure, ownFormat, targetUnit, whyNotAdded } from '../../lib/measures';
+  import { addsUpHere, baseFormat, formatOf, namedMeasure, ownFormat, stepsByDate, targetUnit, tileProblem, whyNotAdded } from '../../lib/measures';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
   import Suggestions from './Suggestions.svelte';
@@ -203,10 +203,10 @@
   const measureInfo = $derived(app.snap!.measure_info ?? {});
   const reach = $derived.by(() => {
     if (!m) return null;
-    if (!m.named) return reachableFrom(m.table, rels, app.linkHealth);
+    if (!m.named) return reachableFrom(m.table, rels, app.linkHealth, app.linkTables);
     const homes = measureInfo[m.named]?.tables ?? [];
     if (!homes.length) return null;
-    return new Set(homes.flatMap((h) => [...reachableFrom(h, rels, app.linkHealth)]));
+    return new Set(homes.flatMap((h) => [...reachableFrom(h, rels, app.linkHealth, app.linkTables)]));
   });
   /** The measures of the workspace a value can be (Advanced makes them; a dashboard that uses one works without the switch). */
   const namedList = $derived(app.snap!.workspace.measures ?? []);
@@ -331,6 +331,10 @@
   const perValue = $derived(tile.measures.length > 1);
   /** What the engine could not follow in the result on show: a table the same for every group does not add up. */
   const parts = $derived(current?.res.parts);
+  /** Why the chart type on show cannot draw these values, in words (V4-D99, V4-D112): shares of rows that are in two groups, for one. */
+  const refusedType = $derived(tileProblem(tile, parts, stepsByDate(tile, current?.res)));
+  /** The same words for a type the tile is not, as the tooltip of its button: a share of rows that are in two groups, for one. The button stays: the tile says it too. */
+  const chipWhy = (id: TileType): string | null => (id === tile.type ? null : tileProblem({ ...tile, type: id }, parts, stepsByDate(tile, current?.res)));
   const stackAble = $derived(stackableTile({ measures: tile.measures.slice(0, MAX_CHART_MEASURES), showAs: tile.showAs }, perValue, parts));
   // The choice on show: the saved one, or the default for these values.
   const stackNow = $derived(stackMode(tile, perValue, parts));
@@ -808,18 +812,20 @@
           role="radio"
           aria-checked={tile.type === t.id}
           class:on={tile.type === t.id || (t.id === 'share' && tile.type === 'donut')}
-          title={t.label}
+          class:soft={!!chipWhy(t.id)}
+          title={chipWhy(t.id) ?? t.label}
           onclick={() => pickType(t.id)}>
           <Icon name={t.icon} size={18} />
           <span>{t.label}</span>
         </button>
       {/each}
     </div>
+    {#if refusedType}<p class="hint tight refusal" role="note">{refusedType}</p>{/if}
     {#if advanced && moreTypes.length}
       <span class="label up">More charts</span>
       <div class="types" role="radiogroup" aria-label="More chart types">
         {#each moreTypes as t}
-          <button role="radio" aria-checked={tile.type === t.id} class:on={tile.type === t.id} title={t.label} onclick={() => pickType(t.id)}>
+          <button role="radio" aria-checked={tile.type === t.id} class:on={tile.type === t.id} class:soft={!!chipWhy(t.id)} title={chipWhy(t.id) ?? t.label} onclick={() => pickType(t.id)}>
             <Icon name={t.icon} size={18} />
             <span>{t.label}</span>
           </button>
@@ -1590,6 +1596,7 @@
   .types button :global(svg) { color: var(--text-2); }
   .types button:hover { background: var(--hover); }
   .types button.on { border-color: var(--accent); background: var(--selected); color: var(--accent-text); }
+  .types button.soft:not(.on) { opacity: 0.55; }
   .types button.on :global(svg) { color: var(--accent-text); }
   .better { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
   .better .label { margin-right: 4px; }
@@ -1628,6 +1635,7 @@
   .link { align-self: flex-start; border: 0; background: none; padding: 0; font-size: 12px; color: var(--accent-text); cursor: pointer; }
   .link:hover { text-decoration: underline; }
   .hint.tight { margin: 0; line-height: 1.4; }
+  .hint.refusal { margin-top: 6px; }
   .label.up { margin-top: 6px; }
   .check.first { margin-top: 0; }
   .grains.stack button { text-transform: none; padding: 0 4px; }

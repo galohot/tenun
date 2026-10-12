@@ -140,6 +140,15 @@ pub struct TableSetup {
     /// just one. Not written until set (V3-D11).
     #[serde(default, rename = "mainDate", skip_serializing_if = "Option::is_none")]
     pub main_date: Option<String>,
+    /// The table only holds links between other tables (programme, funder), so a query may cross
+    /// it from its one side to its many side, which makes many-to-many work (V4-D29, V4-D112). Not
+    /// written until it is set (V3-D11).
+    #[serde(
+        default,
+        rename = "linkTable",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub link_table: bool,
 }
 
 /// A column that is computed from the others, in the view of its table (V4-D3).
@@ -164,6 +173,7 @@ impl TableSetup {
             && self.transforms.is_empty()
             && self.calc.is_empty()
             && self.main_date.is_none()
+            && !self.link_table
     }
 
     /// Drops overrides that say nothing, so a cleared menu leaves no trace in the file.

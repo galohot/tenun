@@ -39,7 +39,9 @@ every other chart filters. Save the Excel file and the dashboard updates.
   suggests the likely ones (`store_id` → `stores.id`) and checks them against the data, again each
   time a table loads: a store id that appears twice never counts an order twice, and the link and
   its tiles say so. Two links to one table (stock sent from a store, stock sent to a store) get
-  names. See [the relationships guide](docs/relationships.md).
+  names. A table that only links two others (programmes and funders) can be marked as a link table, so
+  many to many works: a chart can group by funder, a row is under each of its funders, and the total
+  counts it once. See [the relationships guide](docs/relationships.md).
 - **Measures (Advanced):** write `SUM([sales].[amount]) / SUM([targets].[target])` once, name it
   "Achievement", and use it in any tile, though the two tables come from different files. Tenun adds
   up each table on its own, so a target is never counted once for each sale. See
@@ -175,7 +177,8 @@ dashboard and **Add tile**.
 - A relationship needs one side with unique values, like an ID. If neither side is unique, Tenun
   refuses the link and explains why. Such a join would count every total twice. If a key repeats
   later, Tenun reads one row for each key and shows a warning
-  ([how](docs/relationships.md)).
+  ([how](docs/relationships.md)). Many to many goes through a link table, a table of pairs that you
+  mark in the Model view.
 - A workspace is one `.tenun` file (JSON) with your sources, relationships and dashboards. File
   paths are stored relative to it, so a folder with the file and its data moves as one. It is
   safe to commit to git.

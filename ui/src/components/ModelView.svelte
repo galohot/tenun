@@ -5,6 +5,8 @@
   import { api, type FieldRef, type Relationship, type Suggestion } from '../lib/api';
   import { app } from '../lib/state.svelte';
   import { firstLinks, kindWords, linkLabel, siblings, unnamedPairs } from '../lib/links';
+  import { suggestLinkTables } from '../lib/linktables';
+  import { isEmptySetup, withLinkTable } from '../lib/prep';
   import TableNode from './model/TableNode.svelte';
   import RelEdge from './model/RelEdge.svelte';
   import LinkSheet from './model/LinkSheet.svelte';
@@ -22,6 +24,15 @@
   let sheet = $state<string[] | null>(null);
 
   const ws = $derived(app.snap!.workspace);
+  /** Tables the person said are not link tables, for this visit. */
+  let notLinkTables = $state<string[]>([]);
+  const linkSuggestions = $derived(suggestLinkTables(app.tables, ws.relationships, app.linkHealth, app.linkTables, notLinkTables));
+
+  /** Marks a table as a link table, or takes the mark away (V4-D112). */
+  async function markLinkTable(id: string, on: boolean) {
+    const next = withLinkTable(ws.tables?.[id], on);
+    await app.run(null, () => api.setTableSetup(id, isEmptySetup(next) ? null : next));
+  }
   const sk = (s: Suggestion) => `${s.from.table}.${s.from.column}>${s.to.table}.${s.to.column}`;
 
   /**
@@ -97,7 +108,18 @@
       id: t.id,
       type: 'table',
       position: current.get(t.id) ?? pos[t.id],
-      data: { table: t, source: names.get(t.source_id) ?? '', linked: linked.get(t.id) ?? new Set(), warned: warned.get(t.id) ?? new Set() },
+      data: {
+        table: t,
+        source: names.get(t.source_id) ?? '',
+        linked: linked.get(t.id) ?? new Set(),
+        warned: warned.get(t.id) ?? new Set(),
+        linkTable: app.linkTables.has(t.id),
+        suggestion: linkSuggestions.find((s) => s.table === t.id)?.why ?? null,
+        canMark: new Set(ws.relationships.filter((r) => r.from.table === t.id).map((r) => r.from.column)).size >= 2,
+        onmark: () => markLinkTable(t.id, true),
+        onunmark: () => markLinkTable(t.id, false),
+        ondismiss: () => (notLinkTables = [...notLinkTables, t.id]),
+      },
       dragHandle: 'header',
     }));
   });
@@ -197,7 +219,7 @@
     for (const a of app.tables) {
       for (const b of app.tables) {
         if (a.id === b.id) continue;
-        const first = firstLinks(a.id, b.id, ws.relationships, app.linkHealth);
+        const first = firstLinks(a.id, b.id, ws.relationships, app.linkHealth, app.linkTables);
         if (first.length < 2) continue;
         const names = first.map((id) => ws.relationships.find((r) => r.id === id)).filter((r): r is Relationship => !!r).map((r) => linkLabel(r, app.tables));
         out.push(`${a.label} reaches ${b.label} ${first.length === 2 ? 'two ways' : `${first.length} ways`}: ${names.join(' and ')}.`);

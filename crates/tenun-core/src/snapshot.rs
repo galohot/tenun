@@ -349,8 +349,14 @@ pub fn run_tile(
         }
     }
     let words: Vec<String> = words.into_iter().map(str::to_string).collect();
-    res.notes.extend(words.iter().cloned());
-    res.public_notes.extend(words);
+    for w in &words {
+        if !res.notes.contains(w) {
+            res.notes.push(w.clone());
+        }
+        if !res.public_notes.contains(w) {
+            res.public_notes.push(w.clone());
+        }
+    }
     Ok(res)
 }
 

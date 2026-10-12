@@ -2,7 +2,7 @@
 // never offered. Pure code with only pure imports at run time, so the node tests can load it.
 
 import type { Dim, DType, Table, Tile, TileType } from './api';
-import { additive } from './measures.ts';
+import { addsUp, type Parts } from './measures.ts';
 
 export interface Suggestion {
   type: TileType;
@@ -28,7 +28,7 @@ const isDate = (d: DType | undefined) => d === 'date' || d === 'datetime';
  * - one number column alone: histogram, number
  * - a category and a date: pivot
  */
-export function suggestTypes(tile: Tile, tables: Pick<Table, 'id' | 'columns'>[], groups: number | null): Suggestion[] {
+export function suggestTypes(tile: Tile, tables: Pick<Table, 'id' | 'columns'>[], groups: number | null, parts?: Parts): Suggestion[] {
   const out: Suggestion[] = [];
   const add = (type: TileType, change: Partial<Tile> = {}) => {
     if (out.some((s) => s.type === type) || type === tile.type || (type === 'share' && tile.type === 'donut')) return;
@@ -51,8 +51,8 @@ export function suggestTypes(tile: Tile, tables: Pick<Table, 'id' | 'columns'>[]
   }
   if (d0 && group(t0) && groups !== null && groups <= SMALL_CATEGORY) {
     add('bar', { horizontal: true });
-    // Shares are the parts of a whole: only values that add up (V4-D85d).
-    if (!m0 || additive(m0)) add('share', { measures: tile.measures.slice(0, 1) });
+    // Shares are the parts of a whole: only values that add up here (V4-D85d, V4-D112).
+    if (!m0 || addsUp(tile, parts)) add('share', { measures: tile.measures.slice(0, 1) });
     add('table');
   }
   if (d0 && group(t0) && tile.measures.length >= 2) {

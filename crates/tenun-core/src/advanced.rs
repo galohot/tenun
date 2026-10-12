@@ -702,6 +702,13 @@ pub fn sankey(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resul
             sort: vec![Sort { by: 2, desc: true }],
             limit: Some(SANKEY_LINKS),
         })?;
+        // A field behind a link table puts a row in two nodes of one stage, so what passes through a
+        // node would be counted again (V4-D112).
+        if r.parts.iter().any(|p| p.overlap) {
+            anyhow::bail!(
+                "A Sankey chart follows each row from one stage to the next, and a field behind a link table puts a row in more than one place. Pick fields that are not behind a link table."
+            );
+        }
         if i == 0 {
             ignored = r.ignored_filters.clone();
             value_col = r.columns.get(2).cloned();

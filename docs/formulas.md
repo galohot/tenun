@@ -265,6 +265,11 @@ In a calculated column, `[Table].[Column]` reads the one row it relates to, like
 
 Example: `[amount] / [Stores].[rent]`
 
+A formula goes from the many side to the one side and never the other way. That holds for a link
+table too (see [relationships](relationships.md#many-to-many-with-a-link-table)): a formula does not
+cross it. A chart can group by a table behind a link table, and a measure works with that group,
+because each of its tables is totalled on its own.
+
 ## Add a column
 
 A calculated column is a formula that becomes a real column of a table. It works in a chart, a
@@ -418,8 +423,10 @@ That date is the **main date** of the table.
   use **Main date** (with Advanced features on). The control shows when a table has two dates, or when
   a measure reads the table.
 - **Only a main date is read through another table's main date.** The date of `sales` can line up
-  `targets` because both tables hold events: some link starts from each of them. The launch date of a
-  product, or the day a store opened, only describes a row. A group or a filter on it follows the plain
+  `targets` because both tables hold events: some link starts from each of them, or no link touches
+  the table at all (a `targets.csv` with a month and a target for the whole company, and no links, is a
+  table of events). The launch date of a product, or the day a store opened, only describes a row:
+  other tables point at that table, and none of its links starts from it. A group or a filter on it follows the plain
   rule: a table that cannot reach it is not split or not filtered by it, and says so. If you pick a
   main date for a table yourself, it counts, whatever the table is for.
 - A date filter works the same way. A filter on "last 30 days" of `sales.date` also filters `targets`

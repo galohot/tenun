@@ -2,7 +2,7 @@
 
 import { guessLocale } from './locale';
 import { PHONE_MAX } from './layout';
-import { setLinkLabels } from './links';
+import { linkTablesOf, setLinkLabels } from './links';
 import { setKnownMeasures } from './measures';
 import { api, type CloudStatus, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
 
@@ -69,6 +69,8 @@ class App {
 
   /** What the data says about each link, by relationship id (V4-D26). */
   linkHealth = $derived(this.snap?.health);
+  /** The tables marked as link tables: a tile may cross one from the one side of its links (V4-D112). */
+  linkTables = $derived(linkTablesOf(this.snap?.workspace.tables));
   tables = $derived<Table[]>(this.snap?.tables ?? []);
   dashboards = $derived<Dashboard[]>(this.snap?.workspace.dashboards ?? []);
   /** How numbers and dates read in the open workspace. A file without it reads as English. */

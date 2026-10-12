@@ -106,6 +106,7 @@ function tidy(s: TableSetup): TableSetup {
   if (s.transforms?.length) out.transforms = s.transforms;
   if (s.calc?.length) out.calc = s.calc;
   if (s.mainDate) out.mainDate = s.mainDate;
+  if (s.linkTable) out.linkTable = true;
   return out;
 }
 
@@ -119,6 +120,9 @@ export function barHeights(counts: number[]): number[] {
 
 /** The setup with its calculated columns replaced. An empty list leaves none in the file. */
 export const withCalc = (setup: TableSetup | undefined, calc: CalcColumn[]): TableSetup => tidy({ ...setup, calc });
+
+/** The setup with the table marked as a link table, or not (V4-D112). Unmarked, nothing is left in the file. */
+export const withLinkTable = (setup: TableSetup | undefined, on: boolean): TableSetup => tidy({ ...setup, linkTable: on || undefined });
 
 /** The setup with the date a measure lines this table up with over time. `undefined` goes back to the table's only date column. */
 export const withMainDate = (setup: TableSetup | undefined, column: string | undefined): TableSetup => tidy({ ...setup, mainDate: column });

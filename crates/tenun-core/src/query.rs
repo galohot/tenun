@@ -296,8 +296,9 @@ pub struct Compiled {
     pub blank_reads: Vec<(String, String)>,
 }
 
-/// A group or a filter that one table of a named measure cannot reach (V4-D4, V4-D85).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// What a result says about a value of the tile: a group or a filter that one table of a named measure
+/// cannot reach (V4-D4, V4-D85), or a group that puts a row under several values (V4-D112).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PartNote {
     /// The index of the measure in the question.
     pub measure: usize,
@@ -306,6 +307,25 @@ pub struct PartNote {
     /// up counts it again for each. The measure does not add up on this tile (V4-D99a).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub repeats: bool,
+    /// A group of the tile sits behind a link table, so one row can be under several groups and the
+    /// groups add up to more than the whole. The measure does not add up on this tile either
+    /// (V4-D112); the same gate as `repeats` answers it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub overlap: bool,
+}
+
+// `overlap` is written only when it is true, so the pinned text of an old result stays as it was.
+impl std::fmt::Debug for PartNote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut d = f.debug_struct("PartNote");
+        d.field("measure", &self.measure)
+            .field("note", &self.note)
+            .field("repeats", &self.repeats);
+        if self.overlap {
+            d.field("overlap", &true);
+        }
+        d.finish()
+    }
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -337,6 +357,14 @@ pub enum QueryError {
     NotADate(String),
     #[error("This tile uses a measure that was deleted. Pick the measure again.")]
     UnknownMeasure,
+    /// A value is read from a table that sits behind a link table (V4-D112).
+    #[error(
+        "{0} sits behind the link table {1}, so a value of it would be counted once for each row of {1}. Use {0} as a group or a filter, not as a value."
+    )]
+    BehindLinkTable(String, String),
+    /// A field behind a link table that the question did not name (V4-D112).
+    #[error("{0} sits behind a link table. Name it in the question as a group or a filter.")]
+    NotNamed(String),
     /// A named measure whose formula does not work now: the words say why.
     #[error("The measure {0} cannot be worked out. {1}")]
     MeasureBroken(String, String),
@@ -370,8 +398,38 @@ pub struct Scope<'a> {
     pub ignored_filters: Vec<usize>,
     /// The links the joins cross that have something to tell the reader (see [`Compiled::crossed`]).
     pub crossed: Vec<String>,
+    /// The groups behind a link table, as (the table of the rows, the table of the group): a row can be
+    /// under several of them (V4-D112). Empty when no group sits behind a link table.
+    pub overlaps: Vec<(String, String)>,
     catalog: &'a Catalog,
     joins: Joins<'a>,
+    exposed: Vec<Exposed>,
+}
+
+/// A group (or any field) of the question that sits behind a link table. It is read inside the derived
+/// table of the crossing, which holds the distinct pairs of (the key of the row, the value), so a row
+/// is under a value once however many pairs name it (V4-D112).
+struct Exposed {
+    table: String,
+    via: Option<String>,
+    column: String,
+    grain: Option<Grain>,
+    /// The alias of the crossing step, which is also the alias of its derived table.
+    crossing: usize,
+    /// The name of the column in the derived table.
+    name: String,
+    /// The expression inside the derived table.
+    inner: String,
+    dtype: DType,
+}
+
+impl Exposed {
+    fn matches(&self, table: &str, via: Option<&str>, column: &str, grain: Option<Grain>) -> bool {
+        self.table == table
+            && self.via.as_deref() == via
+            && self.column == column
+            && self.grain == grain
+    }
 }
 
 impl Scope<'_> {
@@ -385,7 +443,9 @@ impl Scope<'_> {
         self.expr_via(table, None, column, grain)
     }
 
-    /// Like `expr`, for a field that crosses a named link (V4-D28).
+    /// Like `expr`, for a field that crosses a named link (V4-D28). A field behind a link table is
+    /// read from the table of its crossing, and only the groups and filters the question names
+    /// can be (V4-D112).
     pub fn expr_via(
         &self,
         table: &str,
@@ -393,13 +453,39 @@ impl Scope<'_> {
         column: &str,
         grain: Option<Grain>,
     ) -> Result<(String, DType), QueryError> {
+        if let Some(x) = self
+            .exposed
+            .iter()
+            .find(|x| x.matches(table, via, column, grain))
+        {
+            return Ok((format!("t{}.{}", x.crossing, ident(&x.name)), x.dtype));
+        }
+        if self.joins.crosses(table, via) {
+            return Err(QueryError::NotNamed(label(self.catalog, table)));
+        }
         dim_expr(self.catalog, &self.joins, table, via, column, grain)
     }
 
     /// The SQL expression, type and name of a measure.
     pub fn measure(&self, m: &Measure) -> Result<(String, DType, String), QueryError> {
+        self.joins.refuse_behind(self.catalog, m)?;
         measure_expr(self.catalog, &self.joins, m)
     }
+
+    /// What the reader should know when a group sits behind a link table, one sentence for each
+    /// pair of tables (V4-D112): the table of the rows and the table of the group.
+    pub fn overlap_notes(&self) -> Vec<String> {
+        self.overlaps
+            .iter()
+            .map(|(rows, group)| overlap_note(rows, group))
+            .collect()
+    }
+}
+
+/// The note under a result whose groups overlap (V4-D112). Table labels only, so it may leave the
+/// computer as it is (V4-D52).
+pub fn overlap_note(rows: &str, group: &str) -> String {
+    format!("A row of {rows} with two {group} is under both. The total counts it once.")
 }
 
 pub fn scope<'a>(
@@ -410,12 +496,47 @@ pub fn scope<'a>(
     scope_on(q, catalog, links, local_today())
 }
 
+/// Where a filter of the question is applied (V4-D112).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Place {
+    /// In the `WHERE` of the question, on the joined rows: no link table on its way.
+    Plain,
+    /// In the `WHERE` of the question, on the pairs of the link table that a group of the question also sits
+    /// behind. The filter keeps the pairs that pass, so the groups show only what the filter keeps ("Keep
+    /// only" a funder, and the chart by funder has one bar; "Exclude" it, and the bar is gone).
+    Joined(usize),
+    /// A semi-join on the key of the row: the row passes when at least one of its values passes. The
+    /// row is kept once, however many values pass.
+    Semi,
+}
+
+/// The filters that cross one link table without a group of the question behind it. They share one
+/// look at the values of a row, so a funder named X *and* of type Y is one funder.
+struct Semi {
+    /// The alias, in the main `FROM`, that the crossing starts from.
+    from: usize,
+    /// The crossing edge, into the link table.
+    cross: Edge,
+    /// Each filter and the edges after the crossing that lead to its table.
+    filters: Vec<(usize, Vec<Edge>)>,
+}
+
+/// What the joins of a question need to be written as SQL.
+struct Plan<'a> {
+    joins: Joins<'a>,
+    ignored: Vec<usize>,
+    places: Vec<Option<Place>>,
+    semis: Vec<Semi>,
+    /// The groups behind a link table: the index of the group and the alias of its crossing.
+    behind: Vec<(usize, usize)>,
+}
+
 /// The joins of a query: which tables it reads and the links they cross.
 fn plan<'a>(
     q: &SemanticQuery,
     catalog: &'a Catalog,
     links: Links<'a>,
-) -> Result<(Joins<'a>, Vec<usize>), QueryError> {
+) -> Result<Plan<'a>, QueryError> {
     if q.measures.iter().any(|m| m.named.is_some()) {
         return Err(QueryError::NamedHere(
             "Pick a column and a way to add it up here.".into(),
@@ -431,31 +552,92 @@ fn plan<'a>(
 
     let mut joins = Joins::new(&base_id, links);
 
-    // Dimensions and measures must all be reachable.
-    let fields = q
-        .dimensions
+    // Dimensions and measures must all be reachable. A value (a measure, or the bottom of a ratio)
+    // cannot sit behind a link table: it would be added up once for each pair (V4-D112).
+    let mut behind = Vec::new();
+    for (i, d) in q.dimensions.iter().enumerate() {
+        lookup(catalog, &d.table)?;
+        joins
+            .add(&d.table, d.via.as_deref())
+            .map_err(|e| explain(catalog, links, &base_id, &d.table, e))?;
+        if let Some(a) = joins.behind(&d.table, d.via.as_deref()) {
+            behind.push((i, a));
+        }
+    }
+    let values = q
+        .measures
         .iter()
-        .map(|d| (&d.table, d.via.as_deref()))
-        .chain(q.measures.iter().map(|m| (&m.table, m.via.as_deref())))
+        .map(|m| (&m.table, m.via.as_deref()))
         .chain(
             q.measures
                 .iter()
                 .filter_map(|m| m.per.as_ref().map(|p| (&p.table, p.via.as_deref()))),
         );
-    for (t, via) in fields {
+    for (t, via) in values {
         lookup(catalog, t)?;
         joins
             .add(t, via)
             .map_err(|e| explain(catalog, links, &base_id, t, e))?;
+        if let Some(a) = joins.behind(t, via) {
+            return Err(QueryError::BehindLinkTable(
+                label(catalog, t),
+                joins.link_table_label(catalog, a),
+            ));
+        }
     }
     // Filters that cannot reach the base table are skipped and reported.
     let mut ignored = Vec::new();
+    let mut places: Vec<Option<Place>> = Vec::new();
+    let mut semis: Vec<Semi> = Vec::new();
     for (i, f) in q.filters.iter().enumerate() {
-        if catalog.table(&f.table).is_none() || joins.add(&f.table, f.via.as_deref()).is_err() {
+        let path = if catalog.table(&f.table).is_none() {
+            None
+        } else {
+            joins.path(&f.table, f.via.as_deref()).ok()
+        };
+        let Some(path) = path else {
             ignored.push(i);
+            places.push(None);
+            continue;
+        };
+        let Some(c) = path.iter().position(|e| e.cross) else {
+            joins.add_path(path);
+            places.push(Some(Place::Plain));
+            continue;
+        };
+        // A filter behind a link table. When a group of the question sits behind the same crossing,
+        // the filter reads the same pairs; else it asks of each row whether one of its values passes.
+        let key: Vec<String> = path[..=c].iter().map(|e| e.rel.clone()).collect();
+        let shared = joins
+            .alias_of_key(&key)
+            .filter(|a| behind.iter().any(|(_, x)| x == a));
+        if let Some(a) = shared {
+            joins.add_path(path);
+            places.push(Some(Place::Joined(a)));
+            continue;
         }
+        let from = joins.add_path(path[..c].to_vec());
+        let (cross, tail) = (path[c].clone(), path[c + 1..].to_vec());
+        match semis
+            .iter_mut()
+            .find(|s| s.from == from && s.cross.rel == cross.rel)
+        {
+            Some(s) => s.filters.push((i, tail)),
+            None => semis.push(Semi {
+                from,
+                cross,
+                filters: vec![(i, tail)],
+            }),
+        }
+        places.push(Some(Place::Semi));
     }
-    Ok((joins, ignored))
+    Ok(Plan {
+        joins,
+        ignored,
+        places,
+        semis,
+        behind,
+    })
 }
 
 /// Why `table` cannot be reached from `base`, in words (V4-D28).
@@ -558,6 +740,129 @@ fn crossed_of(joins: &Joins<'_>) -> Vec<String> {
     out
 }
 
+/// One `LEFT JOIN` of a query as SQL. `alias` is the letter the aliases start with: `t` in the main
+/// `FROM`, `s` inside a semi-join.
+fn join_sql(catalog: &Catalog, step: &Step, alias: &str) -> Result<String, QueryError> {
+    let to = lookup(catalog, &step.edge.to_table)?;
+    let from_t = lookup(catalog, &step.edge.from_table)?;
+    let fc = col(from_t, &step.edge.from_col)?;
+    let tc = col(to, &step.edge.to_col)?;
+    let (l, r) = (
+        format!("{alias}{}.{}", step.from, ident(&step.edge.from_col)),
+        format!("{alias}{}.{}", step.alias, ident(&step.edge.to_col)),
+    );
+    let as_text = fc.dtype != tc.dtype;
+    let on = join_on(&l, &r, fc.dtype, tc.dtype);
+    Ok(format!(
+        " LEFT JOIN {} AS {alias}{} ON {on}",
+        step.edge.target_sql(to, as_text),
+        step.alias
+    ))
+}
+
+/// The join into a link table (V4-D112). The link table is read as the distinct pairs of (its key to
+/// the table the path comes from, every value the question reads behind it), so a pair written twice
+/// counts once and a row of the base is under a value once for each distinct combination of them. The
+/// groups and filters of the question that sit behind it are written inside, with the tables that
+/// follow it.
+fn derived_join(
+    catalog: &Catalog,
+    joins: &Joins<'_>,
+    j: &Step,
+    exposed: &[Exposed],
+) -> Result<String, QueryError> {
+    let link = lookup(catalog, &j.edge.to_table)?;
+    let one = lookup(catalog, &j.edge.from_table)?;
+    let fc = col(one, &j.edge.from_col)?;
+    let tc = col(link, &j.edge.to_col)?;
+    let a = j.alias;
+    let mut select = vec![format!("t{a}.{} AS {}", ident(&j.edge.to_col), ident("k"))];
+    for x in exposed.iter().filter(|x| x.crossing == a) {
+        select.push(format!("{} AS {}", x.inner, ident(&x.name)));
+    }
+    let mut inner = format!(
+        "SELECT DISTINCT {} FROM {} AS t{a}",
+        select.join(", "),
+        link.sql_ref
+    );
+    for s in joins.list.iter().filter(|s| s.under == Some(a)) {
+        inner.push_str(&join_sql(catalog, s, "t")?);
+    }
+    let on = join_on(
+        &format!("t{}.{}", j.from, ident(&j.edge.from_col)),
+        &format!("t{a}.{}", ident("k")),
+        fc.dtype,
+        tc.dtype,
+    );
+    Ok(format!(" LEFT JOIN ({inner}) AS t{a} ON {on}"))
+}
+
+/// The test of the filters that cross one link table with no group of the question behind it
+/// (V4-D112). The row is asked about its values: a row with no pair has one blank value, as it does
+/// in a group, and the row passes when one of its values passes every filter. The row is kept once.
+fn semi_sql(
+    catalog: &Catalog,
+    sm: &Semi,
+    q: &SemanticQuery,
+    today: NaiveDate,
+    params: &mut Vec<Param>,
+) -> Result<String, QueryError> {
+    let link = lookup(catalog, &sm.cross.to_table)?;
+    let one = lookup(catalog, &sm.cross.from_table)?;
+    let fc = col(one, &sm.cross.from_col)?;
+    let tc = col(link, &sm.cross.to_col)?;
+    // The tables after the link table, joined once however many filters read them.
+    let mut keys: Vec<Vec<String>> = vec![vec![sm.cross.rel.clone()]];
+    let mut steps: Vec<Step> = Vec::new();
+    let mut at: Vec<usize> = Vec::new();
+    for (_, tail) in &sm.filters {
+        let mut key = vec![sm.cross.rel.clone()];
+        let mut from = 0;
+        for e in tail {
+            key.push(e.rel.clone());
+            from = match keys.iter().position(|k| *k == key) {
+                Some(i) => i,
+                None => {
+                    keys.push(key.clone());
+                    let alias = keys.len() - 1;
+                    steps.push(Step {
+                        edge: e.clone(),
+                        from,
+                        alias,
+                        under: None,
+                    });
+                    alias
+                }
+            };
+        }
+        at.push(from);
+    }
+    let mut sql = format!(
+        "EXISTS (SELECT 1 FROM (SELECT t{}.{} AS {}) AS p LEFT JOIN {} AS s0 ON {}",
+        sm.from,
+        ident(&sm.cross.from_col),
+        ident("k"),
+        link.sql_ref,
+        join_on(
+            &format!("p.{}", ident("k")),
+            &format!("s0.{}", ident(&sm.cross.to_col)),
+            fc.dtype,
+            tc.dtype
+        )
+    );
+    for s in &steps {
+        sql.push_str(&join_sql(catalog, s, "s")?);
+    }
+    let mut wheres = Vec::new();
+    for ((i, _), a) in sm.filters.iter().zip(&at) {
+        let f = &q.filters[*i];
+        let (expr, dtype) = dim_expr_at(catalog, &format!("s{a}"), &f.table, &f.column, f.grain)?;
+        wheres.push(filter_sql(&expr, dtype, f, today, params)?);
+    }
+    sql.push_str(&format!(" WHERE {})", wheres.join(" AND ")));
+    Ok(sql)
+}
+
 /// Like `scope`, with the day that relative date filters count from.
 pub fn scope_on<'a>(
     q: &SemanticQuery,
@@ -565,51 +870,132 @@ pub fn scope_on<'a>(
     links: impl Into<Links<'a>>,
     today: NaiveDate,
 ) -> Result<Scope<'a>, QueryError> {
-    let (joins, ignored) = plan(q, catalog, links.into())?;
+    let Plan {
+        joins,
+        ignored,
+        places,
+        semis,
+        behind,
+    } = plan(q, catalog, links.into())?;
     let base = lookup(catalog, &joins.base)?;
 
-    let mut params = Vec::new();
-    let mut wheres = Vec::new();
+    // The groups behind a link table, and the filters that read the same pairs, are written inside the
+    // derived table of their crossing, and read from it.
+    /// A field read from behind a link table, and the alias of its crossing.
+    struct Behind<'f> {
+        table: &'f str,
+        via: Option<&'f str>,
+        column: &'f str,
+        grain: Option<Grain>,
+        crossing: usize,
+    }
+    let mut fields: Vec<Behind> = Vec::new();
+    for (i, a) in &behind {
+        let d = &q.dimensions[*i];
+        fields.push(Behind {
+            table: &d.table,
+            via: d.via.as_deref(),
+            column: &d.column,
+            grain: d.grain,
+            crossing: *a,
+        });
+    }
     for (i, f) in q.filters.iter().enumerate() {
-        if ignored.contains(&i) {
+        if let Some(Place::Joined(a)) = places[i] {
+            fields.push(Behind {
+                table: &f.table,
+                via: f.via.as_deref(),
+                column: &f.column,
+                grain: f.grain,
+                crossing: a,
+            });
+        }
+    }
+    let mut exposed: Vec<Exposed> = Vec::new();
+    for b in fields {
+        if exposed
+            .iter()
+            .any(|x| x.matches(b.table, b.via, b.column, b.grain))
+        {
             continue;
         }
-        let (expr, dtype) = dim_expr(
-            catalog,
-            &joins,
-            &f.table,
-            f.via.as_deref(),
-            &f.column,
-            f.grain,
-        )?;
-        wheres.push(filter_sql(&expr, dtype, f, today, &mut params)?);
+        let (inner, dtype) = dim_expr(catalog, &joins, b.table, b.via, b.column, b.grain)?;
+        let n = exposed.iter().filter(|x| x.crossing == b.crossing).count();
+        exposed.push(Exposed {
+            table: b.table.to_string(),
+            via: b.via.map(str::to_string),
+            column: b.column.to_string(),
+            grain: b.grain,
+            crossing: b.crossing,
+            name: format!("c{n}"),
+            inner,
+            dtype,
+        });
     }
 
+    let mut params = Vec::new();
     let mut sql = format!(" FROM {} AS t0", base.sql_ref);
     for j in &joins.list {
-        let to = lookup(catalog, &j.edge.to_table)?;
-        let from_t = lookup(catalog, &j.edge.from_table)?;
-        let fc = col(from_t, &j.edge.from_col)?;
-        let tc = col(to, &j.edge.to_col)?;
-        let (l, r) = (
-            format!("t{}.{}", j.from, ident(&j.edge.from_col)),
-            format!("t{}.{}", j.alias, ident(&j.edge.to_col)),
-        );
-        let as_text = fc.dtype != tc.dtype;
-        let on = join_on(&l, &r, fc.dtype, tc.dtype);
-        sql.push_str(&format!(
-            " LEFT JOIN {} AS t{} ON {on}",
-            j.edge.target_sql(to, as_text),
-            j.alias
-        ));
+        if j.under.is_some() {
+            continue;
+        }
+        if j.edge.cross {
+            sql.push_str(&derived_join(catalog, &joins, j, &exposed)?);
+        } else {
+            sql.push_str(&join_sql(catalog, j, "t")?);
+        }
     }
     let from_joins = sql.clone();
+
+    let mut wheres = Vec::new();
+    for (i, f) in q.filters.iter().enumerate() {
+        let (expr, dtype) = match places[i] {
+            None | Some(Place::Semi) => continue,
+            Some(Place::Plain) => dim_expr(
+                catalog,
+                &joins,
+                &f.table,
+                f.via.as_deref(),
+                &f.column,
+                f.grain,
+            )?,
+            Some(Place::Joined(a)) => {
+                let x = exposed
+                    .iter()
+                    .find(|x| x.matches(&f.table, f.via.as_deref(), &f.column, f.grain))
+                    .ok_or_else(|| QueryError::NotNamed(label(catalog, &f.table)))?;
+                (format!("t{a}.{}", ident(&x.name)), x.dtype)
+            }
+        };
+        wheres.push(filter_sql(&expr, dtype, f, today, &mut params)?);
+    }
+    for sm in &semis {
+        wheres.push(semi_sql(catalog, sm, q, today, &mut params)?);
+    }
     let mut where_clause = String::new();
     if !wheres.is_empty() {
         where_clause = format!(" WHERE {}", wheres.join(" AND "));
         sql.push_str(&where_clause);
     }
-    let crossed = crossed_of(&joins);
+    let mut crossed = crossed_of(&joins);
+    for sm in &semis {
+        for (_, tail) in &sm.filters {
+            for e in tail.iter().filter(|e| e.warn) {
+                if !crossed.contains(&e.rel) {
+                    crossed.push(e.rel.clone());
+                }
+            }
+        }
+    }
+    // The groups put a row under several values; a filter does not.
+    let rows = label(catalog, &joins.base);
+    let mut overlaps: Vec<(String, String)> = Vec::new();
+    for (i, _) in &behind {
+        let pair = (rows.clone(), label(catalog, &q.dimensions[*i].table));
+        if !overlaps.contains(&pair) {
+            overlaps.push(pair);
+        }
+    }
     Ok(Scope {
         from_where: sql,
         from_joins,
@@ -617,8 +1003,10 @@ pub fn scope_on<'a>(
         params,
         ignored_filters: ignored,
         crossed,
+        overlaps,
         catalog,
         joins,
+        exposed,
     })
 }
 
@@ -696,13 +1084,26 @@ pub fn compile_on<'a>(
         !q.measures.is_empty(),
     ));
 
+    // A group behind a link table puts a row under several groups: no value of the tile adds up
+    // (V4-D112). The words are the note of the tile.
+    let mut parts = Vec::new();
+    for note in scope.overlap_notes() {
+        for i in 0..q.measures.len() {
+            parts.push(PartNote {
+                measure: i,
+                note: note.clone(),
+                repeats: false,
+                overlap: true,
+            });
+        }
+    }
     Ok(Compiled {
         sql,
         params: scope.params,
         columns,
         ignored_filters: scope.ignored_filters,
         crossed: scope.crossed,
-        parts: Vec::new(),
+        parts,
         blank_reads: Vec::new(),
     })
 }
@@ -781,6 +1182,10 @@ struct Step {
     from: usize,
     /// The number of the alias of the table that is joined (`t{alias}`).
     alias: usize,
+    /// Behind a link table: the alias of the crossing this step follows. The crossing itself is
+    /// not under anything. A step that is under a crossing is written inside its derived table
+    /// (V4-D112).
+    under: Option<usize>,
 }
 
 /// The tables a query joins, each under an alias named after the path that reaches it, not
@@ -807,10 +1212,23 @@ impl<'a> Joins<'a> {
     /// Adds the joins that reach `table`, crossing the link `via` when one is named.
     pub(crate) fn add(&mut self, table: &str, via: Option<&str>) -> Result<(), PathError> {
         let path = self.paths.path(table, via)?;
+        self.add_path(path);
+        Ok(())
+    }
+
+    /// The edges from the base table to `table`, crossing the link `via` when one is named.
+    fn path(&self, table: &str, via: Option<&str>) -> Result<Vec<Edge>, PathError> {
+        self.paths.path(table, via)
+    }
+
+    /// Adds the joins of a path. Returns the alias the path ends at (0, the base, for an empty one).
+    fn add_path(&mut self, path: Vec<Edge>) -> usize {
         let mut key: Vec<String> = Vec::new();
         let mut from = 0;
+        let mut under = None;
         for e in path {
             key.push(e.rel.clone());
+            let crossing = e.cross;
             from = match self.keys.iter().position(|k| *k == key) {
                 Some(i) => i,
                 None => {
@@ -820,10 +1238,57 @@ impl<'a> Joins<'a> {
                         edge: e,
                         from,
                         alias,
+                        under,
                     });
                     alias
                 }
             };
+            if crossing {
+                under = Some(from);
+            }
+        }
+        from
+    }
+
+    /// The alias of the path with these links, if it was added.
+    fn alias_of_key(&self, key: &[String]) -> Option<usize> {
+        self.keys.iter().position(|k| k == key)
+    }
+
+    /// The path to the field crosses a link table (V4-D112).
+    fn crosses(&self, table: &str, via: Option<&str>) -> bool {
+        self.path(table, via)
+            .is_ok_and(|p| p.iter().any(|e| e.cross))
+    }
+
+    /// The alias of the crossing the path to the field goes through, if it crosses a link table and
+    /// the path was added.
+    fn behind(&self, table: &str, via: Option<&str>) -> Option<usize> {
+        let path = self.path(table, via).ok()?;
+        let c = path.iter().position(|e| e.cross)?;
+        let key: Vec<String> = path[..=c].iter().map(|e| e.rel.clone()).collect();
+        self.alias_of_key(&key)
+    }
+
+    /// The label of the link table that the crossing with this alias enters.
+    fn link_table_label(&self, catalog: &Catalog, alias: usize) -> String {
+        self.list
+            .iter()
+            .find(|s| s.alias == alias)
+            .map_or_else(String::new, |s| label(catalog, &s.edge.to_table))
+    }
+
+    /// A value read from behind a link table is refused (V4-D112).
+    fn refuse_behind(&self, catalog: &Catalog, m: &Measure) -> Result<(), QueryError> {
+        let tables = std::iter::once((&m.table, m.via.as_deref()))
+            .chain(m.per.as_ref().map(|p| (&p.table, p.via.as_deref())));
+        for (t, via) in tables {
+            if let Some(a) = self.behind(t, via) {
+                return Err(QueryError::BehindLinkTable(
+                    label(catalog, t),
+                    self.link_table_label(catalog, a),
+                ));
+            }
         }
         Ok(())
     }
@@ -852,9 +1317,20 @@ fn dim_expr(
     column: &str,
     grain: Option<Grain>,
 ) -> Result<(String, DType), QueryError> {
+    dim_expr_at(catalog, &joins.alias(table, via), table, column, grain)
+}
+
+/// The expression and type of a column of a table joined under `alias`, at a grain.
+fn dim_expr_at(
+    catalog: &Catalog,
+    alias: &str,
+    table: &str,
+    column: &str,
+    grain: Option<Grain>,
+) -> Result<(String, DType), QueryError> {
     let t = lookup(catalog, table)?;
     let c = col(t, column)?;
-    let r = format!("{}.{}", joins.alias(table, via), ident(column));
+    let r = format!("{alias}.{}", ident(column));
     Ok(match (c.dtype, grain) {
         (d, Some(g)) if d.is_temporal() && g.is_part() => (g.sql(&r), DType::Number),
         (d, Some(g)) if d.is_temporal() => (g.sql(&r), DType::Date),

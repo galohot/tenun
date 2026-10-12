@@ -485,5 +485,727 @@
         "r2"
       ]
     }
+  },
+  {
+    "name": "a marked table is crossed once, from the one side to the many side",
+    "linkTables": [
+      "pf"
+    ],
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "s",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "pf",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "pf",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-many",
+      "r2": "one-many",
+      "r3": "one-many"
+    },
+    "base": "s",
+    "reach": {
+      "s": null,
+      "p": "r1",
+      "pf": "r2",
+      "f": "r3"
+    },
+    "first": {
+      "p": [
+        "r1"
+      ],
+      "pf": [
+        "r1"
+      ],
+      "f": [
+        "r1"
+      ]
+    },
+    "behind": [
+      "f",
+      "pf"
+    ]
+  },
+  {
+    "name": "an unmarked table is not crossed",
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "s",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "pf",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "pf",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-many",
+      "r2": "one-many",
+      "r3": "one-many"
+    },
+    "base": "s",
+    "reach": {
+      "s": null,
+      "p": "r1"
+    },
+    "first": {
+      "p": [
+        "r1"
+      ]
+    }
+  },
+  {
+    "name": "the same link table is crossed from the funders to the programmes",
+    "linkTables": [
+      "pf"
+    ],
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "s",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "pf",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "pf",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-many",
+      "r2": "one-many",
+      "r3": "one-many"
+    },
+    "base": "f",
+    "reach": {
+      "f": null,
+      "pf": "r3",
+      "p": "r2"
+    },
+    "first": {
+      "pf": [
+        "r3"
+      ],
+      "p": [
+        "r3"
+      ]
+    },
+    "behind": [
+      "p",
+      "pf"
+    ]
+  },
+  {
+    "name": "a table that is the link table itself reaches both sides the usual way",
+    "linkTables": [
+      "pf"
+    ],
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "s",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "pf",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "pf",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-many",
+      "r2": "one-many",
+      "r3": "one-many"
+    },
+    "base": "pf",
+    "reach": {
+      "pf": null,
+      "p": "r2",
+      "f": "r3"
+    },
+    "first": {
+      "p": [
+        "r2"
+      ],
+      "f": [
+        "r3"
+      ]
+    }
+  },
+  {
+    "name": "two link tables in a row: the second is not crossed",
+    "linkTables": [
+      "pf",
+      "pf2"
+    ],
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "s",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "pf",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "pf",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      },
+      {
+        "id": "r4",
+        "from": [
+          "pf2",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      },
+      {
+        "id": "r5",
+        "from": [
+          "pf2",
+          "region"
+        ],
+        "to": [
+          "g",
+          "code"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-many",
+      "r2": "one-many",
+      "r3": "one-many",
+      "r4": "one-many",
+      "r5": "one-many"
+    },
+    "base": "s",
+    "reach": {
+      "s": null,
+      "p": "r1",
+      "pf": "r2",
+      "f": "r3"
+    },
+    "first": {
+      "p": [
+        "r1"
+      ],
+      "pf": [
+        "r1"
+      ],
+      "f": [
+        "r1"
+      ]
+    },
+    "behind": [
+      "f",
+      "pf"
+    ]
+  },
+  {
+    "name": "two link tables in a row: each is crossed alone from a table that is not behind one",
+    "linkTables": [
+      "pf",
+      "pf2"
+    ],
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "s",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "pf",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "pf",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      },
+      {
+        "id": "r4",
+        "from": [
+          "pf2",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      },
+      {
+        "id": "r5",
+        "from": [
+          "pf2",
+          "region"
+        ],
+        "to": [
+          "g",
+          "code"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-many",
+      "r2": "one-many",
+      "r3": "one-many",
+      "r4": "one-many",
+      "r5": "one-many"
+    },
+    "base": "f",
+    "reach": {
+      "f": null,
+      "pf": "r3",
+      "p": "r2",
+      "pf2": "r4",
+      "g": "r5"
+    },
+    "first": {
+      "pf": [
+        "r3"
+      ],
+      "p": [
+        "r3"
+      ],
+      "pf2": [
+        "r4"
+      ],
+      "g": [
+        "r4"
+      ]
+    },
+    "behind": [
+      "g",
+      "p",
+      "pf",
+      "pf2"
+    ]
+  },
+  {
+    "name": "a table that was reachable without a crossing keeps its way, and the link table is reached two ways",
+    "linkTables": [
+      "pf"
+    ],
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "s",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "pf",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "pf",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      },
+      {
+        "id": "r6",
+        "from": [
+          "s",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-many",
+      "r2": "one-many",
+      "r3": "one-many",
+      "r6": "one-many"
+    },
+    "base": "s",
+    "reach": {
+      "s": null,
+      "p": "r1",
+      "f": "r6",
+      "pf": "r2"
+    },
+    "first": {
+      "p": [
+        "r1"
+      ],
+      "f": [
+        "r6"
+      ],
+      "pf": [
+        "r1",
+        "r6"
+      ]
+    },
+    "behind": [
+      "pf"
+    ]
+  },
+  {
+    "name": "a link into a table that is not a key is not crossed",
+    "linkTables": [
+      "pf"
+    ],
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "s",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "pf",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "pf",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-many",
+      "r2": "many-many",
+      "r3": "one-many"
+    },
+    "base": "s",
+    "reach": {
+      "s": null,
+      "p": "r1"
+    },
+    "first": {
+      "p": [
+        "r1"
+      ]
+    }
+  },
+  {
+    "name": "a link table with a link nobody has read yet is crossed as stored",
+    "linkTables": [
+      "pf"
+    ],
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "s",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "pf",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "pf",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      }
+    ],
+    "health": {},
+    "base": "s",
+    "reach": {
+      "s": null,
+      "p": "r1",
+      "pf": "r2",
+      "f": "r3"
+    },
+    "first": {
+      "p": [
+        "r1"
+      ],
+      "pf": [
+        "r1"
+      ],
+      "f": [
+        "r1"
+      ]
+    },
+    "behind": [
+      "f",
+      "pf"
+    ]
+  },
+  {
+    "name": "after the crossing the path goes on to the tables the funders point at",
+    "linkTables": [
+      "pf"
+    ],
+    "rels": [
+      {
+        "id": "r1",
+        "from": [
+          "s",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r2",
+        "from": [
+          "pf",
+          "programme"
+        ],
+        "to": [
+          "p",
+          "id"
+        ]
+      },
+      {
+        "id": "r3",
+        "from": [
+          "pf",
+          "funder"
+        ],
+        "to": [
+          "f",
+          "id"
+        ]
+      },
+      {
+        "id": "r7",
+        "from": [
+          "f",
+          "kind"
+        ],
+        "to": [
+          "k",
+          "id"
+        ]
+      }
+    ],
+    "health": {
+      "r1": "one-many",
+      "r2": "one-many",
+      "r3": "one-many",
+      "r7": "one-many"
+    },
+    "base": "s",
+    "reach": {
+      "s": null,
+      "p": "r1",
+      "pf": "r2",
+      "f": "r3",
+      "k": "r7"
+    },
+    "first": {
+      "p": [
+        "r1"
+      ],
+      "pf": [
+        "r1"
+      ],
+      "f": [
+        "r1"
+      ],
+      "k": [
+        "r1"
+      ]
+    },
+    "behind": [
+      "f",
+      "k",
+      "pf"
+    ]
   }
 ]

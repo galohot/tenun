@@ -377,6 +377,55 @@ fn the_main_date_can_be_picked_and_a_table_without_one_says_so() {
     assert!(text.contains("\"mainDate\": \"month\""), "{text}");
 }
 
+#[test]
+fn two_tables_with_no_links_are_tables_of_events_and_both_are_split_by_month() {
+    // V4-D111. The first thing a person tries: sales, and a targets file for the whole company, no links.
+    let d = dir("v4d111");
+    std::fs::write(
+        d.join("sales.csv"),
+        "date,amount\n2026-01-05,100\n2026-01-20,50\n2026-02-10,240\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.join("targets.csv"),
+        "month,target\n2026-01-01,300\n2026-02-01,400\n",
+    )
+    .unwrap();
+    let e = Engine::new(Secrets::new(d.join("secrets.json"))).unwrap();
+    for f in ["sales.csv", "targets.csv"] {
+        e.add_source(AddSource::File {
+            path: d.join(f).to_string_lossy().into_owned(),
+        })
+        .unwrap();
+    }
+    let snap = e.snapshot();
+    let id = |name: &str| {
+        snap.tables
+            .iter()
+            .find(|t| t.name == name)
+            .unwrap()
+            .id
+            .clone()
+    };
+    let w = World {
+        e,
+        d,
+        sales: id("sales"),
+        stores: String::new(),
+        targets: id("targets"),
+    };
+    assert!(w.e.snapshot().workspace.relationships.is_empty());
+    let achievement = w.add("Achievement", ACHIEVEMENT);
+    let r = w.q(json!({ "measures": [named(&achievement)], "dimensions": [w.month()] }));
+    // January: 150 sold against 300. February: 240 against 400. Neither is split by nothing.
+    same(&r, "2026-01-01", 150.0 / 300.0);
+    same(&r, "2026-02-01", 240.0 / 400.0);
+    assert!(r.parts.is_empty(), "{:?}", r.parts);
+    // The whole is a ratio of totals.
+    let all = w.q(json!({ "measures": [named(&achievement)] }));
+    near(&all.rows[0][0], 390.0 / 700.0);
+}
+
 // ---- gaps, mixes and shapes ------------------------------------------------------------
 
 #[test]

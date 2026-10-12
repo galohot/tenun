@@ -150,17 +150,18 @@ test('a field that crosses a named link says so, and its clicks keep the link', 
 
 test('search: the same answers as the engine, from the vectors both read', () => {
   const cases = JSON.parse(readFileSync(new URL('./fixtures/paths.json', import.meta.url), 'utf8'));
-  assert.ok(cases.length >= 10);
+  assert.ok(cases.length >= 20);
   // The kinds the engine's test builds records for. A link with no record is unknown.
   const health = (kind) => ({ oneToOne: kind === 'one-one', duplicates: 0, sample: [], fromUnique: kind === 'one-one' || kind === 'many-one', kind });
   for (const c of cases) {
     const rels = c.rels.map((r) => ({ id: r.id, from: { table: r.from[0], column: r.from[1] }, to: { table: r.to[0], column: r.to[1] } }));
     const h = Object.fromEntries(Object.entries(c.health).map(([id, kind]) => [id, health(kind)]));
-    const found = search(c.base, rels, h);
+    const found = search(c.base, rels, h, c.linkTables);
     assert.deepEqual(Object.fromEntries(found.edge), c.reach, `${c.name}: the way to each table`);
     assert.deepEqual(Object.fromEntries(found.firsts), c.first, `${c.name}: the first links`);
-    for (const [table, first] of Object.entries(c.first)) assert.deepEqual(firstLinks(c.base, table, rels, h), first, c.name);
-    assert.deepEqual([...reachableFrom(c.base, rels, h)].sort(), Object.keys(c.reach).sort(), c.name);
+    assert.deepEqual([...found.behind].sort(), c.behind ?? [], `${c.name}: the tables behind a link table`);
+    for (const [table, first] of Object.entries(c.first)) assert.deepEqual(firstLinks(c.base, table, rels, h, c.linkTables), first, c.name);
+    assert.deepEqual([...reachableFrom(c.base, rels, h, c.linkTables)].sort(), Object.keys(c.reach).sort(), c.name);
   }
 });
 

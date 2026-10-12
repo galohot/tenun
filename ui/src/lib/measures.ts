@@ -51,21 +51,25 @@ export function additive(m: Pick<Measure, 'agg' | 'per' | 'named'>): boolean {
 
 // ---- the gate: does a value add up on this tile? (V4-D85d, V4-D99) --------------------------------------
 
-/** What the engine says a measure could not follow (`QueryResult.parts`). Only `repeats` matters here. */
-export type Parts = readonly { measure: number; repeats?: boolean }[] | null | undefined;
+/** What the engine says a measure could not follow (`QueryResult.parts`). Only `repeats` and `overlap` matter here. */
+export type Parts = readonly { measure: number; repeats?: boolean; overlap?: boolean }[] | null | undefined;
 
 /** A table of value `i` has the same number for every group of the tile (the engine says so in `parts`). */
 export const repeatsAt = (parts: Parts, i: number): boolean => !!parts?.some((p) => p.measure === i && p.repeats);
 
+/** A group of the tile sits behind a link table, so one row is under several groups (the engine says so in `parts`, V4-D112). */
+export const overlapsAt = (parts: Parts, i: number): boolean => !!parts?.some((p) => p.measure === i && p.overlap);
+
 /**
- * THE gate. Value `i` of the tile adds up here when its measure does, and no table of it is repeated across the
- * groups of the tile. A share of the whole, a running total, folding the small bars into "Other", a waterfall,
- * stacking, a pace and a share chart need it. The screen, every picture and every export ask this one function.
+ * THE gate. Value `i` of the tile adds up here when its measure does, no table of it is repeated across the
+ * groups of the tile, and no group sits behind a link table (V4-D112). A share of the whole, a running total,
+ * folding the small bars into "Other", a waterfall, stacking, a pace and a share chart need it. The screen,
+ * every picture and every export ask this one function.
  */
 export function addsUpHere(tile: Pick<Tile, 'measures'>, i: number, parts?: Parts): boolean {
   const m = tile.measures[i];
   if (!m) return true;
-  return additive(m) && !repeatsAt(parts, i);
+  return additive(m) && !repeatsAt(parts, i) && !overlapsAt(parts, i);
 }
 
 /** The first value of the tile adds up here (or the tile has none, and counts rows). */
@@ -90,7 +94,10 @@ export function whyNotAdded(tile: Pick<Tile, 'measures'>, i: number, parts?: Par
   const m = tile.measures[i];
   if (!m || addsUpHere(tile, i, parts)) return null;
   const name = m.named ? nameOf(m.named) : null;
-  if (additive(m)) return `${name ?? 'This value'} is not added up here, because a table it reads is the same for every group`;
+  if (additive(m)) {
+    if (overlapsAt(parts, i)) return `${name ?? 'This value'} is not added up here, because one row can be in two groups`;
+    return `${name ?? 'This value'} is not added up here, because a table it reads is the same for every group`;
+  }
   if (name) return `${name} is not added up`;
   return `${m.per ? 'Ratios' : (KIND_WORDS[m.agg] ?? 'These values')} are not added up`;
 }
@@ -106,6 +113,9 @@ export function stepsByDate(tile: Pick<Tile, 'dims'>, res: { columns: { dtype: s
   return first === 'date' || first === 'datetime' || DATE_PARTS.includes(tile.dims[0]?.grain ?? '');
 }
 
+/** The tile types that draw the parts of a whole. A pie (build 07) is one: it needs nothing but this gate. */
+const SHARE_TYPES: readonly string[] = ['share', 'donut', 'pie'];
+
 /**
  * Why a tile cannot be drawn from its values, in words, or null (V4-D99). A share chart is the parts of a whole,
  * and a waterfall by category adds one category to the next. `byDate` is true for a waterfall stepped over
@@ -117,7 +127,11 @@ export function tileProblem(tile: Pick<Tile, 'type' | 'measures'>, parts?: Parts
     const why = whyNotAdded(tile, 0, parts);
     return why ? `A waterfall adds one category to the next. ${why}, so there are no steps to draw.` : null;
   }
-  if (tile.type === 'share' || tile.type === 'donut') {
+  if (SHARE_TYPES.includes(tile.type)) {
+    // Shares of a whole: the parts must add up to it. Rows in two groups would pass 100 % (V4-D112).
+    if (tile.measures[0] && additive(tile.measures[0]) && overlapsAt(parts, 0) && !repeatsAt(parts, 0)) {
+      return 'These shares would add up to more than 100 %, because one row can be in two groups.';
+    }
     const why = whyNotAdded(tile, 0, parts);
     return why ? `${why}, so it has no shares. A share chart needs a sum or a count.` : null;
   }
