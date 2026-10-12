@@ -8,6 +8,7 @@ import { buildCompare } from './charts/compare';
 import { buildGantt } from './charts/gantt';
 import { buildHistogram } from './charts/histogram';
 import { buildPanels } from './charts/panels';
+import { buildPie } from './charts/pie';
 import { buildSankey } from './charts/sankey';
 import { buildScatter } from './charts/scatter';
 import { buildWaterfall } from './charts/waterfall';
@@ -17,7 +18,7 @@ export { readColors, key, pivot, type BuildArgs, type Built, type Colors } from 
 export { sizeNote };
 
 /** The tile types that draw with ECharts. The others are small components or tables. */
-export const CHART_TYPES = ['bar', 'line', 'area', 'scatter', 'histogram', 'waterfall', 'box', 'compare', 'gantt', 'sankey'] as const;
+export const CHART_TYPES = ['bar', 'line', 'area', 'scatter', 'histogram', 'waterfall', 'box', 'compare', 'gantt', 'sankey', 'pie', 'donut'] as const;
 
 export function buildOption(args: BuildArgs): Built {
   switch (args.tile.type) {
@@ -35,6 +36,9 @@ export function buildOption(args: BuildArgs): Built {
       return buildGantt(args);
     case 'sankey':
       return buildSankey(args);
+    case 'pie':
+    case 'donut':
+      return buildPie(args);
     default:
       // Several values in separate panels (Advanced). One value, or a split, has nothing to separate.
       if (args.tile.layout === 'panels' && bySeriesPerMeasure(args.res) && args.res.columns.length - 1 >= 2) return buildPanels(args);

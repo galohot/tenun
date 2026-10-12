@@ -19,6 +19,7 @@
   import ImageView from './ImageView.svelte';
   import KpiView from './KpiView.svelte';
   import MapView from './MapView.svelte';
+  import PieView from './PieView.svelte';
   import PivotView from './PivotView.svelte';
   import ShareView from './ShareView.svelte';
   import SmallMultiples from './SmallMultiples.svelte';
@@ -92,7 +93,7 @@
     if (tile.type === 'waterfall' && !tile.dims.length) return 'A waterfall needs a category or a date to step through.';
     // A share chart and a waterfall by category add values up. One gate says whether they can, here and in every
     // picture of the tile (V4-D99).
-    const refused = tileProblem(tile, res.parts, stepsByDate(tile, res));
+    const refused = tileProblem(tile, res.parts, stepsByDate(tile, res), res.rows);
     if (refused) return refused;
     if (tile.type === 'heatmap' && (!tile.dims.length || !tile.cols || !tile.measures.length)) {
       return 'A heat map needs a value, a field for the rows and a field for the columns.';
@@ -261,8 +262,10 @@
   <div class="placeholder">{missing}</div>
 {:else if res.rows.length === 0}
   <div class="none">No data for this selection.</div>
-{:else if tile.type === 'share' || tile.type === 'donut'}
+{:else if tile.type === 'share'}
   <ShareView {res} {tile} {colors} {selected} {onpick} {oncontext} />
+{:else if tile.type === 'pie' || tile.type === 'donut'}
+  <PieView {tile} {res} {colors} {selected} {tables} {onpick} />
 {:else if tile.type === 'pivot'}
   <PivotView {res} {tile} {tables} {selected} {selectedCol} {onpick} {onpickcol} {oncontext} />
 {:else if tile.type === 'heatmap'}

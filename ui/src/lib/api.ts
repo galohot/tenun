@@ -439,15 +439,14 @@ export interface KpiInfo {
   bars: { label: string; value: number | null }[];
 }
 
-/** `donut` is the old name of `share`; tiles saved with it render as `share`. */
 export type TileType =
   | 'kpi' | 'bar' | 'line' | 'area' | 'share' | 'donut' | 'table'
   // Simple types added in v3.
   | 'scatter' | 'histogram' | 'waterfall' | 'pivot' | 'text' | 'image' | 'filter'
   // Advanced types. They always render; only editing them needs the Advanced switch (V3-D2).
   | 'heatmap' | 'funnel' | 'box' | 'bullet' | 'compare' | 'sankey' | 'calendar' | 'cohort' | 'gantt'
-  // Simple types added in v4.
-  | 'map';
+  // Simple types added in v4. `donut` draws a donut again (V4-D7); files of v1 to v3 drew it as `share`.
+  | 'map' | 'pie';
 
 /** The level of a map: countries, the provinces of a country, or its second level (kabupaten and kota). */
 export type MapLevel = 'country' | 'province' | 'regency';

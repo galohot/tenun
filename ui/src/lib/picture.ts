@@ -1,4 +1,4 @@
-import type { Tile } from './api';
+import type { Cell, Tile } from './api';
 import { stepsByDate, tileProblem, type Parts } from './measures.ts';
 
 // What a picture of a tile says under it (V4-D52, V4-D54). A picture leaves the computer, so it takes
@@ -21,5 +21,5 @@ export function pictureKind(
   chartTypes: readonly string[],
 ): 'chart' | 'screen' {
   if (!res || !chartTypes.includes(tile.type) || res.rows.length === 0) return 'screen';
-  return tileProblem(tile, res.parts, stepsByDate(tile, res)) ? 'screen' : 'chart';
+  return tileProblem(tile, res.parts, stepsByDate(tile, res), res.rows as Cell[][]) ? 'screen' : 'chart';
 }

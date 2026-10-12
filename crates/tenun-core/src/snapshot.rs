@@ -188,7 +188,7 @@ pub fn tile_query(tile: &Tile, filters: &[DashFilter]) -> Option<SemanticQuery> 
     }
     let one = matches!(
         kind,
-        "kpi" | "share" | "donut" | "funnel" | "box" | "filter"
+        "kpi" | "share" | "donut" | "pie" | "funnel" | "box" | "filter"
     );
     // A compare chart with one value reads two periods of its second field.
     let periods = kind == "compare" && tile.measures.len() < 2;

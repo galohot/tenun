@@ -21,6 +21,8 @@ to every good or bad colour.
 | **Line** | You follow a value over time. | One or more values, a date field, optionally a split. |
 | **Area** | You follow a total over time and want to see its parts. | The same as a line. A split stacks by default. |
 | **Share of total** | You show parts of a whole. | One value and one field to group by. Drawn as a 100 % strip with the exact shares listed. |
+| **Pie** and **Donut** | You show parts of a whole, and there are only a few. | One value and one field to group by. At most six slices and Other (five unless you choose), largest first from twelve o'clock. The share is on each slice, or beside a small one; the value shows when you point at it. A donut shows the total in its centre, or the slice you point at. A value that does not add up (an average, a ratio) or one below 0 cannot be cut into slices: the tile says so and offers a bar chart. |
+| **Map** | Your data names places: countries, provinces, kabupaten or kota. | One value and a field of place names or codes, or a latitude and a longitude for points. See [the map guide](maps.md). |
 | **Table** | You need the exact numbers. | Any number of values and fields. Optional: a total row, bars or good/bad colours in the cells, a find box. |
 | **Pivot table** | You know Excel pivots. | Rows (1 to 3 fields), one field for columns, and 1 to 4 values. Totals are on by default. |
 | **Scatter** | You ask if two values move together. | Two values (X and Y), and a field for one dot each. Optional: a split for colour. |

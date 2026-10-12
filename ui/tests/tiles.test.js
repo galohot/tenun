@@ -195,8 +195,8 @@ test('suggestions: never more than three, never the current type, nothing for no
   assert.deepEqual(types(tile('text', [], []), 5), []);
   assert.deepEqual(types(tile('image', [], []), 5), []);
   assert.deepEqual(types(tile('bar', [], []), 5), []);
-  // A share strip is not offered on a share strip, nor on its old name.
-  assert.ok(!types(tile('donut', [sum('amount')], [dim('cat')]), 5).includes('share'));
+  // A share strip is not offered on a share strip. A donut is a donut again (V4-D7), so a strip may be offered on it.
+  assert.ok(!types(tile('share', [sum('amount')], [dim('cat')]), 5).includes('share'));
 });
 
 test('pivot: with two row fields, rows of the same first value sit together', () => {

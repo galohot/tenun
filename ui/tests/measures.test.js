@@ -201,7 +201,8 @@ test('V4-D99: a share chart and a waterfall by category are refused with words b
   assert.equal(tileProblem(tile('waterfall', [sum]), undefined, false), null);
   assert.ok(tileProblem(tile('waterfall', [sum]), parts, false), 'a table repeated across the categories');
   assert.match(tileProblem(tile('share', [plain('avg')])), /^Averages are not added up, so it has no shares/);
-  assert.match(tileProblem(tile('donut', [ratio])), /no shares/);
+  // A donut is a donut again (V4-D7): its own words.
+  assert.equal(tileProblem(tile('donut', [ratio])), 'A donut needs parts that add up to a whole. Achievement does not. Try a bar chart.');
   assert.equal(tileProblem(tile('bar', [ratio])), null);
   // A waterfall steps over time when its first field is a date or a part of a date.
   assert.equal(stepsByDate({ dims: [{ grain: 'month_of_year' }] }, { columns: [{ dtype: 'number' }] }), true);
@@ -345,7 +346,7 @@ test('the code that draws asks the gate (read from the files that node cannot lo
   assert.match(cartesian, /stackMode\(tile, perValue, res\.parts\)/);
   assert.match(cartesian, /source !== 'points'/, 'no trend over a split of values that do not add up');
   const body = source('components/dash/TileBody.svelte');
-  assert.match(body, /tileProblem\(tile, res\.parts, stepsByDate\(tile, res\)\)/);
+  assert.match(body, /tileProblem\(tile, res\.parts, stepsByDate\(tile, res\), res\.rows\)/);
   const output = source('lib/output.ts');
   assert.match(output, /pictureKind\(tile, res, CHART_TYPES\) === 'chart'/);
   assert.match(output, /pictureNote\(res, built\.note, built\.gateNote,/);

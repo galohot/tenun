@@ -2,7 +2,7 @@
 // registry, so the node tests can load this file. The engine decides what a measure means and whether
 // its values add up (`Snapshot.measure_info`); this file only remembers the answer and asks it.
 
-import type { Dashboard, Measure, MeasureInfo, NamedMeasure, NumFormat, Tile } from './api';
+import type { Cell, Dashboard, Measure, MeasureInfo, NamedMeasure, NumFormat, Tile } from './api';
 
 /** A workspace uses this many measures. Same as the engine. */
 export const MAX_MEASURES = 200;
@@ -136,10 +136,27 @@ const SHARE_TYPES: readonly string[] = ['share', 'donut', 'pie'];
  * time, where each step is a difference, which any value has. Called by the tile on the screen and by every
  * picture of it.
  */
-export function tileProblem(tile: Pick<Tile, 'type' | 'measures'>, parts?: Parts, byDate = false): string | null {
+export function tileProblem(tile: Pick<Tile, 'type' | 'measures'>, parts?: Parts, byDate = false, rows?: readonly Cell[][] | null): string | null {
   if (tile.type === 'waterfall' && !byDate) {
     const why = whyNotAdded(tile, 0, parts);
     return why ? `A waterfall adds one category to the next. ${why}, so there are no steps to draw.` : null;
+  }
+  if (tile.type === 'pie' || tile.type === 'donut') {
+    // Slices are the parts of a whole (V4-D7): a value that does not add up, or one below 0, makes none.
+    const m = tile.measures[0];
+    const a = tile.type === 'pie' ? 'A pie' : 'A donut';
+    if (m && additive(m) && overlapsAt(parts, 0) && !repeatsAt(parts, 0)) {
+      return 'These shares would add up to more than 100 %, because one row can be in two groups.';
+    }
+    if (m && !addsUpHere(tile, 0, parts)) {
+      const what = m.named ? `${nameOf(m.named)} does not` : `${m.per ? 'Ratios' : (KIND_WORDS[m.agg] ?? 'These values')} do not`;
+      return `${a} needs parts that add up to a whole. ${what}. Try a bar chart.`;
+    }
+    const value = (r: Cell[]) => r[r.length - 1];
+    if (rows?.some((r) => typeof value(r) === 'number' && (value(r) as number) < 0)) {
+      return `${a} needs parts that add up to a whole. Some values are below 0. Try a bar chart.`;
+    }
+    return null;
   }
   if (SHARE_TYPES.includes(tile.type)) {
     // Shares of a whole: the parts must add up to it. Rows in two groups would pass 100 % (V4-D112).

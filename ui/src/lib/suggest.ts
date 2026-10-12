@@ -32,7 +32,7 @@ const isDate = (d: DType | undefined) => d === 'date' || d === 'datetime';
 export function suggestTypes(tile: Tile, tables: Pick<Table, 'id' | 'columns'>[], groups: number | null, parts?: Parts): Suggestion[] {
   const out: Suggestion[] = [];
   const add = (type: TileType, change: Partial<Tile> = {}) => {
-    if (out.some((s) => s.type === type) || type === tile.type || (type === 'share' && tile.type === 'donut')) return;
+    if (out.some((s) => s.type === type) || type === tile.type) return;
     // A preview is a plain chart: Advanced layouts (small multiples, panels, indexed, combo) stay with the tile.
     out.push({ type, variant: { ...tile, repeat: undefined, ownScale: undefined, layout: undefined, mix: undefined, periods: undefined, spark: undefined, expand: undefined, ...change, type } });
   };

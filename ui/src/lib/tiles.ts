@@ -42,7 +42,7 @@ export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | nu
   const points = tile.type === 'map' && tile.map?.style === 'points' ? tile.map : null;
   if (points && !(points.lat && points.lon)) return null;
   if (isStatic(tile) || (!tile.measures.length && !tile.dims.length && !points)) return null;
-  const one = ['kpi', 'share', 'donut', 'waterfall', 'funnel', 'box', 'bullet', 'gantt', 'cohort', 'filter', 'map'].includes(tile.type);
+  const one = ['kpi', 'share', 'donut', 'pie', 'waterfall', 'funnel', 'box', 'bullet', 'gantt', 'cohort', 'filter', 'map'].includes(tile.type);
   const many = hasManyValues(tile);
   // A compare chart with one value reads two periods of its second field.
   const periods = tile.type === 'compare' && tile.measures.length < 2;
@@ -163,6 +163,7 @@ export function defaultSize(type: TileType): { w: number; h: number } {
       return { w: 3, h: 2 };
     case 'share':
     case 'donut':
+    case 'pie':
       return { w: 4, h: 4 };
     case 'table':
       return { w: 6, h: 4 };

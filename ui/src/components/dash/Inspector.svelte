@@ -43,12 +43,15 @@
     { id: 'line', icon: 'line', label: 'Line' },
     { id: 'area', icon: 'area', label: 'Area' },
     { id: 'share', icon: 'share', label: 'Share' },
+    { id: 'pie', icon: 'pie', label: 'Pie' },
+    { id: 'donut', icon: 'donut', label: 'Donut' },
     { id: 'kpi', icon: 'kpi', label: 'Number' },
     { id: 'table', icon: 'table', label: 'Table' },
     { id: 'scatter', icon: 'scatter', label: 'Scatter' },
     { id: 'histogram', icon: 'histogram', label: 'Histogram' },
     { id: 'waterfall', icon: 'waterfall', label: 'Waterfall' },
     { id: 'pivot', icon: 'pivot', label: 'Pivot' },
+    { id: 'map', icon: 'map', label: 'Map' },
     { id: 'filter', icon: 'filter', label: 'Filter' },
     { id: 'text', icon: 'text', label: 'Text' },
     { id: 'image', icon: 'image', label: 'Image' },
@@ -257,7 +260,7 @@
       dividing = null;
     }
   });
-  const topKind = $derived(tile.type === 'bar' || isBullet || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'pivot' || isHeat);
+  const topKind = $derived(tile.type === 'bar' || isBullet || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'pie' || tile.type === 'pivot' || isHeat);
   const topChoice = $derived(!tile.top ? 'all' : customTop || !TOP_PRESETS.includes(tile.top.n) ? 'custom' : String(tile.top.n));
 
   function setTop(choice: string) {
@@ -293,7 +296,7 @@
     if (i === 0 && isCalendar && dims[0]) dims[0] = { ...dims[0], grain: 'day' };
     const patch: Partial<Tile> = { dims };
     // A first group-by picks a sensible chart for the field. A chart that was chosen by name keeps its type.
-    if (i === 0 && !tile.dims.length && ['bar', 'line', 'area', 'share', 'donut', 'kpi'].includes(tile.type)) {
+    if (i === 0 && !tile.dims.length && ['bar', 'line', 'area', 'share', 'donut', 'pie', 'kpi'].includes(tile.type)) {
       patch.type = isDate ? 'line' : 'bar';
       patch.horizontal = !isDate;
     }
@@ -349,9 +352,9 @@
   /** What the engine could not follow in the result on show: a table the same for every group does not add up. */
   const parts = $derived(current?.res.parts);
   /** Why the chart type on show cannot draw these values, in words (V4-D99, V4-D112): shares of rows that are in two groups, for one. */
-  const refusedType = $derived(tileProblem(tile, parts, stepsByDate(tile, current?.res)));
+  const refusedType = $derived(tileProblem(tile, parts, stepsByDate(tile, current?.res), current?.res?.rows));
   /** The same words for a type the tile is not, as the tooltip of its button: a share of rows that are in two groups, for one. The button stays: the tile says it too. */
-  const chipWhy = (id: TileType): string | null => (id === tile.type ? null : tileProblem({ ...tile, type: id }, parts, stepsByDate(tile, current?.res)));
+  const chipWhy = (id: TileType): string | null => (id === tile.type ? null : tileProblem({ ...tile, type: id }, parts, stepsByDate(tile, current?.res), current?.res?.rows));
   const stackAble = $derived(stackableTile({ measures: tile.measures.slice(0, MAX_CHART_MEASURES), showAs: tile.showAs }, perValue, parts));
   // The choice on show: the saved one, or the default for these values.
   const stackNow = $derived(stackMode(tile, perValue, parts));
@@ -828,7 +831,7 @@
         <button
           role="radio"
           aria-checked={tile.type === t.id}
-          class:on={tile.type === t.id || (t.id === 'share' && tile.type === 'donut')}
+          class:on={tile.type === t.id}
           class:soft={!!chipWhy(t.id)}
           title={chipWhy(t.id) ?? t.label}
           onclick={() => pickType(t.id)}>
@@ -1133,7 +1136,7 @@
 
   {#if !isHistogram}
   <div class="sec">
-      <span class="label">{isMap ? (mapPoints ? 'Colour (optional)' : 'Place (names or codes)') : tile.type === 'kpi' ? 'Period (a date, for the comparison)' : tile.type === 'share' || tile.type === 'donut' ? 'Split into' : isScatter ? 'Dot for each' : pivotLike ? 'Rows' : isFunnel ? 'Stages' : isBox || isBullet ? 'Group by (optional)' : isGantt ? 'Name of each row' : isCalendar ? 'Date (one square for each day)' : isCohort ? 'Date of each event' : isSankey ? 'First stage' : isCompare ? 'Row for each' : 'Group by'}</span>
+      <span class="label">{isMap ? (mapPoints ? 'Colour (optional)' : 'Place (names or codes)') : tile.type === 'kpi' ? 'Period (a date, for the comparison)' : tile.type === 'share' || tile.type === 'donut' || tile.type === 'pie' ? 'Split into' : isScatter ? 'Dot for each' : pivotLike ? 'Rows' : isFunnel ? 'Stages' : isBox || isBullet ? 'Group by (optional)' : isGantt ? 'Name of each row' : isCalendar ? 'Date (one square for each day)' : isCohort ? 'Date of each event' : isSankey ? 'First stage' : isCompare ? 'Row for each' : 'Group by'}</span>
       <FieldPicker
         mode="dim"
         table={tile.dims[0]?.table ?? null}
@@ -1454,7 +1457,15 @@
     </div>
   {/if}
 
-  {#if topKind && tile.dims[0] && dimTypes[0] !== 'date' && dimTypes[0] !== 'datetime'}
+  {#if (tile.type === 'pie' || tile.type === 'donut') && tile.dims[0]}
+    <!-- A pie or a donut has at most six slices and Other (V4-D7). Not set: five. -->
+    <div class="sec">
+      <span class="label">Slices</span>
+      <select class="field" aria-label="How many slices before Other" value={String(Math.min(6, Math.max(2, tile.top?.n ?? 5)))} onchange={(e) => set({ top: { n: Number(e.currentTarget.value) } })}>
+        {#each [2, 3, 4, 5, 6] as n}<option value={String(n)}>{n} and Other</option>{/each}
+      </select>
+    </div>
+  {:else if topKind && tile.dims[0] && dimTypes[0] !== 'date' && dimTypes[0] !== 'datetime'}
     <div class="sec">
       <span class="label">Top</span>
       <select class="field" value={topChoice} onchange={(e) => setTop(e.currentTarget.value)}>

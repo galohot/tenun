@@ -16,6 +16,8 @@
     onx,
     oncontext,
     onresize,
+    onhover,
+    ondrawn,
   }: {
     option: EChartsCoreOption;
     horizontal?: boolean;
@@ -30,6 +32,10 @@
     /** A right-click: the category, the dot or the number under the pointer. */
     oncontext?: (hit: { kind: 'index'; index: number } | { kind: 'item'; series: number; index: number } | { kind: 'x'; x: number }, e: MouseEvent) => void;
     onresize?: (width: number, height: number) => void;
+    /** The mark under the pointer (its position in the first series), or null when the pointer leaves it. */
+    onhover?: (index: number | null) => void;
+    /** After each drawing, with the instance, to read what ECharts laid out (a pie's hidden labels). */
+    ondrawn?: (chart: unknown) => void;
   } = $props();
 
   /** No animation when the person asked for less motion, or while a picture of the dashboard is made. */
@@ -40,6 +46,9 @@
 
   onMount(() => {
     chart = echarts.init(el, null, { renderer: 'canvas', devicePixelRatio: motion.still ? 2 : undefined });
+    if (ondrawn) chart.on('finished', () => {
+      if (chart) ondrawn(chart);
+    });
     chart.setOption(still(option), { notMerge: true });
     const ro = new ResizeObserver(() => {
       chart?.resize();
@@ -49,6 +58,13 @@
     onresize?.(el.clientWidth, el.clientHeight);
 
     const zr = chart.getZr();
+    if (onhover) {
+      chart.on('mouseover', (e) => {
+        if (e.componentType === 'series' && e.dataIndex !== undefined) onhover(e.dataIndex);
+      });
+      chart.on('mouseout', () => onhover(null));
+      chart.on('globalout', () => onhover(null));
+    }
     if (onitem) {
       chart.on('click', (e) => {
         if (e.componentType === 'series' && e.seriesIndex !== undefined && e.dataIndex !== undefined) onitem(e.seriesIndex, e.dataIndex, e.dataType);

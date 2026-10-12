@@ -57,9 +57,7 @@ export function numberFormatter(f?: NumFormat | null, loc: Locale = getLocale(),
 
 /** A share of a whole, 0–1, as a percentage with a locale decimal mark: "4,2%". */
 export function pctShare(x: number, loc: Locale = getLocale()): string {
-  if (x >= 0.995) return '100%';
-  if (x < 0.001) return `<${L.fixedNumber(0.1, 1, loc)}%`;
-  return `${L.fixedNumber(x * 100, x < 0.1 ? 1 : 0, loc)}%`;
+  return L.pctShareIn(x, loc);
 }
 
 /** The value as a share of its target, 0.82 → "82 %". It can pass 100. */

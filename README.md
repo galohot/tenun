@@ -46,10 +46,10 @@ every other chart filters. Save the Excel file and the dashboard updates.
   "Achievement", and use it in any tile, though the two tables come from different files. Tenun adds
   up each table on its own, so a target is never counted once for each sale. See
   [the formula guide](docs/formulas.md#measures).
-- **Charts:** number, bar, line, area, share of total and table. Also stacked, side-by-side and
-  100 % bars, scatter, histogram, waterfall, pivot table, filter, text and image tiles. No pies
-  and no donuts: part-to-whole is a 100 % strip with the exact shares listed under it.
-  See [the chart guide](docs/charts.md).
+- **Charts:** number, bar, line, area, share of total, pie, donut, map and table. Also stacked,
+  side-by-side and 100 % bars, scatter, histogram, waterfall, pivot table, filter, text and image
+  tiles. A pie or a donut is drawn with care: at most six slices and Other, largest first, the
+  share on each slice, and only for values that add up to a whole. See [the chart guide](docs/charts.md).
 - **Top 5 + Other:** keep the biggest groups and add the rest as one bar, so the total stays true.
 - **Show value as:** % of total, % of group, running total, moving average, change, % change, rank,
   year to date, and the same period last year as a grey line. Also median, 90th percentile, and
@@ -112,7 +112,6 @@ Tenun aims to do a few things well. These are left out by choice. Each has an an
 
 | Not included | What to use |
 |---|---|
-| Pie and donut charts | The share strip or a 100 % bar. Shares are easy to compare and the numbers are listed. |
 | Gauges | A number tile with a target. |
 | Dual-axis charts | Separate panels, or indexed lines, so each value keeps an honest axis. |
 | Treemaps and packed bubbles | A bar chart with the top 10 and Other. |

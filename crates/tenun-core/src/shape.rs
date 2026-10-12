@@ -14,7 +14,7 @@ use crate::query::{
     Agg, Dimension, Filter, FilterOp, Grain, Measure, OutColumn, Param, PartNote, SemanticQuery,
     Sort, Unit,
 };
-use crate::snapshot::{SortBy, Tile, add_grain, iso, js_key, parse_day};
+use crate::snapshot::{SortBy, Tile, TopN, add_grain, iso, js_key, parse_day};
 use crate::workspace::Locale;
 use chrono::{Datelike, Duration, NaiveDate};
 use serde::Deserialize;
@@ -295,12 +295,20 @@ pub fn top_n(
     wide: &[Filter],
     res: &mut QueryResult,
 ) -> anyhow::Result<()> {
-    let Some(top) = &tile.top else {
+    // A pie or a donut has at most six slices and "Other": five unless the tile says (V4-D7).
+    let slices = matches!(tile.kind.as_str(), "pie" | "donut").then(|| {
+        let n = tile.top.as_ref().map_or(5, |t| t.n.clamp(2, 6));
+        TopN {
+            n,
+            other: Some(true),
+        }
+    });
+    let Some(top) = slices.as_ref().or(tile.top.as_ref()) else {
         return Ok(());
     };
     if !matches!(
         tile.kind.as_str(),
-        "bar" | "table" | "share" | "donut" | "pivot" | "heatmap" | "bullet"
+        "bar" | "table" | "share" | "donut" | "pie" | "pivot" | "heatmap" | "bullet"
     ) {
         return Ok(());
     }

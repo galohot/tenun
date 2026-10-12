@@ -669,7 +669,7 @@
       <button class="btn primary" onclick={() => (addMenu = !addMenu)} aria-expanded={addMenu}><Icon name="plus" /> Add tile</button>
       {#if addMenu}
         <div class="menu" role="menu">
-          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['table', 'Table'], ['pivot', 'Pivot table'], ['map', 'Map'], ['filter', 'Filter'], ['text', 'Text'], ['image', 'Image'], ...(advanced ? [['heatmap', 'Heat map'], ['funnel', 'Funnel'], ['box', 'Box plot'], ['bullet', 'Bullet chart'], ['compare', 'Compare two values'], ['sankey', 'Sankey'], ['calendar', 'Calendar heat map'], ['cohort', 'Cohort grid'], ...(hasTwoDates(app.tables) ? [['gantt', 'Gantt chart']] : [])] : [])] as [t, label]}
+          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['pie', 'Pie chart'], ['donut', 'Donut chart'], ['table', 'Table'], ['pivot', 'Pivot table'], ['map', 'Map'], ['filter', 'Filter'], ['text', 'Text'], ['image', 'Image'], ...(advanced ? [['heatmap', 'Heat map'], ['funnel', 'Funnel'], ['box', 'Box plot'], ['bullet', 'Bullet chart'], ['compare', 'Compare two values'], ['sankey', 'Sankey'], ['calendar', 'Calendar heat map'], ['cohort', 'Cohort grid'], ...(hasTwoDates(app.tables) ? [['gantt', 'Gantt chart']] : [])] : [])] as [t, label]}
             <button role="menuitem" onclick={() => addTile(t as TileType)}>
               <Icon name={(t === 'calendar' ? 'calendarheat' : t) as IconName} /> {label}
             </button>

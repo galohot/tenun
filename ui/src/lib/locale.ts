@@ -206,3 +206,10 @@ export function partName(n: number, grain: Grain, loc: Locale): string {
       return `${String(i).padStart(2, '0')}:00`;
   }
 }
+
+/** A share of a whole, 0.074 → "7.4%", 0.23 → "23%": one decimal under 10 %, nothing below 0.1 % but "<0.1%". */
+export function pctShareIn(x: number, loc: Locale): string {
+  if (x >= 0.995) return '100%';
+  if (x < 0.001) return `<${fixedNumber(0.1, 1, loc)}%`;
+  return `${fixedNumber(x * 100, x < 0.1 ? 1 : 0, loc)}%`;
+}

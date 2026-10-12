@@ -13,7 +13,8 @@ const KINDS: Record<string, { name: string; one: string; many: string }> = {
   histogram: { name: 'Histogram', one: 'bin', many: 'bins' },
   waterfall: { name: 'Waterfall chart', one: 'step', many: 'steps' },
   share: { name: 'Share of total', one: 'part', many: 'parts' },
-  donut: { name: 'Share of total', one: 'part', many: 'parts' },
+  donut: { name: 'Donut chart', one: 'slice', many: 'slices' },
+  pie: { name: 'Pie chart', one: 'slice', many: 'slices' },
 };
 
 export interface Words {
