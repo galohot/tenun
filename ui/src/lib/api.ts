@@ -577,7 +577,10 @@ export interface Snapshot {
   workspace: Workspace;
   path: string | null;
   tables: Table[];
+  /** Source id → why it did not load. */
   errors: Record<string, string>;
+  /** Table id → the calculated columns that could not be computed, in words. Their values are blank. */
+  table_errors?: Record<string, string>;
   /** Source id → when it last loaded without error (ISO 8601, UTC). */
   loaded_at?: Record<string, string>;
   /** Ids of the web links whose key has a value on this computer. */

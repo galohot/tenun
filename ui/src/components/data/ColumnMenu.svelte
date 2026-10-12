@@ -1,12 +1,13 @@
 <script lang="ts">
   import type { Column, DateFormat, TableSetup } from '../../lib/api';
-  import { DATE_FORMATS, TYPE_CHOICES, withColumn } from '../../lib/prep';
+  import { DATE_FORMATS, TYPE_CHOICES, labelProblem, withColumn } from '../../lib/prep';
   import Icon from '../Icon.svelte';
 
   let {
     column,
     setup,
     canRetype,
+    table,
     x,
     y,
     onsave,
@@ -18,6 +19,8 @@
     setup: TableSetup | undefined;
     /** The data is local, so the column can be read as another type. */
     canRetype: boolean;
+    /** The table of the column, so a name that another column answers to can be refused. */
+    table: { label: string; columns: Pick<Column, 'name' | 'label'>[] };
     x: number;
     y: number;
     onsave: (next: TableSetup) => void;
@@ -38,6 +41,7 @@
   let description = $state(column.description ?? '');
   let root: HTMLDivElement;
 
+  const nameProblem = $derived(labelProblem(label, column, table));
   const isDate = (t: string) => t === 'date' || t === 'datetime';
   const format = $derived<DateFormat>(mine?.date_format ?? 'auto');
 
@@ -98,17 +102,21 @@
     <form
       onsubmit={(e) => {
         e.preventDefault();
-        patch({ label });
+        if (!nameProblem) patch({ label });
       }}>
       <label class="label" for="cm-name">Name shown in Tenun</label>
       <!-- svelte-ignore a11y_autofocus -->
-      <input id="cm-name" class="field" bind:value={label} placeholder={column.name} autofocus />
-      <p class="hint">Queries still use "{column.name}".</p>
+      <input id="cm-name" class="field" bind:value={label} placeholder={column.name} aria-invalid={!!nameProblem} autofocus />
+      {#if nameProblem}
+        <p class="hint warn" role="alert">{nameProblem}</p>
+      {:else}
+        <p class="hint">Queries still use "{column.name}".</p>
+      {/if}
       <div class="row">
         {#if column.label}<button type="button" class="btn plain" onclick={() => patch({ label: undefined })}>Reset</button>{/if}
         <span class="sp"></span>
         <button type="button" class="btn" onclick={() => (mode = 'main')}>Back</button>
-        <button class="btn primary">Save</button>
+        <button class="btn primary" disabled={!!nameProblem}>Save</button>
       </div>
     </form>
   {:else if mode === 'description'}
@@ -195,5 +203,6 @@
   .sp { flex: 1; }
   .hint { margin: 0; font-size: 11px; color: var(--text-2); }
   .warn { padding: 6px 8px 2px; }
+  form .warn { padding: 0; color: var(--danger); }
   @keyframes pop { from { opacity: 0; transform: scale(0.98); } }
 </style>

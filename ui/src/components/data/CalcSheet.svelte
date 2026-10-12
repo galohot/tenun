@@ -55,6 +55,8 @@
     const f = formula;
     const isSql = sql;
     if (!f.trim()) {
+      // An answer that was asked for before the field was emptied must not fill the panel.
+      seq++;
       check = { state: 'idle' };
       return;
     }

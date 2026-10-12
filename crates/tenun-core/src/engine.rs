@@ -99,6 +99,9 @@ struct State {
     /// Table id → the day its calculated-column view was built, for a table with `TODAY()` or
     /// `NOW()` in a formula (V4-D34). The view is built again when the day changes.
     calc_day: BTreeMap<String, NaiveDate>,
+    /// What the passes remember across a reload: the type of each calculated column, and the
+    /// tables each view read (V4-D67, V4-D77). A load does not clear it.
+    calc_memory: calc::Memory,
     /// Bumped when a load puts new tables in the catalog, so a pass that began before it is
     /// thrown away instead of writing old tables back.
     tables_gen: u64,
@@ -111,9 +114,13 @@ pub struct Snapshot {
     pub workspace: Workspace,
     pub path: Option<String>,
     pub tables: Vec<Table>,
-    /// Source id → why it did not load. Table id → the calculated columns of the table that
-    /// could not be computed, in words; their values are blank.
+    /// Source id → why it did not load.
     pub errors: BTreeMap<String, String>,
+    /// Table id → the calculated columns of the table that could not be computed, in words; their
+    /// values are blank. A table problem is not a source problem: it is not in `errors`, so what
+    /// stops on a source that did not load (`tenun snapshot`) does not stop on this (V4-D77).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub table_errors: BTreeMap<String, String>,
     /// Source id → when it last loaded without error (ISO 8601, UTC). Kept
     /// out of the source itself so it never reaches the `.tenun` file.
     pub loaded_at: BTreeMap<String, String>,
@@ -393,7 +400,8 @@ impl Engine {
             workspace: s.ws.clone(),
             path: s.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
             tables: s.catalog.tables.clone(),
-            errors: errors_of(&s),
+            errors: s.errors.clone(),
+            table_errors: table_errors_of(&s),
             loaded_at: s.loaded_at.clone(),
             link_keys: s
                 .ws
@@ -697,6 +705,8 @@ impl Engine {
             s.calc_base.retain(|k, _| !k.starts_with(&prefix));
             s.calc_related.retain(|(k, _)| !k.starts_with(&prefix));
             s.calc_day.retain(|k, _| !k.starts_with(&prefix));
+            s.calc_memory.types.retain(|k, _| !k.starts_with(&prefix));
+            s.calc_memory.reads.retain(|k, _| !k.starts_with(&prefix));
             s.tables_gen += 1;
         }
         // Tables that read the removed ones now say so.
@@ -773,60 +783,7 @@ impl Engine {
     /// Builds the calculated-column views of the tables `roots` names and of the tables that read
     /// them (V4-D3). Returns the tables that have a column which reads another table.
     fn rebuild_calc(&self, roots: calc::Roots<'_>) -> Vec<String> {
-        for _ in 0..3 {
-            let (catalog, rels, health, setups, bases, generation) = {
-                let s = self.state.read().unwrap();
-                (
-                    s.catalog.clone(),
-                    s.ws.relationships.clone(),
-                    s.health.clone(),
-                    s.ws.tables.clone(),
-                    s.calc_base.clone(),
-                    s.tables_gen,
-                )
-            };
-            let today = self.today();
-            let world = calc::World {
-                catalog: &catalog,
-                rels: &rels,
-                health: &health,
-                setups: &setups,
-                bases: &bases,
-                today,
-                now: today.and_time(chrono::Local::now().time()),
-            };
-            let out = {
-                let db = self.db.lock().unwrap();
-                calc::rebuild(&db, &world, &roots, true, true)
-            };
-            let mut s = self.state.write().unwrap();
-            if s.tables_gen != generation {
-                // A load put new tables in while this pass ran. Do it again on them.
-                continue;
-            }
-            for b in out.built {
-                let id = b.table.id.clone();
-                let Some(slot) = s.catalog.tables.iter_mut().find(|t| t.id == id) else {
-                    continue;
-                };
-                *slot = b.table;
-                match b.base {
-                    Some(base) => s.calc_base.insert(id.clone(), base),
-                    None => s.calc_base.remove(&id),
-                };
-                s.calc_related.retain(|(t, _)| *t != id);
-                for m in b.columns.iter().filter(|m| m.related && m.error.is_none()) {
-                    s.calc_related.insert((id.clone(), m.name.clone()));
-                }
-                if b.columns.iter().any(|m| m.uses_time) {
-                    s.calc_day.insert(id, today);
-                } else {
-                    s.calc_day.remove(&id);
-                }
-            }
-            return out.related_tables;
-        }
-        Vec::new()
+        rebuild_calc_in(&self.db, &self.state, self.today(), roots)
     }
 
     /// Builds the calculated columns that use `TODAY()` or `NOW()` again when the day has changed
@@ -921,16 +878,23 @@ impl Engine {
         let delay = self.check_delay.load(Ordering::Relaxed);
         let rows = self.live_rows.load(Ordering::Relaxed);
         if !local.is_empty() {
-            run_checks(&self.db, &self.state, local, rows, delay);
+            let _ = run_checks(&self.db, &self.state, local, rows, delay);
         }
         if live.is_empty() {
             return;
         }
         let (db, state, listener) = (self.db.clone(), self.state.clone(), self.listener.clone());
         let pending = self.pending.clone();
+        let today = self.today();
         pending.fetch_add(1, Ordering::SeqCst);
         std::thread::spawn(move || {
-            run_checks(&db, &state, live, rows, delay);
+            let changed = run_checks(&db, &state, live, rows, delay);
+            // A calculated column that reads across a link whose way is known now is built again
+            // (V4-D77): it may have waited for the answer.
+            if !changed.is_empty() {
+                let tables = tables_of_links(&state, &changed);
+                rebuild_calc_in(&db, &state, today, calc::Roots::Tables(&tables));
+            }
             pending.fetch_sub(1, Ordering::SeqCst);
             let told = listener.lock().unwrap().clone();
             if let Some(f) = told {
@@ -985,7 +949,11 @@ impl Engine {
         let rows = self.live_rows.load(Ordering::Relaxed);
         let delay = self.check_delay.load(Ordering::Relaxed);
         let ids: Vec<String> = live.iter().map(|j| j.id.clone()).collect();
-        run_checks(&self.db, &self.state, live, rows, delay);
+        let changed = run_checks(&self.db, &self.state, live, rows, delay);
+        if !changed.is_empty() {
+            let tables = tables_of_links(&self.state, &changed);
+            self.rebuild_calc(calc::Roots::Tables(&tables));
+        }
         let s = self.state.read().unwrap();
         ids.iter().any(|id| before.get(id) != s.health.get(id))
     }
@@ -1817,7 +1785,7 @@ impl Engine {
                 anyhow::bail!("Give the two new columns different names.");
             }
         }
-        let (table, old) = {
+        let (table, old, link_names) = {
             let s = self.state.read().unwrap();
             let t = s
                 .catalog
@@ -1826,16 +1794,33 @@ impl Engine {
             if !t.prep && (setup.header_row.is_some() || setup.changes_view()) {
                 anyhow::bail!("This table is read live, so its columns cannot be changed here.");
             }
+            // The links that lead to this table, by name: a formula of another table may write a
+            // column of this one after the name of a link (V4-D28).
+            let links: Vec<String> =
+                s.ws.relationships
+                    .iter()
+                    .filter(|r| r.to.table == table_id)
+                    .filter_map(|r| r.name.clone())
+                    .collect();
             (
                 t.clone(),
                 s.ws.tables.get(table_id).cloned().unwrap_or_default(),
+                links,
             )
         };
+        // A name that two columns would answer to is refused on every save, not only when the
+        // calculated columns changed (V4-D77). So is a rename the SQL of a column cannot follow.
+        if let Some(why) = calc::label_problem(&table, &old, &setup) {
+            anyhow::bail!(why);
+        }
+        if let Some(why) = calc::unpivot_sql_problem(&old, &setup) {
+            anyhow::bail!(why);
+        }
         // The formulas follow the names that changed. The check below judges what was sent.
         let sent = setup.calc.clone();
         let renames = calc::renamed_columns(&table, &old, &setup);
         for c in setup.calc.iter_mut().filter(|c| !c.sql) {
-            c.formula = calc::follow_renames(&c.formula, &table, &renames, true);
+            c.formula = calc::follow_renames(&c.formula, &table, &renames, true, &[]);
         }
         if setup.calc != old.calc {
             self.check_calc_setup(&table, &old, &setup, &sent)?;
@@ -1853,7 +1838,8 @@ impl Engine {
                 {
                     let before = other.calc.clone();
                     for c in other.calc.iter_mut().filter(|c| !c.sql) {
-                        c.formula = calc::follow_renames(&c.formula, &table, &renames, false);
+                        c.formula =
+                            calc::follow_renames(&c.formula, &table, &renames, false, &link_names);
                     }
                     if other.calc != before {
                         touched.push(id.clone());
@@ -1905,7 +1891,7 @@ impl Engine {
         new: &TableSetup,
         sent: &[CalcColumn],
     ) -> anyhow::Result<()> {
-        let (mut catalog, rels, health, mut setups, bases) = {
+        let (mut catalog, rels, health, mut setups, bases, memory) = {
             let s = self.state.read().unwrap();
             (
                 s.catalog.clone(),
@@ -1913,6 +1899,7 @@ impl Engine {
                 s.health.clone(),
                 s.ws.tables.clone(),
                 s.calc_base.clone(),
+                s.calc_memory.clone(),
             )
         };
         if new.calc.len() > calc::MAX_COLUMNS {
@@ -1950,6 +1937,7 @@ impl Engine {
             health: &health,
             setups: &setups,
             bases: &bases,
+            memory: &memory,
             today,
             now: today.and_time(chrono::Local::now().time()),
         };
@@ -1974,11 +1962,15 @@ impl Engine {
                     })
                 });
             if !unchanged {
+                // The place is in the text the engine checked, which a rename may have rewritten.
+                // The user sees the text that was sent, so the place is moved onto it.
+                let (at, len) =
+                    calc::map_back(&as_sent.formula, &c.formula, bad.error.at, bad.error.len);
                 return Err(CalcRefused {
                     index: bad.index,
                     name: c.name.clone(),
-                    formula: c.formula.clone(),
-                    error: bad.error,
+                    formula: as_sent.formula.clone(),
+                    error: formula::FormulaError::new(bad.error.message, at, len),
                 }
                 .into());
             }
@@ -2062,6 +2054,23 @@ impl Engine {
         })
     }
 
+    /// What is wrong with the calculated columns, one sentence each, in words that name the table
+    /// and the column and nothing else: no formula, no file name, no value (V4-D52). For what
+    /// writes to a log or leaves the computer, such as `tenun snapshot` and the agent (V4-D77).
+    pub fn public_table_problems(&self) -> Vec<String> {
+        let s = self.state.read().unwrap();
+        let mut out = Vec::new();
+        for t in &s.catalog.tables {
+            for c in t.columns.iter().filter(|c| c.error.is_some()) {
+                out.push(format!("{}: {} could not be computed.", t.label, c.name));
+            }
+            if t.notes.iter().any(|n| n.starts_with(calc::NOT_MADE)) {
+                out.push(format!("{}: a calculated column was not made.", t.label));
+            }
+        }
+        out
+    }
+
     /// Checks a formula against the open workspace and runs a preview of it (the first 5 values
     /// of a column, the grand total of a measure). The answer holds no SQL.
     pub fn check_formula(
@@ -2124,18 +2133,121 @@ impl Engine {
     }
 }
 
-/// The errors of the workspace: why a source did not load, and, by table id, which calculated
-/// columns of a table could not be computed (their values are blank).
-fn errors_of(s: &State) -> BTreeMap<String, String> {
-    let mut out = s.errors.clone();
+/// The calculated columns of each table that could not be computed, by table id, in words for
+/// the app (the reason can quote the formula).
+fn table_errors_of(s: &State) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
     for t in &s.catalog.tables {
         let bad: Vec<String> = t
             .columns
             .iter()
             .filter_map(|c| Some(format!("{}: {}", c.name, c.error.as_ref()?)))
+            .chain(
+                t.notes
+                    .iter()
+                    .filter(|n| n.starts_with(calc::NOT_MADE))
+                    .cloned(),
+            )
             .collect();
         if !bad.is_empty() {
             out.insert(t.id.clone(), bad.join(" "));
+        }
+    }
+    out
+}
+
+/// One pass of the calculated columns (see [`Engine::rebuild_calc`]). It takes the handles the
+/// engine holds instead of the engine, so the thread that checks live links can run it when an
+/// answer changes (V4-D77).
+fn rebuild_calc_in(
+    db: &Mutex<Connection>,
+    state: &RwLock<State>,
+    today: NaiveDate,
+    roots: calc::Roots<'_>,
+) -> Vec<String> {
+    for _ in 0..3 {
+        let (catalog, rels, health, setups, bases, memory, generation) = {
+            let s = state.read().unwrap();
+            (
+                s.catalog.clone(),
+                s.ws.relationships.clone(),
+                s.health.clone(),
+                s.ws.tables.clone(),
+                s.calc_base.clone(),
+                s.calc_memory.clone(),
+                s.tables_gen,
+            )
+        };
+        let world = calc::World {
+            catalog: &catalog,
+            rels: &rels,
+            health: &health,
+            setups: &setups,
+            bases: &bases,
+            memory: &memory,
+            today,
+            now: today.and_time(chrono::Local::now().time()),
+        };
+        let out = {
+            let db = db.lock().unwrap();
+            calc::rebuild(&db, &world, &roots, true, true)
+        };
+        let mut s = state.write().unwrap();
+        if s.tables_gen != generation {
+            // A load put new tables in while this pass ran. Do it again on them.
+            continue;
+        }
+        for b in out.built {
+            let id = b.table.id.clone();
+            let Some(slot) = s.catalog.tables.iter_mut().find(|t| t.id == id) else {
+                continue;
+            };
+            *slot = b.table;
+            match b.base {
+                Some(base) => s.calc_base.insert(id.clone(), base),
+                None => s.calc_base.remove(&id),
+            };
+            s.calc_related.retain(|(t, _)| *t != id);
+            for m in b.columns.iter().filter(|m| m.related && m.error.is_none()) {
+                s.calc_related.insert((id.clone(), m.name.clone()));
+            }
+            if b.columns.iter().any(|m| m.uses_time) {
+                s.calc_day.insert(id.clone(), today);
+            } else {
+                s.calc_day.remove(&id);
+            }
+            // What the next pass, and the next reload, need to know.
+            let names: BTreeSet<&String> = b.columns.iter().map(|m| &m.name).collect();
+            let types = s.calc_memory.types.entry(id.clone()).or_default();
+            types.retain(|name, _| names.contains(name));
+            for m in &b.columns {
+                if let Some(d) = m.dtype {
+                    types.insert(m.name.clone(), d);
+                }
+            }
+            if types.is_empty() {
+                s.calc_memory.types.remove(&id);
+            }
+            if b.reads.is_empty() {
+                s.calc_memory.reads.remove(&id);
+            } else {
+                s.calc_memory.reads.insert(id, b.reads);
+            }
+        }
+        return out.related_tables;
+    }
+    Vec::new()
+}
+
+/// The ids of the tables at the two ends of these links.
+fn tables_of_links(state: &RwLock<State>, links: &[String]) -> Vec<String> {
+    let s = state.read().unwrap();
+    let mut out: Vec<String> = Vec::new();
+    for r in s.ws.relationships.iter().filter(|r| links.contains(&r.id)) {
+        for t in [&r.from.table, &r.to.table] {
+            if !out.contains(t) {
+                out.push(t.clone());
+            }
         }
     }
     out
@@ -2338,7 +2450,8 @@ fn run_checks(
     jobs: Vec<LinkJob>,
     live_rows: u64,
     delay_ms: u64,
-) {
+) -> Vec<String> {
+    let mut changed: Vec<String> = Vec::new();
     if delay_ms > 0 {
         std::thread::sleep(Duration::from_millis(delay_ms));
     }
@@ -2358,13 +2471,24 @@ fn run_checks(
         {
             continue;
         }
+        // What a path can do with the link: unknown, or which ways it may be crossed.
+        let way = |s: &State| {
+            s.health
+                .get(&job.id)
+                .map(|h| (h.forward_ok(), h.backward_ok()))
+        };
+        let before = way(&s);
         match health {
             Some(h) => record(&mut s, &job.id, h),
             None => {
                 s.health.remove(&job.id);
             }
         }
+        if way(&s) != before {
+            changed.push(job.id.clone());
+        }
     }
+    changed
 }
 
 /// What a check read of one column, kept while the checks of one load run.

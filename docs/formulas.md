@@ -313,7 +313,13 @@ name shown.
   exported file and a picture say only "The table: the column could not be computed", with no
   formula.
 - **Names follow renames.** If you change the name shown for a column, every formula that wrote the
-  old name is rewritten. The same happens when you rename a link. The text between the names does not change.
+  old name is rewritten, also a formula of another table that writes it after the table or after
+  the name of a link. The same happens when you rename a link, and when an unpivot gives its two new
+  columns other names. Two columns can swap names in one save. The text between the names does not
+  change. A SQL column is not rewritten, so a rename of an unpivot column that the SQL names is
+  refused, with the name of the column.
+- **A name shown must be new.** It cannot be a name another column of the table answers to, by its
+  real name or the name shown, whatever the case. Tenun says so when you save it.
 - **A name** may not be the name of a column of the table, may not hold `[` or `]`, and has at most
   100 letters.
 - **A table can have up to 50 calculated columns.**
@@ -334,23 +340,31 @@ opens:
 
 - **Allowed:** numbers, text (a `;` inside a text is only a character), the columns of the table,
   `+ - * / % ^ // || = <> < > <= >=`, `AND OR NOT`, `CASE`, `CAST` and `::`, `IN`, `BETWEEN`, `LIKE`,
-  `IS [NOT] NULL`, `IS [NOT] DISTINCT FROM`, `DATE '2026-01-31'`, `INTERVAL`, and the functions that
-  DuckDB lists as plain built-in functions (the list is read from DuckDB, so it follows the version):
-  `lower`, `round`, `coalesce`, `strftime`, `date_part`, `regexp_matches`, and many more.
+  `IS [NOT] NULL`, `IS [NOT] DISTINCT FROM`, `DATE '2026-01-31'`, `INTERVAL`, and about 300 plain
+  functions of numbers, text, dates and lists, from a list that people have read one by one:
+  `lower`, `round`, `coalesce`, `strftime`, `date_part`, `regexp_matches`, `split_part`, and more.
+  A function that DuckDB adds later is refused until it is added to the list.
 - **Refused:** a `;`, a comment (`--` or `/* */`), a subquery, `SELECT`, `FROM`, `WITH`, `VALUES`,
   `JOIN`, `UNION`, `OVER` and any other word that starts a query. Any function that reads a file,
   the environment or the network (`read_text`, `read_csv`, `glob`, `getenv`, `current_setting`,
-  `query`, `query_table`, `sniff_csv`, names that start with `http` or `s3`, names that end in
-  `_scan`), any function that has side effects or changes from one call to the next (`random`,
-  `uuid`, `nextval`), totals such as `sum` (they belong to measures), and any name that is not a
-  column of the table. The message names the word and the place is underlined.
+  `query`, `query_table`, `sniff_csv`), any function that changes from one call to the next
+  (`random`, `uuid`, `nextval`), any function whose result is as big as an argument says (`repeat`,
+  `lpad`, `rpad`, `range`, `generate_series`, `list_resize`, `printf`, `format`, `bar`), any
+  lambda (`x -> x + 1`, `lambda x: …`, and so `list_transform` and `list_reduce`), totals such as
+  `sum` (they belong to measures), and any name that is not a column of the table. The message
+  names the word and the place is underlined.
 - **Write `date_part('year', d)`, not `EXTRACT(year FROM d)`,** and `substr(s, 2, 3)`, not
   `SUBSTRING(s FROM 2 FOR 3)`. The word `FROM` is refused everywhere except in `IS DISTINCT FROM`.
 
 How the limit works: Tenun reads the text itself and **denies by default.** Every word must be on the
-short list above, a function DuckDB marks as plain, or a column. A subquery needs a word that is not
+short list above, on the list of functions, or be a column. A subquery needs a word that is not
 on the list, and a table function can only follow `FROM`, so neither can be written. The expression
-is then bound by DuckDB (`EXPLAIN`) and runs inside `TRY`. The limit is the language of the list:
-an expression that needs something outside it is not possible in a column, and the other tools of
-Tenun (formulas, links, measures) are the way to do it.
+is then bound by DuckDB (`EXPLAIN`) and runs inside `TRY`. The check as a whole has 2 seconds: past
+that, the column is refused with "Tenun stopped checking this column after 2 seconds." The limit is
+the language of the list: an expression that needs something outside it is not possible in a column,
+and the other tools of Tenun (formulas, links, measures) are the way to do it.
+
+The same limits hold when a file is **opened**. A calculated column past the 50th, or with more than
+10,000 characters, stays in the file and is not built. The table says so in its notes, and the
+columns before it work as usual.
 

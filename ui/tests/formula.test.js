@@ -11,6 +11,7 @@ import {
   kindWords,
   listWords,
   nameProblem,
+  readersOf,
   signature,
   suggest,
   tableNamed,
@@ -19,6 +20,8 @@ import {
   visibleColumns,
 } from '../src/lib/formula.ts';
 import { firstLinks, reachableFrom } from '../src/lib/links.ts';
+import { pictureNote } from '../src/lib/picture.ts';
+import { labelProblem } from '../src/lib/prep.ts';
 
 const col = (name, dtype = 'number', more = {}) => ({ name, dtype, raw_type: '', ...more });
 const table = (id, label, columns) => ({ id, source_id: id.split('/')[0], name: label, label, columns, rows: 10 });
@@ -266,4 +269,82 @@ test('the function list file is the one the engine tests against', () => {
     raw.map((x) => x.name),
     FUNCTIONS.map((x) => x.name),
   );
+});
+
+test('a table with brackets in its name is found after its own name', () => {
+  // "Sales [2024]" is written [Sales [2024]]]: the inner [ is a letter, the doubled ] is a letter.
+  const odd = table('s4/odd', 'Sales [2024]', [col('id'), col('total')]);
+  const scope = { ...scopeOf([], 'measure'), tables: [orders, odd] };
+  const text = `[${'Sales [2024]'.replace(/]/g, ']]')}].[to`;
+  assert.equal(text, '[Sales [2024]]].[to');
+  const c = suggest(text, text.length, scope);
+  assert.deepEqual(
+    c.items.map((i) => i.label),
+    ['total'],
+  );
+  // And after a formula that holds other names and texts with brackets.
+  const longer = `"a [b]" & [id] + [Sales [2024]]].[`;
+  assert.deepEqual(
+    suggest(longer, longer.length, scope).items.map((i) => i.label),
+    ['id', 'total'],
+  );
+  // The offer of the table itself writes the name the same way.
+  const t = suggest('[Sal', 4, scope).items.find((i) => i.label === 'Sales [2024]');
+  assert.equal(t.insert, '[Sales [2024]]].[');
+});
+
+test('the calculated columns that go blank with a column are found, through others too', () => {
+  const setups = {
+    's1/orders': {
+      calc: [
+        { name: 'A', formula: '[amount] * 2' },
+        { name: 'B', formula: '[A] + 1' },
+        { name: 'C', formula: '[store_id] + 1' },
+        { name: 'S', formula: '"B" * 2', sql: true },
+      ],
+    },
+    's5/lines': { calc: [{ name: 'L', formula: '[orders].[B] + [qty]' }, { name: 'M', formula: '[Sold at].[A]' }, { name: 'N', formula: '[B]' }] },
+  };
+  const labels = (id) => ({ 's1/orders': 'orders', 's5/lines': 'lines' })[id];
+  const read = (column) =>
+    readersOf(setups, { id: 's1/orders', label: 'orders' }, column, labels, ['Sold at']).map((r) => `${r.label} › ${r.column}`);
+  // A is read by B, and B by the SQL column S and by L (through the table name). M names it by a link.
+  assert.deepEqual(read('A').sort(), ['lines › L', 'lines › M', 'orders › B', 'orders › S']);
+  // N reads its own table's [B], which is the lines' column, not orders'.
+  assert.ok(!read('A').includes('lines › N'));
+  assert.deepEqual(read('amount').sort(), ['lines › L', 'lines › M', 'orders › A', 'orders › B', 'orders › S']);
+  // Nothing reads C, and a column that nothing names has no readers.
+  assert.deepEqual(read('C'), []);
+  assert.deepEqual(read('nothing'), []);
+  // A name with characters of a pattern does not break the search.
+  const found = readersOf({ x: { calc: [{ name: 'P', formula: '[a.b] + 1' }, { name: 'Q', formula: '[axb]' }] } }, { id: 'x', label: 'x' }, 'a.b', (id) => id);
+  assert.deepEqual(found, [{ table: 'x', label: 'x', column: 'P' }]);
+});
+
+test('a picture says what leaves the computer: the public notes, never the notes of the app', () => {
+  const res = {
+    notes: ['orders: Marked could not be computed, so its values are blank. No column [amount]'],
+    publicNotes: ['orders: Marked could not be computed.'],
+  };
+  const line = pictureNote(res, 'Some periods are not finished.', null);
+  assert.equal(line, 'Some periods are not finished. orders: Marked could not be computed.');
+  assert.ok(!line.includes('No column'));
+  // A result with no notes, and no result, say nothing of their own.
+  assert.equal(pictureNote({}, null), '');
+  assert.equal(pictureNote(null), '');
+  // A result whose public notes are missing says nothing, even when the app's notes are there.
+  assert.equal(pictureNote({ notes: ['stores.csv has 2 rows with id 7.'] }), '');
+});
+
+test('a name shown that another column answers to is refused, the way the engine does', () => {
+  const t = { label: 'orders', columns: [col('id'), col('note', 'text', { label: 'Memo' }), col('Margin', 'number', { calc: true })] };
+  assert.equal(labelProblem('Total', { name: 'id' }, t), null);
+  assert.equal(labelProblem('', { name: 'id' }, t), null);
+  // A column may take its own name, or keep its own name shown.
+  assert.equal(labelProblem('ID', { name: 'id' }, t), null);
+  assert.equal(labelProblem('memo', { name: 'note' }, t), null);
+  // Not another column's real name, calculated or not, nor its name shown; case and spaces do not help.
+  for (const name of ['margin', ' MARGIN ', 'Note', 'MEMO']) {
+    assert.match(labelProblem(name, { name: 'id' }, t), /already used by another column of orders/, name);
+  }
 });

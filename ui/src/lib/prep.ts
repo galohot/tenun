@@ -118,3 +118,18 @@ export function barHeights(counts: number[]): number[] {
 
 /** The setup with its calculated columns replaced. An empty list leaves none in the file. */
 export const withCalc = (setup: TableSetup | undefined, calc: CalcColumn[]): TableSetup => tidy({ ...setup, calc });
+
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Why a name shown cannot be given to a column, in words, or null: another column answers to it
+ * already (by its real name or the name shown), so `[name]` in a formula would mean two columns.
+ * Names are compared the way the engine does, ignoring case and the spaces at the ends (V4-D77).
+ * A column may be given its own real name.
+ */
+export function labelProblem(label: string, column: Pick<Column, 'name'>, table: { label: string; columns: Pick<Column, 'name' | 'label'>[] }): string | null {
+  const n = label.trim();
+  if (!n) return null;
+  const other = table.columns.find((c) => c.name !== column.name && (sameName(c.name, n) || (c.label && sameName(c.label, n))));
+  return other ? `The name ${n} is already used by another column of ${table.label}. Choose another name.` : null;
+}

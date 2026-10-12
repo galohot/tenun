@@ -268,3 +268,97 @@ fn a_calculated_column_works_on_a_live_table_and_reads_one_row_per_key_from_one(
     let names: Vec<&str> = t.columns.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, ["id", "store_id", "amount", "Double", "Region"]);
 }
+
+/// A database where the link is one to one, which no one has read yet when the file opens: the
+/// stores have a calculated column that reads their order, which is the way back across the link.
+fn one_to_one_engine(tag: &str) -> (Engine, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    let d = dir(tag);
+    let path = d.join("pairs.duckdb");
+    let db = duckdb::Connection::open(&path).unwrap();
+    db.execute_batch(
+        "CREATE TABLE orders (id INTEGER, store_id INTEGER, amount DOUBLE);
+         INSERT INTO orders VALUES (1,1,100),(2,2,40);
+         CREATE TABLE stores (id INTEGER, region VARCHAR);
+         INSERT INTO stores VALUES (1,'West'),(2,'East');",
+    )
+    .unwrap();
+    let field = |t: &str, c: &str| FieldRef {
+        table: t.into(),
+        column: c.into(),
+    };
+    let ws = Workspace {
+        name: "Pairs".into(),
+        sources: vec![Source {
+            id: "s1".into(),
+            name: "pairs.duckdb".into(),
+            kind: SourceKind::Duckdb {
+                path: path.to_string_lossy().into_owned(),
+            },
+        }],
+        relationships: vec![Relationship {
+            id: "r1".into(),
+            from: field("s1/orders", "store_id"),
+            to: field("s1/stores", "id"),
+            name: None,
+        }],
+        tables: [(
+            "s1/stores".to_string(),
+            tenun_core::workspace::TableSetup {
+                calc: vec![calc_column("Spent", "[orders].[amount] * 2")],
+                ..Default::default()
+            },
+        )]
+        .into(),
+        ..Workspace::default()
+    };
+    let e = Engine::new(Secrets::new(d.join("secrets.json"))).unwrap();
+    // Hold the moment after the load open, so the first state can be seen.
+    e.slow_link_checks(Duration::from_millis(600));
+    let told = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = told.clone();
+    e.on_links_checked(move || {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    });
+    e.replace(ws, Some(d.join("pairs.tenun")));
+    (e, told)
+}
+
+#[test]
+fn a_column_that_reads_back_across_a_one_to_one_link_into_a_live_table_heals_when_the_check_ends() {
+    let (e, told) = one_to_one_engine("heal");
+    // At first the link is not known: the column is blank, and the words do not say "many values".
+    let c = e
+        .catalog()
+        .table("s1/stores")
+        .unwrap()
+        .column("Spent")
+        .unwrap()
+        .clone();
+    let said = c.error.expect("blank until the link is known");
+    assert!(said.contains("still being read"), "{said}");
+    assert!(!said.contains("many values"), "{said}");
+    // The check ends: the link is one to one, and the column is built again by itself.
+    wait_for_checks(&e);
+    assert_eq!(e.snapshot().health["r1"].kind, "one-one");
+    let c = e
+        .catalog()
+        .table("s1/stores")
+        .unwrap()
+        .column("Spent")
+        .unwrap()
+        .clone();
+    assert!(c.error.is_none(), "{:?}", c.error);
+    let t: Tile = serde_json::from_value(json!({
+        "id": "t", "type": "kpi", "title": "", "x": 0, "y": 0, "w": 3, "h": 2,
+        "measures": [{ "table": "s1/stores", "column": "Spent", "agg": "sum" }],
+        "dims": [],
+    }))
+    .unwrap();
+    assert_eq!(
+        run_tile(&e, &t, &[]).unwrap().rows[0][0].as_f64(),
+        Some(280.0)
+    );
+    assert!(e.snapshot().table_errors.is_empty());
+    // The windows were told.
+    assert!(told.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+}

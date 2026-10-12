@@ -504,6 +504,19 @@ impl<'a> Checker<'a> {
             );
         }
         if reach(&t.id, links).contains_key(&cur.id) {
+            // A link nobody has read yet (a live database, or a load that is not finished) may turn
+            // out to be one to one, and then the column can be read. Do not say "many values" about
+            // a link whose data is not known (V4-D77).
+            let unknown = Paths::new(&t.id, links)
+                .path(&cur.id, None)
+                .is_ok_and(|path| path.iter().any(|e| self.cx.health.get(&e.rel).is_none()));
+            if unknown {
+                return format!(
+                    "The data of the link between {t_label} and {cur_label} is still being read, so {text} cannot be read yet. It is read as soon as that is done.",
+                    cur_label = cur.label,
+                    t_label = t.label
+                );
+            }
             format!(
                 "{text} has many values for each row of {cur_label}. Total it in a measure with SUMIF or COUNTROWS, or check the line between {t_label} and {cur_label} in Model.",
                 cur_label = cur.label,

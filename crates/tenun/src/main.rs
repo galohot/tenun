@@ -135,6 +135,11 @@ fn snapshot_cmd(
     if let Some((id, e)) = snap.errors.iter().next() {
         anyhow::bail!("source {id} did not load: {e}");
     }
+    // A calculated column that cannot be computed is blank and does not stop the snapshot. The
+    // words name the table and the column only, as in the pages it makes (V4-D77).
+    for problem in engine.public_table_problems() {
+        eprintln!("warning: {problem}");
+    }
     let dashboards = &snap.workspace.dashboards;
     let pick = match &dashboard {
         Some(want) => dashboards.iter().find(|d| {

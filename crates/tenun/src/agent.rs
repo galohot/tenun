@@ -56,6 +56,10 @@ fn open(file: &Path) -> anyhow::Result<Engine> {
     for (id, e) in &snap.errors {
         log(&format!("warning: source {id} did not load: {e}"));
     }
+    // The words of a published page: the table and the column, never the formula (V4-D77).
+    for problem in engine.public_table_problems() {
+        log(&format!("warning: {problem}"));
+    }
     Ok(engine)
 }
 

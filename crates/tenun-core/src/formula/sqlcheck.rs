@@ -7,31 +7,36 @@
 //! DuckDB's own parser would be the best judge, but the bundled build has no JSON extension, so
 //! `json_serialize_sql` is not there, and adding the extension rebuilds DuckDB (V4-D49). The
 //! check is a small reader of its own instead, and it **denies by default**: every word of the
-//! text must be one of a short list of words, a function DuckDB marks as a plain built-in scalar,
-//! or a column of the table. A subquery needs `SELECT`, `WITH`, `FROM`, `VALUES`, `TABLE` or
-//! another reserved word, none of which is on the list, and a table function can only follow
+//! text must be one of a short list of words, a function on a hand-reviewed list ([`FUNCTIONS`],
+//! V4-D75), or a column of the table. A subquery needs `SELECT`, `WITH`, `FROM`, `VALUES`, `TABLE`
+//! or another reserved word, none of which is on the list, and a table function can only follow
 //! `FROM`. So neither can be written.
 //!
 //! What it refuses (each with a plain sentence and the place to underline):
 //! - `;`, comments (`--`, `/* */`), `$`, `?`, `.`, brackets and braces, `->`, and a quote that
 //!   follows a letter (`E'..'`), because they can hide what the reader sees from what DuckDB sees.
-//! - Any reserved word that is not on the list: `SELECT`, `FROM`, `WITH`, `JOIN`, `OVER`…
-//! - Any function that is not a built-in scalar (or a plain macro) without side effects, or that
-//!   is on the deny list: `getenv`, `current_setting`, `read_*`, `glob`, `query*`, `sniff_csv`,
-//!   `*_scan`, `http*`, `s3*`.
+//! - Any reserved word that is not on the list: `SELECT`, `FROM`, `WITH`, `JOIN`, `OVER`, `LAMBDA`…
+//! - Any function that is not on the list. Not on it: what reads a file, the environment or the
+//!   network, what changes from call to call, what runs a lambda, and what makes a result as big as
+//!   an argument says (`repeat`, `lpad`, `range`, `printf`…).
 //! - Any name that is not a column of the table.
 //! - Two or more expressions (a comma at the top level) and unbalanced brackets.
 //!
 //! After the words are checked, DuckDB binds the expression with `EXPLAIN`, and a message that
-//! comes back names a type that does not fit, not a value.
+//! comes back names a type that does not fit, not a value. The word check and the binding together
+//! run under a limit of [`CHECK_LIMIT`] (2 seconds); past it the column is refused.
 
 use super::FormulaError;
 use crate::catalog::ident;
 use duckdb::Connection;
-use std::collections::HashSet;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 /// The most characters a SQL column may have, as for a formula (V4-D24).
 pub const MAX_CHARS: usize = 10_000;
+
+/// The longest the check of one column may take: the words, then DuckDB's binding (V4-D75).
+pub const CHECK_LIMIT: Duration = Duration::from_secs(2);
 
 /// Words that are part of an expression and not a name: logic, `CASE`, `CAST`, tests and the
 /// values that have no digits.
@@ -157,60 +162,148 @@ const STARTS_A_QUERY: &[&str] = &[
     "exists",
 ];
 
-/// Functions that are never allowed, whatever DuckDB says about them.
-fn denied(name: &str) -> bool {
-    name.starts_with("read_")
-        || name.starts_with("query")
-        || name.starts_with("http")
-        || name.starts_with("s3")
-        || name.starts_with("pg_")
-        || name.starts_with("duckdb_")
-        || name.ends_with("_scan")
-        || matches!(
-            name,
-            "glob" | "getenv" | "current_setting" | "sniff_csv" | "current_query"
-        )
+/// The functions an expression may call (V4-D75). **This list is the rule.** It is written by hand
+/// and reviewed: no list is read from DuckDB at run time, so what passes never depends on what ran
+/// before (a name that only exists once the ICU extension has loaded is not on it), and a new
+/// DuckDB function is refused until someone adds it here. A test fails when a name below is missing
+/// from the bundled DuckDB, and when one of the names in [`REFUSED`] is on it.
+///
+/// What is on it: plain scalar functions of numbers, text, dates and lists. What is not: anything
+/// that reads a file, the environment, the clock of the system or the catalog (`getenv`,
+/// `current_setting`, `read_*`, `glob`, `query*`, `pg_*`, `current_*`), anything that changes from
+/// one call to the next (`random`, `uuid`, `nextval`), anything that takes a function to run
+/// (`list_transform`, `list_reduce`, `apply`: lambdas are refused), and anything whose result is as
+/// big as an argument says (see [`REFUSED`]). Sorted, for the binary search.
+#[rustfmt::skip]
+const FUNCTIONS: &[&str] = &[
+    "abs", "acos", "acosh", "add", "age", "array_append",
+    "array_cat", "array_concat", "array_contains", "array_distinct", "array_extract", "array_has",
+    "array_has_all", "array_has_any", "array_indexof", "array_intersect", "array_length", "array_pop_back",
+    "array_pop_front", "array_position", "array_prepend", "array_push_back", "array_push_front", "array_reverse",
+    "array_reverse_sort", "array_slice", "array_sort", "array_to_string", "array_unique", "array_value",
+    "array_zip", "ascii", "asin", "asinh", "atan", "atan2",
+    "atanh", "base64", "bin", "bit_count", "bit_length", "cardinality",
+    "cbrt", "ceil", "ceiling", "century", "char_length", "character_length",
+    "chr", "concat", "concat_ws", "contains", "cos", "cosh",
+    "cot", "damerau_levenshtein", "date_add", "date_diff", "date_part", "date_sub",
+    "date_trunc", "datediff", "datepart", "datesub", "datetrunc", "day",
+    "dayname", "dayofmonth", "dayofweek", "dayofyear", "days_in_month", "decade",
+    "decode", "degrees", "divide", "editdist3", "element_at", "encode",
+    "ends_with", "epoch", "epoch_ms", "epoch_ns", "epoch_us", "era",
+    "even", "exp", "factorial", "fdiv", "flatten", "floor",
+    "fmod", "format_bytes", "formatreadabledecimalsize", "formatreadablesize", "from_base64", "from_binary",
+    "from_hex", "gamma", "gcd", "greatest", "greatest_common_divisor", "hamming",
+    "hash", "hex", "hour", "instr", "isfinite", "isinf",
+    "isnan", "isodow", "isoyear", "jaccard", "jaro_similarity", "jaro_winkler_similarity",
+    "julian", "last_day", "lcase", "lcm", "least", "least_common_multiple",
+    "left", "left_grapheme", "len", "length", "length_grapheme", "levenshtein",
+    "lgamma", "list_any_value", "list_append", "list_approx_count_distinct", "list_avg", "list_bool_and",
+    "list_bool_or", "list_cat", "list_concat", "list_contains", "list_count", "list_distinct",
+    "list_element", "list_entropy", "list_extract", "list_first", "list_has", "list_has_all",
+    "list_has_any", "list_indexof", "list_intersect", "list_kurtosis", "list_kurtosis_pop", "list_last",
+    "list_mad", "list_max", "list_median", "list_min", "list_mode", "list_pack",
+    "list_position", "list_prepend", "list_product", "list_reverse", "list_reverse_sort", "list_select",
+    "list_sem", "list_skewness", "list_slice", "list_sort", "list_stddev_pop", "list_stddev_samp",
+    "list_string_agg", "list_sum", "list_unique", "list_value", "list_var_pop", "list_var_samp",
+    "list_where", "list_zip", "ln", "log", "log10", "log2",
+    "lower", "ltrim", "make_date", "make_time", "make_timestamp", "make_timestamp_ms",
+    "make_timestamp_ns", "md5", "md5_number", "md5_number_lower", "md5_number_upper", "microsecond",
+    "millennium", "millisecond", "minute", "mismatches", "mod", "month",
+    "monthname", "multiply", "nanosecond", "nextafter", "nfc_normalize", "now",
+    "nullif", "octet_length", "ord", "pi", "position", "pow",
+    "power", "prefix", "quarter", "radians", "regexp_escape", "regexp_extract",
+    "regexp_extract_all", "regexp_full_match", "regexp_matches", "regexp_replace", "regexp_split_to_array", "replace",
+    "reverse", "right", "right_grapheme", "round", "round_even", "roundbankers",
+    "rtrim", "second", "sha1", "sha256", "sign", "signbit",
+    "sin", "sinh", "split", "split_part", "sqrt", "starts_with",
+    "str_split", "str_split_regex", "strftime", "string_split", "string_split_regex", "string_to_array",
+    "strip_accents", "strlen", "strpos", "strptime", "substr", "substring",
+    "substring_grapheme", "subtract", "suffix", "tan", "tanh", "time_bucket",
+    "to_base64", "to_binary", "to_centuries", "to_days", "to_decades", "to_hex",
+    "to_hours", "to_microseconds", "to_millennia", "to_milliseconds", "to_minutes", "to_months",
+    "to_quarters", "to_seconds", "to_timestamp", "to_weeks", "to_years", "translate",
+    "trim", "trunc", "try_strptime", "typeof", "ucase", "unbin",
+    "unhex", "unicode", "upper", "url_decode", "url_encode", "uuid_extract_timestamp",
+    "uuid_extract_version", "week", "weekday", "weekofyear", "xor", "year",
+    "yearweek",
+];
+
+/// The functions the parser handles itself, so DuckDB does not list them.
+const PARSER_FUNCTIONS: &[&str] = &["coalesce", "ifnull"];
+
+/// Functions that were looked at and are refused, with the reason (V4-D75). The test of the list
+/// checks that none of them is allowed.
+#[allow(dead_code)]
+const REFUSED: &[(&str, &str)] = &[
+    ("repeat", "its result is as long as an argument says"),
+    ("lpad", "its result is as long as an argument says"),
+    ("rpad", "its result is as long as an argument says"),
+    ("range", "its result has as many items as an argument says"),
+    (
+        "generate_series",
+        "its result has as many items as an argument says",
+    ),
+    (
+        "list_resize",
+        "its result has as many items as an argument says",
+    ),
+    (
+        "array_resize",
+        "its result has as many items as an argument says",
+    ),
+    ("printf", "a format can ask for any width"),
+    ("format", "a format can ask for any width"),
+    ("bar", "its result is as wide as an argument says"),
+    ("bitstring", "its result is as long as an argument says"),
+    ("to_base", "its result is as long as an argument says"),
+    ("list_transform", "it runs a lambda"),
+    ("list_filter", "it runs a lambda"),
+    (
+        "list_reduce",
+        "it runs a lambda: it can double a text over and over",
+    ),
+    ("apply", "it runs a lambda"),
+    ("reduce", "it runs a lambda"),
+    ("filter", "it runs a lambda"),
+    ("getenv", "it reads the environment"),
+    ("current_setting", "it reads the settings"),
+    ("read_text", "it reads a file"),
+    ("read_csv", "it reads a file"),
+    ("glob", "it lists files"),
+    ("query", "it runs a statement"),
+    ("query_table", "it reads a table"),
+    ("sniff_csv", "it reads a file"),
+    ("random", "it changes from one call to the next"),
+    ("uuid", "it changes from one call to the next"),
+    ("nextval", "it changes a sequence"),
+    ("today", "it exists only once the ICU extension has loaded"),
+    ("current_date", "a word of the language, not a function"),
+];
+
+/// The words DuckDB will not take as a name unless they are quoted (`duckdb_keywords()`, the
+/// category `reserved`). A test checks the list against the bundled DuckDB, so a new reserved word
+/// shows up as a failing test.
+#[rustfmt::skip]
+const RESERVED: &[&str] = &[
+    "all", "analyse", "analyze", "and", "any", "array", "as", "asc",
+    "asymmetric", "both", "case", "cast", "check", "collate", "column", "constraint",
+    "create", "default", "deferrable", "desc", "describe", "distinct", "do", "else",
+    "end", "except", "false", "fetch", "for", "foreign", "from", "group",
+    "having", "in", "initially", "intersect", "into", "lambda", "lateral", "leading",
+    "limit", "not", "null", "offset", "on", "only", "or", "order",
+    "pivot", "pivot_longer", "pivot_wider", "placing", "primary", "qualify", "references", "returning",
+    "select", "show", "some", "summarize", "symmetric", "table", "then", "to",
+    "trailing", "true", "union", "unique", "unpivot", "using", "variadic", "when",
+    "where", "window", "with",
+];
+
+fn function_allowed(name: &str) -> bool {
+    let lc = name.to_ascii_lowercase();
+    PARSER_FUNCTIONS.contains(&lc.as_str()) || FUNCTIONS.binary_search(&lc.as_str()).is_ok()
 }
 
-/// The functions an expression may call. DuckDB's own list, `duckdb_functions()`: built-in
-/// scalars with no side effects that give the same answer for the same input, and macros whose
-/// definition holds no query. `COALESCE` and `IFNULL` are not in the list because the parser
-/// handles them itself.
-fn allowed_functions(db: &Connection) -> HashSet<String> {
-    let mut out: HashSet<String> = ["coalesce", "ifnull"].map(String::from).into();
-    let sql = "SELECT DISTINCT lower(function_name) FROM duckdb_functions() WHERE internal AND (\
-        (function_type = 'scalar' AND NOT coalesce(has_side_effects, false) \
-            AND coalesce(stability::VARCHAR, '') <> 'VOLATILE') \
-        OR (function_type = 'macro' AND macro_definition IS NOT NULL \
-            AND lower(macro_definition) NOT LIKE '%select%' \
-            AND lower(macro_definition) NOT LIKE '%system%' \
-            AND lower(macro_definition) NOT LIKE '%read_%' \
-            AND lower(macro_definition) NOT LIKE '%query%' \
-            AND lower(macro_definition) NOT LIKE '%getenv%' \
-            AND lower(macro_definition) NOT LIKE '%glob%' \
-            AND lower(macro_definition) NOT LIKE '%setting%'))";
-    out.extend(names(db, sql).into_iter().filter(|n| !denied(n)));
-    out
-}
-
-/// The words DuckDB will not take as a name unless they are quoted.
-fn reserved_words(db: &Connection) -> HashSet<String> {
-    names(
-        db,
-        "SELECT lower(keyword_name) FROM duckdb_keywords() WHERE keyword_category = 'reserved'",
-    )
-    .into_iter()
-    .collect()
-}
-
-fn names(db: &Connection, sql: &str) -> Vec<String> {
-    let Ok(mut stmt) = db.prepare(sql) else {
-        return Vec::new();
-    };
-    let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else {
-        return Vec::new();
-    };
-    rows.filter_map(Result::ok).collect()
+fn reserved(word: &str) -> bool {
+    RESERVED.contains(&word)
 }
 
 // ---- reading -----------------------------------------------------------------------------
@@ -478,6 +571,20 @@ pub fn check(
     table: &str,
     source: &str,
 ) -> Result<(), FormulaError> {
+    check_within(db, text, columns, table, source, CHECK_LIMIT)
+}
+
+/// Like [`check`], with a limit of your own on the time (the tests use a tiny one). A check that
+/// takes the limit or longer is refused, whether DuckDB had finished or not.
+pub fn check_within(
+    db: &Connection,
+    text: &str,
+    columns: &[String],
+    table: &str,
+    source: &str,
+    limit: Duration,
+) -> Result<(), FormulaError> {
+    let started = Instant::now();
     let len = text.chars().count();
     if text.trim().is_empty() {
         return Err(bad("Write the expression for this column.", 0, 0));
@@ -493,15 +600,34 @@ pub fn check(
     if tokens.is_empty() {
         return Err(bad("Write the expression for this column.", 0, 0));
     }
-    let functions = allowed_functions(db);
-    let reserved = reserved_words(db);
-    judge(&tokens, columns, table, &functions, &reserved)?;
-    // DuckDB binds it. The wrapper is the one the view uses.
+    judge(&tokens, columns, table)?;
+    // DuckDB binds it, under the limit. The wrapper is the one the view uses. A watchdog stops the
+    // query when the time is up; one that ends in time cancels the watchdog and waits for it, so
+    // it can never stop the next query.
     let sql = format!("EXPLAIN SELECT TRY(({text})) FROM ({source}) AS t0 LIMIT 0");
-    if let Err(e) = db.prepare(&sql).and_then(|mut s| s.query([]).map(|_| ())) {
-        return Err(bad(bind_message(&format!("{e}")), 0, len));
+    let handle = db.interrupt_handle();
+    let (done, wait) = mpsc::channel::<()>();
+    let watchdog = std::thread::spawn(move || {
+        if wait.recv_timeout(limit) == Err(mpsc::RecvTimeoutError::Timeout) {
+            handle.interrupt();
+        }
+    });
+    let outcome = db.prepare(&sql).and_then(|mut s| s.query([]).map(|_| ()));
+    let _ = done.send(());
+    let _ = watchdog.join();
+    let late = started.elapsed() >= limit;
+    match outcome {
+        _ if late => Err(bad(
+            format!(
+                "Tenun stopped checking this column after {} seconds.",
+                CHECK_LIMIT.as_secs()
+            ),
+            0,
+            len,
+        )),
+        Err(e) => Err(bad(bind_message(&format!("{e}")), 0, len)),
+        Ok(()) => Ok(()),
     }
-    Ok(())
 }
 
 /// The first line of what DuckDB says about an expression it cannot bind, shortened. It names a
@@ -521,13 +647,7 @@ fn is_word(t: Option<&Tk>, w: &str) -> bool {
     matches!(t, Some(Tk { t: T::Word(x), .. }) if x.eq_ignore_ascii_case(w))
 }
 
-fn judge(
-    tokens: &[Tk],
-    columns: &[String],
-    table: &str,
-    functions: &HashSet<String>,
-    reserved: &HashSet<String>,
-) -> Result<(), FormulaError> {
+fn judge(tokens: &[Tk], columns: &[String], table: &str) -> Result<(), FormulaError> {
     let mut depth = 0usize;
     let mut opened: Vec<&Tk> = Vec::new();
     let mut seen_interval = false;
@@ -572,7 +692,7 @@ fn judge(
             T::Op(_) => {}
             T::Quoted(name) => {
                 if next_is_paren {
-                    function(name, tk, functions)?;
+                    function(name, tk)?;
                 } else {
                     column(name, tk, columns, table)?;
                 }
@@ -646,10 +766,10 @@ fn judge(
                     // `DATE '2026-01-31'`
                 } else if seen_interval && UNITS.contains(&lc.as_str()) {
                     // The unit of an interval.
-                } else if STARTS_A_QUERY.contains(&lc.as_str()) || reserved.contains(&lc) {
+                } else if STARTS_A_QUERY.contains(&lc.as_str()) || reserved(&lc) {
                     return Err(starts_query(&lc, tk));
                 } else if next_is_paren {
-                    function(w, tk, functions)?;
+                    function(w, tk)?;
                 } else {
                     column(w, tk, columns, table)?;
                 }
@@ -682,8 +802,8 @@ fn starts_query(word: &str, tk: &Tk) -> FormulaError {
     }
 }
 
-fn function(name: &str, tk: &Tk, functions: &HashSet<String>) -> Result<(), FormulaError> {
-    if functions.contains(&name.to_lowercase()) {
+fn function(name: &str, tk: &Tk) -> Result<(), FormulaError> {
+    if function_allowed(name) {
         return Ok(());
     }
     Err(bad(
@@ -866,69 +986,189 @@ mod tests {
     }
 
     #[test]
-    fn the_functions_that_may_be_called_are_the_plain_ones() {
-        let c = db();
-        let allowed = allowed_functions(&c);
-        for yes in [
+    fn every_function_on_the_list_is_in_the_bundled_duckdb() {
+        // On a fresh connection: a name that only exists after the ICU extension has loaded would
+        // make the answer depend on what ran before, so it is not allowed on the list.
+        let c = Connection::open_in_memory().unwrap();
+        let mut stmt = c
+            .prepare(
+                "SELECT DISTINCT lower(function_name) FROM duckdb_functions() \
+                 WHERE function_type IN ('scalar', 'macro')",
+            )
+            .unwrap();
+        let there: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let missing: Vec<&&str> = FUNCTIONS
+            .iter()
+            .filter(|f| !there.iter().any(|t| t == **f))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "DuckDB has no function called {missing:?}"
+        );
+        // The list is sorted for the binary search, and has each name once.
+        assert!(FUNCTIONS.windows(2).all(|w| w[0] < w[1]), "sort the list");
+        // What is on it never changes with ICU: a name present now is present after it loads.
+        let _ = c.execute_batch("SELECT current_date, current_timestamp, localtime;");
+        let mut again = c
+            .prepare(
+                "SELECT DISTINCT lower(function_name) FROM duckdb_functions() \
+                 WHERE function_type IN ('scalar', 'macro')",
+            )
+            .unwrap();
+        let later: Vec<String> = again
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(FUNCTIONS.iter().all(|f| later.iter().any(|t| t == *f)));
+    }
+
+    #[test]
+    fn what_was_looked_at_and_refused_is_not_on_the_list() {
+        for (name, why) in REFUSED {
+            assert!(
+                !function_allowed(name),
+                "{name} ({why}) must not be allowed"
+            );
+        }
+        // Whatever reads a file, the environment or the catalog is not there either.
+        for name in FUNCTIONS {
+            for start in [
+                "read_", "query", "http", "s3", "pg_", "duckdb_", "has_", "current_", "st_",
+            ] {
+                assert!(!name.starts_with(start), "{name}");
+            }
+            assert!(
+                !name.ends_with("_scan") && !name.contains("setting") && !name.contains("env"),
+                "{name}"
+            );
+        }
+        // The plain ones are.
+        for name in [
             "lower",
-            "upper",
             "round",
-            "abs",
             "coalesce",
             "ifnull",
             "nullif",
             "strftime",
             "date_part",
-            "year",
-            "substr",
-            "replace",
-            "regexp_matches",
-            "greatest",
-            "least",
-            "date_trunc",
             "split_part",
-            "concat",
-            "length",
-            "list_value",
+            "now",
         ] {
-            assert!(allowed.contains(yes), "{yes} should be allowed");
+            assert!(function_allowed(name), "{name}");
         }
-        for no in [
-            "getenv",
-            "read_text",
-            "read_csv",
-            "read_blob",
-            "glob",
-            "query",
-            "query_table",
-            "current_setting",
-            "sniff_csv",
-            "nextval",
-            "random",
-            "uuid",
-            "gen_random_uuid",
-            "current_query",
-            "sum",
-            "count",
-            "avg",
-            "unnest",
-            "http_get",
-            "s3_scan",
-            "pg_typeof",
-            "duckdb_settings",
-            "error",
-            "sleep_ms",
+    }
+
+    #[test]
+    fn the_reserved_words_are_those_of_the_bundled_duckdb() {
+        let c = Connection::open_in_memory().unwrap();
+        let mut stmt = c
+            .prepare(
+                "SELECT lower(keyword_name) FROM duckdb_keywords() WHERE keyword_category = 'reserved' ORDER BY 1",
+            )
+            .unwrap();
+        let now: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let mut listed: Vec<&str> = RESERVED.to_vec();
+        listed.sort_unstable();
+        assert_eq!(now, listed, "update RESERVED");
+        for w in [
+            "select", "from", "with", "table", "union", "where", "lambda",
         ] {
-            assert!(!allowed.contains(no), "{no} must not be allowed");
+            assert!(reserved(w) || STARTS_A_QUERY.contains(&w), "{w}");
         }
-        // The reserved words that start a query are not names.
-        let reserved = reserved_words(&c);
-        for w in ["select", "from", "with", "table", "union", "where", "join"] {
-            assert!(
-                reserved.contains(w) || STARTS_A_QUERY.contains(&w),
-                "{w} should be refused"
-            );
+    }
+
+    #[test]
+    fn a_function_that_makes_a_big_result_or_runs_a_lambda_is_refused() {
+        let c = db();
+        for (bad, says) in [
+            ("repeat(b, 1000000000)", "repeat"),
+            ("lpad(b, 1000000000, 'x')", "lpad"),
+            ("rpad(b, 1000000000, 'x')", "rpad"),
+            ("range(1000000000)", "range"),
+            ("generate_series(1, 1000000000)", "generate_series"),
+            ("list_resize(list_value(1), 1000000000)", "list_resize"),
+            ("array_resize(array_value(1), 1000000000)", "array_resize"),
+            ("printf('%1000000000d', a)", "printf"),
+            ("format('{:>1000000000}', b)", "format"),
+            ("bar(a, 0, 1, 1000000000)", "bar"),
+            // A lambda: the arrow, and the word. The functions that take one are not on the list either.
+            ("list_reduce(list_value(b, b), (x, y) -> x || y)", "arrow"),
+            ("list_reduce(list_value(b, b), lambda x)", "list_reduce"),
+            ("list_transform(list_value(1), x -> x + 1)", "arrow"),
+            // A function that is allowed, given a lambda: the word is refused by itself.
+            ("lower(lambda x)", "LAMBDA is not available"),
+            (
+                "array_to_string(list_value(b, b), lambda x, y: x)",
+                "not available",
+            ),
+        ] {
+            let e = run_check(&c, bad).expect_err(bad);
+            assert!(e.message.contains(says), "{bad}: {}", e.message);
         }
+        // Even by a quoted name.
+        assert!(run_check(&c, "\"repeat\"(b, 3)").is_err());
+    }
+
+    #[test]
+    fn a_check_that_takes_the_limit_is_refused_in_words() {
+        let c = db();
+        // The same expression passes with the time it has, and is stopped with none.
+        assert!(run_check(&c, "a * 2").is_ok());
+        let columns: Vec<String> = ["a", "b", "Total sales", "d"].map(String::from).into();
+        let e = check_within(
+            &c,
+            "a * 2",
+            &columns,
+            "t",
+            "SELECT * FROM t",
+            Duration::ZERO,
+        )
+        .unwrap_err();
+        assert_eq!(
+            e.message,
+            "Tenun stopped checking this column after 2 seconds."
+        );
+        // The connection is fine afterwards: no interrupt is left behind for the next query.
+        assert!(run_check(&c, "a * 2").is_ok());
+        let n: i64 = c
+            .query_row("SELECT count(*) FROM t", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn a_slow_expression_is_interrupted_by_the_watchdog() {
+        // DuckDB binds `a * 2` in well under a millisecond, so the honest slow form is a source that
+        // takes a while to bind: a view over many nested layers. The limit is small, the work is not.
+        let c = db();
+        let mut source = String::from("SELECT * FROM t");
+        for _ in 0..400 {
+            source = format!("SELECT * FROM ({source}) AS x");
+        }
+        let columns: Vec<String> = ["a", "b", "Total sales", "d"].map(String::from).into();
+        let started = Instant::now();
+        let r = check_within(
+            &c,
+            "a * 2",
+            &columns,
+            "t",
+            &source,
+            Duration::from_millis(1),
+        );
+        let took = started.elapsed();
+        assert!(r.is_err());
+        assert!(took < Duration::from_secs(10), "{took:?}");
+        // And the connection still works.
+        assert!(run_check(&c, "a * 2").is_ok());
     }
 
     #[test]

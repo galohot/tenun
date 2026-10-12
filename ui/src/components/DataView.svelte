@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { api, type Cell, type Column, type Profile, type Source, type TableSetup, type UnpivotPlan, type UrlEvery } from '../lib/api';
+  import { api, type Cell, type Column, type Profile, type Source, type TableSetup, type Tile, type UnpivotPlan, type UrlEvery } from '../lib/api';
   import { typeIcon } from '../lib/ui';
   import { app, go } from '../lib/state.svelte';
   import { cell, full, tileTitle } from '../lib/format';
-  import { listWords, tilesUsing, useWords } from '../lib/formula';
+  import { readersOf, tilesUsing, useWords } from '../lib/formula';
   import { failedText, hasUnpivot, isEmptySetup, withCalc, withHeaderRow, withUnpivot, withoutUnpivot } from '../lib/prep';
   import { looksTabular, sinceWords, EVERY_CHOICES } from '../lib/sources';
   import Icon from './Icon.svelte';
@@ -160,8 +160,10 @@
   // Advanced (V4-D20). A dashboard that uses a calculated column opens and works with the switch off (V3-D2).
   const canCalc = $derived(app.settings?.advanced === true);
   let calcSheet = $state<{ editing?: string } | null>(null);
-  /** The column to delete and what uses it, while the question is open. */
-  let askDelete = $state<{ name: string; shown: string; tiles: string[]; columns: string[] } | null>(null);
+  /** The column to delete and what it takes with it, while the question is open. */
+  let askDelete = $state<{ name: string; shown: string; tiles: string[]; blank: { label: string; tiles: string[] }[] } | null>(null);
+  /** Below 720 px the list of sources is above the table and folded away (V4-D76). */
+  let sourcesOpen = $state(false);
 
   /** The tip of a column: its description, what it is, and the day a calculated one is as of. */
   function tip(c: Column): string {
@@ -171,32 +173,22 @@
     return parts.filter(Boolean).join(' ');
   }
 
-  /** The other calculated columns whose formula names this one, as "Table › Column". */
-  function readers(name: string): string[] {
-    if (!table) return [];
-    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // In the table itself the name stands alone; in another table it follows the table.
-    const bare = new RegExp(`\\[${esc(name)}\\]`, 'i');
-    const named = new RegExp(`\\[(${esc(table.label)}|${esc(table.id)})\\]\\s*\\.\\s*\\[${esc(name)}\\]`, 'i');
-    const out: string[] = [];
-    for (const [id, s] of Object.entries(app.snap!.workspace.tables ?? {})) {
-      const t = app.table(id);
-      for (const c of s.calc ?? []) {
-        if (c.sql || (id === table.id && c.name === name)) continue;
-        if ((id === table.id ? bare : named).test(c.formula)) out.push(`${t?.label ?? id} › ${c.name}`);
-      }
-    }
-    return out;
-  }
-
   function wantDelete(name: string) {
     if (!table) return;
     const shown = colOf(name)?.label ?? name;
-    const uses = tilesUsing(app.dashboards, table.id, name, (t) => tileTitle(t, app.tables));
-    const columns = readers(name);
-    // Nothing uses it: it goes without a question. The only question in this file is for a column that tiles use.
-    if (!uses.length) removeCalc(name);
-    else askDelete = { name, shown, tiles: uses.map(useWords), columns };
+    const title = (t: Tile) => tileTitle(t, app.tables);
+    const direct = tilesUsing(app.dashboards, table.id, name, title);
+    // The calculated columns that read it, and the ones that read those, go blank with it. What
+    // matters is the tiles that show them.
+    const links = app.snap!.workspace.relationships.filter((r) => r.to.table === table.id && r.name).map((r) => r.name!);
+    const readers = readersOf(app.snap!.workspace.tables ?? {}, table, name, (id) => app.table(id)?.label ?? id, links);
+    const blank = readers.map((r) => ({
+      label: `${r.label} › ${r.column}`,
+      tiles: tilesUsing(app.dashboards, r.table, r.column, title).map(useWords),
+    }));
+    // Nothing shows it, directly or through another column: it goes without a question.
+    if (!direct.length && !blank.some((b) => b.tiles.length)) removeCalc(name);
+    else askDelete = { name, shown, tiles: direct.map(useWords), blank };
   }
 
   async function removeCalc(name: string) {
@@ -261,7 +253,14 @@
   </div>
 {:else}
   <div class="split">
-    <aside class="sources">
+    <aside class="sources" class:open={sourcesOpen}>
+      <button class="sources-toggle" aria-expanded={sourcesOpen} onclick={() => (sourcesOpen = !sourcesOpen)}>
+        <Icon name="table" size={14} />
+        <span class="now">{table?.label ?? 'Sources'}</span>
+        <span class="count">{sources.length} {sources.length === 1 ? 'source' : 'sources'}</span>
+        <Icon name="chevronDown" size={12} />
+      </button>
+      <div class="sources-list">
       {#each sources as s (s.id)}
         <section>
           <div class="src">
@@ -285,15 +284,18 @@
           {#if errors[s.id]}
             <p class="err"><Icon name="warning" size={13} /> {errors[s.id]}</p>
           {/if}
-          {#each app.tables.filter((t) => t.source_id === s.id) as t (t.id)}
-            <button class="tbl" class:on={table?.id === t.id} onclick={() => go({ view: 'data', table: t.id })}>
-              <Icon name="table" size={14} />
-              <span class="tname">{t.name}</span>
-              <span class="rows">{t.rows === null ? 'live' : full(t.rows)}</span>
-            </button>
-          {/each}
+          <div class="tbls">
+            {#each app.tables.filter((t) => t.source_id === s.id) as t (t.id)}
+              <button class="tbl" class:on={table?.id === t.id} onclick={() => ((sourcesOpen = false), go({ view: 'data', table: t.id }))}>
+                <Icon name="table" size={14} />
+                <span class="tname">{t.name}</span>
+                <span class="rows">{t.rows === null ? 'live' : full(t.rows)}</span>
+              </button>
+            {/each}
+          </div>
         </section>
       {/each}
+      </div>
     </aside>
 
     <section class="detail">
@@ -424,6 +426,7 @@
     column={menuColumn}
     {setup}
     canRetype={!!table.prep && !menuColumn.calc}
+    {table}
     x={menu.x}
     y={menu.y}
     onsave={save}
@@ -439,14 +442,33 @@
 {#if askDelete}
   {@const d = askDelete}
   <Modal title="Delete {d.shown}?" width={460} onclose={() => (askDelete = null)}>
-    <p class="lead">
-      {d.tiles.length === 1 ? 'This tile uses' : `These ${d.tiles.length} tiles use`} the column. {d.tiles.length === 1 ? 'It' : 'They'} will show an error until you pick another field.
-    </p>
-    <ul class="uses">
-      {#each d.tiles as t, i (i)}<li>{t}</li>{/each}
-    </ul>
-    {#if d.columns.length}
-      <p class="lead">These calculated columns read it too and will be blank: {listWords(d.columns)}.</p>
+    {#if d.tiles.length}
+      <p class="lead">
+        {d.tiles.length === 1 ? 'This tile uses' : `These ${d.tiles.length} tiles use`} the column. {d.tiles.length === 1 ? 'It' : 'They'} will show an error until you pick another field.
+      </p>
+      <ul class="uses">
+        {#each d.tiles as t, i (i)}<li>{t}</li>{/each}
+      </ul>
+    {/if}
+    {#if d.blank.length}
+      <p class="lead">
+        {d.blank.length === 1 ? 'A calculated column reads it' : `${d.blank.length} calculated columns read it`} and will be blank:
+      </p>
+      <ul class="uses">
+        {#each d.blank as b, i (i)}
+          <li>
+            <strong>{b.label}</strong>
+            {#if b.tiles.length}
+              is used by
+              <ul class="uses">
+                {#each b.tiles as t, j (j)}<li>{t}</li>{/each}
+              </ul>
+            {:else}
+              is not used by a tile.
+            {/if}
+          </li>
+        {/each}
+      </ul>
     {/if}
     {#snippet footer()}
       <button class="btn" onclick={() => (askDelete = null)}>Keep the column</button>
@@ -524,14 +546,14 @@
   .linkbtn:hover { text-decoration: underline; }
   .err { display: flex; gap: 6px; margin: 4px 6px 6px; color: var(--danger); font-size: 12px; }
   .detail { min-width: 0; display: flex; flex-direction: column; padding: 20px 24px; gap: 12px; overflow: hidden; }
-  .head { display: flex; align-items: flex-start; gap: 16px; }
-  .title { flex: 1; min-width: 0; }
+  .head { display: flex; align-items: flex-start; gap: 8px 16px; flex-wrap: wrap; }
+  .title { flex: 1 1 240px; min-width: 0; }
   .head h1 { font-size: 22px; }
   .head p { margin: 4px 0 0; }
   .notes { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-2); }
   .notes li { display: flex; align-items: center; gap: 6px; }
   .notes li.bad { color: var(--danger); }
-  .tools { display: flex; align-items: center; gap: 8px; flex: none; }
+  .tools { display: flex; align-items: center; gap: 8px; flex: none; flex-wrap: wrap; }
   .hdr { display: flex; align-items: center; gap: 6px; }
   .num-box { width: 64px; height: 28px; padding: 0 8px; border-color: var(--sep-strong); }
   .num-box:focus { border-color: var(--focus); }
@@ -571,6 +593,40 @@
   .lead { margin: 0 0 10px; }
   .uses { margin: 0 0 10px; padding-left: 18px; font-size: 13px; }
   .uses li { margin: 2px 0; }
+  .uses .uses { margin: 2px 0 4px; font-size: 12px; color: var(--text-2); }
+
+  /* The list of sources: beside the table above 720 px, above it and folded below (V4-D76). */
+  .sources-toggle { display: none; }
+  .tbls { display: block; }
+  @media (max-width: 719.98px) {
+    .split { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+    .sources { border-right: 0; border-bottom: 1px solid var(--sep); padding: 8px 12px; max-height: 50vh; display: flex; flex-direction: column; }
+    .sources-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      height: 32px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: var(--r-control);
+      background: var(--inset);
+      text-align: left;
+    }
+    .sources-toggle :global(svg) { color: var(--text-2); flex: none; }
+    .sources-toggle .now { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .sources-toggle .count { color: var(--text-2); font-size: 12px; white-space: nowrap; }
+    .sources.open .sources-toggle :global(svg:last-child) { transform: rotate(180deg); }
+    .sources-list { display: none; }
+    .sources.open .sources-list { display: block; overflow: auto; margin-top: 8px; min-height: 0; }
+    .tbls { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 6px 4px 28px; }
+    .tbl { width: auto; height: 26px; padding: 0 10px; border-radius: 13px; background: var(--window); }
+    .tbl.on { background: var(--selected); }
+    .detail { padding: 14px 14px 0; }
+    .title { flex: 1 1 100%; }
+    .tools { flex: 1 1 100%; }
+    .toolbar { padding: 0 14px; }
+  }
   .hd {
     display: inline-flex;
     align-items: center;

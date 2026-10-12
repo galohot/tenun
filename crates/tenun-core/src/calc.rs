@@ -41,7 +41,20 @@ pub const MAX_COLUMNS: usize = 50;
 /// A note on a table about a calculated column that could not be made at all, because its name
 /// cannot be a column of the view (empty, or the name of a column the view has). The notes of this
 /// kind are made again with every pass.
-const NOT_MADE: &str = "A calculated column was not made: ";
+pub const NOT_MADE: &str = "A calculated column was not made: ";
+
+/// What the passes remember between one and the next, and across a reload. A reload gives the
+/// catalog fresh tables with no calculated columns, so what a column was cannot be read from it.
+#[derive(Debug, Clone, Default)]
+pub struct Memory {
+    /// Table id → column name → the type the column had the last time it was computed. A column
+    /// that cannot be computed now is blank with this type, so a chart that used it still draws
+    /// (V4-D67).
+    pub types: BTreeMap<String, BTreeMap<String, DType>>,
+    /// Table id → the tables its view read at the last pass. A table whose source fails or goes
+    /// away is no longer in the catalog, but the tables that read it are still found by this.
+    pub reads: BTreeMap<String, BTreeSet<String>>,
+}
 
 /// What a pass reads.
 pub struct World<'a> {
@@ -53,6 +66,7 @@ pub struct World<'a> {
     /// Table id → the reference of the table under its calculated-column view. A table has an
     /// entry only while its catalog entry points at such a view.
     pub bases: &'a BTreeMap<String, String>,
+    pub memory: &'a Memory,
     pub today: NaiveDate,
     pub now: NaiveDateTime,
 }
@@ -75,6 +89,8 @@ pub struct Built {
     pub base: Option<String>,
     /// One for each calculated column, in order.
     pub columns: Vec<Made>,
+    /// The ids of the tables the view reads: those the formulas name, and the tables on the way.
+    pub reads: BTreeSet<String>,
 }
 
 /// One calculated column after a pass.
@@ -84,8 +100,10 @@ pub struct Made {
     /// It reads another table, through a link, or a column that does. Such a column cannot be the
     /// key of a link (V4-D63).
     pub related: bool,
-    /// The formula uses `TODAY()` or `NOW()`.
+    /// The formula uses `TODAY()` or `NOW()`, or reads a column that does.
     pub uses_time: bool,
+    /// The type of the column, when it was computed. Not set for a column that could not be.
+    pub dtype: Option<DType>,
 }
 
 pub struct Output {
@@ -285,7 +303,8 @@ pub fn rebuild(
     let has_calc = |id: &str| edges.contains_key(id);
 
     // The tables that changed: every table of a source that loaded, even one with no calculated
-    // column, because a column of another table may read it.
+    // column, because a column of another table may read it. A source that failed to load or went
+    // away has no tables in the catalog; its tables are known from what the views read before.
     let changed: BTreeSet<String> = match roots {
         Roots::All => with_calc
             .iter()
@@ -293,13 +312,17 @@ pub fn rebuild(
             .map(|t| t.id.clone())
             .collect(),
         Roots::Tables(ids) => ids.iter().cloned().collect(),
-        Roots::Source(src) => w
-            .catalog
-            .tables
-            .iter()
-            .filter(|t| t.source_id == *src)
-            .map(|t| t.id.clone())
-            .collect(),
+        Roots::Source(src) => {
+            let prefix = format!("{src}/");
+            w.catalog
+                .tables
+                .iter()
+                .map(|t| t.id.clone())
+                .chain(w.memory.reads.values().flatten().cloned())
+                .chain(w.setups.keys().cloned())
+                .filter(|id| id.starts_with(&prefix))
+                .collect()
+        }
     };
     // The tables to build: the changed ones that have columns (or had them), and the tables that
     // read a changed table, and so on.
@@ -310,16 +333,20 @@ pub fn rebuild(
         .map(|t| t.id.clone())
         .collect();
     if dependents {
+        let reads_affected = |id: &str, affected: &BTreeSet<String>| {
+            edges.get(id).is_some_and(|es| {
+                es.iter()
+                    .any(|e| changed.contains(&e.on) || affected.contains(&e.on))
+            }) || w.memory.reads.get(id).is_some_and(|r| {
+                r.iter()
+                    .any(|x| changed.contains(x) || affected.contains(x))
+            })
+        };
         loop {
-            let more: Vec<String> = edges
+            let more: Vec<String> = with_calc
                 .iter()
-                .filter(|(id, es)| {
-                    !affected.contains(*id)
-                        && es
-                            .iter()
-                            .any(|e| changed.contains(&e.on) || affected.contains(&e.on))
-                })
-                .map(|(id, _)| id.clone())
+                .map(|t| t.id.clone())
+                .filter(|id| !affected.contains(id) && reads_affected(id, &affected))
                 .collect();
             if more.is_empty() {
                 break;
@@ -416,8 +443,7 @@ pub fn rebuild(
             if edges.get(id).is_some_and(|e| !e.is_empty()) {
                 related_tables.push(id.clone());
             }
-            let old = w.catalog.table(id);
-            build_table(db, w, &wc, &t, old, calcs, &cyclic, commit)
+            build_table(db, w, &wc, &t, calcs, &cyclic, commit)
         };
         if let Some(slot) = wc.tables.iter_mut().find(|x| x.id == *id) {
             *slot = b.table.clone();
@@ -430,7 +456,8 @@ pub fn rebuild(
     }
 }
 
-/// "Orders › Region reads Stores, and Stores › Zone reads Orders." for a column on a cycle.
+/// "Orders › Region reads Stores, and Stores › Zone reads Orders. Two tables cannot read each other…"
+/// for a column on a cycle (V4-D66).
 fn cycle_words(
     w: &World<'_>,
     edges: &BTreeMap<String, BTreeSet<Edge>>,
@@ -489,7 +516,13 @@ fn cycle_words(
         Some((last, rest)) if !rest.is_empty() => format!("{}, and {last}", rest.join(", ")),
         _ => steps.join(""),
     };
-    format!("{list}. A column cannot depend on itself. Change or remove one of them.")
+    if path.len() == 2 {
+        format!("{list}. Two tables cannot read each other. Change or remove one of these columns.")
+    } else {
+        format!(
+            "{list}. These tables read each other in a circle, and a table cannot read itself. Change or remove one of these columns."
+        )
+    }
 }
 
 /// The table without a calculated-column view: its own columns and its own reference.
@@ -508,7 +541,56 @@ fn restore_table(db: &Connection, t: &Table, commit: bool) -> Built {
         table,
         base: None,
         columns: Vec::new(),
+        reads: BTreeSet::new(),
     }
+}
+
+/// The type a column had the last time it was computed (V4-D67).
+fn old_type(w: &World<'_>, table: &str, name: &str) -> Option<DType> {
+    w.memory.types.get(table)?.get(name).copied()
+}
+
+/// Does the formula read a calculated column that is as of a day: one with `TODAY()` or `NOW()`,
+/// or one that reads such a column? Then it is as of that day too (V4-D34). A raw SQL column reads
+/// the columns of its own table, so it is judged by the names in its text.
+fn reads_time_column(c: &CalcColumn, cat: &Catalog, own: &Table, rels: &[Relationship]) -> bool {
+    let mine = cat.table(&own.id).unwrap_or(own);
+    if c.sql {
+        let text = c.formula.to_lowercase();
+        return mine
+            .columns
+            .iter()
+            .any(|x| x.as_of.is_some() && text.contains(&x.name.to_lowercase()));
+    }
+    lex(&c.formula).iter().any(|tk| {
+        let Tok::Ref { table, column } = &tk.tok else {
+            return false;
+        };
+        let t = match table {
+            None => Some(mine),
+            Some(q) => find_table(cat, q).or_else(|| {
+                let r = rels
+                    .iter()
+                    .find(|r| r.name.as_deref().is_some_and(|n| same(n, q)))?;
+                cat.table(&r.to.table)
+            }),
+        };
+        t.is_some_and(|t| matches!(find_column(t, column), Found::One(x) if x.as_of.is_some()))
+    })
+}
+
+/// What one calculated column came to before its layer is tried.
+struct Tried {
+    /// The SQL expression.
+    expr: String,
+    /// The `LEFT JOIN`s it needs, as text.
+    joins: String,
+    /// It reads another table, or a column that does.
+    related: bool,
+    /// The type the formula gives (a SQL column has none until DuckDB says).
+    dtype: Option<DType>,
+    /// The ids of the tables it reads.
+    reads: Vec<String>,
 }
 
 fn clash(name: &str, known: &[String]) -> bool {
@@ -547,7 +629,6 @@ fn build_table(
     w: &World<'_>,
     wc: &Catalog,
     t: &Table,
-    old: Option<&Table>,
     calcs: &[CalcColumn],
     cyclic: &BTreeMap<(String, usize), String>,
     commit: bool,
@@ -570,7 +651,7 @@ fn build_table(
                 0,
                 0,
             );
-            return all_failed(t, calcs, old, error, w);
+            return all_failed(t, calcs, error, w);
         }
     };
     // The table as the formulas see it: its own columns, then the calculated ones above.
@@ -583,13 +664,59 @@ fn build_table(
         .iter()
         .flat_map(|c| std::iter::once(c.name.clone()).chain(c.label.clone()))
         .collect();
+    let mut reads: BTreeSet<String> = BTreeSet::new();
+    // The limits of a file that is opened hold as much as those of a save (V4-D24, V4-D75): a column
+    // past the 50th, or with more than 10,000 characters, stays in the file and is not built.
+    if calcs.len() > MAX_COLUMNS {
+        let extra = calcs.len() - MAX_COLUMNS;
+        not_made.push(format!(
+            "{NOT_MADE}{extra} calculated column{} after the first {MAX_COLUMNS} {} not built. The file keeps {}.",
+            if extra == 1 { "" } else { "s" },
+            if extra == 1 { "was" } else { "were" },
+            if extra == 1 { "it" } else { "them" },
+        ));
+    }
     for (k, c) in calcs.iter().enumerate() {
-        let uses_time = !c.sql && uses_time(&c.formula);
+        if k >= MAX_COLUMNS {
+            made.push(Made {
+                name: c.name.trim().to_string(),
+                error: Some(FormulaError::new(
+                    format!("A table builds up to {MAX_COLUMNS} calculated columns."),
+                    0,
+                    0,
+                )),
+                related: false,
+                uses_time: false,
+                dtype: None,
+            });
+            continue;
+        }
+        if c.formula.chars().count() > sqlcheck::MAX_CHARS {
+            let error = FormulaError::new(
+                format!(
+                    "The formula has more than {} characters, so it was not built.",
+                    sqlcheck::MAX_CHARS
+                ),
+                0,
+                0,
+            );
+            not_made.push(format!("{NOT_MADE}{}: {}", c.name.trim(), error.message));
+            made.push(Made {
+                name: c.name.trim().to_string(),
+                error: Some(error),
+                related: false,
+                uses_time: false,
+                dtype: None,
+            });
+            continue;
+        }
+        let own_time = !c.sql && uses_time(&c.formula);
+        let uses_time = own_time;
         // This column and the ones below it: a formula cannot read them.
         let later: Vec<&str> = calcs[k..].iter().map(|x| x.name.as_str()).collect();
         let table_now = own.table(&t.id).cloned().unwrap_or_else(|| t.clone());
         // One column: the expression, its joins, and whether it reads another table.
-        let attempt: Result<(String, String, bool, Option<DType>), FormulaError> = (|| {
+        let attempt: Result<Tried, FormulaError> = (|| {
             let name = c.name.trim();
             if name.is_empty() {
                 return Err(FormulaError::new("Give the column a name.", 0, 0));
@@ -631,7 +758,13 @@ fn build_table(
             if c.sql {
                 let columns: Vec<String> = known.iter().map(|(n, _)| n.clone()).collect();
                 sqlcheck::check(db, &c.formula, &columns, &t.label, &layer)?;
-                return Ok((sqlcheck::wrap(&c.formula), String::new(), false, None));
+                return Ok(Tried {
+                    expr: sqlcheck::wrap(&c.formula),
+                    joins: String::new(),
+                    related: false,
+                    dtype: None,
+                    reads: Vec::new(),
+                });
             }
             if let Some((col, at, len)) = later_reference(&c.formula, t, &table_now, &later) {
                 let message = if same(&col, name) {
@@ -665,16 +798,32 @@ fn build_table(
                     } => related_names.iter().any(|r| same(r, column)),
                     _ => false,
                 });
-            Ok((col.sql, joins, reads_related, Some(compiled.dtype)))
+            let mut read: Vec<String> = compiled.uses.clone();
+            read.extend(col.joins.iter().map(|j| j.table.clone()));
+            Ok(Tried {
+                expr: col.sql,
+                joins,
+                related: reads_related,
+                dtype: Some(compiled.dtype),
+                reads: read,
+            })
         })();
 
         let mut error: Option<FormulaError> = None;
         let mut related = false;
         let mut done = false;
         let mut compiled_type = None;
-        if let Ok((expr, joins, reads_related, dtype)) = &attempt {
+        if let Ok(Tried {
+            expr,
+            joins,
+            related: reads_related,
+            dtype,
+            reads: read,
+        }) = &attempt
+        {
             related = *reads_related;
             compiled_type = *dtype;
+            reads.extend(read.iter().filter(|r| **r != t.id).cloned());
             let try_layer = format!(
                 "SELECT t0.*, {expr} AS {} FROM ({layer}) AS t0{joins}",
                 ident(c.name.trim())
@@ -713,16 +862,15 @@ fn build_table(
                 error: Some(error),
                 related: false,
                 uses_time,
+                dtype: None,
             });
             continue;
         }
         if !done {
             // A blank column of the kind it had before, else the kind the formula gives, else text.
-            let ty = old
-                .and_then(|o| o.column(c.name.trim()))
-                .map(|c| duck_type(c.dtype))
-                .or(compiled_type.map(duck_type))
-                .unwrap_or("VARCHAR");
+            let ty = old_type(w, &t.id, c.name.trim())
+                .or(compiled_type)
+                .map_or("VARCHAR", duck_type);
             let try_layer = format!(
                 "SELECT t0.*, {} FROM ({layer}) AS t0",
                 sqlcheck::blank(ty, c.name.trim())
@@ -744,6 +892,7 @@ fn build_table(
                         error: Some(error),
                         related: false,
                         uses_time,
+                        dtype: None,
                     });
                     continue;
                 }
@@ -759,7 +908,8 @@ fn build_table(
             .find(|(n, _)| n == c.name.trim())
             .cloned()
             .unwrap_or_else(|| (c.name.trim().to_string(), "VARCHAR".into()));
-        let mut col = Column::new(name.clone(), DType::from_duckdb(&raw), raw);
+        let col_type = DType::from_duckdb(&raw);
+        let mut col = Column::new(name.clone(), col_type, raw);
         col.calc = true;
         let o = cols_setup(&name);
         col.label = o.and_then(|o| o.label.clone()).filter(|l| !l.is_empty());
@@ -769,7 +919,9 @@ fn build_table(
             .or_else(|| c.description.clone())
             .filter(|d| !d.is_empty());
         col.error = error.as_ref().map(|e| e.message.clone());
-        col.as_of = (uses_time && error.is_none()).then(|| w.today.to_string());
+        // Reading a column that is as of a day makes this one as of that day (V4-D34).
+        let uses_time = error.is_none() && (own_time || reads_time_column(c, &own, t, w.rels));
+        col.as_of = uses_time.then(|| w.today.to_string());
         shown_names.push(name.clone());
         if let Some(l) = &col.label {
             shown_names.push(l.clone());
@@ -777,11 +929,13 @@ fn build_table(
         if let Some(slot) = own.tables.iter_mut().find(|x| x.id == t.id) {
             slot.columns.push(col);
         }
+        let dtype = error.is_none().then_some(col_type);
         made.push(Made {
             name,
             error,
             related,
             uses_time,
+            dtype,
         });
     }
 
@@ -809,7 +963,7 @@ fn build_table(
                     t.label
                 );
                 let error = FormulaError::new("The columns of this table could not be made.", 0, 0);
-                return all_failed(t, calcs, old, error, w);
+                return all_failed(t, calcs, error, w);
             }
         }
     } else if !made.is_empty() {
@@ -820,17 +974,12 @@ fn build_table(
         table,
         base,
         columns: made,
+        reads,
     }
 }
 
 /// Every calculated column of the table is blank, with the same reason.
-fn all_failed(
-    t: &Table,
-    calcs: &[CalcColumn],
-    old: Option<&Table>,
-    error: FormulaError,
-    w: &World<'_>,
-) -> Built {
+fn all_failed(t: &Table, calcs: &[CalcColumn], error: FormulaError, w: &World<'_>) -> Built {
     let mut table = t.clone();
     table.notes.retain(|n| !n.starts_with(NOT_MADE));
     let mut made = Vec::new();
@@ -846,12 +995,11 @@ fn all_failed(
                 error: Some(error.clone()),
                 related: false,
                 uses_time: false,
+                dtype: None,
             });
             continue;
         }
-        let dtype = old
-            .and_then(|o| o.column(c.name.trim()))
-            .map_or(DType::Text, |c| c.dtype);
+        let dtype = old_type(w, &t.id, c.name.trim()).unwrap_or(DType::Text);
         let mut col = Column::new(c.name.trim().to_string(), dtype, duck_type(dtype).into());
         col.calc = true;
         col.error = Some(error.message.clone());
@@ -868,12 +1016,14 @@ fn all_failed(
             error: Some(error.clone()),
             related: false,
             uses_time: false,
+            dtype: None,
         });
     }
     Built {
         table,
         base: None,
         columns: made,
+        reads: BTreeSet::new(),
     }
 }
 
@@ -1011,6 +1161,12 @@ pub fn renamed_columns(table: &Table, old: &TableSetup, new: &TableSetup) -> Vec
             out.push((was, now));
         }
     }
+    out.extend(unpivot_renames(old, new));
+    out
+}
+
+/// The two columns an unpivot makes, when the setup gives them other names.
+pub fn unpivot_renames(old: &TableSetup, new: &TableSetup) -> Vec<(String, String)> {
     let unpivot = |s: &TableSetup| {
         s.transforms
             .iter()
@@ -1021,6 +1177,7 @@ pub fn renamed_columns(table: &Table, old: &TableSetup, new: &TableSetup) -> Vec
             })
             .next()
     };
+    let mut out = Vec::new();
     if let (Some((on, ov)), Some((nn, nv))) = (unpivot(old), unpivot(new)) {
         if on != nn {
             out.push((on, nn));
@@ -1032,23 +1189,138 @@ pub fn renamed_columns(table: &Table, old: &TableSetup, new: &TableSetup) -> Vec
     out
 }
 
+/// A raw SQL column reads real names, and an unpivot that gives its two columns other names
+/// changes them. The SQL is not rewritten (it is not a formula), so the rename is refused, with
+/// words that name the column (V4-D78).
+pub fn unpivot_sql_problem(old: &TableSetup, new: &TableSetup) -> Option<String> {
+    for (was, now) in unpivot_renames(old, new) {
+        for c in new.calc.iter().filter(|c| c.sql) {
+            if mentions(&c.formula, &was) {
+                return Some(format!(
+                    "Renaming {was} to {now} would break the SQL of the calculated column {}. Change the SQL first.",
+                    c.name
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// Does the text write the name, between double quotes or as a word of its own?
+fn mentions(text: &str, name: &str) -> bool {
+    let (t, n) = (text.to_lowercase(), name.trim().to_lowercase());
+    if n.is_empty() {
+        return false;
+    }
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    t.match_indices(&n).any(|(i, m)| {
+        let before = t[..i].chars().next_back();
+        let after = t[i + m.len()..].chars().next();
+        let quoted = before == Some('"') && after == Some('"');
+        quoted || (!before.is_some_and(word) && !after.is_some_and(word))
+    })
+}
+
+/// A name shown that another column of the table answers to already: it would make `[name]` mean
+/// two columns, and the formulas that use it could not tell which (V4-D38). Only a name that this
+/// setup gives or changes is looked at, so an old file with a clash can still be saved. Names are
+/// compared the way a formula finds a column: ignoring case and the spaces at the ends (V4-D77).
+pub fn label_problem(table: &Table, old: &TableSetup, new: &TableSetup) -> Option<String> {
+    // Every column the table will have: its own, and the calculated ones of the new setup.
+    let mut cols: Vec<(String, Option<String>)> = table
+        .columns
+        .iter()
+        .filter(|c| !c.calc)
+        .map(|c| (c.name.clone(), None))
+        .collect();
+    cols.extend(new.calc.iter().map(|c| (c.name.trim().to_string(), None)));
+    for col in &mut cols {
+        col.1 = new
+            .columns
+            .get(&col.0)
+            .and_then(|o| o.label.clone())
+            .filter(|l| !l.trim().is_empty());
+    }
+    for (i, (real, label)) in cols.iter().enumerate() {
+        let Some(label) = label else { continue };
+        let was = old.columns.get(real).and_then(|o| o.label.as_deref());
+        if was == Some(label.as_str()) {
+            continue;
+        }
+        for (j, (other, other_label)) in cols.iter().enumerate() {
+            if i != j
+                && (same(label, other) || other_label.as_deref().is_some_and(|l| same(label, l)))
+            {
+                return Some(format!(
+                    "The name {} is already used by another column of {}. Choose another name.",
+                    label.trim(),
+                    table.label
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// The place (`at` and `len`, in characters) of a problem found in `rewritten`, as it sits in
+/// `sent`. The two texts have the same tokens; a rename changes how long some of them are. Used
+/// so an error is underlined in the text the user wrote, not in the one the engine rewrote
+/// (V4-D77).
+pub fn map_back(sent: &str, rewritten: &str, at: usize, len: usize) -> (usize, usize) {
+    if sent == rewritten {
+        return (at, len);
+    }
+    let (a, b) = (lex(sent), lex(rewritten));
+    if a.len() != b.len() {
+        return (at, len);
+    }
+    let map = |pos: usize| -> usize {
+        match b.iter().rposition(|t| t.at <= pos) {
+            None => pos,
+            Some(i) if pos < b[i].at + b[i].len => a[i].at + (pos - b[i].at).min(a[i].len),
+            Some(i) => a[i].at + a[i].len + (pos - (b[i].at + b[i].len)),
+        }
+    };
+    let (start, end) = (map(at), map(at + len));
+    (start, end.saturating_sub(start))
+}
+
 /// The formula after the columns in `renames` of `table` got other names. For a formula of the
-/// table itself (`own`), a bare `[old]` is that column too.
+/// table itself (`own`), a bare `[old]` is that column too. For a formula of another table, a
+/// column is written after the table, or after the name of a link that leads to the table
+/// (`links`, V4-D28): `[orders].[old]`, `[Sold at].[old]`.
+///
+/// All the names change in one sweep (through a name nobody uses), so two columns can swap names
+/// and a formula keeps its meaning (V4-D77).
 pub fn follow_renames(
     formula: &str,
     table: &Table,
     renames: &[(String, String)],
     own: bool,
+    links: &[String],
 ) -> String {
-    let mut text = formula.to_string();
-    for (old, new) in renames {
-        for name in [&table.label, &table.id] {
+    let tmp = |i: usize| format!("\u{e000}col{i}");
+    let mut qualifiers: Vec<&str> = vec![&table.label, &table.id];
+    if !own {
+        qualifiers.extend(links.iter().map(String::as_str));
+    }
+    let step = |text: String, from: &str, to: &str| {
+        let mut text = text;
+        for q in &qualifiers {
             text = if own {
-                formula::rename_column(&text, name, old, new)
+                formula::rename_column(&text, q, from, to)
             } else {
-                formula::rename_column_qualified(&text, name, old, new)
+                formula::rename_column_qualified(&text, q, from, to)
             };
         }
+        text
+    };
+    let mut text = formula.to_string();
+    for (i, (old, _)) in renames.iter().enumerate() {
+        text = step(text, old, &tmp(i));
+    }
+    for (i, (_, new)) in renames.iter().enumerate() {
+        text = step(text, &tmp(i), new);
     }
     text
 }

@@ -11,7 +11,7 @@ use tenun_core::catalog::DType;
 use tenun_core::engine::AddSource;
 use tenun_core::query::SemanticQuery;
 use tenun_core::secrets::Secrets;
-use tenun_core::workspace::{CalcColumn, FieldRef};
+use tenun_core::workspace::{CalcColumn, FieldRef, TableSetup};
 
 fn dir(tag: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("tenun-calc-{tag}-{}", std::process::id()));
@@ -416,7 +416,10 @@ fn a_failing_calculated_column_leaves_the_rest_of_the_table_loaded() {
     let snap = w.e.snapshot();
     // The source loaded; the table says which column is blank and why.
     assert!(!snap.errors.contains_key(&id), "{:?}", snap.errors);
-    let said = snap.errors.get(&w.orders).expect("an error on the table");
+    let said = snap
+        .table_errors
+        .get(&w.orders)
+        .expect("an error on the table");
     assert!(
         said.contains("Tagged") && said.contains("No column [note]"),
         "{said}"
@@ -671,6 +674,7 @@ fn two_tables_that_read_each_other_are_refused_with_both_columns() {
         m.contains("b › Y reads a") && m.contains("a › X reads b"),
         "{m}"
     );
+    assert!(m.contains("Two tables cannot read each other"), "{m}");
     // Nothing was saved.
     assert!(e.catalog().table(&b).unwrap().column("Y").is_none());
     // B may read A when A does not read B.
@@ -1196,5 +1200,458 @@ async fn the_setup_route_answers_a_bad_formula_as_a_normal_answer_with_utf16_pla
     assert_eq!(
         (r["error"]["at"].clone(), r["error"]["len"].clone()),
         (json!(0), json!(6))
+    );
+}
+
+// ---- review fixes ------------------------------------------------------------------------------
+
+fn source_of(e: &Engine, table: &str) -> String {
+    e.catalog().table(table).unwrap().source_id.clone()
+}
+
+#[test]
+fn a_blank_column_keeps_its_type_across_a_reload() {
+    let w = world("keeps-type");
+    set(
+        &w.e,
+        &w.orders,
+        vec![calc("Broken", "LEN([note]) * 2 + [amount]")],
+    )
+    .unwrap();
+    assert_eq!(column(&w.e, &w.orders, "Broken").dtype, DType::Number);
+    // The file loses the column the formula reads. The column is blank, and still a number.
+    std::fs::write(
+        w.d.join("orders.csv"),
+        "id,date,store_id,amount\n1,2026-01-15,1,100\n2,2026-01-20,1,250\n",
+    )
+    .unwrap();
+    w.e.load(&source_of(&w.e, &w.orders));
+    let c = column(&w.e, &w.orders, "Broken");
+    assert!(c.error.is_some());
+    assert_eq!(c.dtype, DType::Number, "{c:?}");
+    // A chart that adds it up still draws: a blank sum, not an error about text.
+    let r =
+        w.e.query(&q(json!({
+            "measures": [{"table": w.orders, "column": "Broken", "agg": "sum"}]
+        })))
+        .unwrap();
+    assert!(
+        r.rows[0][0].is_null() || r.rows[0][0].as_f64() == Some(0.0),
+        "{:?}",
+        r.rows
+    );
+    // It still has the type after another reload, and the type is the real one when it heals.
+    w.e.load(&source_of(&w.e, &w.orders));
+    assert_eq!(column(&w.e, &w.orders, "Broken").dtype, DType::Number);
+    std::fs::write(
+        w.d.join("orders.csv"),
+        "id,date,store_id,amount,note\n1,2026-01-15,1,100,abc\n",
+    )
+    .unwrap();
+    w.e.load(&source_of(&w.e, &w.orders));
+    assert!(column(&w.e, &w.orders, "Broken").error.is_none());
+    assert_eq!(values(&w.e, &w.orders, "Broken")[0].as_f64(), Some(106.0));
+}
+
+#[test]
+fn a_source_that_fails_blanks_only_the_columns_that_read_it() {
+    let w = world("failing-source");
+    set(
+        &w.e,
+        &w.orders,
+        vec![
+            calc("Store name", "[stores].[name]"),
+            calc("Double", "[amount] * 2"),
+        ],
+    )
+    .unwrap();
+    let stores_source = source_of(&w.e, &w.stores);
+    // The stores file goes away and the source is read again.
+    std::fs::rename(w.d.join("stores.csv"), w.d.join("stores.moved")).unwrap();
+    w.e.load(&stores_source);
+    let sum = |col: &str| {
+        w.e.query(&q(json!({
+            "measures": [{"table": w.orders, "column": col, "agg": "sum"}]
+        })))
+    };
+    // Every tile of the orders still works. Only the column that read the stores is blank.
+    assert_eq!(sum("amount").unwrap().rows[0][0].as_f64(), Some(480.5));
+    assert_eq!(sum("Double").unwrap().rows[0][0].as_f64(), Some(961.0));
+    assert!(column(&w.e, &w.orders, "Store name").error.is_some());
+    assert_eq!(values(&w.e, &w.orders, "Store name")[0], Value::Null);
+    let snap = w.e.snapshot();
+    assert!(snap.table_errors[&w.orders].contains("Store name"));
+    assert!(snap.errors.contains_key(&stores_source));
+    // The file comes back: the column is whole again.
+    std::fs::rename(w.d.join("stores.moved"), w.d.join("stores.csv")).unwrap();
+    w.e.load(&stores_source);
+    assert!(column(&w.e, &w.orders, "Store name").error.is_none());
+    assert_eq!(values(&w.e, &w.orders, "Store name")[0], json!("Kopi A"));
+    assert!(w.e.snapshot().table_errors.is_empty());
+    // A source that is removed does the same.
+    w.e.remove_source(&stores_source);
+    assert_eq!(sum("amount").unwrap().rows[0][0].as_f64(), Some(480.5));
+    assert!(column(&w.e, &w.orders, "Store name").error.is_some());
+}
+
+#[test]
+fn a_swap_of_two_names_keeps_every_formula_true() {
+    let w = world("swap");
+    label(&w.e, &w.orders, "amount", "X");
+    label(&w.e, &w.orders, "store_id", "Y");
+    set(&w.e, &w.orders, vec![calc("Mix", "[X] * 1000 + [Y]")]).unwrap();
+    let before = values(&w.e, &w.orders, "Mix");
+    // One save gives each column the other's name.
+    let mut setup = w.e.snapshot().workspace.tables[&w.orders].clone();
+    setup.columns.get_mut("amount").unwrap().label = Some("Y".into());
+    setup.columns.get_mut("store_id").unwrap().label = Some("X".into());
+    w.e.set_table_setup(&w.orders, Some(setup)).unwrap();
+    let saved = w.e.snapshot().workspace.tables[&w.orders].calc[0]
+        .formula
+        .clone();
+    // The first name now means the other column, so the text swaps with it.
+    assert_eq!(saved, "[Y] * 1000 + [X]");
+    assert!(column(&w.e, &w.orders, "Mix").error.is_none());
+    assert_eq!(values(&w.e, &w.orders, "Mix"), before);
+}
+
+#[test]
+fn a_column_written_after_the_name_of_a_link_follows_a_rename() {
+    let w = world("link-rename-col");
+    let link = w.e.snapshot().workspace.relationships[0].id.clone();
+    w.e.rename_link(&link, Some("Sold at".into())).unwrap();
+    label(&w.e, &w.stores, "name", "Shop name");
+    set(&w.e, &w.orders, vec![calc("Shop", "[Sold at].[Shop name]")]).unwrap();
+    assert_eq!(values(&w.e, &w.orders, "Shop")[0], json!("Kopi A"));
+    label(&w.e, &w.stores, "name", "Outlet");
+    let saved = w.e.snapshot().workspace.tables[&w.orders].calc[0]
+        .formula
+        .clone();
+    assert_eq!(saved, "[Sold at].[Outlet]");
+    assert!(column(&w.e, &w.orders, "Shop").error.is_none());
+    assert_eq!(values(&w.e, &w.orders, "Shop")[0], json!("Kopi A"));
+}
+
+#[test]
+fn a_name_shown_that_two_columns_would_answer_to_is_refused_on_every_save() {
+    let w = world("label-clash");
+    set(&w.e, &w.orders, vec![calc("Margin", "[amount] * 0.2")]).unwrap();
+    let with_label = |column: &str, text: &str| {
+        let mut setup = w.e.snapshot().workspace.tables[&w.orders].clone();
+        setup.columns.entry(column.into()).or_default().label = Some(text.into());
+        w.e.set_table_setup(&w.orders, Some(setup))
+    };
+    // A calculated column, whatever the case and the spaces.
+    for text in ["Margin", "margin", "  MARGIN "] {
+        let err = with_label("note", text).expect_err(text);
+        assert!(
+            err.to_string().contains("already used by another column"),
+            "{err}"
+        );
+    }
+    // A real column of the file, by its real name.
+    let err = with_label("note", "Amount").expect_err("a real column");
+    assert!(err.to_string().contains("already used"), "{err}");
+    // Another column's name shown.
+    with_label("note", "Memo").unwrap();
+    let err = with_label("date", "memo").expect_err("a name shown");
+    assert!(err.to_string().contains("already used"), "{err}");
+    // Nothing was saved: the column still answers to its own names only.
+    let setup = &w.e.snapshot().workspace.tables[&w.orders];
+    assert!(!setup.columns.contains_key("date"));
+    // A column may be given its own real name, and a name nobody uses.
+    with_label("date", "date").unwrap();
+    with_label("date", "When").unwrap();
+    // An old file whose names already clash can still be saved when the save does not touch them.
+    let mut ws = w.e.snapshot().workspace;
+    let t = ws.tables.get_mut(&w.orders).unwrap();
+    t.columns.entry("id".into()).or_default().label = Some("When".into());
+    w.e.replace(ws, Some(w.d.join("old.tenun")));
+    label(&w.e, &w.orders, "store_id", "Shop");
+}
+
+#[test]
+fn an_error_is_placed_on_the_text_that_was_sent() {
+    let w = world("place");
+    label(&w.e, &w.orders, "amount", "Sales");
+    // One save renames the column and adds a column that has a slip after it. The engine reads
+    // the text with the new name, which is longer; the place is moved back onto the sent text.
+    let mut setup = w.e.snapshot().workspace.tables[&w.orders].clone();
+    setup.columns.get_mut("amount").unwrap().label = Some("A much longer name".into());
+    setup.calc = vec![calc("Bad", "[Sales] * [nope]")];
+    let err = refused(w.e.set_table_setup(&w.orders, Some(setup)));
+    assert_eq!(err.formula, "[Sales] * [nope]");
+    assert_eq!(
+        (err.error.at, err.error.len),
+        (10, 6),
+        "{}",
+        err.error.message
+    );
+    let reply = err.reply();
+    assert_eq!(reply["error"]["at"], json!(10));
+}
+
+#[test]
+fn an_unpivot_rename_follows_formulas_and_is_refused_for_sql() {
+    let d = dir("unpivot-rename");
+    std::fs::write(
+        d.join("sales.csv"),
+        "product,jan,feb\nTea,10,20\nCoffee,30,40\n",
+    )
+    .unwrap();
+    let e = Engine::new(Secrets::new(d.join("secrets.json"))).unwrap();
+    e.add_source(AddSource::File {
+        path: d.join("sales.csv").to_string_lossy().into_owned(),
+    })
+    .unwrap();
+    let t = e.catalog().tables[0].id.clone();
+    let unpivot = |value: &str| TableSetup {
+        transforms: vec![tenun_core::workspace::Transform::Unpivot {
+            keep: vec!["product".into()],
+            name: "Month".into(),
+            value: value.into(),
+        }],
+        ..TableSetup::default()
+    };
+    e.set_table_setup(&t, Some(unpivot("Sales"))).unwrap();
+    let mut setup = e.snapshot().workspace.tables[&t].clone();
+    setup.calc = vec![calc("Double", "[Sales] * 2")];
+    e.set_table_setup(&t, Some(setup)).unwrap();
+    assert_eq!(values(&e, &t, "Double")[0].as_f64(), Some(20.0));
+    // The value column gets another name: the formula follows it.
+    let mut setup = e.snapshot().workspace.tables[&t].clone();
+    setup.transforms = unpivot("Amount").transforms;
+    e.set_table_setup(&t, Some(setup)).unwrap();
+    let saved = e.snapshot().workspace.tables[&t].calc[0].formula.clone();
+    assert_eq!(saved, "[Amount] * 2");
+    assert!(column(&e, &t, "Double").error.is_none());
+    assert_eq!(values(&e, &t, "Double")[0].as_f64(), Some(20.0));
+    // A SQL column is not rewritten, so the rename that would break it is refused, by name.
+    let mut setup = e.snapshot().workspace.tables[&t].clone();
+    setup.calc.push(sql("Triple", "\"Amount\" * 3"));
+    e.set_table_setup(&t, Some(setup)).unwrap();
+    let mut setup = e.snapshot().workspace.tables[&t].clone();
+    setup.transforms = unpivot("Revenue").transforms;
+    let err = e
+        .set_table_setup(&t, Some(setup))
+        .expect_err("the SQL would break");
+    let said = err.to_string();
+    assert!(said.contains("Triple") && said.contains("Amount"), "{said}");
+    // Nothing changed.
+    assert_eq!(values(&e, &t, "Triple")[0].as_f64(), Some(30.0));
+}
+
+#[test]
+fn a_formula_that_reads_a_column_of_today_through_another_table_is_as_of_the_day_too() {
+    let w = world("as-of-through");
+    let day = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+    w.e.set_today(Some(day("2026-10-11")));
+    set(&w.e, &w.orders, vec![calc("Age", "DAYS(TODAY(), [date])")]).unwrap();
+    // The lines read the age of their order, and the next column reads that one.
+    set(
+        &w.e,
+        &w.lines,
+        vec![
+            calc("Order age", "[orders].[Age] + 1"),
+            calc("Older", "[Order age] + 1"),
+        ],
+    )
+    .unwrap();
+    for c in ["Order age", "Older"] {
+        assert_eq!(
+            column(&w.e, &w.lines, c).as_of.as_deref(),
+            Some("2026-10-11"),
+            "{c}"
+        );
+    }
+    let before = values(&w.e, &w.lines, "Older")[0].as_f64().unwrap();
+    // The day changes: the orders, then the lines that read them, are built again.
+    w.e.set_today(Some(day("2026-10-12")));
+    assert!(w.e.refresh_dates());
+    assert_eq!(
+        values(&w.e, &w.lines, "Older")[0].as_f64().unwrap() - before,
+        1.0
+    );
+    assert_eq!(
+        column(&w.e, &w.lines, "Older").as_of.as_deref(),
+        Some("2026-10-12")
+    );
+}
+
+#[test]
+fn building_a_snapshot_builds_a_column_of_today_again() {
+    let w = world("snapshot-today");
+    let day = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+    w.e.set_today(Some(day("2026-10-11")));
+    set(&w.e, &w.orders, vec![calc("Age", "DAYS(TODAY(), [date])")]).unwrap();
+    w.e.set_dashboards(vec![json!({
+        "id": "d1", "title": "D", "refresh": 0,
+        "tiles": [{
+            "id": "t1", "type": "kpi", "title": "", "x": 0, "y": 0, "w": 3, "h": 2,
+            "measures": [{"table": w.orders, "column": "Age", "agg": "max"}],
+            "dims": []
+        }]
+    })]);
+    let first = tenun_core::snapshot::build(&w.e, "d1", &[]).unwrap();
+    let age = |v: &Value| v["base"]["t1"]["rows"][0][0].as_f64().unwrap();
+    // The next day, with no load and no refresh: the page that is made is of that day.
+    w.e.set_today(Some(day("2026-10-12")));
+    let second = tenun_core::snapshot::build(&w.e, "d1", &[]).unwrap();
+    assert_eq!(age(&second) - age(&first), 1.0, "{first} {second}");
+    assert_eq!(
+        column(&w.e, &w.orders, "Age").as_of.as_deref(),
+        Some("2026-10-12")
+    );
+}
+
+#[test]
+fn a_hostile_file_cannot_read_a_file_or_the_environment_when_it_is_opened() {
+    let w = world("hostile");
+    let secret = w.d.join("secret.txt");
+    std::fs::write(&secret, "TOP SECRET CONTENT").unwrap();
+    let mut ws = w.e.snapshot().workspace;
+    ws.tables.insert(
+        w.orders.clone(),
+        TableSetup {
+            calc: vec![
+                sql(
+                    "Leak",
+                    &format!("(SELECT content FROM read_text('{}'))", secret.display()),
+                ),
+                sql("Env", "getenv('HOME')"),
+                sql("Bomb", "repeat('x', 1000000000)"),
+                sql("Loop", "list_reduce(list_value(note, note), lambda x)"),
+                sql("Fine", "amount * 2"),
+            ],
+            ..TableSetup::default()
+        },
+    );
+    // The file is opened: nothing is run for the columns that are refused.
+    w.e.replace(ws, Some(w.d.join("hostile.tenun")));
+    let t = w.e.catalog().table(&w.orders).unwrap().clone();
+    for bad in ["Leak", "Env", "Bomb", "Loop"] {
+        let c = t.column(bad).unwrap_or_else(|| panic!("{bad}"));
+        assert!(c.error.is_some(), "{bad}");
+        assert!(
+            values(&w.e, &w.orders, bad).iter().all(Value::is_null),
+            "{bad}"
+        );
+    }
+    assert!(t.column("Fine").is_some_and(|c| c.error.is_none()));
+    let text = serde_json::to_string(&w.e.preview(&w.orders, 5).unwrap().rows).unwrap();
+    assert!(!text.contains("TOP SECRET"), "{text}");
+}
+
+#[test]
+fn a_file_that_opens_with_too_many_or_too_long_columns_builds_what_it_may() {
+    let w = world("open-limits");
+    let mut cols: Vec<CalcColumn> = (0..60)
+        .map(|i| calc(&format!("C{i}"), "[amount] + 1"))
+        .collect();
+    cols.push(calc("Long", &format!("[amount]{}", " + 1".repeat(5000))));
+    let mut ws = w.e.snapshot().workspace;
+    ws.tables.insert(
+        w.orders.clone(),
+        TableSetup {
+            calc: cols,
+            ..TableSetup::default()
+        },
+    );
+    w.e.replace(ws, Some(w.d.join("many.tenun")));
+    let t = w.e.catalog().table(&w.orders).unwrap().clone();
+    assert!(t.column("C49").is_some_and(|c| c.error.is_none()));
+    assert!(t.column("C50").is_none());
+    assert!(t.column("Long").is_none());
+    let said = t.notes.join(" ");
+    assert!(
+        said.contains("11 calculated columns after the first 50"),
+        "{said}"
+    );
+    // The file keeps them all.
+    assert_eq!(w.e.snapshot().workspace.tables[&w.orders].calc.len(), 61);
+    // An oversized column alone says why.
+    let mut ws = w.e.snapshot().workspace;
+    ws.tables.get_mut(&w.orders).unwrap().calc =
+        vec![calc("Long", &format!("[amount]{}", " + 1".repeat(5000)))];
+    w.e.replace(ws, Some(w.d.join("long.tenun")));
+    let t = w.e.catalog().table(&w.orders).unwrap().clone();
+    assert!(t.column("Long").is_none());
+    assert!(
+        t.notes
+            .iter()
+            .any(|n| n.contains("Long") && n.contains("10000 characters")),
+        "{:?}",
+        t.notes
+    );
+}
+
+#[test]
+fn a_function_that_makes_a_big_result_is_refused_when_a_column_is_saved() {
+    let w = world("bomb-save");
+    for text in [
+        "repeat(note, 1000000000)",
+        "lpad(note, 1000000000, 'x')",
+        "range(1000000000)",
+        "list_reduce(list_value(note, note), lambda x)",
+    ] {
+        let r = refused(set(&w.e, &w.orders, vec![sql("Bomb", text)]));
+        assert!(
+            r.error.message.contains("not available"),
+            "{text}: {}",
+            r.error.message
+        );
+    }
+}
+
+#[test]
+fn tenun_snapshot_goes_on_when_a_calculated_column_is_blank_and_says_so_in_public_words() {
+    let w = world("cli");
+    set(
+        &w.e,
+        &w.orders,
+        vec![calc("Marked", r#"[amount] & "s3cr3t""#)],
+    )
+    .unwrap();
+    w.e.set_dashboards(vec![json!({
+        "id": "d1", "title": "D", "refresh": 0,
+        "tiles": [{
+            "id": "t1", "type": "kpi", "title": "", "x": 0, "y": 0, "w": 3, "h": 2,
+            "measures": [{"table": w.orders, "column": null, "agg": "count"}],
+            "dims": []
+        }]
+    })]);
+    let file = w.d.join("cli.tenun");
+    w.e.save(Some(file.clone())).unwrap();
+    // The file loses the column the formula reads.
+    std::fs::write(
+        w.d.join("orders.csv"),
+        "id,date,store_id,note\n1,2026-01-15,1,a\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_tenun"))
+        .args(["snapshot", file.to_str().unwrap(), "--json"])
+        .arg(w.d.join("snap.json"))
+        .env("HOME", &w.d)
+        .env("XDG_CONFIG_HOME", w.d.join("cfg"))
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert!(
+        err.contains("orders: Marked could not be computed."),
+        "{err}"
+    );
+    assert!(
+        !err.contains("s3cr3t") && !err.contains("No column"),
+        "{err}"
+    );
+    assert!(w.d.join("snap.json").is_file());
+    // The same words in the engine, and no source error.
+    let snap = w.e.snapshot();
+    assert!(snap.errors.is_empty());
+    w.e.load(&source_of(&w.e, &w.orders));
+    assert_eq!(
+        w.e.public_table_problems(),
+        ["orders: Marked could not be computed."]
     );
 }

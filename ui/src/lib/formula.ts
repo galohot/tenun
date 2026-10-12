@@ -99,18 +99,38 @@ export const bracketed = (name: string): string => `[${name.replace(/]/g, ']]')}
 
 const unbracket = (s: string): string => s.replace(/]]/g, ']');
 
-/** The name in the bracket pair that ends right before `at` (`[Table].` then `at`), or null. */
+/**
+ * The name in the bracket pair that ends right before `at` (`[Table].` then `at`), or null. The text is
+ * read from its start the way the engine reads it, so a name that holds `[` or a doubled `]` (a table
+ * called "Sales [2024]" is written `[Sales [2024]]]`) is one name, not a part of one.
+ */
 function qualifierBefore(text: string, at: number): string | null {
   if (text[at - 1] !== '.' || text[at - 2] !== ']') return null;
-  let i = at - 3;
-  while (i >= 0) {
-    if (text[i] === '[') {
-      // `[` after another `[` is part of the name; a doubled `]` ends a name that holds one.
-      return unbracket(text.slice(i + 1, at - 2));
+  let last: { start: number; end: number } | null = null;
+  let place: 'code' | 'text' | 'name' = 'code';
+  let start = 0;
+  for (let i = 0; i < at - 1; i++) {
+    const c = text[i];
+    if (place === 'code') {
+      if (c === '"') place = 'text';
+      else if (c === '[') {
+        place = 'name';
+        start = i;
+      }
+    } else if (place === 'text') {
+      if (c === '"') {
+        if (text[i + 1] === '"') i++;
+        else place = 'code';
+      }
+    } else if (c === ']') {
+      if (text[i + 1] === ']') i++;
+      else {
+        place = 'code';
+        last = { start, end: i + 1 };
+      }
     }
-    i--;
   }
-  return null;
+  return last && last.end === at - 1 ? unbracket(text.slice(last.start + 1, last.end - 1)) : null;
 }
 
 const TYPE_WORDS: Record<DType, string> = {
@@ -335,6 +355,55 @@ export function tilesUsing(dashboards: readonly Dashboard[], table: string, colu
       if (used) out.push({ dashboard: d.title, tile: title(t), kind: kindWords(t.type) });
     }
     if (d.filters?.some(hit)) out.push({ dashboard: d.title, tile: '', kind: 'saved filter' });
+  }
+  return out;
+}
+
+/** A calculated column that reads another column: `table` is the table id, `label` its name for people. */
+export interface Reader {
+  table: string;
+  label: string;
+  column: string;
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The calculated columns that would go blank if `column` of `table` went: the ones whose formula names
+ * it, and the ones that read those, and so on. In the table itself a name stands alone; in another
+ * table it follows the table or a link that leads to it. A SQL column reads real names, so it is found
+ * by the name in its text. `setups` is `workspace.tables`; `labels` gives each table's name for people.
+ */
+export function readersOf(
+  setups: Record<string, { calc?: { name: string; formula: string; sql?: boolean }[] }>,
+  table: { id: string; label: string },
+  column: string,
+  labels: (id: string) => string,
+  links: readonly string[] = [],
+): Reader[] {
+  const out: Reader[] = [];
+  const seen = new Set<string>([`${table.id}\u0000${column}`]);
+  // Each column found is looked for in its turn: who reads it?
+  const queue: { table: { id: string; label: string }; column: string }[] = [{ table, column }];
+  while (queue.length) {
+    const target = queue.shift()!;
+    const bare = new RegExp(`\\[${escapeRe(target.column)}\\]`, 'i');
+    const qualifiers = [target.table.label, target.table.id, ...links].map(escapeRe).join('|');
+    const named = new RegExp(`\\[(${qualifiers})\\]\\s*\\.\\s*\\[${escapeRe(target.column)}\\]`, 'i');
+    const sqlWord = new RegExp(`(^|[^A-Za-z0-9_])"?${escapeRe(target.column)}"?($|[^A-Za-z0-9_])`, 'i');
+    for (const [id, setup] of Object.entries(setups)) {
+      for (const c of setup.calc ?? []) {
+        const key = `${id}\u0000${c.name}`;
+        if (seen.has(key)) continue;
+        const own = id === target.table.id;
+        const reads = c.sql ? own && sqlWord.test(c.formula) : (own ? bare : named).test(c.formula);
+        if (!reads) continue;
+        seen.add(key);
+        const label = labels(id) ?? id;
+        out.push({ table: id, label, column: c.name });
+        queue.push({ table: { id, label }, column: c.name });
+      }
+    }
   }
   return out;
 }

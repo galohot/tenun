@@ -10,6 +10,7 @@ import { columnHeads, measureLabel, type Named } from './format';
 import { saveBlob, saveBytes } from './download';
 import { motion } from './motion';
 import { buildPdf, pageSize } from './pdf';
+import { pictureNote } from './picture';
 import { partialNote } from './run';
 import { fileName, tileTable, toCsv } from './tabular';
 import type { DashFilter } from './tiles';
@@ -76,7 +77,7 @@ async function chartPicture(tile: Tile, res: QueryResult, tables: Named[], title
   try {
     const built = buildOption({ res, tile, colors, selected: null, width: w, height: h, tables });
     // A picture leaves the computer: it says it with no key value and no file name.
-    note = [built.note, partialNote(res, tile.dims[0]?.grain), ...(res.publicNotes ?? [])].filter(Boolean).join(' ');
+    note = pictureNote(res, built.note, partialNote(res, tile.dims[0]?.grain));
     const chart = echarts.init(holder, null, { renderer: 'canvas', width: w, height: h });
     chart.setOption({ ...built.option, animation: false });
     url = chart.getDataURL({ pixelRatio: SCALE, backgroundColor: colors.surface });
@@ -142,17 +143,41 @@ async function withControlState<T>(root: HTMLElement, draw: () => Promise<T>): P
   }
 }
 
-/** A tile that is not a chart: what is on the screen is drawn to a canvas. */
-async function domPicture(el: HTMLElement, colors: Colors) {
+/**
+ * A tile that is not a chart (or a chart with no rows): what is on the screen is drawn to a canvas.
+ * The footer of the tile holds the notes of the app, which name keys and may quote a formula, so it is
+ * left out; the line under the picture is made from the public notes (V4-D52).
+ */
+async function domPicture(el: HTMLElement, colors: Colors, note: string) {
   await document.fonts?.ready;
-  return withControlState(el, () =>
+  const canvas = await withControlState(el, () =>
     toCanvas(el, {
       pixelRatio: SCALE,
       backgroundColor: colors.surface,
-      // The buttons that show on hover are not part of the picture.
-      filter: (n) => !(n instanceof HTMLElement && n.matches('.edit, .resize')),
+      // The buttons that show on hover and the footer with the notes are not part of the picture.
+      filter: (n) => !(n instanceof HTMLElement && n.matches('.edit, .resize, article > footer')),
     }),
   );
+  return withNote(canvas, note, colors);
+}
+
+/** The canvas with a line of text under it, in the muted colour. */
+function withNote(canvas: HTMLCanvasElement, note: string, colors: Colors): HTMLCanvasElement {
+  if (!note) return canvas;
+  const font = getComputedStyle(document.body).fontFamily;
+  const out = document.createElement('canvas');
+  out.width = canvas.width;
+  out.height = canvas.height + 22 * SCALE;
+  const ctx = out.getContext('2d')!;
+  ctx.fillStyle = colors.surface;
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(canvas, 0, 0);
+  ctx.scale(SCALE, SCALE);
+  ctx.fillStyle = colors.text2;
+  ctx.font = `400 11px ${font}`;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(fit(ctx, note, canvas.width / SCALE - PAD * 2), PAD, canvas.height / SCALE + 11);
+  return out;
 }
 
 /** The tile as a PNG file. `el` is the tile on the screen; charts do not need it for their pixels. */
@@ -161,7 +186,7 @@ export async function downloadTilePng(el: HTMLElement, tile: Tile, res: QueryRes
   const canvas =
     res && (CHART_TYPES as readonly string[]).includes(tile.type) && res.rows.length > 0
       ? await chartPicture(tile, res, tables, title, colors, { w: el.clientWidth, h: el.clientHeight })
-      : await domPicture(el, colors);
+      : await domPicture(el, colors, pictureNote(res, res && tile.type !== 'kpi' ? partialNote(res, tile.dims[0]?.grain) : null));
   saveBlob(await toBlob(canvas, 'image/png'), fileName(title, 'png'));
 }
 
