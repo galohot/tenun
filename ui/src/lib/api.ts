@@ -400,6 +400,8 @@ export interface QueryResult {
   pair?: { periods: Cell[] | null };
   /** Named measures: a group or a filter that one table of the formula cannot reach, so it is left out of it. The words are also in `notes`. */
   parts?: { measure: number; note: string; repeats?: boolean; overlap?: boolean; splitOnly?: boolean }[];
+  /** Map tiles: the place of each row and the names not on the map (build 06). */
+  geo?: GeoInfo;
 }
 
 /**
@@ -443,7 +445,42 @@ export type TileType =
   // Simple types added in v3.
   | 'scatter' | 'histogram' | 'waterfall' | 'pivot' | 'text' | 'image' | 'filter'
   // Advanced types. They always render; only editing them needs the Advanced switch (V3-D2).
-  | 'heatmap' | 'funnel' | 'box' | 'bullet' | 'compare' | 'sankey' | 'calendar' | 'cohort' | 'gantt';
+  | 'heatmap' | 'funnel' | 'box' | 'bullet' | 'compare' | 'sankey' | 'calendar' | 'cohort' | 'gantt'
+  // Simple types added in v4.
+  | 'map';
+
+/** The level of a map: countries, the provinces of a country, or its second level (kabupaten and kota). */
+export type MapLevel = 'country' | 'province' | 'regency';
+
+/** A map tile's map (build 06). */
+export interface MapSpec {
+  level: MapLevel;
+  /** ISO 3166-1 alpha-2 of the country, for a province or kabupaten map. Not set: Indonesia. */
+  country?: string;
+  style?: 'filled' | 'points';
+  /** Points: the latitude and the longitude fields. */
+  lat?: Dim;
+  lon?: Dim;
+}
+
+/** What a map result says about its places. */
+export interface GeoInfo {
+  level?: MapLevel;
+  country?: string;
+  /** The code of each row's place, index-aligned with the rows. */
+  codes?: (string | null)[];
+  /** The names in the data of each row's place: what a click filters by. */
+  raw?: Cell[][];
+  /** The standard name of each row's place. */
+  names?: string[];
+  /** Names that are not on the map, with a hint when a name is two places. */
+  unmatched?: { name: string; hint?: string }[];
+  unmatchedCount?: number;
+  /** Points whose latitude or longitude is not on the earth. */
+  dropped?: number;
+  /** Another country's boundaries are not on this computer yet. */
+  download?: boolean;
+}
 
 /** How one value is written. Index-aligned with `Tile.measures`; every field is optional. */
 export interface NumFormat {
@@ -567,6 +604,8 @@ export interface Tile {
   text?: string;
   /** Image tile. */
   image?: TileImage;
+  /** Map tile: the level, the country, filled or points (build 06). */
+  map?: MapSpec;
 }
 
 /** Settings of this computer (not of the workspace). */

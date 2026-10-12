@@ -42,3 +42,17 @@ export function placesTable(rows: readonly PlaceRow[]): Plain {
     numeric: [false, false, false, false],
   };
 }
+
+/**
+ * The map level a column's name suggests: "province", "provinsi" → provinces; "kabupaten", "kota", "city",
+ * "regency" → kabupaten and kota; "country", "negara" → countries. The engine reads the values (geo.rs); this
+ * only decides whether to offer a map.
+ */
+export function placeLevelOf(column: string): PlaceLevel | null {
+  const words = column.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  const has = (...ws: string[]) => words.some((w) => ws.includes(w));
+  if (has('kabupaten', 'kab', 'kota', 'kabkota', 'kabkot', 'city', 'cities', 'regency', 'regencies', 'district')) return 'regency';
+  if (has('province', 'provinces', 'provinsi', 'prov', 'propinsi', 'state')) return 'province';
+  if (has('country', 'countries', 'negara', 'nation')) return 'country';
+  return null;
+}

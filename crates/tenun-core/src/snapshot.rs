@@ -64,6 +64,9 @@ pub struct Tile {
     /// Filter tile: its style and what it has selected.
     #[serde(default)]
     pub filter: Option<TileFilter>,
+    /// Map tile (build 06): the level, the country, filled or points.
+    #[serde(default)]
+    pub map: Option<crate::maptile::MapSpec>,
 }
 
 /// Tiles that show something the user typed or picked, not a query: they have no result.
@@ -414,6 +417,22 @@ fn run_tile_inner(
     }
     if tile.kind == "filter" {
         return filters::options(engine, tile, &own_excluded(tile, filters));
+    }
+    if tile.kind == "map" {
+        let spec = tile.map.clone().unwrap_or(crate::maptile::MapSpec {
+            level: crate::geo::Level::Province,
+            country: None,
+            style: None,
+            lat: None,
+            lon: None,
+        });
+        return crate::maptile::run(
+            engine,
+            &tile.measures,
+            &tile.dims,
+            &spec,
+            own_excluded(tile, filters),
+        );
     }
     let mut q =
         tile_query(tile, filters).ok_or_else(|| anyhow::anyhow!("the tile has no fields yet"))?;
@@ -933,6 +952,35 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
                             op: FilterOp::Range,
                             values: vec![r[0].clone(), shape::round_edge(lo + bins.width).into()],
                             via: m.via.clone(),
+                        },
+                    ))
+                })
+                .collect()
+        } else if src.kind == "map" {
+            // A place filters by every name of it in the data (build 06). The key is its code. Points
+            // are not clicked.
+            let (Some(d), Some(geo)) = (src.dims.first(), res.geo.as_ref()) else {
+                continue;
+            };
+            res.rows
+                .iter()
+                .zip(&geo.raw)
+                .filter_map(|(r, raw)| {
+                    let code = r.first()?.clone();
+                    Some((
+                        code,
+                        Filter {
+                            table: d.table.clone(),
+                            column: d.column.clone(),
+                            grain: d.grain,
+                            op: FilterOp::In,
+                            values: filters::with_empty_text(
+                                engine,
+                                &d.table,
+                                &d.column,
+                                raw.clone(),
+                            ),
+                            via: d.via.clone(),
                         },
                     ))
                 })

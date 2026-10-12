@@ -17,7 +17,6 @@ use tenun_core::engine::{AddSource, KeyEdit, KeyIn, LinkPreview};
 use tenun_core::formula::CheckRequest;
 use tenun_core::paste;
 use tenun_core::query::{Filter, SemanticQuery};
-use tenun_core::secrets::Secrets;
 use tenun_core::snapshot::{self, DashFilter, Tile, run_tile, run_tile_public};
 use tenun_core::workspace::{DerivedSpec, Every, FieldRef, Locale, Paging, TableSetup};
 
@@ -360,8 +359,8 @@ async fn geo_boundaries(
         "regency" => tenun_core::geo::Level::Regency,
         _ => return Err(anyhow::anyhow!("A map level is province or regency.").into()),
     };
-    let body = blocking(&s, move |_| {
-        let dir = Secrets::default_path().with_file_name("geo");
+    let body = blocking(&s, move |st| {
+        let dir = st.engine.geo_dir();
         let file =
             tenun_core::geo::boundaries(&country, level, &dir, tenun_core::geo::GEOBOUNDARIES)?;
         Ok(std::fs::read(file)?)
@@ -836,7 +835,8 @@ async fn snapshot(State(s): S, Json(b): Json<SnapBody>) -> R<Json<Value>> {
 
 async fn export_html(State(s): S, Json(b): Json<SnapBody>) -> R<Response> {
     let (html, path) = blocking(&s, move |st| {
-        let payload = snapshot::build(&st.engine, &b.dashboard, &b.filters)?;
+        let mut payload = snapshot::build(&st.engine, &b.dashboard, &b.filters)?;
+        export::with_maps(&mut payload, &st.engine.geo_dir());
         Ok((export::html(&payload), b.path))
     })
     .await?;
@@ -1050,6 +1050,11 @@ async fn pump(mut socket: WebSocket, state: Arc<AppState>) {
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../ui/dist"]
 struct Ui;
+
+/// A file of the app's own UI, such as a map's TopoJSON (`geo/ID-2.topo.json`).
+pub(crate) fn bundled(path: &str) -> Option<Vec<u8>> {
+    Ui::get(path).map(|f| f.data.into_owned())
+}
 
 pub async fn static_file(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');

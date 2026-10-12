@@ -23,6 +23,9 @@ export interface Placed {
 
 const rowsHeight = (rows: number, row: number, gap: number) => Math.max(1, rows) * row + (Math.max(1, rows) - 1) * gap;
 
+/** A map keeps its shape on a phone: Indonesia and the world are about twice as wide as high. The legend and the credit line go under it. */
+export const mapHeight = (width: number) => Math.round(width * 0.55) + 96;
+
 /** Reading order: top to bottom, then left to right. */
 export const readingOrder = (tiles: Tile[]): Tile[] => [...tiles].sort((a, b) => a.y - b.y || a.x - b.x);
 
@@ -52,9 +55,11 @@ export function phoneLayout(tiles: Tile[], width: number, row = 76, gap = 12): P
         ? rowsHeight(t.h, row, gap)
         : t.type === 'calendar'
           ? rowsHeight(3, row, gap)
-          : WIDE_TYPES.includes(t.type)
-            ? PHONE_PIVOT_HEIGHT
-            : PHONE_CHART_HEIGHT;
+          : t.type === 'map'
+            ? mapHeight(width)
+            : WIDE_TYPES.includes(t.type)
+              ? PHONE_PIVOT_HEIGHT
+              : PHONE_CHART_HEIGHT;
     out.push({ t, x: 0, y, w: width, h });
     y += h + gap;
   }

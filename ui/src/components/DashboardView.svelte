@@ -278,6 +278,8 @@
       dims: [],
       horizontal: type === 'bar',
       ...(type === 'filter' ? { filter: { style: 'list' as const } } : {}),
+      // A new map starts on Indonesia's provinces (build 06).
+      ...(type === 'map' ? { map: { level: 'province' as const, country: 'ID' } } : {}),
     };
     update((ts) => [...ts, t]);
     selectedTile = t.id;
@@ -285,7 +287,7 @@
 
   /** `otherOf` comes with a click on the "Other" group of a top N: everything except those groups. */
   function pick(tile: Tile, value: Cell, otherOf?: Cell[], bins?: Bins, stage?: number) {
-    const f = markFilter(tile, value, otherOf, bins, stage);
+    const f = markFilter(tile, value, otherOf, bins, stage, results[tile.id]?.res?.geo);
     if (!f) return;
     clicked(tile.id, f);
   }
@@ -364,7 +366,7 @@
     let click: Filter | null = null;
     let mark = '';
     if (value !== undefined) {
-      const f = markFilter(t, value, otherOf, bins);
+      const f = markFilter(t, value, otherOf, bins, undefined, results[t.id]?.res?.geo);
       click = f ? { table: f.table, column: f.column, grain: f.grain, op: f.op, values: f.values, ...(f.via ? { via: f.via } : {}) } : null;
       const d = t.dims[0];
       const dtype = app.table(d?.table ?? '')?.columns.find((c) => c.name === d?.column)?.dtype ?? 'text';
@@ -667,7 +669,7 @@
       <button class="btn primary" onclick={() => (addMenu = !addMenu)} aria-expanded={addMenu}><Icon name="plus" /> Add tile</button>
       {#if addMenu}
         <div class="menu" role="menu">
-          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['table', 'Table'], ['pivot', 'Pivot table'], ['filter', 'Filter'], ['text', 'Text'], ['image', 'Image'], ...(advanced ? [['heatmap', 'Heat map'], ['funnel', 'Funnel'], ['box', 'Box plot'], ['bullet', 'Bullet chart'], ['compare', 'Compare two values'], ['sankey', 'Sankey'], ['calendar', 'Calendar heat map'], ['cohort', 'Cohort grid'], ...(hasTwoDates(app.tables) ? [['gantt', 'Gantt chart']] : [])] : [])] as [t, label]}
+          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['table', 'Table'], ['pivot', 'Pivot table'], ['map', 'Map'], ['filter', 'Filter'], ['text', 'Text'], ['image', 'Image'], ...(advanced ? [['heatmap', 'Heat map'], ['funnel', 'Funnel'], ['box', 'Box plot'], ['bullet', 'Bullet chart'], ['compare', 'Compare two values'], ['sankey', 'Sankey'], ['calendar', 'Calendar heat map'], ['cohort', 'Cohort grid'], ...(hasTwoDates(app.tables) ? [['gantt', 'Gantt chart']] : [])] : [])] as [t, label]}
             <button role="menuitem" onclick={() => addTile(t as TileType)}>
               <Icon name={(t === 'calendar' ? 'calendarheat' : t) as IconName} /> {label}
             </button>

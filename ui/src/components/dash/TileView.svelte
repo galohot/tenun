@@ -9,6 +9,7 @@
   import { isColFilter, sameField } from '../../lib/filters';
   import { advancedOn } from '../../lib/tiers';
   import Icon from '../Icon.svelte';
+  import PlaceNames from '../PlaceNames.svelte';
   import { downloadCsv, downloadTilePng, downloadXlsx } from '../../lib/output';
   import Menu from './Menu.svelte';
   import TileBody from './TileBody.svelte';
@@ -82,9 +83,15 @@
   const qKey = $derived(resultKey(tile, filters));
   const fixed = $derived(isStatic(tile));
 
+  /** A map that downloaded another country's boundaries asks again (build 06). */
+  let retry = $state(0);
+  /** The list of place names, from a map's "not on the map" names. */
+  let places = $state(false);
+
   // Re-query when the question, the filters or the data change.
   $effect(() => {
     void tick;
+    void retry;
     void app.dataVersion;
     // The engine writes period names such as "Oct 1–14", so they follow the locale.
     void app.locale;
@@ -246,7 +253,9 @@
           {title}
           {onfilter}
           onwidths={tile.type === 'table' ? onwidths : undefined}
-          onlayout={advancedOn() ? onlayout : undefined} />
+          onlayout={advancedOn() ? onlayout : undefined}
+          onretry={() => retry++}
+          onplaces={() => (places = true)} />
         {#snippet failed()}
           <p class="error"><Icon name="warning" size={14} /> This tile could not be drawn. Check its fields.</p>
         {/snippet}
@@ -273,6 +282,10 @@
     <button class="resize" aria-label="Resize tile" onpointerdown={onresizestart}><Icon name="resize" size={14} /></button>
   {/if}
 </article>
+
+{#if places}
+  <PlaceNames level={tile.map?.level ?? 'province'} onclose={() => (places = false)} />
+{/if}
 
 <style>
   .tile {

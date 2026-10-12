@@ -26,6 +26,11 @@ pub fn export_html(payload: &serde_json::Value) -> String {
     export::html(payload)
 }
 
+/// Puts the map shapes a snapshot's map tiles draw into it, so its exported file works offline (build 06).
+pub fn add_maps(payload: &mut serde_json::Value, geo_dir: &std::path::Path) {
+    export::with_maps(payload, geo_dir)
+}
+
 pub struct Options {
     pub host: IpAddr,
     /// 0 picks a free port.

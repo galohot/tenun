@@ -39,6 +39,10 @@
   --ramp-1: #eaf2fc; --ramp-2: #cfe1f8; --ramp-3: #adcbf1; --ramp-4: #84aee6;
   --ramp-5: #5a92d8; --ramp-6: #2f6fc2; --ramp-7: #17488a;
 
+  /* the diverging ramp (maps of a change): blue below zero, grey near it, orange above (build 06) */
+  --div-1: #17488a; --div-2: #2f6fc2; --div-3: #84aee6; --div-4: #e3e3e8;
+  --div-5: #f3ad85; --div-6: #df6f35; --div-7: #a2420f;
+
   --shadow-float: 0 2px 12px rgb(0 0 0 / 10%), 0 0 0 1px rgb(0 0 0 / 6%);
   --shadow-tile: 0 0 0 1px rgb(0 0 0 / 5%);
 
@@ -79,6 +83,10 @@
   /* the sequential ramp in dark mode: its own steps, dark to bright, so a high value stands out */
   --ramp-1: #34425a; --ramp-2: #2f5282; --ramp-3: #2f66a8; --ramp-4: #3a78b8;
   --ramp-5: #6a9fd8; --ramp-6: #9bbfe9; --ramp-7: #c9defa;
+
+  /* the diverging ramp in dark mode: bright at both ends, dark near zero */
+  --div-1: #9bbfe9; --div-2: #5a92d8; --div-3: #2f5282; --div-4: #3a3a3f;
+  --div-5: #8a4423; --div-6: #d9672c; --div-7: #f6a77a;
 
   --shadow-float: 0 4px 18px rgb(0 0 0 / 45%), 0 0 0 1px rgb(255 255 255 / 8%);
   --shadow-tile: 0 0 0 1px rgb(255 255 255 / 4%);

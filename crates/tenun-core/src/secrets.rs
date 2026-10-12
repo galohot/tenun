@@ -18,6 +18,11 @@ impl Secrets {
         Self { path }
     }
 
+    /// The file the secrets are kept in. Tenun's other files of this computer sit beside it.
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
     /// The default location: `<config dir>/tenun/secrets.json`.
     pub fn default_path() -> PathBuf {
         let base = std::env::var_os("XDG_CONFIG_HOME")

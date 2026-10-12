@@ -38,8 +38,11 @@ export const isPivotLike = (type: TileType) => type === 'pivot' || type === 'hea
  * decides when a tile must ask again, so keep the two the same.
  */
 export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | null {
-  if (isStatic(tile) || (!tile.measures.length && !tile.dims.length)) return null;
-  const one = ['kpi', 'share', 'donut', 'waterfall', 'funnel', 'box', 'bullet', 'gantt', 'cohort', 'filter'].includes(tile.type);
+  // A map of points can have only a latitude and a longitude (build 06).
+  const points = tile.type === 'map' && tile.map?.style === 'points' ? tile.map : null;
+  if (points && !(points.lat && points.lon)) return null;
+  if (isStatic(tile) || (!tile.measures.length && !tile.dims.length && !points)) return null;
+  const one = ['kpi', 'share', 'donut', 'waterfall', 'funnel', 'box', 'bullet', 'gantt', 'cohort', 'filter', 'map'].includes(tile.type);
   const many = hasManyValues(tile);
   // A compare chart with one value reads two periods of its second field.
   const periods = tile.type === 'compare' && tile.measures.length < 2;
@@ -59,6 +62,7 @@ export function tileQuery(tile: Tile, filters: DashFilter[]): SemanticQuery | nu
   })();
   // A chart with a group but no value counts rows of the grouped table.
   const measures = ((): Measure[] => {
+    if (points && !tile.measures.length) return [{ table: points.lat!.table, column: null, agg: 'count' as const }];
     if (!tile.measures.length) return tile.type === 'table' ? [] : [{ table: tile.dims[0].table, column: null, agg: 'count' as const }];
     if (tile.type === 'table') return tile.measures;
     if (tile.type === 'pivot') return tile.measures.slice(0, PIVOT_MAX_MEASURES);
@@ -115,6 +119,7 @@ export function resultKey(tile: Tile, filters: DashFilter[]): string {
     tile.showAs ?? null,
     tile.compare ?? null,
     tile.repeat ?? null,
+    tile.type === 'map' ? (tile.map ?? null) : null,
     tile.layout ?? null,
     tile.sort ?? null,
     tile.periods ?? null,
@@ -166,6 +171,8 @@ export function defaultSize(type: TileType): { w: number; h: number } {
       return { w: 8, h: 5 };
     case 'funnel':
       return { w: 6, h: 5 };
+    case 'map':
+      return { w: 8, h: 6 };
     case 'bullet':
       return { w: 6, h: 4 };
     case 'compare':

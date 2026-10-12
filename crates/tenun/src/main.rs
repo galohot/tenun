@@ -157,6 +157,8 @@ fn snapshot_cmd(
     let payload = tenun_core::snapshot::build(&engine, &id, &[])?;
     let to_stdout = html.is_none() && json.is_none();
     if let Some(p) = html {
+        let mut payload = payload.clone();
+        tenun::add_maps(&mut payload, &engine.geo_dir());
         std::fs::write(&p, tenun::export_html(&payload))?;
         eprintln!("wrote {}", p.display());
     }

@@ -21,6 +21,10 @@ export interface Colors {
   series: string[];
   /** The sequential ramp of the heat map, light to dark (dark mode has its own steps). */
   ramp: string[];
+  /** The diverging ramp of a map of a change: below zero, near it, above it (build 06). */
+  div: string[];
+  /** The colour of a hole in the surface: a shape of a map with no data. */
+  inset: string;
   raised: string;
   /** Status colours. Always paired with a word, a sign or an icon. */
   good: string;
@@ -38,6 +42,8 @@ export function readColors(el: Element = document.documentElement): Colors {
     grid: v('--grid-line'),
     series: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => v(`--s${i}`)),
     ramp: [1, 2, 3, 4, 5, 6, 7].map((i) => v(`--ramp-${i}`)),
+    div: [1, 2, 3, 4, 5, 6, 7].map((i) => v(`--div-${i}`)),
+    inset: v('--inset'),
     good: v('--success'),
     bad: v('--danger'),
   };

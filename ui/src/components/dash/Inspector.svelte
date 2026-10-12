@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, DATE_PARTS, isPart, type Agg, type Cell, type CondFormat, type Dim, type DType, type Grain, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileLine, type TileType } from '../../lib/api';
+  import { api, DATE_PARTS, isPart, type Agg, type Cell, type CondFormat, type Dim, type DType, type Grain, type MapLevel, type MapSpec, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileLine, type TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { aggNames, cell, measureLabel, OTHER_KEY, tileTitle } from '../../lib/format';
   import { isChange } from '../../lib/cells';
@@ -13,6 +13,7 @@
   import { addsUpHere, baseFormat, formatOf, namedMeasure, ownFormat, stepsByDate, targetUnit, tileProblem, whyNotAdded } from '../../lib/measures';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
+  import PlaceNames from '../PlaceNames.svelte';
   import Suggestions from './Suggestions.svelte';
   import { normalisePicture } from '../../lib/image';
   import { MAX_BANDS } from '../../lib/charts/bullet';
@@ -190,6 +191,22 @@
   const isCalendar = $derived(tile.type === 'calendar');
   const isCohort = $derived(tile.type === 'cohort');
   const isGantt = $derived(tile.type === 'gantt');
+  // A map (build 06): its place field, or for points its colour field, and its own options.
+  const isMap = $derived(tile.type === 'map');
+  const mapSpec = $derived<MapSpec>(tile.map ?? { level: 'province', country: 'ID' });
+  const mapPoints = $derived(isMap && mapSpec.style === 'points');
+  let countries = $state<{ code: string; name: string }[]>([]);
+  let placesOpen = $state(false);
+  $effect(() => {
+    if (!isMap || countries.length) return;
+    api
+      .places('country')
+      .then((r) => (countries = r.places.map((p) => ({ code: p.code, name: p.name }))))
+      .catch(() => {});
+  });
+  function setMap(patch: Partial<MapSpec>) {
+    set({ map: { ...mapSpec, ...patch } });
+  }
   // A compare chart with one value reads two periods of a second field.
   const periodsMode = $derived(isCompare && tile.measures.length < 2);
   // Their values are fixed by the chart: a start and an end date, or the entity to follow.
@@ -1116,12 +1133,12 @@
 
   {#if !isHistogram}
   <div class="sec">
-      <span class="label">{tile.type === 'kpi' ? 'Period (a date, for the comparison)' : tile.type === 'share' || tile.type === 'donut' ? 'Split into' : isScatter ? 'Dot for each' : pivotLike ? 'Rows' : isFunnel ? 'Stages' : isBox || isBullet ? 'Group by (optional)' : isGantt ? 'Name of each row' : isCalendar ? 'Date (one square for each day)' : isCohort ? 'Date of each event' : isSankey ? 'First stage' : isCompare ? 'Row for each' : 'Group by'}</span>
+      <span class="label">{isMap ? (mapPoints ? 'Colour (optional)' : 'Place (names or codes)') : tile.type === 'kpi' ? 'Period (a date, for the comparison)' : tile.type === 'share' || tile.type === 'donut' ? 'Split into' : isScatter ? 'Dot for each' : pivotLike ? 'Rows' : isFunnel ? 'Stages' : isBox || isBullet ? 'Group by (optional)' : isGantt ? 'Name of each row' : isCalendar ? 'Date (one square for each day)' : isCohort ? 'Date of each event' : isSankey ? 'First stage' : isCompare ? 'Row for each' : 'Group by'}</span>
       <FieldPicker
         mode="dim"
         table={tile.dims[0]?.table ?? null}
         column={tile.dims[0]?.column ?? null} via={tile.dims[0]?.via}
-        placeholder={tile.type === 'kpi' ? 'A date, for the trend' : isScatter ? 'One dot for each of these' : isFunnel ? 'The steps, like visit and sale' : isBox ? 'One box for each of these' : isBullet ? 'One bar for each of these' : isGantt ? 'A task, a project or an id' : isCalendar || isCohort ? 'A date column' : isSankey ? 'Where it starts, like a channel' : 'Category or date'}
+        placeholder={isMap ? (mapPoints ? 'Colour points by, like a kind' : 'A column of places, like province') : tile.type === 'kpi' ? 'A date, for the trend' : isScatter ? 'One dot for each of these' : isFunnel ? 'The steps, like visit and sale' : isBox ? 'One box for each of these' : isBullet ? 'One bar for each of these' : isGantt ? 'A task, a project or an id' : isCalendar || isCohort ? 'A date column' : isSankey ? 'Where it starts, like a channel' : 'Category or date'}
         reachable={reach} base={baseTable}
         onchange={(t, c, v) => c && setDim(0, t, c, v)}
         onclear={() => removeDim(0)} />
@@ -1161,6 +1178,39 @@
     </div>
   {:else if tile.compare && compareType}
     <p class="hint">Comparing needs one value, a date with a grain and no split.</p>
+  {/if}
+
+  {#if isMap}
+    <div class="sec">
+      <span class="label">Map</span>
+      <select class="field" aria-label="Places on the map" value={mapSpec.level} onchange={(e) => setMap({ level: e.currentTarget.value as MapLevel })}>
+        <option value="country">Countries of the world</option>
+        <option value="province">Provinces</option>
+        <option value="regency">Kabupaten and kota</option>
+      </select>
+      {#if mapSpec.level !== 'country' || mapPoints}
+        <select class="field" aria-label="Country" value={mapSpec.country ?? 'ID'} onchange={(e) => setMap({ country: e.currentTarget.value })}>
+          {#if !countries.length}<option value={mapSpec.country ?? 'ID'}>{mapSpec.country ?? 'ID'}</option>{/if}
+          {#each countries as c (c.code)}<option value={c.code}>{c.name}</option>{/each}
+        </select>
+        {#if mapSpec.level !== 'country' && (mapSpec.country ?? 'ID').toUpperCase() !== 'ID'}
+          <p class="hint tight">Tenun downloads this country's map once, from geoBoundaries, the first time the tile draws it.</p>
+        {/if}
+      {/if}
+      <div class="grains" role="radiogroup" aria-label="How the map shows the value">
+        <button role="radio" aria-checked={!mapPoints} class:on={!mapPoints} onclick={() => setMap({ style: 'filled' })}>Filled</button>
+        <button role="radio" aria-checked={mapPoints} class:on={mapPoints} onclick={() => setMap({ style: 'points' })}>Points</button>
+      </div>
+      {#if mapPoints}
+        <span class="label up">Latitude</span>
+        <FieldPicker mode="dim" table={mapSpec.lat?.table ?? null} column={mapSpec.lat?.column ?? null} via={mapSpec.lat?.via} placeholder="A column of latitudes" reachable={reach} base={baseTable} onchange={(t, c, v) => c && setMap({ lat: { table: t, column: c, ...(v ? { via: v } : {}) } })} onclear={() => setMap({ lat: undefined })} />
+        <span class="label up">Longitude</span>
+        <FieldPicker mode="dim" table={mapSpec.lon?.table ?? null} column={mapSpec.lon?.column ?? null} via={mapSpec.lon?.via} placeholder="A column of longitudes" reachable={reach} base={baseTable} onchange={(t, c, v) => c && setMap({ lon: { table: t, column: c, ...(v ? { via: v } : {}) } })} onclear={() => setMap({ lon: undefined })} />
+        <p class="hint tight">The value sizes each point. Without one, each point is sized by its number of rows.</p>
+      {:else}
+        <p class="hint tight">Write places the standard way: names or codes. <button class="linkbtn" onclick={() => (placesOpen = true)}>See the place names</button></p>
+      {/if}
+    </div>
   {/if}
 
   {#if isSankey && tile.dims[0]}
@@ -1552,7 +1602,13 @@
   </div>
 </aside>
 
+{#if placesOpen}
+  <PlaceNames level={mapSpec.level} onclose={() => (placesOpen = false)} />
+{/if}
+
 <style>
+  .linkbtn { border: 0; background: none; padding: 0; color: var(--accent-text); font: inherit; cursor: pointer; }
+  .linkbtn:hover { text-decoration: underline; }
   .insp {
     width: 332px;
     flex: none;

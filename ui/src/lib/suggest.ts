@@ -3,6 +3,7 @@
 
 import type { Dim, DType, Table, Tile, TileType } from './api';
 import { addsUp, type Parts } from './measures.ts';
+import { placeLevelOf } from './places.ts';
 
 export interface Suggestion {
   type: TileType;
@@ -46,6 +47,9 @@ export function suggestTypes(tile: Tile, tables: Pick<Table, 'id' | 'columns'>[]
   // Notes, pictures and the Advanced charts of build 13 read their fields in their own way; they get no previews.
   if (['text', 'image', 'filter', 'bullet', 'compare', 'sankey', 'calendar', 'cohort', 'gantt'].includes(tile.type) || (!hasValue && !d0)) return out;
 
+  // A column of places, by its name, with one value: a map (build 06).
+  const level = d0 && group(t0) && !d1 && tile.measures.length <= 1 ? placeLevelOf(d0.column) : null;
+  if (level) add('map', { dims: [d0], measures: tile.measures.slice(0, 1), map: { level, ...(level === 'country' ? {} : { country: 'ID' }) } });
   if (d0 && isDate(t0)) {
     for (const type of ['line', 'area', 'bar'] as const) add(type, { horizontal: false });
   }

@@ -16,6 +16,8 @@ export interface ExportPayload {
   /** v1 files only; newer files let the viewer name the tiles. */
   titles?: Record<string, string>;
   base: Record<string, QueryResult>;
+  /** The map shapes its map tiles draw (build 06): TopoJSON by file name, downloaded GeoJSON by `<country>-<level>`. */
+  geo?: Record<string, unknown>;
   /** cross[fromTile][valueKey][tile] = result with that value picked. */
   cross: Record<string, Record<string, Record<string, QueryResult>>>;
   /** The marks that were picked when the file was made. */

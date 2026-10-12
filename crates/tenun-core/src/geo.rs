@@ -275,6 +275,14 @@ pub fn match_place(level: Level, country: &str, raw: &str) -> Matched {
     }
 }
 
+/// The standard name of a place by its code, or the code when no place has it.
+pub fn name_of(level: Level, country: &str, code: &str) -> String {
+    list(level, country)
+        .into_iter()
+        .find(|p| p.code == code)
+        .map_or_else(|| code.to_string(), |p| p.name.clone())
+}
+
 /// The ISO alpha-3 code of a country, from its alpha-2 code: what geoBoundaries names it by.
 pub fn iso3(country: &str) -> Option<&'static str> {
     list(Level::Country, "")
@@ -284,6 +292,89 @@ pub fn iso3(country: &str) -> Option<&'static str> {
         .first()
         .map(String::as_str)
         .filter(|a| a.len() == 3 && a.chars().all(|c| c.is_ascii_uppercase()))
+}
+
+/// The places of a boundary file downloaded from geoBoundaries (another country's provinces or second level):
+/// each feature's code is its `shapeISO`, or its `shapeName` when it has none, and it is read by either.
+pub struct Downloaded {
+    keys: HashMap<String, Vec<usize>>,
+    codes: Vec<String>,
+    names: Vec<String>,
+}
+
+impl Downloaded {
+    /// The place a cell of data names, by the rules of `match_place`.
+    pub fn find(&self, raw: &str) -> Matched {
+        let k = key(raw);
+        match self.keys.get(&k).map(Vec::as_slice) {
+            Some([i]) => Matched::One {
+                code: self.codes[*i].clone(),
+            },
+            Some(many) if !many.is_empty() => Matched::Ambiguous {
+                names: many.iter().map(|i| self.codes[*i].clone()).collect(),
+            },
+            _ => Matched::None,
+        }
+    }
+
+    /// The name of the place with this code (its `shapeName`), or the code.
+    pub fn name_of(&self, code: &str) -> String {
+        self.codes
+            .iter()
+            .position(|c| c == code)
+            .map_or_else(|| code.to_string(), |i| self.names[i].clone())
+    }
+
+    /// The code of a feature of the file, as `find` answers it.
+    pub fn code_of(props: &serde_json::Value) -> Option<String> {
+        let iso = props.get("shapeISO").and_then(|v| v.as_str()).unwrap_or("");
+        let name = props
+            .get("shapeName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let code = if iso.trim().is_empty() { name } else { iso };
+        (!code.trim().is_empty()).then(|| code.trim().to_string())
+    }
+}
+
+/// The places of `country`'s boundaries at `level`, when they are on this computer (`boundaries` downloaded them).
+pub fn downloaded_places(dir: &Path, country: &str, level: Level) -> Option<Downloaded> {
+    let iso3 = iso3(country)?;
+    let text = std::fs::read(dir.join(format!("{iso3}-{}.geojson", level.adm()))).ok()?;
+    let geo: serde_json::Value = serde_json::from_slice(&text).ok()?;
+    let mut out = Downloaded {
+        keys: HashMap::new(),
+        codes: Vec::new(),
+        names: Vec::new(),
+    };
+    for f in geo.get("features")?.as_array()? {
+        let props = f.get("properties")?;
+        let Some(code) = Downloaded::code_of(props) else {
+            continue;
+        };
+        let i = out.codes.len();
+        out.codes.push(code.clone());
+        let name = props
+            .get("shapeName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        out.names.push(if name.trim().is_empty() {
+            code.clone()
+        } else {
+            name.trim().to_string()
+        });
+        let short = code.split_once('-').map_or("", |(_, s)| s);
+        for k in [key(&code), key(short), key(name)] {
+            if k.is_empty() {
+                continue;
+            }
+            let slot = out.keys.entry(k).or_default();
+            if !slot.contains(&i) {
+                slot.push(i);
+            }
+        }
+    }
+    Some(out)
 }
 
 /// The countries whose provinces and second level ship with Tenun.

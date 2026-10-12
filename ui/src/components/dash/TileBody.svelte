@@ -18,6 +18,7 @@
   import HeatmapView from './HeatmapView.svelte';
   import ImageView from './ImageView.svelte';
   import KpiView from './KpiView.svelte';
+  import MapView from './MapView.svelte';
   import PivotView from './PivotView.svelte';
   import ShareView from './ShareView.svelte';
   import SmallMultiples from './SmallMultiples.svelte';
@@ -39,6 +40,8 @@
     onfilter,
     onwidths,
     onlayout,
+    onretry,
+    onplaces,
   }: {
     tile: Tile;
     res: QueryResult;
@@ -65,6 +68,10 @@
     onwidths?: (widths: number[] | undefined) => void;
     /** Advanced: the note about values of very different sizes offers separate panels. Not set: the note has no link. */
     onlayout?: (layout: 'panels') => void;
+    /** Map: another country's map was downloaded, so the tile asks again. */
+    onretry?: () => void;
+    /** Map, in the app: open the list of place names. */
+    onplaces?: () => void;
   } = $props();
 
   // A value with no format of its own is written the way its named measure is (build 03).
@@ -248,6 +255,8 @@
   <FilterView {tile} {res} {tables} {selected} onchange={onfilter} {onpick} />
 {:else if tile.type === 'kpi' && res.kpi}
   <KpiView kpi={res.kpi} {tile} {colors} parts={res.parts} />
+{:else if tile.type === 'map'}
+  <MapView {tile} {res} {colors} {selected} {tables} onpick={onpick ? (c) => onpick(c) : undefined} {onretry} {onplaces} />
 {:else if unfinished}
   <div class="placeholder">{missing}</div>
 {:else if res.rows.length === 0}

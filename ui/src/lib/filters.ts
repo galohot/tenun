@@ -2,7 +2,7 @@
 // and "Exclude", and the one grain for every time tile. Pure code with no imports at run time, so the
 // node tests can load it. The engine does the same on its side (`filters.rs`); keep the two in step.
 
-import type { Bins, Cell, DashFilter, Dim, DType, Filter, Grain, Tile, TileFilter } from './api';
+import type { Bins, Cell, DashFilter, Dim, DType, Filter, GeoInfo, Grain, Tile, TileFilter } from './api';
 
 export const isPeriod = (g: Grain | null | undefined): boolean => !!g && !['month_of_year', 'weekday', 'hour'].includes(g);
 
@@ -125,7 +125,17 @@ export function markFilter(
   otherOf?: Cell[],
   bins?: Bins,
   stage?: number,
+  geo?: GeoInfo,
 ): Omit<DashFilter, 'fromTile'> | null {
+  // A place on a map filters by every name of it in the data ("Jawa Barat", "Jabar", "32"), and the chip says its
+  // standard name (build 06).
+  if (tile.type === 'map') {
+    const d = tile.dims[0];
+    const at = geo?.codes?.indexOf(String(value)) ?? -1;
+    if (!d || at < 0) return null;
+    const raw = geo?.raw?.[at] ?? [value];
+    return { table: d.table, column: d.column, grain: d.grain ?? null, op: 'in', values: [...raw], ...via(d), label: geo?.names?.[at] ?? String(value) };
+  }
   if (tile.type === 'histogram') {
     const m = tile.measures[0];
     if (!m?.column || !bins || typeof value !== 'number') return null;

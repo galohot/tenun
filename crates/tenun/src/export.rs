@@ -36,6 +36,74 @@ pub fn html(payload: &serde_json::Value) -> String {
     )
 }
 
+/// The map shapes a snapshot's map tiles draw, put in `payload.geo` so an exported file works offline
+/// (build 06): Tenun's own TopoJSON files by name (`world`, `ID-1`, `ID-2`), another country's downloaded
+/// GeoJSON by `<country>-<level>`. Only the shapes its tiles use: a file with no map carries none.
+pub fn with_maps(payload: &mut serde_json::Value, geo_dir: &std::path::Path) {
+    use tenun_core::geo::{self, Level};
+    let mut bundled: Vec<&str> = Vec::new();
+    let mut downloaded: Vec<(String, Level)> = Vec::new();
+    let tiles = payload
+        .get("tiles")
+        .and_then(|t| t.as_array())
+        .cloned()
+        .unwrap_or_default();
+    for t in tiles.iter().filter(|t| t["type"] == "map") {
+        let spec: Option<tenun_core::maptile::MapSpec> =
+            serde_json::from_value(t["map"].clone()).ok();
+        let level = spec.as_ref().map_or(Level::Province, |s| s.level);
+        let country = spec
+            .as_ref()
+            .map_or_else(|| "ID".to_string(), |s| s.country());
+        let points = spec.as_ref().is_some_and(|s| s.points());
+        let want: &[&str] = match (points, level, country.as_str()) {
+            // Points lie on Indonesia's provinces, or on the world.
+            (true, _, "ID") => &["ID-1"],
+            (true, _, _) | (false, Level::Country, _) => &["world"],
+            (false, Level::Province, "ID") => &["ID-1"],
+            (false, Level::Regency, "ID") => &["ID-2", "ID-1"],
+            (false, _, _) => {
+                downloaded.push((country.clone(), level));
+                &[]
+            }
+        };
+        for w in want {
+            if !bundled.contains(w) {
+                bundled.push(w);
+            }
+        }
+    }
+    if bundled.is_empty() && downloaded.is_empty() {
+        return;
+    }
+    let mut geo = serde_json::Map::new();
+    for name in bundled {
+        if let Some(bytes) = crate::api::bundled(&format!("geo/{name}.topo.json"))
+            && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        {
+            geo.insert(name.to_string(), v);
+        }
+    }
+    for (country, level) in downloaded {
+        let Some(iso3) = geo::iso3(&country) else {
+            continue;
+        };
+        let file = geo_dir.join(format!("{iso3}-{}.geojson", level.adm()));
+        if let Some(v) = std::fs::read(&file)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        {
+            let word = match level {
+                Level::Province => "province",
+                Level::Regency => "regency",
+                Level::Country => "country",
+            };
+            geo.insert(format!("{country}-{word}"), v);
+        }
+    }
+    payload["geo"] = serde_json::Value::Object(geo);
+}
+
 #[derive(Deserialize)]
 pub struct WriteFile {
     pub path: String,

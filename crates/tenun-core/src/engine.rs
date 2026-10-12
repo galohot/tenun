@@ -418,6 +418,9 @@ pub struct QueryResult {
     /// may leave the computer as they are. The same sentences are also in `notes` and `publicNotes`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<query::PartNote>,
+    /// Map tiles (build 06): the place of each row, the names that are not on the map.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub geo: Option<crate::maptile::GeoInfo>,
 }
 
 /// A compare chart with one value reads two periods of a field. `periods` are those two values, in
@@ -451,6 +454,7 @@ impl QueryResult {
             notes: Vec::new(),
             public_notes: Vec::new(),
             parts: Vec::new(),
+            geo: None,
         }
     }
 }
@@ -686,6 +690,11 @@ impl Engine {
         if has_path && let Err(e) = self.save(None) {
             tracing::warn!("autosave failed: {e}");
         }
+    }
+
+    /// Where boundaries downloaded for maps are kept: `geo/` beside the secrets file (V4-D19).
+    pub fn geo_dir(&self) -> PathBuf {
+        self.secrets.path().with_file_name("geo")
     }
 
     pub fn add_source(&self, req: AddSource) -> anyhow::Result<String> {

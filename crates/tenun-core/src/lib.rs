@@ -13,6 +13,7 @@ pub mod formula;
 pub mod geo;
 pub mod jsonrec;
 pub mod links;
+pub mod maptile;
 pub mod measures;
 pub mod paste;
 pub mod prep;
