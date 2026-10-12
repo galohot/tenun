@@ -35,6 +35,7 @@
     dashboards = [],
     onduplicate,
     oncopy,
+    onclip,
     onremove,
     onnav,
     onopen,
@@ -68,6 +69,8 @@
     onduplicate: () => void;
     /** Copy the tile to another dashboard, or to a new one (null). */
     oncopy: (dashboard: string | null) => void;
+    /** Copy the tile to the clipboard, to paste on any dashboard of any workspace (build 09). */
+    onclip?: () => void;
     onremove: () => void;
     /** An arrow key on the tile: 1 for the next tile in reading order, -1 for the one before. */
     onnav: (step: 1 | -1) => void;
@@ -178,6 +181,7 @@
       return [{ label: 'Show rows', run: () => onrows(value, res?.otherOf, res?.bins) }];
     }
     return [
+      ...(onclip ? [{ label: 'Copy', run: onclip }] : []),
       { label: 'Duplicate', run: onduplicate },
       { label: 'Copy to dashboard', sub: [...dashboards.map((d) => ({ label: d.title || 'Untitled', run: () => oncopy(d.id) })), { label: 'New dashboard', run: () => oncopy(null) }] },
       { label: 'Download as PNG', run: png },

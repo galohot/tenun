@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick as nextTick, untrack } from 'svelte';
-  import { api, type Bins, type Cell, type DashFilter, type Filter, type Grain, type QueryResult, type RowsBehind, type Tile, type TileFilter, type TileType } from '../lib/api';
+  import { api, MeasureRefused, type Bins, type Cell, type Dashboard, type DashFilter, type Filter, type Grain, type NamedMeasure, type QueryResult, type RowsBehind, type Tile, type TileFilter, type TileType } from '../lib/api';
   import { app, go } from '../lib/state.svelte';
   import { cell, dateTimeMedium, stampLabel, tileTitle } from '../lib/format';
   import { filterText } from '../lib/filterText';
@@ -18,6 +18,9 @@
   import RowsSheet from './dash/RowsSheet.svelte';
   import FocusSheet from './dash/FocusSheet.svelte';
   import { drawnTile } from '../lib/card';
+  import { buildClip, clipText, dashboardCopy, freeName, joinMeasures, joinStyles, landTiles, measureIds, placeBelow, readClip, renamesFor, rewriteFormula, sameWorkspace, type Clip, type Matches } from '../lib/clipboard';
+  import MatchFields from './dash/MatchFields.svelte';
+  import CardStyles from './dash/CardStyles.svelte';
   // tenun.cloud is not live yet; build with VITE_TENUN_CLOUD=1 to show Publish.
   const CLOUD_ON = import.meta.env.VITE_TENUN_CLOUD === '1';
 
@@ -126,11 +129,16 @@
     grain: Grain | null;
     filters: DashFilter[];
   }
+  /** A dashboard this view made (Duplicate dashboard): undo takes it away again, redo puts it back. */
+  interface Added {
+    added: Dashboard;
+  }
+  type Entry = Step | Added;
   const MAX_STEPS = 50;
   /** Edits with the same key close together (typing a title) make one step. */
   const BURST_MS = 1200;
-  const past: Step[] = [];
-  const future: Step[] = [];
+  const past: Entry[] = [];
+  const future: Entry[] = [];
   let burst = { key: '', at: 0 };
   let historyTick = $state(0);
   const canUndo = $derived((void historyTick, past.length > 0));
@@ -183,6 +191,13 @@
   function undo() {
     const step = past.pop();
     if (!dash || !step) return;
+    if ('added' in step) {
+      app.snap!.workspace.dashboards = app.dashboards.filter((d) => d.id !== step.added.id);
+      app.saveDashboards();
+      future.push(step);
+      historyTick++;
+      return;
+    }
     future.push(snap());
     restore(step);
   }
@@ -190,6 +205,13 @@
   function redo() {
     const step = future.pop();
     if (!dash || !step) return;
+    if ('added' in step) {
+      app.snap!.workspace.dashboards.push(structuredClone(step.added));
+      app.saveDashboards();
+      past.push(step);
+      historyTick++;
+      return;
+    }
     past.push(snap());
     restore(step);
   }
@@ -544,6 +566,170 @@
     }
   }
 
+  // ---- copy and paste (build 09, V4-D11) ----------------------------------------------------------------------------
+
+  /** Tiles picked with Shift-click: a copy takes them all. */
+  let picked = $state<string[]>([]);
+  /** A copy from another workspace, waiting for its fields to be matched. */
+  let matching = $state<Clip | null>(null);
+  let dashMenu = $state<{ x: number; y: number } | null>(null);
+  let stylesOpen = $state(false);
+  $effect(() => {
+    void dash?.id;
+    untrack(() => {
+      picked = [];
+      lastClicked = null;
+    });
+  });
+
+  /** The tile clicked last without Shift: the first of the picked ones when Shift-click adds a second. */
+  let lastClicked: string | null = null;
+  function togglePick(id: string) {
+    const first = lastClicked ?? selectedTile;
+    const now = picked.length ? picked : first && first !== id && dash?.tiles.some((t) => t.id === first) ? [first] : [];
+    picked = now.includes(id) ? now.filter((x) => x !== id) : [...now, id];
+  }
+
+  /** What a copy takes: the tiles picked with Shift-click, else the tile with the focus, else the one being edited. */
+  function copyTargets(): Tile[] {
+    const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-tile]')?.dataset.tile;
+    const ids = picked.length ? picked : focused ? [focused] : selectedTile ? [selectedTile] : [];
+    return (dash?.tiles ?? []).filter((t) => ids.includes(t.id));
+  }
+
+  function clipOf(tiles: Tile[], whole = false): Clip {
+    const tablesOf = Object.fromEntries(Object.entries(app.snap!.measure_info ?? {}).map(([id, m]) => [id, m.tables]));
+    return buildClip($state.snapshot(tiles) as Tile[], app.snap!.workspace, app.tables, tablesOf, whole && dash ? { title: dash.title, grain: dash.grain ?? null } : undefined);
+  }
+
+  const copiedWords = (n: number) => (n === 1 ? 'Copied the tile' : `Copied ${n} tiles`);
+
+  async function copyToClipboard(clip: Clip, said: string) {
+    try {
+      await navigator.clipboard.writeText(clipText(clip));
+      app.toast(said);
+    } catch {
+      app.toast('The clipboard is not open to this page. Use Ctrl+C (⌘C on a Mac) on a tile instead.', 'error');
+    }
+  }
+
+  /** A field, a text box or selected words copy and paste as usual. */
+  function ownClipboard(e: ClipboardEvent): boolean {
+    const el = e.target as HTMLElement | null;
+    if (el && (['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) || el.isContentEditable)) return false;
+    if (e.type === 'copy' && (window.getSelection()?.toString() ?? '') !== '') return false;
+    return !(app.settingsOpen || app.addOpen || publishing || focusId || rowsReq || matching || stylesOpen || document.querySelector('[role="dialog"]'));
+  }
+
+  function onCopy(e: ClipboardEvent) {
+    if (!dash || phone || !ownClipboard(e) || !e.clipboardData) return;
+    const tiles = copyTargets();
+    if (!tiles.length) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', clipText(clipOf(tiles)));
+    app.toast(copiedWords(tiles.length));
+  }
+
+  function onPaste(e: ClipboardEvent) {
+    if (!dash || phone || !ownClipboard(e)) return;
+    // Text that is not a copy of tiles does nothing on a dashboard (a table is pasted in the Data view).
+    const clip = readClip(e.clipboardData?.getData('text/plain') ?? '');
+    if (!clip) return;
+    e.preventDefault();
+    paste(clip);
+  }
+
+  async function pasteFromMenu() {
+    let text = '';
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      app.toast('The clipboard is not open to this page. Press Ctrl+V (⌘V on a Mac) on the dashboard instead.', 'error');
+      return;
+    }
+    const clip = readClip(text);
+    if (clip) paste(clip);
+    else app.toast('The clipboard holds no Tenun tiles. Copy a tile or a dashboard first.');
+  }
+
+  function paste(clip: Clip) {
+    if (!dash) return;
+    if (sameWorkspace(clip, app.tables)) void land(clip, null);
+    else matching = clip;
+  }
+
+  /**
+   * New named measures are saved with the engine, which checks each formula again. One it refuses is left out and named in
+   * a message; its tiles say the measure is missing. Gives the id each copied measure has now.
+   */
+  async function saveMeasures(here: NamedMeasure[], added: NamedMeasure[], ids: Record<string, string | { added: number }>): Promise<Record<string, string>> {
+    const kept = [...added];
+    const left: string[] = [];
+    while (kept.length) {
+      try {
+        const r = await api.setMeasures([...here, ...kept]);
+        if (!('saved' in r)) break;
+        app.snap = r.saved;
+        if (left.length) app.toast(`Not pasted: ${left.join(' ')}`, 'error');
+        return measureIds(ids, added, kept, r.saved.workspace.measures ?? [], here.length);
+      } catch (e) {
+        if (!(e instanceof MeasureRefused) || e.measure < here.length) {
+          app.error(e);
+          break;
+        }
+        left.push(`${kept[e.measure - here.length].name}: ${e.message}`);
+        kept.splice(e.measure - here.length, 1);
+      }
+    }
+    if (left.length) app.toast(`Not pasted: ${left.join(' ')}`, 'error');
+    return measureIds(ids, added, [], [], here.length);
+  }
+
+  /** Tiles of a copy land on this dashboard (or, for a copied dashboard, on a new one), with what they need. */
+  async function land(clip: Clip, m: Matches | null) {
+    matching = null;
+    if (!dash) return;
+    // Styles first: saving measures makes the app reload the workspace.
+    const styles = app.snap!.workspace.cardStyles ?? [];
+    const st = joinStyles(clip.cardStyles, styles, () => newId('cs-'));
+    if (st.list.length !== styles.length) await app.saveCardStyles(st.list);
+    const here = $state.snapshot(app.snap!.workspace.measures ?? []) as NamedMeasure[];
+    const renames = m ? renamesFor(clip, m, app.tables) : [];
+    const joined = joinMeasures(clip.measures, here, (f) => rewriteFormula(f, renames));
+    const mids = joined.added.length ? await saveMeasures(here, joined.added, joined.ids) : (joined.ids as Record<string, string>);
+    const links = new Set(app.snap!.workspace.relationships.map((r) => r.id));
+    const tiles = landTiles(clip, m, { measures: mids, styles: st.ids }, links, () => newId('t'));
+    if (clip.dashboard) {
+      // A whole dashboard becomes a new one, after this one, with its tiles in their places.
+      const d: Dashboard = { ...newDashboard(app.dashboards.length), title: freeName(clip.dashboard.title, app.dashboards.map((x) => x.title)), tiles, grain: clip.dashboard.grain ?? undefined };
+      app.snap!.workspace.dashboards.push(d);
+      app.saveDashboards();
+      app.toast(`Pasted the dashboard as ${d.title}`);
+      go({ view: 'dashboard', id: d.id });
+      return;
+    }
+    const placed = placeBelow(tiles, dash.tiles);
+    update((ts) => [...ts, ...placed]);
+    picked = placed.length > 1 ? placed.map((t) => t.id) : [];
+    app.toast(placed.length === 1 ? 'Pasted the tile' : `Pasted ${placed.length} tiles`);
+    await nextTick();
+    document.querySelector<HTMLElement>(`[data-tile="${CSS.escape(placed[0]?.id ?? '')}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  /** A copy of this dashboard, after it in the list. Undo takes it away. */
+  function duplicateDashboard() {
+    if (!dash) return;
+    const d = dashboardCopy($state.snapshot(dash) as Dashboard, freeName(`${dash.title} copy`, app.dashboards.map((x) => x.title)), newId);
+    const at = app.dashboards.findIndex((x) => x.id === dash.id);
+    app.snap!.workspace.dashboards.splice(at + 1, 0, d);
+    app.saveDashboards();
+    past.push({ added: structuredClone(d) });
+    if (past.length > MAX_STEPS) past.shift();
+    future.length = 0;
+    historyTick++;
+    app.toast(`Duplicated as ${d.title}`);
+  }
+
   function removeDashboard() {
     if (!dash || !confirm(`Delete the dashboard “${dash.title}”?`)) return;
     app.snap!.workspace.dashboards = app.dashboards.filter((d) => d.id !== dash.id);
@@ -555,7 +741,7 @@
   const sel = $derived(dash?.tiles.find((t) => t.id === selectedTile));
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} oncopy={onCopy} onpaste={onPaste} />
 
 {#if dash && publishing}
   <PublishSheet {dash} onclose={() => (publishing = false)} />
@@ -679,6 +865,16 @@
         </div>
       {/if}
     </div>
+    <button
+      class="btn plain icon"
+      title="More"
+      aria-label="More for this dashboard"
+      aria-haspopup="menu"
+      aria-expanded={!!dashMenu}
+      onclick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        dashMenu = dashMenu ? null : { x: r.right - 220, y: r.bottom + 4 };
+      }}><Icon name="more" /></button>
     <button class="btn plain icon" title="Delete dashboard" aria-label="Delete dashboard" onclick={removeDashboard}><Icon name="trash" /></button>
     {/if}
   </header>
@@ -692,6 +888,25 @@
       </span>
     </div>
   {/each}
+
+  {#if dashMenu}
+    <Menu
+      x={dashMenu.x}
+      y={dashMenu.y}
+      items={[
+        { label: 'Copy dashboard', run: () => copyToClipboard(clipOf(dash!.tiles, true), 'Copied the dashboard'), disabled: !dash.tiles.length },
+        { label: 'Duplicate dashboard', run: duplicateDashboard },
+        { label: 'Paste', run: pasteFromMenu },
+        { label: 'Card styles…', run: () => (stylesOpen = true) },
+      ]}
+      onclose={() => (dashMenu = null)} />
+  {/if}
+  {#if matching}
+    <MatchFields clip={matching} tables={app.tables} onpaste={(m) => matching && land(matching, m)} onclose={() => (matching = null)} />
+  {/if}
+  {#if stylesOpen}
+    <CardStyles onclose={() => (stylesOpen = false)} />
+  {/if}
 
   {#if exportMenu}
     <Menu
@@ -760,9 +975,21 @@
         {/if}
         {#each tiles as t (t.id)}
           {@const p = px(dragging?.id === t.id ? (dash.tiles.find((x) => x.id === t.id) ?? t) : t)}
+          <!-- Shift-click picks a tile for a copy, with the others picked (build 09); a plain click lets them go. -->
           <div
             class="cell"
             class:lifted={dragging?.id === t.id}
+            class:picked={picked.includes(t.id)}
+            onclickcapture={(e) => {
+              if (e.shiftKey && !phone) {
+                e.preventDefault();
+                e.stopPropagation();
+                togglePick(t.id);
+              } else {
+                lastClicked = t.id;
+                if (picked.length) picked = [];
+              }
+            }}
             style:transform={dragging?.id === t.id
               ? `translate(${p.left + dragging.dx}px, ${p.top + dragging.dy}px)`
               : `translate(${p.left}px, ${p.top}px)`}
@@ -786,6 +1013,10 @@
               dashboards={app.dashboards.filter((d) => d.id !== dash.id).map((d) => ({ id: d.id, title: d.title }))}
               onduplicate={() => duplicate(t.id)}
               oncopy={(to) => copyTo(t.id, to)}
+              onclip={() => {
+                const tiles = picked.includes(t.id) ? copyTargets() : dash.tiles.filter((x) => x.id === t.id);
+                copyToClipboard(clipOf(tiles), copiedWords(tiles.length));
+              }}
               onremove={() => removeTile(t.id)}
               onnav={(step) => navTile(t.id, step)}
               onopen={() => openTile(t.id)}
@@ -935,6 +1166,8 @@
   }
   .cell.lifted { transition: none; z-index: 10; }
   .cell.lifted :global(.tile) { box-shadow: var(--shadow-float); }
+  /* Picked for a copy with Shift-click. */
+  .cell.picked :global(.tile) { box-shadow: 0 0 0 2px var(--accent); }
   .ghost {
     position: absolute;
     top: 0;

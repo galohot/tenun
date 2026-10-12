@@ -8,7 +8,10 @@
   import Modal from '../Modal.svelte';
   import CardView from './card/CardView.svelte';
 
-  let { kpi, tile, onclose }: { kpi: KpiInfo; tile: Tile; onclose: () => void } = $props();
+  const SAMPLE: KpiInfo = { value: 128400, period: 'This month', versus: 'last month', prev: 117800, delta: 0.09, partial: false, bars: [] };
+  const PLAIN: Tile = { id: 'sample', type: 'kpi', title: 'Revenue', x: 0, y: 0, w: 3, h: 2, measures: [], dims: [] };
+  /** The thumbnails draw this number: the tile being edited, or a made-up one when the list opens from the dashboard. */
+  let { kpi = SAMPLE, tile = PLAIN, onclose }: { kpi?: KpiInfo; tile?: Tile; onclose: () => void } = $props();
 
   const styles = $derived(app.snap?.workspace.cardStyles ?? []);
   const cards = $derived((app.snap?.workspace.dashboards ?? []).flatMap((d) => d.tiles.filter((t) => t.type === 'kpi' && t.card?.style)));

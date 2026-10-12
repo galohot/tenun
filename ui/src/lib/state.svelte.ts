@@ -175,8 +175,12 @@ class App {
     }
   }
 
+  /** Counts dashboard and card style edits made here, so a reload that crosses one keeps it (see `refresh`). */
+  #localEdits = 0;
+
   /** Dashboard edits are applied locally at once and saved shortly after. */
   saveDashboards() {
+    this.#localEdits++;
     if (this.#saveTimer) clearTimeout(this.#saveTimer);
     this.#saveTimer = setTimeout(async () => {
       if (!this.snap) return;
@@ -193,6 +197,7 @@ class App {
   /** Card styles (build 08) are applied here at once and saved; every card that uses a style follows it. */
   async saveCardStyles(list: CardStyle[]) {
     if (!this.snap) return;
+    this.#localEdits++;
     this.snap.workspace.cardStyles = list;
     this.#lastLocalSave = Date.now();
     try {
@@ -204,8 +209,16 @@ class App {
   }
 
   async refresh() {
+    const edits = this.#localEdits;
     try {
-      this.snap = await api.workspace();
+      const next = await api.workspace();
+      // A dashboard or card style edit made here while the reload was on its way is newer than the reply, and its own
+      // save is on its way to the engine: keep it (a paste saves measures, styles and tiles one after the other).
+      if (this.snap && edits !== this.#localEdits) {
+        next.workspace.dashboards = this.snap.workspace.dashboards;
+        next.workspace.cardStyles = this.snap.workspace.cardStyles;
+      }
+      this.snap = next;
     } catch (e) {
       this.error(e);
     }

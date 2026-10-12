@@ -67,6 +67,10 @@ every other chart filters. Save the Excel file and the dashboard updates.
   See [data prep](docs/data-prep.md).
 - **Filter tiles:** a list, dropdown, number range or date range on the dashboard. **Keep only**
   and **Exclude** pin a filter. **Show rows** lists the data behind a bar.
+- **Copy and paste:** copy tiles (Shift-click picks several, then Ctrl+C or ⌘C) or a whole dashboard, and paste
+  them on any dashboard, in this workspace or another. Named measures and card styles come along. From another
+  workspace, **Match fields** asks which table and column here holds the same data, with a first guess filled in.
+  **Duplicate dashboard** is in the dashboard's **⋯** menu, and undo takes it back.
 - **Exports:** one HTML file, a PNG or PDF of the dashboard, a PNG of one tile, and the numbers of
   a tile as CSV or Excel.
 - **Works on a phone-width screen,** with keyboard and screen reader support.

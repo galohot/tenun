@@ -19,6 +19,7 @@ export function buildPie(a: PieArgs): Built & { slices: Slice[] } {
   const dtype = res.columns[0]?.dtype ?? 'text';
   const fmt = tile.formats?.[0] ?? null;
   const format = (v: number) => cell(v, 'number', null, false, fmt);
+  const short = (v: number) => cell(v, 'number', null, true, fmt);
   const slices = slicesOf(res.rows, (v) => (v === OTHER_KEY ? 'Other' : cell(v, dtype, tile.dims[0]?.grain ?? null)), (keys) => slotsFor(tile, keys));
   const option = pieOption({
     slices,
@@ -27,6 +28,7 @@ export function buildPie(a: PieArgs): Built & { slices: Slice[] } {
     listed: !!a.listed,
     picked: a.selected?.length ? new Set(a.selected.map((v) => key(v))) : null,
     format,
+    short,
     measure: tile.measures[0] ? measureLabel(tile.measures[0], a.tables ?? []) : 'Rows',
     hovered: a.hovered ?? null,
     loc: getLocale(),

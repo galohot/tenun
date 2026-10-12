@@ -149,6 +149,8 @@ export interface PieOptionArgs {
   /** The keys picked by a click: the other slices are dimmed. */
   picked: Set<string> | null;
   format: (v: number) => string;
+  /** The value written short ("347M"), for a donut's total: its hole is small. Not set: `format`. */
+  short?: (v: number) => string;
   /** The name of the value, under a donut's total. */
   measure: string;
   hovered: number | null;
@@ -180,9 +182,12 @@ export function pieOption(a: PieOptionArgs): EChartsCoreOption {
       labelLine: { show: !listed && (donut || !inside), length: 8, length2: 8, lineStyle: { color: c.text2 } },
     };
   });
-  const mid = centre(slices, a.hovered, a.format, a.measure, loc);
-  // The big number fits the hole: 22 px on a desktop tile, smaller on a phone.
-  const big = Math.round(Math.max(14, Math.min(22, (a.size ?? 320) * 0.065)));
+  const mid = centre(slices, a.hovered, a.short ?? a.format, a.measure, loc);
+  // The big number fits the hole: 22 px on a desktop tile, smaller on a phone, and smaller still when its text is long.
+  // The hole is `DONUT_HOLE` of the radius, and the radius is a share of the smaller side. A figure is about 0.6 of
+  // the size wide; the text may take 85 % of the hole.
+  const hole = (a.size ?? 320) * (radius / 100) * DONUT_HOLE;
+  const big = Math.round(Math.max(11, Math.min(22, (a.size ?? 320) * 0.065, (hole * 0.85) / (Math.max(4, mid.value.length) * 0.6))));
   return {
     animation: false,
     tooltip: {

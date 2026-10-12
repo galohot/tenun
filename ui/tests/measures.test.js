@@ -355,6 +355,8 @@ test('the code that draws asks the gate (read from the files that node cannot lo
   assert.match(kpi, /paceElapsed\(tile, kpi\.elapsed, parts\)/);
   const viewer = source('viewer/Viewer.svelte');
   assert.match(viewer, /setKnownFromFile\(data\.measures\)/);
+  // A text or a picture tile has no result: an exported file with one drew nothing at all when this read `res.parts`.
+  assert.doesNotMatch(viewer, /res\.parts/);
   const sheet = source('components/data/MeasureSheet.svelte');
   assert.match(sheet, /formulaProblem\(formula\)/);
   assert.match(sheet, /nameProblem\(name, all, editing\)/);

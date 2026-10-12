@@ -181,7 +181,7 @@
     {#if colors}
       {#each layout as l (l.t.id)}
         {@const r = resultFor(l.t)}
-        {@const name = data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables, r?.res.parts)}
+        {@const name = data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables, r?.res?.parts)}
         <!-- A number card fills its tile with its ground and draws its own title (build 08). -->
         {@const ground = cardGround(l.t)}
         <!-- A tile is a stop for the keyboard: arrows go to the next and the previous tile, Enter opens it large. -->

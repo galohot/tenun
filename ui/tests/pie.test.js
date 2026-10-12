@@ -100,6 +100,16 @@ test('a label on a slice is white or near-black, whichever reads better on the s
   assert.deepEqual(o.series[0].data.map((d) => d.label.color), ['#111', '#fff']);
 });
 
+test('the total of a donut fits its hole: written short, and smaller when its text is long', () => {
+  const rows = [['A', 200000000], ['B', 146904000]];
+  // 390 px: the radius is 52 % of half of it, the hole 62 % of that: 390 × 0.52 × 0.62 = 125.7 px across.
+  // "346,904,000" is 11 characters: 125.7 × 0.85 / (11 × 0.6) = 16 px. Written short, "347M" keeps 22 px.
+  const long = option(rows, { donut: true, size: 390, format: (v) => v.toLocaleString('en-US') }).option.graphic[0].children[0].style;
+  assert.deepEqual([long.text, long.fontSize], ['346,904,000', 16]);
+  const short = option(rows, { donut: true, size: 390, format: (v) => v.toLocaleString('en-US'), short: (v) => `${Math.round(v / 1e6)}M` }).option.graphic[0].children[0].style;
+  assert.deepEqual([short.text, short.fontSize], ['347M', 22]);
+});
+
 test('a label ECharts hides is found, so the list under the chart can name it', () => {
   // Six slices of about a sixth, with long names, on a small tile: the labels inside cannot all fit.
   const rows = ['Kepulauan Bangka Belitung', 'Nusa Tenggara Barat', 'Kalimantan Timur', 'Sulawesi Tenggara', 'Papua Barat Daya', 'Yogyakarta'].map((n, i) => [n, 17 - i]);
@@ -147,5 +157,6 @@ test('the centre of a donut fits the hole: smaller on a phone', () => {
   const sizeOf = (size) => option([['A', 60], ['B', 40]], { donut: true, size }).option.graphic[0].children[0].style.fontSize;
   assert.equal(sizeOf(400), 22);
   assert.equal(sizeOf(260), 17);
-  assert.equal(sizeOf(100), 14);
+  // 100 px: the hole is 100 × 0.52 × 0.62 = 32 px across, so the text takes the floor, 11 px.
+  assert.equal(sizeOf(100), 11);
 });
