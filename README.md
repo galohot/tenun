@@ -38,14 +38,23 @@ every other chart filters. Save the Excel file and the dashboard updates.
 - **Relationships across sources:** drag from a column to a column in the Model view. Tenun
   suggests the likely ones (`store_id` → `stores.id`) and checks them against the data, again each
   time a table loads: a store id that appears twice never counts an order twice, and the link and
-  its tiles say so. Two links to one table (stock sent from a store, stock sent to a store) get
-  names. A table that only links two others (programmes and funders) can be marked as a link table, so
+  its tiles say so. A one-to-one link works in both directions. Two links to one table (stock sent
+  from a store, stock sent to a store) get names. A table that only links two others (programmes and funders) can be marked as a link table, so
   many to many works: a chart can group by funder, a row is under each of its funders, and the total
   counts it once. See [the relationships guide](docs/relationships.md).
+- **Calculated columns (Advanced):** write `[amount] * 1.11` or `IF([region] = "Java", "West", "East")`
+  once, and the new column works in charts, filters, maps and exports. 64 functions with Excel names; a
+  formula can read a column of a related table. See [the formula guide](docs/formulas.md).
 - **Measures (Advanced):** write `SUM([sales].[amount]) / SUM([targets].[target])` once, name it
   "Achievement", and use it in any tile, though the two tables come from different files. Tenun adds
   up each table on its own, so a target is never counted once for each sale. See
   [the formula guide](docs/formulas.md#measures).
+- **New tables (Advanced):** append tables (one file for each month), merge two tables on their keys,
+  or group a table. A new table never writes to your files. See [data prep](docs/data-prep.md#new-tables-from-other-tables).
+- **Maps:** colour Indonesia's 38 provinces or 514 kabupaten and kota, or the countries of the world, by
+  a value. Places are read from standard names and codes (`Jawa Barat`, `JB`, `32`, `Kab. Bandung`), and
+  a chip lists the names Tenun could not place. Points from latitude and longitude. Click a place to
+  filter. See [the map guide](docs/maps.md).
 - **Charts:** number, bar, line, area, share of total, pie, donut, map and table. Also stacked,
   side-by-side and 100 % bars, scatter, histogram, waterfall, pivot table, filter, text and image
   tiles. A pie or a donut is drawn with care: at most six slices and Other, largest first, the
@@ -91,6 +100,14 @@ every other chart filters. Save the Excel file and the dashboard updates.
 - **Two ways to run it:** the desktop app, or `tenun serve` in your browser.
 
 <p align="center">
+  <img src="docs/story.png" alt="A story page: a heading, a paragraph whose numbers follow the filters, two number cards side by side, a callout and a weekly revenue line" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/cards.png" alt="Number cards in six looks, with the card editor open on the right: presets, parts, size, alignment and background" width="900">
+</p>
+
+<p align="center">
   <img src="docs/model.png" alt="The Model view: an Orders table from an Excel file linked to stores from a CSV file and customers from a SQLite file" width="900">
 </p>
 
@@ -100,11 +117,12 @@ Tenun shows the common things by default. It keeps the rest behind one switch: *
 features** in Settings. The switch is free, and nothing is locked. It only shows more controls.
 
 - **Simple** has everything in the list above.
-- **Advanced** adds heat map, funnel, box plot, bullet chart, compare two values (dumbbell and
-  slope), Sankey, calendar heat map, cohort grid and Gantt chart. It also adds small multiples,
-  separate panels and indexed lines for values with different units, bars plus a line, bubble size,
-  a trend column in tables, pivot groups that open and close, standard deviation, a manual sort
-  order and reference bands.
+- **Advanced** adds calculated columns (a formula, or SQL), measures, a main date for each table,
+  and new tables made by append, merge or group. It adds heat map, funnel, box plot, bullet chart,
+  compare two values (dumbbell and slope), Sankey, calendar heat map, cohort grid and Gantt chart. It
+  also adds small multiples, separate panels and indexed lines for values with different units, bars
+  plus a line, bubble size, a trend column in tables, pivot groups that open and close, standard
+  deviation, a manual sort order and reference bands.
 - A dashboard made with Advanced features opens and works with the switch off. You only cannot edit
   those parts until you turn it on. Exported files show them either way.
 
@@ -113,11 +131,15 @@ features** in Settings. The switch is free, and nothing is locked. It only shows
 </p>
 
 <p align="center">
-  <img src="docs/pivot.png" alt="A pivot table of revenue by category and region with row and column totals" width="900">
+  <img src="docs/pivot.png" alt="A pivot table of revenue by category and region with row and column totals" width="680">
 </p>
 
 <p align="center">
-  <img src="docs/advanced-picker.png" alt="The chart picker with the More charts group: heat map, funnel, box plot, bullet, compare, Sankey, calendar and cohort" width="900">
+  <img src="docs/measure.png" alt="A measure named Achievement: SUM of sales from an Excel file divided by SUM of targets from a web link, with stores from a CSV file" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/advanced-picker.png" alt="The Add tile menu with Advanced features on: number, bar, line, area, share, pie, donut, table, pivot, map, filter, text and image, then heat map, funnel, box plot, bullet, compare, Sankey, calendar and cohort" width="270">
 </p>
 
 ## What Tenun does not do, on purpose
@@ -223,6 +245,25 @@ tenun publish sales.tenun      # publish now
 tenun agent sales.tenun        # keep publishing on schedule
 ```
 
+## Sites
+
+A workspace can become a small website. Choose **Site…** under the dashboards and switch on **Make this
+workspace a site**. It is off by default, and with it off nothing about export or publish changes.
+
+- **Navigation:** a title, a top bar or a sidebar, groups of pages, a home page and a footer line. A page
+  can stay out of the navigation and still open from a link or a click.
+- **Drill-through:** in a tile's **⋯** menu, choose **On click**, then **Open <page>, keeping only the
+  clicked value**. A click on a bar, a slice, a place or a row then opens that page, kept to that value. The page says where you came from,
+  and **Back** returns.
+- **Preview** the site in the app. Then choose **Export › Whole site (one file)**, or **Whole site
+  (folder, ZIP)** for any web host. Both work offline. Offline, a drill-through holds the first 50 values of the field; past
+  them the page opens as it is and says why.
+- **Publish** the whole site to tenun.cloud at one link (up to 10 pages).
+
+<p align="center">
+  <img src="docs/site.png" alt="An exported site: a sidebar with the pages in two groups, Sales and More, and the Coffee overview page" width="900">
+</p>
+
 ## Privacy and security
 
 - The server listens on `127.0.0.1` only. It refuses requests that name another host, which
@@ -254,7 +295,8 @@ Checks: `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo t
 
 ## Not in this version
 
-User accounts, shared servers, row-level security, scheduled emails, a formula language and maps.
+User accounts in the app, shared servers, row-level security, scheduled emails, parameters and what-if
+inputs, forecasting, and street maps under a map.
 
 ## Licence
 

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Tenun — weave your spreadsheets and databases into one dashboard</title>
-<meta name="description" content="A free, open-source dashboard app that runs on your computer. Join Excel files, CSV files and databases, click to filter every chart, and export a dashboard as one HTML file.">
+<meta name="description" content="A free, open-source dashboard app that runs on your computer. Join Excel files, CSV files and databases, write formulas, map Indonesia down to every kabupaten, and export a dashboard or a whole site as one HTML file.">
 <link rel="canonical" href="https://tenun.cloud/">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
@@ -68,7 +68,7 @@
     </article>
     <article>
       <h2>Export one HTML file</h2>
-      <p>Send a dashboard as a single file. It opens offline in any browser, and click-to-filter still works. You can also save a picture or a PDF, or the numbers of one tile as CSV or Excel.</p>
+      <p>Send a dashboard, or a whole site, as a single file. It opens offline in any browser, and click-to-filter still works. You can also save a picture or a PDF, or the numbers of one tile as CSV or Excel.</p>
     </article>
   </section>
 
@@ -85,9 +85,64 @@
 
   <section class="model">
     <div>
+      <h2>One formula, three sources</h2>
+      <p>Sales come from an Excel file, targets from an API, stores from a CSV export. Write <code>SUM([sales].[amount]) / SUM([targets].[target])</code> once, name it Achievement, and use it in any tile. Tenun adds up each table on its own, so a target is never counted once for each sale. Calculated columns use 64 functions with the names Excel uses.</p>
+    </div>
+    <picture class="shot">
+      <source srcset="/calc-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/calc-light.webp" width="1440" height="900" alt="The Data view with an Excel file, a CSV file and a web link, and the measure Achievement open: the sum of sales divided by the sum of targets" loading="lazy">
+    </picture>
+  </section>
+
+  <section class="model">
+    <div>
+      <h2>Down to every kabupaten</h2>
+      <p>Colour Indonesia's 38 provinces or 514 kabupaten and kota, or the countries of the world. Write places the way your data already does: <code>Jawa Barat</code>, <code>Jabar</code>, <code>32</code> or <code>Kab. Bandung</code>. Tenun lists the names it could not place. The maps ship with the app and work offline.</p>
+    </div>
+    <picture class="shot">
+      <source srcset="/map-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/map-light.webp" width="1440" height="900" alt="A map of Indonesia with every kabupaten and kota coloured by a value, from demo data" loading="lazy">
+    </picture>
+  </section>
+
+  <section class="model">
+    <div>
+      <h2>Number cards you design</h2>
+      <p>Choose the parts of a card, their order, their size and the background. Add a small chart, a target, or a rule that says "Below target" in words. Save a look as a card style and use it on every dashboard. The colours still come from the fixed palette, so it stays good-looking.</p>
+    </div>
+    <picture class="shot">
+      <source srcset="/cards-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/cards-light.webp" width="1440" height="900" alt="Six number cards in different looks, with the card editor open: presets, parts, size, alignment and background" loading="lazy">
+    </picture>
+  </section>
+
+  <section class="model">
+    <div>
+      <h2>Write the story next to the numbers</h2>
+      <p>Text tiles have headings, lists, quotes and callouts, and numbers that follow the filters: "Revenue is 18.4K in Oct 1–14, ≈ Same against the same days of September." A story page puts text, cards and charts in one column, and prints on A4 pages that never cut a chart.</p>
+    </div>
+    <picture class="shot">
+      <source srcset="/story-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/story-light.webp" width="1440" height="900" alt="A story page: a heading, a paragraph with live numbers, two cards side by side, a callout and a line chart" loading="lazy">
+    </picture>
+  </section>
+
+  <section class="model">
+    <div>
+      <h2>A website, not a stack of files</h2>
+      <p>Make a workspace a site, with a top bar or a sidebar, groups of pages and a home page. A click on a bar can open another page, kept to that bar. Export the whole site as one HTML file or a folder for any web host, or publish it at one link.</p>
+    </div>
+    <picture class="shot">
+      <source srcset="/site-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/site-light.webp" width="1440" height="900" alt="An exported site with a sidebar: the pages in two groups, Sales and More, and the Coffee overview page" loading="lazy">
+    </picture>
+  </section>
+
+  <section class="model">
+    <div>
       <h2>Simple by default. Advanced when you want it.</h2>
       <p>Tenun starts with the charts an Excel user knows: bars, lines, areas, scatter, histogram, waterfall and pivot tables with totals. Keep the top 5 and group the rest as Other. Show a value as a share, a running total or a change. Add a target and a trend line. Clean a messy sheet, turn months into rows, read a whole folder of files, or read a web link to CSV or JSON data.</p>
-      <p style="margin-top:0.75rem">One free switch, <b>Advanced features</b>, adds heat maps, funnels, box plots, bullet charts, Sankey, calendar, cohort and Gantt charts, and small multiples. Dashboards that use them still open when the switch is off.</p>
+      <p style="margin-top:0.75rem">One free switch, <b>Advanced features</b>, adds calculated columns, measures and new tables made by append, merge or group. It adds heat maps, funnels, box plots, bullet charts, Sankey, calendar, cohort and Gantt charts, and small multiples. Dashboards that use them still open when the switch is off.</p>
     </div>
     <picture class="shot">
       <source srcset="/more-views-dark.webp" media="(prefers-color-scheme: dark)">
@@ -97,19 +152,19 @@
 
   <section class="online">
     <h2>Share it online, keep the data at home</h2>
-    <p>Choose <b>Publish</b> and a dashboard gets a private link on tenun.cloud. Tenun builds it on your computer and sends only the results. The cloud never connects to your files or databases, and never sees a password.</p>
+    <p>Choose <b>Publish</b> and a dashboard, or a whole site, gets a private link on tenun.cloud. Tenun builds it on your computer and sends only the results. The cloud never connects to your files or databases, and never sees a password.</p>
     <ul>
       <li><b>Anyone with the link</b>, or <b>only people you invite</b>.</li>
       <li><b>Updates by itself</b> when the data changes, hourly or daily. <code>tenun agent</code> keeps it going on a computer that stays on.</li>
       <li><b>Never silently stale:</b> every page says when it was updated, and warns when an update is late.</li>
-      <li><b>Free</b> for up to 3 dashboards.</li>
+      <li><b>Free</b> for up to 3 dashboards or sites. A site holds up to 10 pages.</li>
       <li>The Publish button is hidden in this release. It comes back when tenun.cloud opens.</li>
     </ul>
   </section>
 
   <section id="download" class="download">
     <h2>Download</h2>
-    <p>Version <span data-version>0.3.0</span>. Free and open source.</p>
+    <p>Version <span data-version>0.4.0</span>. Free and open source.</p>
     <div class="platforms">
       <a class="platform" href="https://github.com/galohot/tenun/releases/latest"><strong>Windows</strong><span>64-bit installer</span></a>
       <a class="platform" href="https://github.com/galohot/tenun/releases/latest"><strong>macOS</strong><span>Apple silicon and Intel</span></a>
