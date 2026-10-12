@@ -332,6 +332,65 @@ pub enum SourceKind {
     },
     Postgres(DbConn),
     Mysql(DbConn),
+    /// A new table made from other tables: append, merge or group (V4-D6). It is a DuckDB view
+    /// over them, named after the source, and is built again when one of them loads.
+    Derived {
+        spec: DerivedSpec,
+    },
+}
+
+/// How a new table is made from other tables (V4-D6). Table ids name the inputs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "op", rename_all = "lowercase")]
+pub enum DerivedSpec {
+    /// The rows of every table, one after the other. Columns are matched by name; a table that
+    /// lacks one leaves it blank. A `source` column says which table each row came from.
+    Append { tables: Vec<String> },
+    /// The rows of `left` with the columns of `right` beside them, matched on the key pairs
+    /// `(left column, right column)`. `right` is read one row per key, so no row of `left` is
+    /// counted twice (V4-D126).
+    Merge {
+        left: String,
+        right: String,
+        on: Vec<(String, String)>,
+        keep: Keep,
+    },
+    /// One row for each combination of the `by` columns of `table`, with a value for each
+    /// formula (the `group` kind of the formulas of build 01).
+    Group {
+        table: String,
+        by: Vec<String>,
+        values: Vec<GroupValue>,
+    },
+}
+
+impl DerivedSpec {
+    /// The ids of the tables the new table reads, in the order the spec names them.
+    pub fn inputs(&self) -> Vec<&str> {
+        match self {
+            DerivedSpec::Append { tables } => tables.iter().map(String::as_str).collect(),
+            DerivedSpec::Merge { left, right, .. } => vec![left.as_str(), right.as_str()],
+            DerivedSpec::Group { table, .. } => vec![table.as_str()],
+        }
+    }
+}
+
+/// Which rows of the left table a merge keeps.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Keep {
+    /// Every row of the left table; the right columns are blank where nothing matched.
+    #[default]
+    Left,
+    /// Only the rows of the left table that found a match.
+    Inner,
+}
+
+/// One value of a grouped table: a column name and a formula of aggregates.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GroupValue {
+    pub name: String,
+    pub formula: String,
 }
 
 /// How a JSON link finds its next page.
@@ -439,6 +498,7 @@ impl SourceKind {
             SourceKind::Url { .. } => "url",
             SourceKind::Postgres(_) => "postgres",
             SourceKind::Mysql(_) => "mysql",
+            SourceKind::Derived { .. } => "derived",
         }
     }
 }

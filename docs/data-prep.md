@@ -156,3 +156,42 @@ again.
 ### What is not supported
 
 POST requests, sign-in through a browser (OAuth), XML and GraphQL.
+
+## New tables from other tables
+
+With **Advanced features** on, **Add data** has a tab **New table** with three ways to make a table
+from the tables you have. A new table reads the tables you pick. It never writes to your files.
+
+- **Append tables** puts the rows of two or more tables one after the other, like one file for each
+  month. Columns are matched by name. A table that lacks a column leaves it blank, and the sheet shows
+  which table lacks which column. A column that holds numbers in one table and text in another becomes
+  text. The new table starts with a column `source`, the name of the table each row came from.
+- **Merge two tables** puts the columns of the right table beside the rows of the left table, where the
+  key columns match: `sales.store_id` = `stores.id`, and you can add a second pair. Choose **All rows of
+  the left table** (rows with no match have blank right columns) or **Only rows that match**. Keys of
+  two kinds (a number and a text) are compared as text. The key columns of the right table are left
+  out, because they hold the left keys again. A right column whose name the left table has already
+  gets the name of the right table in front: `stores region`.
+- **Group a table** makes one row for each group of the columns you pick, with a value for each formula
+  you write: `SUM([amount])`, `COUNTD([store_id])`, `SUMIF([amount], [amount] > 60)`. A formula can
+  read a related table, as a calculated column does: `SUM([stores].[sqm])`. No group column gives one
+  row: the whole table.
+
+The sheet shows the first rows, the number of rows and the columns before you make the table. Give it
+a name, then **Make table**.
+
+**A merge never counts a row twice.** When the right table has the same key on two rows, the first of
+them is used, as a link does. The table says so in its notes, with how many rows found a match:
+
+- *8,912 of 9,000 rows of sales found a match in stores.*
+- *stores repeats 3 keys. The first row of each is used, so no row of sales is counted twice.*
+
+**A new table follows its tables.** When a table it reads loads again (a refresh, a saved file, a
+new calculated column), the new table is made again, and so is any new table that reads it. A new
+table can read another new table: a group of a merge works. A table that would read itself is
+refused. When a table it reads is gone, the new table says which, and the rest of the workspace
+loads.
+
+A new table is a table like any other: you can link it, add calculated columns to it, use it in
+measures and charts, and export it. To change how it is made, click **Change** under it in the Data
+view. Its name stays, so its links and the tiles that use it keep working.

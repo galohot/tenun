@@ -2,6 +2,7 @@
 
 use crate::calc::{self, CalcRefused};
 use crate::catalog::{Catalog, Column, DType, Table, ident, lit};
+use crate::derived;
 use crate::excel::{self, Cell, ColType};
 use crate::fetch;
 use crate::folder;
@@ -14,9 +15,9 @@ use crate::query::{self, Param, SemanticQuery};
 use crate::secrets::Secrets;
 use crate::suggest::{self, Suggestion};
 use crate::workspace::{
-    CalcColumn, DEFAULT_PATTERN, DbConn, Every, FieldRef, KeyPlace, LinkKey, Locale, NamedMeasure,
-    Paging, Relationship, Source, SourceKind, TableSetup, Transform, Workspace, resolve_path,
-    store_path,
+    CalcColumn, DEFAULT_PATTERN, DbConn, DerivedSpec, Every, FieldRef, KeyPlace, LinkKey, Locale,
+    NamedMeasure, Paging, Relationship, Source, SourceKind, TableSetup, Transform, Workspace,
+    resolve_path, store_path,
 };
 use chrono::NaiveDate;
 use duckdb::Connection;
@@ -339,6 +340,19 @@ pub enum AddSource {
         #[serde(default)]
         password: String,
     },
+    /// A new table from other tables: append, merge or group (V4-D6). `name` is the table's name.
+    Derived { name: String, spec: DerivedSpec },
+}
+
+/// A look at a new table before it is made: its columns, its first rows, how many rows it has and
+/// the notes it would carry (build 04).
+#[derive(Debug, Serialize)]
+pub struct DerivedPreview {
+    pub columns: Vec<Column>,
+    pub rows: Vec<Vec<serde_json::Value>>,
+    pub total: i64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -618,8 +632,19 @@ impl Engine {
                 ..State::default()
             };
         }
-        for src in &ws.sources {
-            self.load_with(&src.id, false);
+        // A new table loads after the tables it reads (V4-D6). New tables that read each other in a
+        // ring are not loaded: each says so, and the rest of the workspace loads.
+        let (order, ring) = derived::load_order(&ws.sources);
+        for id in order {
+            self.load_one(&id, false);
+        }
+        let mut s = self.state.write().unwrap();
+        for id in ring {
+            s.errors.insert(
+                id,
+                "This new table reads itself through another new table. Open it and pick other tables."
+                    .into(),
+            );
         }
     }
 
@@ -770,6 +795,19 @@ impl Engine {
                 }
                 (conn.database.clone(), SourceKind::Mysql(conn))
             }
+            AddSource::Derived { name, spec } => {
+                let name = name.trim().to_string();
+                if let Some(why) = derived::name_problem(&name) {
+                    anyhow::bail!(why);
+                }
+                // The spec is checked against the tables as they are now, before anything is saved.
+                {
+                    let s = self.state.read().unwrap();
+                    derived::plan(&spec, &s.catalog, &s.ws.relationships, &s.health)
+                        .map_err(anyhow::Error::msg)?;
+                }
+                return self.add_derived(name, spec);
+            }
         };
         // The key goes into the secrets file before the first load, as a database password does.
         // If the load fails, the entry goes back to what it was, also when the value stored
@@ -812,7 +850,104 @@ impl Engine {
         Ok(id)
     }
 
+    /// Adds a new table (V4-D6). Two new tables may have the same spec under two names, so there is
+    /// no "already added" here. A spec that fails when the view is made is not kept.
+    fn add_derived(&self, name: String, spec: DerivedSpec) -> anyhow::Result<String> {
+        let id = {
+            let mut s = self.state.write().unwrap();
+            let id = s.ws.next_id("s");
+            s.ws.sources.push(Source {
+                id: id.clone(),
+                name,
+                kind: SourceKind::Derived { spec },
+            });
+            id
+        };
+        self.load(&id);
+        let err = self.state.read().unwrap().errors.get(&id).cloned();
+        if let Some(e) = err {
+            self.remove_source(&id);
+            anyhow::bail!(e);
+        }
+        self.persist();
+        Ok(id)
+    }
+
+    /// Changes how a new table is made. Its name stays, so its id, its links and the tiles that use
+    /// it stay too. A spec that would make the table read itself is refused; one that fails when the
+    /// view is made leaves the old spec in place. Returns the ids of the tables that loaded again.
+    pub fn set_derived(&self, id: &str, spec: DerivedSpec) -> anyhow::Result<Vec<String>> {
+        let old = {
+            let s = self.state.read().unwrap();
+            let src =
+                s.ws.source(id)
+                    .ok_or_else(|| anyhow::anyhow!("unknown source {id}"))?;
+            let SourceKind::Derived { spec: old } = &src.kind else {
+                anyhow::bail!("{} is not a new table.", src.name);
+            };
+            if derived::makes_ring(&s.ws.sources, id, &spec) {
+                anyhow::bail!("{} would read itself. Pick other tables.", src.name);
+            }
+            derived::plan(&spec, &s.catalog, &s.ws.relationships, &s.health)
+                .map_err(anyhow::Error::msg)?;
+            old.clone()
+        };
+        let put = |spec: DerivedSpec| {
+            let mut s = self.state.write().unwrap();
+            if let Some(src) = s.ws.sources.iter_mut().find(|x| x.id == id) {
+                src.kind = SourceKind::Derived { spec };
+            }
+        };
+        put(spec);
+        let ids = self.load(id);
+        let err = self.state.read().unwrap().errors.get(id).cloned();
+        if let Some(e) = err {
+            put(old);
+            self.load(id);
+            anyhow::bail!(e);
+        }
+        self.persist();
+        Ok(ids)
+    }
+
+    /// The columns, the first rows, the number of rows and the notes of a new table before it is made.
+    pub fn preview_derived(&self, spec: &DerivedSpec) -> anyhow::Result<DerivedPreview> {
+        let plan = {
+            let s = self.state.read().unwrap();
+            derived::plan(spec, &s.catalog, &s.ws.relationships, &s.health)
+                .map_err(anyhow::Error::msg)?
+        };
+        let db = self.db.lock().unwrap();
+        let columns = describe(&db, &plan.sql).map_err(|e| anyhow::anyhow!(friendly(&e)))?;
+        let from = format!("({}) AS d", plan.sql);
+        let mut out = preview_of(&db, &from, columns.clone(), 5)?;
+        let total = count_of(&db, &format!("SELECT count(*) FROM {from}"));
+        let notes = match &plan.merge {
+            Some(m) => merge_notes(&db, m),
+            None => Vec::new(),
+        };
+        out.columns = columns;
+        Ok(DerivedPreview {
+            columns: out.columns,
+            rows: out.rows,
+            total,
+            notes,
+        })
+    }
+
     pub fn remove_source(&self, id: &str) {
+        // The new tables that read this source say so after it goes.
+        let readers = {
+            let s = self.state.read().unwrap();
+            derived::dependents(&s.ws.sources, &[id.to_string()])
+        };
+        self.remove_one(id);
+        for r in readers {
+            self.load_one(&r, false);
+        }
+    }
+
+    fn remove_one(&self, id: &str) {
         drop_source(&self.db.lock().unwrap(), id);
         {
             let mut s = self.state.write().unwrap();
@@ -858,8 +993,27 @@ impl Engine {
     }
 
     /// `fetch` makes a CSV link download again. Without it, a copy that is still fresh is read
-    /// as it is, so opening a workspace does not download every link.
+    /// as it is, so opening a workspace does not download every link. The new tables that read the
+    /// source are built again after it, in order (V4-D6); the ids of their tables are in the answer.
     fn load_with(&self, id: &str, fetch: bool) -> Vec<String> {
+        let mut ids = self.load_one(id, fetch);
+        self.load_readers(&[id.to_string()], &mut ids);
+        ids
+    }
+
+    /// Builds again the new tables that read the sources `changed`, each after the tables it reads.
+    fn load_readers(&self, changed: &[String], ids: &mut Vec<String>) {
+        let readers = {
+            let s = self.state.read().unwrap();
+            derived::dependents(&s.ws.sources, changed)
+        };
+        for r in readers {
+            ids.extend(self.load_one(&r, false));
+        }
+    }
+
+    /// Loads one source and nothing that reads it.
+    fn load_one(&self, id: &str, fetch: bool) -> Vec<String> {
         let (src, base, setups, cache, cached_at) = {
             let s = self.state.read().unwrap();
             let Some(src) = s.ws.source(id).cloned() else {
@@ -897,9 +1051,21 @@ impl Engine {
         // The data is about to change. From now until the check has read it, the links of this
         // source are unknown, so no query can join them as if they were clean (V4-D51).
         forget_links(&mut self.state.write().unwrap(), id);
-        let result = {
-            let db = self.db.lock().unwrap();
-            load_source(&db, &src, base.as_deref(), &self.secrets, &setups, &cache)
+        let result = match &src.kind {
+            // A new table is a view over tables of the catalog, written from its spec (V4-D6).
+            SourceKind::Derived { spec } => {
+                let plan = {
+                    let s = self.state.read().unwrap();
+                    derived::plan(spec, &s.catalog, &s.ws.relationships, &s.health)
+                };
+                let db = self.db.lock().unwrap();
+                plan.map_err(anyhow::Error::msg)
+                    .and_then(|p| load_derived(&db, &src, &p, &setups))
+            }
+            _ => {
+                let db = self.db.lock().unwrap();
+                load_source(&db, &src, base.as_deref(), &self.secrets, &setups, &cache)
+            }
         };
         let ids = {
             let mut s = self.state.write().unwrap();
@@ -1502,8 +1668,39 @@ impl Engine {
         };
         // A calculated column may have been waiting for this link.
         self.rebuild_calc(calc::Roots::All);
+        self.reload_groups();
         self.persist();
         Ok(id)
+    }
+
+    /// Builds again the new tables made by a group, and what reads them: a value of a group may read a
+    /// related table, and a link changed (V4-D6), as a calculated column does.
+    fn reload_groups(&self) {
+        let groups: Vec<String> = {
+            let s = self.state.read().unwrap();
+            derived::load_order(&s.ws.sources)
+                .0
+                .into_iter()
+                .filter(|id| {
+                    s.ws.source(id).is_some_and(|x| {
+                        matches!(
+                            x.kind,
+                            SourceKind::Derived {
+                                spec: DerivedSpec::Group { .. }
+                            }
+                        )
+                    })
+                })
+                .collect()
+        };
+        if groups.is_empty() {
+            return;
+        }
+        let mut ids = Vec::new();
+        for g in &groups {
+            ids.extend(self.load_one(g, false));
+        }
+        self.load_readers(&groups, &mut ids);
     }
 
     pub fn remove_relationship(&self, id: &str) {
@@ -1516,6 +1713,7 @@ impl Engine {
         }
         // A calculated column that read across this link says so now.
         self.rebuild_calc(calc::Roots::All);
+        self.reload_groups();
         self.persist();
     }
 
@@ -2352,6 +2550,8 @@ impl Engine {
             let mut ids = touched;
             ids.push(table_id.to_string());
             self.rebuild_calc(calc::Roots::Tables(&ids));
+            // The new tables that read it see its new columns (V4-D6).
+            self.load_readers(std::slice::from_ref(&table.source_id), &mut Vec::new());
         }
         self.persist();
         Ok(reloaded || calc_changed || main_changed || link_changed || !renames.is_empty())
@@ -3695,11 +3895,71 @@ fn load_source(
             let default_schema = if pg { "public" } else { c.database.as_str() };
             catalog_attached(db, src, &name, &[default_schema])
         }
+        // The engine makes a new table from the catalog (`load_derived`), never from here.
+        SourceKind::Derived { .. } => anyhow::bail!("a new table is made from other tables"),
     }
 }
 
 /// Creates the table `name` as a view over a SELECT. When the table has changes (types, unpivot)
 /// the SELECT sits under a second view that holds them.
+/// Makes the view of a new table and reads it into the catalog (V4-D6). The setup of the table (types,
+/// unpivot) applies as for a file. A merge gets its notes: the rows that found a match, and the keys the
+/// right table repeats (V4-D126).
+fn load_derived(
+    db: &Connection,
+    src: &Source,
+    plan: &derived::Plan,
+    setups: &BTreeMap<String, TableSetup>,
+) -> anyhow::Result<Vec<Table>> {
+    let schema = schema_of(&src.id);
+    // A view of an older spec under another name goes: the schema holds this table only.
+    db.execute_batch(&format!(
+        "DROP SCHEMA IF EXISTS {q} CASCADE; CREATE SCHEMA {q};",
+        q = ident(&schema)
+    ))?;
+    let outcome = make_table(db, &schema, &src.name, &plan.sql, setups)?;
+    let mut tables = catalog_local(db, src, &schema)?;
+    stamp_table_outcome(&mut tables, &src.name, outcome);
+    if let Some(m) = &plan.merge
+        && let Some(t) = tables.iter_mut().find(|t| t.name == src.name)
+    {
+        t.notes.extend(merge_notes(db, m));
+    }
+    Ok(tables)
+}
+
+/// The words under a merge, from its counts.
+fn merge_notes(db: &Connection, m: &derived::MergeCounts) -> Vec<String> {
+    let row = run(db, &m.matched, &[])
+        .ok()
+        .and_then(|r| r.into_iter().next())
+        .unwrap_or_default();
+    let n = |i: usize| row.get(i).and_then(serde_json::Value::as_i64).unwrap_or(0);
+    let repeated = count_of(db, &m.repeated);
+    m.notes(n(0), n(1), repeated)
+}
+
+/// The one number a `SELECT count(*) …` answers, or 0.
+fn count_of(db: &Connection, sql: &str) -> i64 {
+    run(db, sql, &[])
+        .ok()
+        .and_then(|r| r.into_iter().next())
+        .and_then(|r| r.first().and_then(serde_json::Value::as_i64))
+        .unwrap_or(0)
+}
+
+/// The columns a SELECT gives, with their types.
+fn describe(db: &Connection, sql: &str) -> anyhow::Result<Vec<Column>> {
+    let mut stmt = db.prepare(&format!("DESCRIBE {sql}"))?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows
+        .into_iter()
+        .map(|(name, ty)| Column::new(name, DType::from_duckdb(&ty), ty))
+        .collect())
+}
+
 fn make_table(
     db: &Connection,
     schema: &str,

@@ -7,10 +7,16 @@
   import LinkFields from './LinkFields.svelte';
   import Modal from './Modal.svelte';
   import FileBrowser from './FileBrowser.svelte';
+  import NewTableSheet from './data/NewTableSheet.svelte';
+  import { OPS, type DerivedOp } from '../lib/derived';
 
   let { onclose }: { onclose: () => void } = $props();
 
-  let tab = $state<'file' | 'folder' | 'link' | 'database'>('file');
+  let tab = $state<'file' | 'folder' | 'link' | 'database' | 'new'>('file');
+  /** New tables from other tables are Advanced, and need a table to start from (build 04). */
+  const canMake = $derived(app.settings?.advanced === true && app.tables.length > 0);
+  /** The way of making a new table whose sheet is open. */
+  let making = $state<DerivedOp | null>(null);
   let browsing = $state(false);
   let kind = $state<'postgres' | 'mysql'>('postgres');
   let host = $state('localhost');
@@ -118,6 +124,16 @@
   }
 </script>
 
+{#if making}
+  <NewTableSheet
+    op={making}
+    onclose={() => (making = null)}
+    ondone={(t) => {
+      making = null;
+      onclose();
+      go({ view: 'data', table: t });
+    }} />
+{:else}
 <Modal title="Add data" onclose={onclose} width={560}>
   <div class="tabs" role="tablist">
     <button role="tab" aria-selected={tab === 'file'} class:on={tab === 'file'} onclick={() => (tab = 'file')}>
@@ -132,6 +148,11 @@
     <button role="tab" aria-selected={tab === 'database'} class:on={tab === 'database'} onclick={() => (tab = 'database')}>
       <Icon name="database" size={14} /> Database
     </button>
+    {#if canMake}
+      <button role="tab" aria-selected={tab === 'new'} class:on={tab === 'new'} onclick={() => (tab = 'new')}>
+        <Icon name="newtable" size={14} /> New table
+      </button>
+    {/if}
   </div>
 
   {#if tab === 'file'}
@@ -167,6 +188,20 @@
         Tenun downloads the link and keeps a copy next to your workspace. It sends no cookies, and reads up to 50 MB.
       </p>
     </form>
+  {:else if tab === 'new'}
+    <div class="ops">
+      {#each OPS as o (o.op)}
+        <button class="op" onclick={() => (making = o.op)}>
+          <Icon name={o.icon} size={20} />
+          <strong>{o.title}</strong>
+          <span>{o.words}</span>
+        </button>
+      {/each}
+      <p class="note">
+        <Icon name="info" size={14} />
+        A new table reads the tables you pick and is made again when they change. Tenun never writes to your files.
+      </p>
+    </div>
   {:else}
     <form class="db" id="dbform" onsubmit={connect}>
       <div class="seg" role="radiogroup" aria-label="Database type">
@@ -206,6 +241,8 @@
     {/if}
   {/snippet}
 </Modal>
+
+{/if}
 
 {#if browsingFolder}
   <FileBrowser mode="folder" onclose={() => (browsingFolder = false)} onpick={(p) => { browsingFolder = false; folder = p[0]; }} />
@@ -254,6 +291,23 @@
   .drop strong { color: var(--text); font-size: 15px; font-weight: 600; }
   .drop:hover { border-color: var(--accent); }
   .paste { display: flex; gap: 8px; margin-top: 12px; }
+  .ops { display: flex; flex-direction: column; gap: 8px; }
+  .op {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 2px 10px;
+    align-items: center;
+    padding: 12px 14px;
+    border: 1px solid var(--sep);
+    border-radius: var(--r-card);
+    background: var(--window);
+    color: var(--text-2);
+    text-align: left;
+  }
+  .op :global(svg) { grid-row: span 2; color: var(--accent-text); }
+  .op strong { color: var(--text); font-size: 14px; font-weight: 600; }
+  .op span { font-size: 12px; }
+  .op:hover { border-color: var(--accent); }
   .seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--inset); margin-bottom: 14px; }
   .grid { display: grid; grid-template-columns: 1fr 140px; gap: 10px 12px; }
   .grid label { display: flex; flex-direction: column; gap: 4px; }

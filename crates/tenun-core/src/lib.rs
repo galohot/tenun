@@ -3,6 +3,7 @@
 pub mod advanced;
 pub mod calc;
 pub mod catalog;
+pub mod derived;
 pub mod engine;
 pub mod excel;
 pub mod fetch;

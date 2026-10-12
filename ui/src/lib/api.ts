@@ -230,7 +230,9 @@ export interface PastePreview {
 export interface Source {
   id: string;
   name: string;
-  kind: 'excel' | 'csv' | 'parquet' | 'sqlite' | 'duckdb' | 'folder' | 'url' | 'postgres' | 'mysql';
+  kind: 'excel' | 'csv' | 'parquet' | 'sqlite' | 'duckdb' | 'folder' | 'url' | 'postgres' | 'mysql' | 'derived';
+  /** A new table (build 04): how it is made from other tables. Its one table is called `name`. */
+  spec?: DerivedSpec;
   path?: string;
   /** Folder: the file name patterns, separated by `;`. */
   pattern?: string;
@@ -245,6 +247,27 @@ export interface Source {
   key?: LinkKey;
   host?: string;
   database?: string;
+}
+
+/** How a new table is made from other tables (build 04, V4-D6). Table ids name the inputs. */
+export type DerivedSpec =
+  | { op: 'append'; tables: string[] }
+  | { op: 'merge'; left: string; right: string; on: [string, string][]; keep: 'left' | 'inner' }
+  | { op: 'group'; table: string; by: string[]; values: GroupValue[] };
+
+/** One value of a grouped table: a column name and a formula of totals, such as SUM([amount]). */
+export interface GroupValue {
+  name: string;
+  formula: string;
+}
+
+/** A look at a new table before it is made. */
+export interface DerivedPreview {
+  columns: Column[];
+  rows: Cell[][];
+  /** How many rows the table has. */
+  total: number;
+  notes?: string[];
 }
 
 /** `median` and `p90` (the 90th percentile) take numbers only. `stdev` and `variance` are Advanced (see tiers.ts). */
@@ -785,6 +808,13 @@ export const api = {
     call<Snapshot & { added: string }>('POST', '/paste', { name, text, header }),
   addDatabase: (kind: 'postgres' | 'mysql', conn: Record<string, unknown>) =>
     call<Snapshot & { added: string }>('POST', '/sources', { kind, ...conn }),
+  /** Makes a new table from other tables (build 04). */
+  addDerived: (name: string, spec: DerivedSpec) =>
+    call<Snapshot & { added: string }>('POST', '/sources', { kind: 'derived', name, spec }),
+  /** Changes how a new table is made. Its name, links and tiles stay. */
+  setDerived: (id: string, spec: DerivedSpec) => call<Snapshot>('PUT', `/sources/${encodeURIComponent(id)}/derived`, { spec }),
+  /** The columns, first rows, size and notes of a new table before it is made. Saves nothing. */
+  previewDerived: (spec: DerivedSpec) => call<DerivedPreview>('POST', '/derived/preview', { spec }),
   removeSource: (id: string) => call<Snapshot>('DELETE', `/sources/${encodeURIComponent(id)}`),
   reloadSource: (id: string) => call<Snapshot>('POST', `/sources/${encodeURIComponent(id)}/reload`),
   preview: (id: string, limit = 200) =>

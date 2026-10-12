@@ -18,7 +18,7 @@ use tenun_core::formula::CheckRequest;
 use tenun_core::paste;
 use tenun_core::query::{Filter, SemanticQuery};
 use tenun_core::snapshot::{self, DashFilter, Tile, run_tile, run_tile_public};
-use tenun_core::workspace::{Every, FieldRef, Locale, Paging, TableSetup};
+use tenun_core::workspace::{DerivedSpec, Every, FieldRef, Locale, Paging, TableSetup};
 
 type S = State<Arc<AppState>>;
 
@@ -67,6 +67,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/sources/{id}/reload", post(reload_source))
         .route("/sources/{id}/every", put(source_every))
         .route("/sources/{id}/link", put(source_link))
+        .route("/sources/{id}/derived", put(source_derived))
+        .route("/derived/preview", post(derived_preview))
         .route("/link/preview", post(link_preview))
         .route("/paste/preview", post(paste_preview))
         .route("/paste", post(paste_add))
@@ -295,6 +297,37 @@ async fn reload_source(State(s): S, Path(id): Path<String>) -> R<Json<Value>> {
             let tables = st.engine.load(&id);
             st.emit(json!({ "type": "data-changed", "sources": [id], "tables": tables }));
             Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct DerivedBody {
+    spec: DerivedSpec,
+}
+
+/// Changes how a new table is made (build 04). Its name, links and tiles stay.
+async fn source_derived(
+    State(s): S,
+    Path(id): Path<String>,
+    Json(b): Json<DerivedBody>,
+) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let tables = st.engine.set_derived(&id, b.spec)?;
+            st.emit(json!({ "type": "data-changed", "sources": [id], "tables": tables }));
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+/// The columns, first rows, number of rows and notes of a new table before it is made.
+async fn derived_preview(State(s): S, Json(b): Json<DerivedBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            Ok(serde_json::to_value(st.engine.preview_derived(&b.spec)?)?)
         })
         .await?,
     ))

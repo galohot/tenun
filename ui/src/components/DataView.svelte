@@ -7,6 +7,8 @@
   import { failedText, hasUnpivot, isEmptySetup, withCalc, withHeaderRow, withMainDate, withUnpivot, withoutUnpivot } from '../lib/prep';
   import { tilesWith } from '../lib/measures';
   import { looksTabular, sinceWords, EVERY_CHOICES } from '../lib/sources';
+  import { fromWords } from '../lib/derived';
+  import NewTableSheet from './data/NewTableSheet.svelte';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import CalcSheet from './data/CalcSheet.svelte';
@@ -50,7 +52,10 @@
     url: 'Web link',
     postgres: 'PostgreSQL',
     mysql: 'MySQL',
+    derived: 'New table',
   };
+  /** The new table whose sheet is open, to change how it is made (build 04). */
+  let editingDerived = $state<string | null>(null);
 
   async function remove(id: string, name: string) {
     if (!confirm(`Remove ${name}? Its relationships and the tiles that use it will stop working.`)) return;
@@ -61,7 +66,7 @@
   const isId = (name: string) => /(^|[ _-])(id|code|no|key)$|id$/i.test(name);
 
   const iconOf = (kind: string) =>
-    kind === 'folder' ? 'folder' : kind === 'url' ? 'link' : ['postgres', 'mysql', 'sqlite', 'duckdb'].includes(kind) ? 'database' : 'sheet';
+    kind === 'folder' ? 'folder' : kind === 'url' ? 'link' : kind === 'derived' ? 'newtable' : ['postgres', 'mysql', 'sqlite', 'duckdb'].includes(kind) ? 'database' : 'sheet';
 
   async function setEvery(id: string, every: UrlEvery) {
     await app.run(null, () => api.setUrlEvery(id, every));
@@ -325,6 +330,11 @@
             </p>
           {:else if s.kind === 'folder'}
             <p class="srcline" title={s.path}>Reads {s.pattern}</p>
+          {:else if s.spec}
+            <p class="srcline">
+              <span class="from" title={fromWords(s.spec, app.tables)}>{fromWords(s.spec, app.tables)}</span>
+              {#if canCalc}<button class="linkbtn" onclick={() => (editingDerived = s.id)}>Change</button>{/if}
+            </p>
           {/if}
           {#if errors[s.id]}
             <p class="err"><Icon name="warning" size={13} /> {errors[s.id]}</p>
@@ -586,6 +596,10 @@
   <PasteSheet text={pasted} onclose={() => (pasted = null)} />
 {/if}
 
+{#if editingDerived}
+  <NewTableSheet op="append" editing={editingDerived} onclose={() => (editingDerived = null)} />
+{/if}
+
 {#if linkSource}
   <LinkSettings source={linkSource} onclose={() => (linkSource = null)} />
 {/if}
@@ -648,6 +662,7 @@
   .every { height: 24px; max-width: 170px; padding: 0 6px; border: 1px solid var(--sep-strong); border-radius: 5px; background: var(--inset); color: var(--text); font-size: 11px; }
   .every:focus { outline: none; border-color: var(--focus); }
   .linkbtn { border: 0; background: none; padding: 0; color: var(--accent-text); font-size: 11px; cursor: pointer; }
+  .from { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .linkbtn:hover { text-decoration: underline; }
   .err { display: flex; gap: 6px; margin: 4px 6px 6px; color: var(--danger); font-size: 12px; }
   .detail { min-width: 0; display: flex; flex-direction: column; padding: 20px 24px; gap: 12px; overflow: hidden; }
