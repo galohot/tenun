@@ -1,6 +1,6 @@
 <script lang="ts">
   // Draws one tile from its result. Used by the app and by exported files.
-  import type { Cell, QueryResult, Tile, TileFilter } from '../../lib/api';
+  import { isPart, type Cell, type QueryResult, type Tile, type TileFilter } from '../../lib/api';
   import { buildOption, CHART_TYPES, type Colors } from '../../lib/chart';
   import { barScale, barSpan, barStyle, goodBad } from '../../lib/cells';
   import { cell, columnHeads, full, numberFormatter, OTHER_KEY, resultDim0, type Named } from '../../lib/format';
@@ -8,6 +8,8 @@
   import { sparkKey, sparkPath, SPARK_H, SPARK_W } from '../../lib/charts/spark';
   import { effectiveShowAs } from '../../lib/showas';
   import { isRepeated } from '../../lib/tiles';
+  import { withNamedFormats } from '../../lib/measures';
+  import { waterfallProblem } from '../../lib/charts/math';
   import BulletView from './BulletView.svelte';
   import CalendarView from './CalendarView.svelte';
   import ChartView from './ChartView.svelte';
@@ -23,7 +25,7 @@
   import TextView from './TextView.svelte';
 
   let {
-    tile,
+    tile: given,
     res,
     colors,
     selected,
@@ -66,6 +68,9 @@
     onlayout?: (layout: 'panels') => void;
   } = $props();
 
+  // A value with no format of its own is written the way its named measure is (build 03).
+  const tile = $derived(withNamedFormats(given));
+
   /** The pixels each row of a compare or Gantt chart needs. */
   const ROW_PX = 26;
   let width = $state(400);
@@ -79,6 +84,12 @@
       return 'A scatter chart needs two values and a field to draw one dot for each.';
     }
     if (tile.type === 'waterfall' && !tile.dims.length) return 'A waterfall needs a category or a date to step through.';
+    // Steps by category add the values up, which a ratio or an average does not do (V4-D85d).
+    if (tile.type === 'waterfall') {
+      const byDate = res.columns[0]?.dtype === 'date' || res.columns[0]?.dtype === 'datetime' || isPart(tile.dims[0]?.grain);
+      const why = waterfallProblem(tile.measures[0], byDate);
+      if (why) return why;
+    }
     if (tile.type === 'heatmap' && (!tile.dims.length || !tile.cols || !tile.measures.length)) {
       return 'A heat map needs a value, a field for the rows and a field for the columns.';
     }

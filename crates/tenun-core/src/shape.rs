@@ -11,7 +11,8 @@ use crate::advanced;
 use crate::catalog::DType;
 use crate::engine::{Bins, Compare, Engine, QueryResult, Totals};
 use crate::query::{
-    Agg, Dimension, Filter, FilterOp, Grain, Measure, OutColumn, Param, SemanticQuery, Sort, Unit,
+    Agg, Dimension, Filter, FilterOp, Grain, Measure, OutColumn, Param, PartNote, SemanticQuery,
+    Sort, Unit,
 };
 use crate::snapshot::{SortBy, Tile, add_grain, iso, js_key, parse_day};
 use crate::workspace::Locale;
@@ -82,6 +83,19 @@ fn total_rows(
 ) -> anyhow::Result<()> {
     let cut = q.limit.is_some_and(|l| res.rows.len() >= l as usize);
     if tile.kind != "table" || q.dimensions.is_empty() || tile.top.is_some() || !cut {
+        return Ok(());
+    }
+    // A named measure has no one table to count the groups from: ask the question again, cut at the
+    // most any question returns.
+    if q.measures.iter().any(|m| m.named.is_some()) {
+        let all = engine.query(&SemanticQuery {
+            measures: q.measures.clone(),
+            dimensions: q.dimensions.clone(),
+            filters: q.filters.clone(),
+            sort: vec![],
+            limit: Some(10_000),
+        })?;
+        res.total_rows = Some(all.rows.len() as u64).filter(|n| *n > res.rows.len() as u64);
         return Ok(());
     }
     let (found, _) = engine.query_custom(q, |sc| {
@@ -232,15 +246,9 @@ pub fn densify(engine: &Engine, tile: &Tile, q: &SemanticQuery, res: &mut QueryR
     for r in dated {
         by_period.entry(js_key(&r[0])).or_default().push(r);
     }
-    let fill: Vec<Value> = q
-        .measures
-        .iter()
-        .map(|m| match m.agg {
-            // A ratio of nothing is a gap, not zero.
-            Agg::Sum | Agg::Count | Agg::CountDistinct if m.per.is_none() => json!(0.0),
-            _ => Value::Null,
-        })
-        .collect();
+    // A sum or a count of nothing is 0. A ratio of nothing is a gap, not zero (a named measure
+    // is worked out over nothing, so `SUM(a) / SUM(b)` is a gap and `SUM(a)` is 0).
+    let fill: Vec<Value> = engine.empty_values(&q.measures);
 
     let mut out = Vec::new();
     if desc {
@@ -608,6 +616,16 @@ pub fn show_as(tile: &Tile, q: &SemanticQuery, engine: &Engine, res: &mut QueryR
         if matches!(how, ShowAs::Value | ShowAs::Unknown) {
             continue;
         }
+        // A share of the whole, a running total and a year to date add the values up. A named
+        // measure whose values do not add up (a ratio, an average) is shown as it is, with words
+        // (V4-D85d).
+        if let Some(why) = refuses_to_add(engine, &q.measures[j], how) {
+            res.parts.push(PartNote {
+                measure: j,
+                note: why,
+            });
+            continue;
+        }
         // Year to date needs a date to read the year from. The other ways that read in order
         // need a date or a date part first, or the order is only the order of the rows.
         if (how == ShowAs::Ytd && !dated) || (how.needs_order() && !ordered) {
@@ -668,6 +686,31 @@ fn shape_column(rows: &mut [Vec<Value>], nd: usize, col: usize, how: ShowAs, per
             _ => Value::Null,
         };
     }
+}
+
+/// The ways of showing a value that add values up (V4-D85d).
+fn adds_up(how: ShowAs) -> bool {
+    matches!(
+        how,
+        ShowAs::PctTotal | ShowAs::PctGroup | ShowAs::Running | ShowAs::Ytd
+    )
+}
+
+/// Why a named measure cannot be shown this way: its values do not add up to the whole, so a
+/// share of the whole or a running total of them would be wrong. `None` when it can.
+fn refuses_to_add(engine: &Engine, m: &Measure, how: ShowAs) -> Option<String> {
+    if m.named.is_none() || !adds_up(how) {
+        return None;
+    }
+    let f = engine.measure_facts(m).ok()?;
+    if f.additive {
+        return None;
+    }
+    Some(format!(
+        "{} is not shown as {}: its values do not add up. The value is shown instead.",
+        f.name,
+        how.suffix()
+    ))
 }
 
 /// Orders the first-column values of a time chart: dates (ISO text) and date parts (numbers).
@@ -895,6 +938,7 @@ pub fn compare(
         .as_ref()
         .and_then(|l| l.first().copied().flatten())
         .filter(|h| !matches!(h, ShowAs::Value | ShowAs::Unknown))
+        .filter(|h| refuses_to_add(engine, &q.measures[0], *h).is_none())
         .map(|h| {
             if h == ShowAs::PctGroup {
                 ShowAs::PctTotal
@@ -1000,6 +1044,7 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
             agg: Agg::Count,
             per: None,
             via: m.via.clone(),
+            named: None,
         }],
         dimensions: vec![],
         filters: filters.to_vec(),
@@ -1053,6 +1098,7 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
         pair: None,
         notes: Vec::new(),
         public_notes: Vec::new(),
+        parts: Vec::new(),
     };
     let (Some(n), Some(min), Some(max), Some(q1), Some(q3)) =
         (num(0), num(1), num(2), num(3), num(4))

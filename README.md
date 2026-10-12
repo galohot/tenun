@@ -40,6 +40,10 @@ every other chart filters. Save the Excel file and the dashboard updates.
   time a table loads: a store id that appears twice never counts an order twice, and the link and
   its tiles say so. Two links to one table (stock sent from a store, stock sent to a store) get
   names. See [the relationships guide](docs/relationships.md).
+- **Measures (Advanced):** write `SUM([sales].[amount]) / SUM([targets].[target])` once, name it
+  "Achievement", and use it in any tile, though the two tables come from different files. Tenun adds
+  up each table on its own, so a target is never counted once for each sale. See
+  [the formula guide](docs/formulas.md#measures).
 - **Charts:** number, bar, line, area, share of total and table. Also stacked, side-by-side and
   100 % bars, scatter, histogram, waterfall, pivot table, filter, text and image tiles. No pies
   and no donuts: part-to-whole is a 100 % strip with the exact shares listed under it.

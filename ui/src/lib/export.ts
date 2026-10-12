@@ -1,7 +1,7 @@
 // The snapshot a dashboard is exported or published as. Built by the Rust
 // engine (`tenun-core::snapshot`); the viewer reads it.
 
-import type { Dashboard, Grain, QueryResult, Table } from './api';
+import type { Dashboard, Grain, NumFormat, QueryResult, Table } from './api';
 import type { DashFilter } from './tiles';
 
 export interface ExportPayload {
@@ -26,4 +26,6 @@ export interface ExportPayload {
   grain?: Grain | null;
   /** Link id → what the link is called, for the links the tiles name. Not set when none does. */
   links?: Record<string, string>;
+  /** The named measures the tiles use: their name and format, the type of the value and whether the values add up. Never the formula. */
+  measures?: { id: string; name: string; format?: NumFormat | null; dtype?: string | null; additive?: boolean }[];
 }

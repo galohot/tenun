@@ -27,8 +27,8 @@ export const signature = (f: FnInfo): string => `${f.name}(${f.args})`;
 export type FormulaKind = 'column' | 'measure' | 'group';
 
 export interface Scope {
-  /** The table of the formula. */
-  table: Table;
+  /** The table of the formula. A measure has none: it reads any table by its name, `[Sales].[amount]`. */
+  table: Table | null;
   tables: readonly Table[];
   rels: readonly Relationship[];
   kind: FormulaKind;
@@ -188,7 +188,7 @@ function tableItems(scope: Scope): Item[] {
   const { table, tables, rels } = scope;
   const out: Item[] = [];
   for (const t of tables) {
-    if (t.id === table.id || (scope.reach && !scope.reach.has(t.id))) continue;
+    if (t.id === table?.id || (scope.reach && !scope.reach.has(t.id))) continue;
     const firsts = scope.firsts ? scope.firsts(t.id) : [];
     const direct = firsts.map((id) => rels.find((r) => r.id === id)).filter((r): r is Relationship => !!r && r.to.table === t.id);
     const named = direct.filter((r) => r.name?.trim());
@@ -206,7 +206,7 @@ function tableItems(scope: Scope): Item[] {
       label: t.label,
       insert,
       caret: insert.length,
-      detail: firsts.length >= 2 ? 'Two links lead here. Name them in Model.' : 'Related table',
+      detail: firsts.length >= 2 ? 'Two links lead here. Name them in Model.' : table ? 'Related table' : 'Table',
     });
   }
   return out;
@@ -242,7 +242,8 @@ export function suggest(text: string, caret: number, scope: Scope): Completion |
       const items = cols.slice(0, MAX_ITEMS).map((c) => columnItem(c, bracketed));
       return items.length ? { from: place.start, to, query, items } : null;
     }
-    const own = rank(visibleColumns(scope.table, scope.editing), query, (c) => [c.name, shown(c)]).map((c) => columnItem(c, bracketed));
+    // A measure has no table of its own: every column sits inside a total, so it is named with its table.
+    const own = scope.table ? rank(visibleColumns(scope.table, scope.editing), query, (c) => [c.name, shown(c)]).map((c) => columnItem(c, bracketed)) : [];
     const others = rank(tableItems(scope), query, (i) => [i.label]);
     const items = [...own, ...others].slice(0, MAX_ITEMS);
     return items.length ? { from: place.start, to, query, items } : null;
@@ -252,7 +253,11 @@ export function suggest(text: string, caret: number, scope: Scope): Completion |
   while (start > 0 && /[A-Za-z0-9_]/.test(text[start - 1])) start--;
   const word = text.slice(start, caret);
   if (!word || !/^[A-Za-z_]/.test(word)) return null;
-  const fits = FUNCTIONS.filter((f) => scope.kind !== 'column' || f.class !== 'agg');
+  // A measure or a group value is made of totals, so the totals come first: SU offers SUM before SUBSTITUTE.
+  const fits =
+    scope.kind === 'column'
+      ? FUNCTIONS.filter((f) => f.class !== 'agg')
+      : [...FUNCTIONS.filter((f) => f.class !== 'row'), ...FUNCTIONS.filter((f) => f.class === 'row')];
   const found = rank([...fits], word, (f) => [f.name]).filter((f) => f.name.toLowerCase().startsWith(word.toLowerCase()));
   // A function that is already typed in full, with its bracket, needs no help.
   if (text[caret] === '(' && FUNCTIONS.some((f) => f.name.toLowerCase() === word.toLowerCase())) return null;

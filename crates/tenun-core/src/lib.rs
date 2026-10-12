@@ -11,6 +11,7 @@ pub mod folder;
 pub mod formula;
 pub mod jsonrec;
 pub mod links;
+pub mod measures;
 pub mod paste;
 pub mod prep;
 pub mod query;

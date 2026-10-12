@@ -162,6 +162,8 @@ impl<'a> JoinPlan<'a> {
                 sql_ref: e.target_sql(tt, fc.dtype != tc.dtype),
                 alias: alias.clone(),
                 on,
+                rel: e.rel.clone(),
+                warn: e.warn,
             });
             from = alias;
         }
@@ -258,6 +260,10 @@ impl<'a> Gen<'a> {
             zero_when_empty: matches!(
                 name,
                 "SUM" | "SUMIF" | "COUNT" | "COUNTA" | "COUNTD" | "COUNTIF" | "COUNTROWS"
+            ),
+            additive: matches!(
+                name,
+                "SUM" | "SUMIF" | "COUNT" | "COUNTA" | "COUNTIF" | "COUNTROWS"
             ),
         };
         let i = match self.parts.iter().position(|p| *p == part) {

@@ -2,6 +2,7 @@
 // the focus sheet's table view all read this one shape. Pure code: no app state.
 
 import type { Cell, QueryResult, Tile } from './api';
+import { nameOf } from './measures.ts';
 
 /** The key the engine gives the "Other" group of a top N (same as `OTHER_KEY` in format.ts). */
 const OTHER_KEY = '\u0000other';
@@ -23,7 +24,7 @@ export function kpiRows(tile: Tile, res: QueryResult): QueryResult {
     ...res,
     columns: [
       { name: 'Period', role: 'dimension', dtype: 'text' },
-      { name: tile.measures[0]?.column ?? 'Value', role: 'measure', dtype: 'number' },
+      { name: tile.measures[0]?.named ? nameOf(tile.measures[0].named) : (tile.measures[0]?.column ?? 'Value'), role: 'measure', dtype: 'number' },
     ],
     rows: bars.map((b) => [b.label, b.value]),
   };

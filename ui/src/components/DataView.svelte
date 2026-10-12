@@ -1,15 +1,17 @@
 <script lang="ts">
-  import { api, type Cell, type Column, type Profile, type Source, type TableSetup, type Tile, type UnpivotPlan, type UrlEvery } from '../lib/api';
+  import { api, type Cell, type Column, type NamedMeasure, type Profile, type Source, type TableSetup, type Tile, type TileRef, type UnpivotPlan, type UrlEvery } from '../lib/api';
   import { typeIcon } from '../lib/ui';
   import { app, go } from '../lib/state.svelte';
   import { cell, full, tileTitle } from '../lib/format';
   import { readersOf, tilesUsing, useWords } from '../lib/formula';
-  import { failedText, hasUnpivot, isEmptySetup, withCalc, withHeaderRow, withUnpivot, withoutUnpivot } from '../lib/prep';
+  import { failedText, hasUnpivot, isEmptySetup, withCalc, withHeaderRow, withMainDate, withUnpivot, withoutUnpivot } from '../lib/prep';
+  import { tilesWith } from '../lib/measures';
   import { looksTabular, sinceWords, EVERY_CHOICES } from '../lib/sources';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import CalcSheet from './data/CalcSheet.svelte';
   import ColumnMenu from './data/ColumnMenu.svelte';
+  import MeasureSheet from './data/MeasureSheet.svelte';
   import ProfileCard from './data/ProfileCard.svelte';
   import UnpivotSheet from './data/UnpivotSheet.svelte';
   import PasteSheet from './data/PasteSheet.svelte';
@@ -197,6 +199,48 @@
     await save(withCalc(setup, (setup?.calc ?? []).filter((c) => c.name !== name)));
   }
 
+  // --- Measures (build 03) -------------------------------------------------------------------
+  // Advanced (V4-D20). A dashboard that uses a measure opens and works with the switch off (V3-D2).
+  const measures = $derived(app.snap!.workspace.measures ?? []);
+  const measureInfo = $derived(app.snap!.measure_info ?? {});
+  let measureSheet = $state<{ editing?: string } | null>(null);
+  /** The measure to delete and the tiles that use it, while the question is open. */
+  let askMeasure = $state<{ id: string; name: string; tiles: TileRef[] } | null>(null);
+
+  const usedIn = (m: NamedMeasure) => tilesWith(app.dashboards, m.id).length;
+
+  /** What a tile is called: its title, or the words it is given when it has none. */
+  function tileName(r: TileRef): string {
+    const t = app.dashboards.find((d) => d.id === r.dashboard)?.tiles.find((x) => x.id === r.tile);
+    const title = t ? tileTitle(t, app.tables) : r.title;
+    return `${title.trim() ? title : `A ${r.kind} tile`} on ${r.dashboardTitle || 'a dashboard'}`;
+  }
+
+  async function removeMeasure(m: NamedMeasure, confirmed = false) {
+    app.busy = 'Saving';
+    try {
+      const r = await api.setMeasures(
+        measures.filter((x) => x.id !== m.id),
+        confirmed,
+      );
+      if ('saved' in r) {
+        app.snap = r.saved;
+        askMeasure = null;
+      } else {
+        askMeasure = { id: m.id, name: m.name, tiles: r.used.find((u) => u.measure === m.id)?.tiles ?? [] };
+      }
+    } catch (e) {
+      app.error(e);
+    } finally {
+      app.busy = null;
+    }
+  }
+
+  // The main date: the date a measure uses to line this table up with the others over time (V4-D5).
+  const dateColumns = $derived((table?.columns ?? []).filter((c) => c.dtype === 'date' || c.dtype === 'datetime'));
+  const readByMeasure = $derived(!!table && Object.values(measureInfo).some((i) => i.tables.includes(table.id)));
+  const showMainDate = $derived(dateColumns.length >= 2 || (readByMeasure && dateColumns.length >= 1));
+
   // Column menu and hover profile.
   let menu = $state<{ column: string; x: number; y: number } | null>(null);
   const menuColumn = $derived(table?.columns.find((c) => c.name === menu?.column));
@@ -295,6 +339,33 @@
           </div>
         </section>
       {/each}
+      {#if canCalc || measures.length}
+        <section class="measures" aria-label="Measures">
+          <div class="src">
+            <Icon name="fx" size={15} />
+            <span class="src-name">Measures</span>
+            <span class="kind">{measures.length ? `${measures.length}` : ''}</span>
+          </div>
+          {#each measures as m (m.id)}
+            {@const info = measureInfo[m.id]}
+            <div class="msr" class:bad={!!info?.error}>
+              <button class="msr-main" onclick={() => canCalc && (measureSheet = { editing: m.id })} disabled={!canCalc} title={info?.error ?? m.description ?? m.formula}>
+                <span class="mname">{m.name}{#if info?.error}<Icon name="warning" size={12} />{/if}</span>
+                <span class="mformula">{m.formula}</span>
+                <span class="muse">{info?.error ? 'Does not work now' : usedIn(m) ? `Used in ${usedIn(m)} ${usedIn(m) === 1 ? 'tile' : 'tiles'}` : 'Not used yet'}</span>
+              </button>
+              {#if canCalc}
+                <button class="btn plain icon tiny" title="Delete {m.name}" aria-label="Delete {m.name}" onclick={() => removeMeasure(m)}><Icon name="trash" size={13} /></button>
+              {/if}
+            </div>
+          {:else}
+            <p class="srcline mhint">A measure is a formula of totals, like SUM([Sales].[amount]) / SUM([Targets].[target]). Any tile can use it.</p>
+          {/each}
+          {#if canCalc}
+            <button class="btn newm" onclick={() => (measureSheet = {})}><Icon name="plus" size={13} /> New measure</button>
+          {/if}
+        </section>
+      {/if}
       </div>
     </aside>
 
@@ -315,8 +386,21 @@
               </ul>
             {/if}
           </div>
-          {#if table.prep || canCalc}
+          {#if table.prep || canCalc || showMainDate}
             <div class="tools">
+              {#if showMainDate}
+                <label class="hdr" title="The date a measure uses to line this table up with the others over time">
+                  <span class="label">Main date</span>
+                  <select
+                    class="field"
+                    aria-label="Main date"
+                    value={setup?.mainDate ?? ''}
+                    onchange={(e) => save(withMainDate(setup, e.currentTarget.value || undefined))}>
+                    <option value="">{dateColumns.length === 1 ? `${dateColumns[0].label ?? dateColumns[0].name} (the only date)` : 'Not set'}</option>
+                    {#each dateColumns as c (c.name)}<option value={c.name}>{c.label ?? c.name}</option>{/each}
+                  </select>
+                </label>
+              {/if}
               {#if canCalc}
                 <button class="btn" title="Add a column that is computed from the others" onclick={() => (calcSheet = {})}><Icon name="fx" size={13} /> Add column</button>
               {/if}
@@ -439,6 +523,26 @@
   <CalcSheet {table} {setup} editing={calcSheet.editing} onclose={() => (calcSheet = null)} />
 {/if}
 
+{#if measureSheet}
+  <MeasureSheet editing={measureSheet.editing} onclose={() => (measureSheet = null)} />
+{/if}
+
+{#if askMeasure}
+  {@const d = askMeasure}
+  <Modal title="Delete {d.name}?" width={460} onclose={() => (askMeasure = null)}>
+    <p class="lead">
+      {d.tiles.length === 1 ? 'This tile uses' : `These ${d.tiles.length} tiles use`} the measure. {d.tiles.length === 1 ? 'It' : 'They'} will show an error until you pick another measure.
+    </p>
+    <ul class="uses">
+      {#each d.tiles as t, i (i)}<li>{tileName(t)}</li>{/each}
+    </ul>
+    {#snippet footer()}
+      <button class="btn" onclick={() => (askMeasure = null)}>Keep the measure</button>
+      <button class="btn danger" onclick={() => removeMeasure({ id: d.id, name: d.name } as NamedMeasure, true)}>Delete measure</button>
+    {/snippet}
+  </Modal>
+{/if}
+
 {#if askDelete}
   {@const d = askDelete}
   <Modal title="Delete {d.shown}?" width={460} onclose={() => (askDelete = null)}>
@@ -555,6 +659,7 @@
   .notes li.bad { color: var(--danger); }
   .tools { display: flex; align-items: center; gap: 8px; flex: none; flex-wrap: wrap; }
   .hdr { display: flex; align-items: center; gap: 6px; }
+  .hdr .label { white-space: nowrap; }
   .num-box { width: 64px; height: 28px; padding: 0 8px; border-color: var(--sep-strong); }
   .num-box:focus { border-color: var(--focus); }
   .prep { position: relative; }
@@ -590,6 +695,29 @@
   .hd .fx { margin-right: 4px; }
   .col .fx :global(svg), .hd .fx :global(svg) { color: var(--accent-text); opacity: 1; }
   .col .fx { margin-left: 1px; }
+  .measures { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--sep); }
+  .msr { display: flex; align-items: flex-start; gap: 2px; border-radius: var(--r-control); }
+  .msr:hover { background: var(--hover); }
+  .msr-main {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 1px;
+    padding: 5px 8px 5px 28px;
+    border: 0;
+    background: none;
+    text-align: left;
+    color: inherit;
+    cursor: pointer;
+  }
+  .msr-main:disabled { cursor: default; }
+  .msr .tiny { margin-top: 5px; }
+  .mname { display: flex; align-items: center; gap: 5px; font-weight: 600; min-width: 0; }
+  .msr.bad .mname { color: var(--danger); }
+  .mformula { font: 11px/16px var(--mono); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .muse { font-size: 11px; color: var(--text-2); }
+  .mhint { margin: 2px 8px 6px 28px; display: block; }
+  .newm { margin: 6px 6px 0 28px; }
   .lead { margin: 0 0 10px; }
   .uses { margin: 0 0 10px; padding-left: 18px; font-size: 13px; }
   .uses li { margin: 2px 0; }

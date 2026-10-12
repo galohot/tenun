@@ -105,6 +105,7 @@ function tidy(s: TableSetup): TableSetup {
   if (s.columns && Object.keys(s.columns).length) out.columns = s.columns;
   if (s.transforms?.length) out.transforms = s.transforms;
   if (s.calc?.length) out.calc = s.calc;
+  if (s.mainDate) out.mainDate = s.mainDate;
   return out;
 }
 
@@ -118,6 +119,9 @@ export function barHeights(counts: number[]): number[] {
 
 /** The setup with its calculated columns replaced. An empty list leaves none in the file. */
 export const withCalc = (setup: TableSetup | undefined, calc: CalcColumn[]): TableSetup => tidy({ ...setup, calc });
+
+/** The setup with the date a measure lines this table up with over time. `undefined` goes back to the table's only date column. */
+export const withMainDate = (setup: TableSetup | undefined, column: string | undefined): TableSetup => tidy({ ...setup, mainDate: column });
 
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 

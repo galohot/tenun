@@ -236,9 +236,12 @@
   const usedSources = $derived.by(() => {
     const ids = new Set<string>();
     for (const t of dash?.tiles ?? []) {
-      for (const ref of [...t.measures, ...t.dims, ...(t.cols ? [t.cols] : []), ...(t.repeat ? [t.repeat] : [])]) {
+      // A named measure reads the tables of its formula.
+      const named = t.measures.filter((m) => m.named).flatMap((m) => app.snap!.measure_info?.[m.named!]?.tables ?? []);
+      const refs = [...t.measures.filter((m) => !m.named).map((m) => m.table), ...named, ...t.dims.map((d) => d.table), ...(t.cols ? [t.cols.table] : []), ...(t.repeat ? [t.repeat.table] : [])];
+      for (const table of refs) {
         // A source that failed to load has no tables left, so fall back to the id prefix.
-        ids.add(app.table(ref.table)?.source_id ?? ref.table.split('/')[0]);
+        ids.add(app.table(table)?.source_id ?? table.split('/')[0]);
       }
     }
     return app.snap!.workspace.sources.filter((s) => ids.has(s.id));

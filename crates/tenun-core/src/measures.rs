@@ -1,0 +1,997 @@
+//! Named measures: formulas of totals that work across tables (build 03, V4-D4, V4-D5, V4-D85).
+//!
+//! A tile that uses a named measure (`{ named: "m1" }`) asks the same question as any tile: some
+//! values, grouped by some fields, under some filters. The formula says what is added up, and the
+//! parts of it may come from different tables (`SUM([Sales].[amount]) / SUM([Targets].[target])`).
+//! Joining those tables first and adding up after would count a target once for each sale. So each
+//! **home table** is totalled on its own, in a sub-query of its own that reaches the groups and the
+//! filters the way a plain question from that table does (`query::scope_on`, so the one-row-per-key
+//! rule of V4-D50 and V4-D51 holds in every part), and the sub-queries meet on the group values.
+//! Then the formula combines the parts in an outer query, because `TRY` cannot wrap an aggregate
+//! (V4-D32).
+//!
+//! - **One table, every group reachable from it, and a formula that is one total** (`SUM(...)`, no
+//!   arithmetic around it): one SELECT, the shape a plain measure has (the fast path).
+//! - **Otherwise**: one sub-query for each home table (`g0`, `g1`…), each grouped by the groups it
+//!   can reach. The group values of the tile come from the sub-queries that reach all of them
+//!   (`FULL OUTER JOIN` on `IS NOT DISTINCT FROM`, so a blank group is a group). A sub-query that
+//!   reaches only some of the groups is joined on those, so its value repeats across the rest.
+//!   A group that is missing from a part gives 0 for a sum or a count (V4-D22) and blank for the rest.
+//! - **A group a table cannot reach** is dropped from that table's sub-query. A time group (a date at
+//!   a grain) is read from the table's main date instead (V4-D5), and so is a filter on a date. Any
+//!   other group or filter is left out of that part, and the result says so in `parts` (V4-D85).
+//!
+//! A plain measure beside a named one is a part of its own and reads as it does alone.
+
+use crate::catalog::{Catalog, Column, DType, ident};
+use crate::formula::{self, AggregateSql, Body, Join, Kind};
+use crate::links::{Health, Links, PathError};
+use crate::query::{
+    self, Agg, Compiled, Dimension, Filter, Grain, Joins, Measure, OutColumn, PartNote, QueryError,
+    SemanticQuery, explain, label, lookup, order_limit, scope_on,
+};
+use crate::snapshot::count_rows;
+use crate::workspace::{NamedMeasure, Relationship, TableSetup};
+use chrono::{NaiveDate, NaiveDateTime};
+use std::collections::BTreeMap;
+
+/// A workspace uses at most this many named measures. The rest stay in the file and are not
+/// worked out, and a tile that uses one says why (V4-D85c).
+pub const MAX_MEASURES: usize = 200;
+/// A formula of a measure has at most this many characters (V4-D24).
+pub const MAX_FORMULA: usize = 10_000;
+
+/// What a question about named measures is read against.
+pub struct Env<'a> {
+    pub measures: &'a [NamedMeasure],
+    /// The setup of each table, for its main date.
+    pub tables: &'a BTreeMap<String, TableSetup>,
+    pub rels: &'a [Relationship],
+    pub health: &'a Health,
+    /// What `NOW()` is. `TODAY()` is its date.
+    pub now: NaiveDateTime,
+}
+
+impl<'a> Env<'a> {
+    fn links(&self) -> Links<'a> {
+        Links::new(self.rels, Some(self.health))
+    }
+}
+
+/// A named measure, checked and written as SQL.
+#[derive(Debug, Clone)]
+pub struct Resolved {
+    pub name: String,
+    pub agg: AggregateSql,
+    pub dtype: DType,
+}
+
+impl Resolved {
+    /// The formula is one total and nothing else: `SUM(...)`, `AVERAGE(...)`.
+    fn is_one_total(&self) -> bool {
+        self.agg.parts.len() == 1 && self.agg.combine.trim() == "$p0"
+    }
+
+    /// The value for a group, or the whole, is the sum of the values of its parts: a share of the
+    /// whole, a running total or a pile of bars read it right. A formula that is one sum or count
+    /// is. So is a plain sum, count or difference of them (`SUM([a]) - SUM([b])`).
+    pub fn is_additive(&self) -> bool {
+        !self.agg.parts.is_empty()
+            && self.agg.parts.iter().all(|p| p.additive)
+            && combine_is_linear(&self.agg.combine)
+    }
+
+    /// The tables whose rows the formula adds up, once each, in the order it reads them.
+    pub fn homes(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for p in &self.agg.parts {
+            if !out.contains(&p.home_table) {
+                out.push(p.home_table.clone());
+            }
+        }
+        out
+    }
+
+    /// The value of the formula over no rows at all, as SQL: 0 for a sum or a count, blank for the
+    /// rest, and what the formula makes of them. A time chart fills a quiet period with this.
+    pub fn empty_sql(&self) -> String {
+        let values: Vec<String> = self
+            .agg
+            .parts
+            .iter()
+            .map(|p| {
+                if p.zero_when_empty {
+                    "0e0".to_string()
+                } else {
+                    typed_null(p.dtype)
+                }
+            })
+            .collect();
+        format!("SELECT {}", out_sql(&self.agg.fill(&values), self.dtype))
+    }
+}
+
+/// The formula that combines the parts is linear in them: sums and differences of parts, and a
+/// part times or over a number. Then the value of a whole is the sum of the values of its groups.
+/// `SUM(a) + 5` is not (5 would be added once for each group), `SUM(a) * SUM(b)` is not, and
+/// neither is `ROUND(SUM(a), 2)` or `SUM(a) / SUM(b)`.
+fn combine_is_linear(combine: &str) -> bool {
+    #[derive(PartialEq, Clone, Copy)]
+    enum Shape {
+        /// A number.
+        Number,
+        /// Made of parts, and linear in them.
+        Linear,
+    }
+    struct P<'a> {
+        s: &'a [u8],
+        at: usize,
+    }
+    impl P<'_> {
+        fn skip(&mut self) {
+            while self.s.get(self.at).is_some_and(u8::is_ascii_whitespace) {
+                self.at += 1;
+            }
+        }
+        fn eat(&mut self, c: u8) -> bool {
+            self.skip();
+            if self.s.get(self.at) == Some(&c) {
+                self.at += 1;
+                true
+            } else {
+                false
+            }
+        }
+        fn expr(&mut self) -> Option<Shape> {
+            let mut left = self.term()?;
+            loop {
+                let plus = self.eat(b'+');
+                if !plus && !self.eat(b'-') {
+                    return Some(left);
+                }
+                let right = self.term()?;
+                // A part plus a number is a part with something added once, not a linear one.
+                if left != right {
+                    return None;
+                }
+                left = right;
+            }
+        }
+        fn term(&mut self) -> Option<Shape> {
+            let mut left = self.unary()?;
+            loop {
+                if self.eat(b'*') {
+                    let right = self.unary()?;
+                    left = match (left, right) {
+                        (Shape::Number, Shape::Number) => Shape::Number,
+                        (Shape::Linear, Shape::Number) | (Shape::Number, Shape::Linear) => {
+                            Shape::Linear
+                        }
+                        _ => return None,
+                    };
+                } else if self.eat(b'/') {
+                    // Over a number only.
+                    if self.unary()? != Shape::Number {
+                        return None;
+                    }
+                } else {
+                    return Some(left);
+                }
+            }
+        }
+        fn unary(&mut self) -> Option<Shape> {
+            if self.eat(b'-') || self.eat(b'+') {
+                return self.unary();
+            }
+            if self.eat(b'(') {
+                let inner = self.expr()?;
+                return self.eat(b')').then_some(inner);
+            }
+            self.skip();
+            let start = self.at;
+            if self.s.get(self.at) == Some(&b'$') && self.s.get(self.at + 1) == Some(&b'p') {
+                self.at += 2;
+                while self.s.get(self.at).is_some_and(u8::is_ascii_digit) {
+                    self.at += 1;
+                }
+                return (self.at > start + 2).then_some(Shape::Linear);
+            }
+            // A number, written the way SQL writes it: `1.11e0`.
+            while self
+                .s
+                .get(self.at)
+                .is_some_and(|c| c.is_ascii_digit() || matches!(c, b'.' | b'e' | b'E'))
+            {
+                self.at += 1;
+            }
+            (self.at > start).then_some(Shape::Number)
+        }
+    }
+    let mut p = P {
+        s: combine.as_bytes(),
+        at: 0,
+    };
+    let shape = p.expr();
+    p.skip();
+    shape == Some(Shape::Linear) && p.at == combine.len()
+}
+
+fn typed_null(d: DType) -> String {
+    match d {
+        DType::Number => "CAST(NULL AS DOUBLE)",
+        DType::Text => "CAST(NULL AS VARCHAR)",
+        DType::Date => "CAST(NULL AS DATE)",
+        DType::DateTime => "CAST(NULL AS TIMESTAMP)",
+        DType::Bool => "CAST(NULL AS BOOLEAN)",
+    }
+    .into()
+}
+
+/// A value as a query column shows it: numbers as DOUBLE, dates as text.
+fn out_sql(sql: &str, dtype: DType) -> String {
+    match dtype {
+        DType::Number => format!("CAST({sql} AS DOUBLE)"),
+        DType::Text => format!("CAST({sql} AS VARCHAR)"),
+        DType::Date => format!("strftime({sql}, '%Y-%m-%d')"),
+        DType::DateTime => format!("strftime({sql}, '%Y-%m-%dT%H:%M:%S')"),
+        DType::Bool => sql.to_string(),
+    }
+}
+
+/// Finds a named measure and writes its formula as SQL. A measure past a limit (V4-D85c) or with a
+/// formula that does not work now is an error in words, never a crash.
+pub fn resolve(env: &Env<'_>, catalog: &Catalog, id: &str) -> Result<Resolved, QueryError> {
+    let at = env
+        .measures
+        .iter()
+        .position(|m| m.id == id)
+        .ok_or(QueryError::UnknownMeasure)?;
+    let nm = &env.measures[at];
+    if at >= MAX_MEASURES {
+        return Err(QueryError::MeasureLimit(
+            nm.name.clone(),
+            format!(
+                "a workspace uses its first {MAX_MEASURES} measures. Delete one that is not needed."
+            ),
+        ));
+    }
+    if nm.formula.chars().count() > MAX_FORMULA {
+        return Err(QueryError::MeasureLimit(
+            nm.name.clone(),
+            format!("its formula is longer than {MAX_FORMULA} characters. Make it shorter."),
+        ));
+    }
+    let cx = formula::Context {
+        catalog,
+        rels: env.rels,
+        health: env.health,
+        today: env.now.date(),
+        now: env.now,
+        view: false,
+    };
+    let c = formula::compile(&nm.formula, Kind::Measure, None, &cx)
+        .map_err(|e| QueryError::MeasureBroken(nm.name.clone(), e.message))?;
+    match c.body {
+        Body::Aggregate(agg) => Ok(Resolved {
+            name: nm.name.clone(),
+            agg,
+            dtype: c.dtype,
+        }),
+        Body::Column(_) => Err(QueryError::MeasureBroken(
+            nm.name.clone(),
+            "A measure adds things up. Use SUM, AVERAGE, COUNT or another total.".into(),
+        )),
+    }
+}
+
+/// What the engine needs to know about one measure of a tile: the tables it adds up, whether its
+/// values add up to the whole, and what it is called.
+pub struct Facts {
+    pub name: String,
+    pub homes: Vec<String>,
+    pub additive: bool,
+}
+
+pub fn facts(env: &Env<'_>, catalog: &Catalog, m: &Measure) -> Result<Facts, QueryError> {
+    match &m.named {
+        Some(id) => {
+            let r = resolve(env, catalog, id)?;
+            Ok(Facts {
+                homes: r.homes(),
+                additive: r.is_additive(),
+                name: r.name,
+            })
+        }
+        None => Ok(Facts {
+            name: m.column.clone().unwrap_or_else(|| "Rows".into()),
+            homes: vec![m.table.clone()],
+            additive: m.per.is_none() && matches!(m.agg, Agg::Sum | Agg::Count),
+        }),
+    }
+}
+
+/// What the app needs to know about a measure of the workspace: its type, whether its values add
+/// up (a share of the whole, a running total and a pile of bars are only right for these), the
+/// tables it adds up, and why it does not work, if it does not. Made with every snapshot.
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct MeasureInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dtype: Option<DType>,
+    pub additive: bool,
+    /// The ids of the tables the formula adds up.
+    pub tables: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// The info of every measure, by id.
+pub fn infos(env: &Env<'_>, catalog: &Catalog) -> BTreeMap<String, MeasureInfo> {
+    env.measures
+        .iter()
+        .map(|m| {
+            let info = match resolve(env, catalog, &m.id) {
+                Ok(r) => MeasureInfo {
+                    dtype: Some(r.dtype),
+                    additive: r.is_additive(),
+                    tables: r.homes(),
+                    error: None,
+                },
+                Err(e) => MeasureInfo {
+                    dtype: None,
+                    additive: false,
+                    tables: Vec::new(),
+                    error: Some(match e {
+                        QueryError::MeasureBroken(_, why) | QueryError::MeasureLimit(_, why) => why,
+                        other => other.to_string(),
+                    }),
+                },
+            };
+            (m.id.clone(), info)
+        })
+        .collect()
+}
+
+// ---- the question, read part by part -----------------------------------------------------
+
+enum Item {
+    Plain(Measure),
+    Named(Resolved),
+}
+
+/// One total inside a sub-query.
+#[derive(PartialEq)]
+enum Member {
+    /// The SQL of a part of a formula, over `t0` and the joins of its group.
+    Sql(String),
+    /// A plain measure, written by the scope of the group.
+    Plain(Measure),
+}
+
+/// All the totals of one home table that read the same joins: one sub-query.
+struct Group {
+    home: String,
+    joins: Vec<Join>,
+    members: Vec<Member>,
+    /// A plain measure with a ratio or a link of its own: its sub-query is built from that measure.
+    lone: bool,
+}
+
+impl Group {
+    fn add(&mut self, m: Member) -> usize {
+        match self.members.iter().position(|x| *x == m) {
+            Some(i) => i,
+            None => {
+                self.members.push(m);
+                self.members.len() - 1
+            }
+        }
+    }
+}
+
+/// Where the total of a measure sits: the sub-query and the place in it.
+#[derive(Clone, Copy)]
+struct Slot {
+    group: usize,
+    member: usize,
+}
+
+/// The date column a time group or a date filter uses for a table (V4-D5): the one the user picked
+/// (`mainDate`), else the only date or date-time column of the table.
+pub fn main_date<'a>(
+    catalog: &'a Catalog,
+    tables: &BTreeMap<String, TableSetup>,
+    table: &str,
+) -> Option<&'a Column> {
+    let t = catalog.table(table)?;
+    if let Some(name) = tables.get(table).and_then(|s| s.main_date.as_deref()) {
+        return t.column(name).filter(|c| c.dtype.is_temporal());
+    }
+    let mut dates = t.columns.iter().filter(|c| c.dtype.is_temporal());
+    match (dates.next(), dates.next()) {
+        (Some(c), None) => Some(c),
+        _ => None,
+    }
+}
+
+fn is_date(catalog: &Catalog, table: &str, column: &str) -> bool {
+    catalog
+        .table(table)
+        .and_then(|t| t.column(column))
+        .is_some_and(|c| c.dtype.is_temporal())
+}
+
+fn column_label(catalog: &Catalog, table: &str, column: &str) -> String {
+    catalog
+        .table(table)
+        .and_then(|t| t.column(column))
+        .and_then(|c| c.label.clone())
+        .unwrap_or_else(|| column.to_string())
+}
+
+/// What one group reads of the question: the groups and the filters it can reach (a date read from
+/// the main date counts as reached).
+struct Reads {
+    dims: Vec<Option<Dimension>>,
+    filters: Vec<Option<Filter>>,
+}
+
+fn reads(
+    catalog: &Catalog,
+    env: &Env<'_>,
+    links: Links<'_>,
+    home: &str,
+    q: &SemanticQuery,
+) -> Result<Reads, QueryError> {
+    let reaches = |table: &str, via: Option<&str>| -> Result<(), PathError> {
+        Joins::new(home, links).add(table, via)
+    };
+    let main = main_date(catalog, env.tables, home).map(|c| c.name.clone());
+    let mut dims = Vec::new();
+    for d in &q.dimensions {
+        lookup(catalog, &d.table)?;
+        dims.push(match reaches(&d.table, d.via.as_deref()) {
+            Ok(()) => Some(d.clone()),
+            Err(PathError::Gone) => return Err(QueryError::LinkGone),
+            // A date at a grain is read from the main date of this table, at the same grain.
+            Err(_) => match (&main, d.grain) {
+                (Some(m), Some(g)) if is_date(catalog, &d.table, &d.column) => Some(Dimension {
+                    table: home.to_string(),
+                    column: m.clone(),
+                    grain: Some(g),
+                    via: None,
+                }),
+                _ => None,
+            },
+        });
+    }
+    let mut filters = Vec::new();
+    for f in &q.filters {
+        filters.push(if catalog.table(&f.table).is_none() {
+            None
+        } else {
+            match reaches(&f.table, f.via.as_deref()) {
+                Ok(()) => Some(f.clone()),
+                Err(_) => match &main {
+                    Some(m) if is_date(catalog, &f.table, &f.column) => Some(Filter {
+                        table: home.to_string(),
+                        column: m.clone(),
+                        via: None,
+                        ..f.clone()
+                    }),
+                    _ => None,
+                },
+            }
+        });
+    }
+    Ok(Reads { dims, filters })
+}
+
+/// Compiles a question that has a named measure in it. A question with none is compiled by
+/// `query::compile_on`, unchanged.
+pub fn compile(
+    q: &SemanticQuery,
+    catalog: &Catalog,
+    today: NaiveDate,
+    env: &Env<'_>,
+) -> Result<Compiled, QueryError> {
+    let links = env.links();
+    if q.measures.iter().all(|m| m.named.is_none()) {
+        return query::compile_on(q, catalog, links, today);
+    }
+    // 1. The measures, and the totals they are made of, grouped by the table they read.
+    let mut items = Vec::new();
+    for m in &q.measures {
+        items.push(match &m.named {
+            Some(id) => Item::Named(resolve(env, catalog, id)?),
+            None => {
+                lookup(catalog, &m.table)?;
+                Item::Plain(m.clone())
+            }
+        });
+    }
+    let mut groups: Vec<Group> = Vec::new();
+    let mut slots: Vec<Vec<Slot>> = Vec::new();
+    for item in &items {
+        let mut mine = Vec::new();
+        match item {
+            Item::Named(r) => {
+                for p in &r.agg.parts {
+                    lookup(catalog, &p.home_table)?;
+                    let g = match groups
+                        .iter()
+                        .position(|g| !g.lone && g.home == p.home_table && g.joins == p.joins)
+                    {
+                        Some(g) => g,
+                        None => {
+                            groups.push(Group {
+                                home: p.home_table.clone(),
+                                joins: p.joins.clone(),
+                                members: Vec::new(),
+                                lone: false,
+                            });
+                            groups.len() - 1
+                        }
+                    };
+                    let member = groups[g].add(Member::Sql(p.sql.clone()));
+                    mine.push(Slot { group: g, member });
+                }
+            }
+            Item::Plain(m) if m.per.is_none() && m.via.is_none() => {
+                let g = match groups
+                    .iter()
+                    .position(|g| !g.lone && g.home == m.table && g.joins.is_empty())
+                {
+                    Some(g) => g,
+                    None => {
+                        groups.push(Group {
+                            home: m.table.clone(),
+                            joins: Vec::new(),
+                            members: Vec::new(),
+                            lone: false,
+                        });
+                        groups.len() - 1
+                    }
+                };
+                let member = groups[g].add(Member::Plain(m.clone()));
+                mine.push(Slot { group: g, member });
+            }
+            Item::Plain(m) => {
+                let g = match groups
+                    .iter()
+                    .position(|g| g.lone && g.members == [Member::Plain(m.clone())])
+                {
+                    Some(g) => g,
+                    None => {
+                        groups.push(Group {
+                            home: m.table.clone(),
+                            joins: Vec::new(),
+                            members: vec![Member::Plain(m.clone())],
+                            lone: true,
+                        });
+                        groups.len() - 1
+                    }
+                };
+                mine.push(Slot {
+                    group: g,
+                    member: 0,
+                });
+            }
+        }
+        slots.push(mine);
+    }
+    if groups.is_empty() {
+        let name = items
+            .iter()
+            .find_map(|i| match i {
+                Item::Named(r) => Some(r.name.clone()),
+                Item::Plain(_) => None,
+            })
+            .unwrap_or_default();
+        return Err(QueryError::MeasureBroken(
+            name,
+            "A measure adds things up. Use SUM, AVERAGE, COUNT or another total.".into(),
+        ));
+    }
+
+    // 2. What each group can reach of the groups and the filters of the question.
+    let nd = q.dimensions.len();
+    let mut read: Vec<Reads> = Vec::new();
+    for g in &groups {
+        read.push(reads(catalog, env, links, &g.home, q)?);
+    }
+    // A group that no table can reach is an error, in the words a plain question gives.
+    for (i, d) in q.dimensions.iter().enumerate() {
+        if read.iter().all(|r| r.dims[i].is_none()) {
+            let home = &groups[0].home;
+            let err = Joins::new(home, links)
+                .add(&d.table, d.via.as_deref())
+                .err()
+                .unwrap_or(PathError::No);
+            return Err(explain(catalog, links, home, &d.table, err));
+        }
+    }
+    let ignored: Vec<usize> = (0..q.filters.len())
+        .filter(|&j| read.iter().all(|r| r.filters[j].is_none()))
+        .collect();
+
+    // 3. One scope for each group, as a plain question from its home table.
+    let mut scopes = Vec::new();
+    for (g, r) in groups.iter().zip(&read) {
+        let lead = match (&g.lone, g.members.first()) {
+            (true, Some(Member::Plain(m))) => m.clone(),
+            _ => count_rows(&g.home),
+        };
+        let sq = SemanticQuery {
+            measures: vec![lead],
+            dimensions: r.dims.iter().flatten().cloned().collect(),
+            filters: r.filters.iter().flatten().cloned().collect(),
+            sort: vec![],
+            limit: None,
+        };
+        scopes.push(scope_on(&sq, catalog, links, today)?);
+    }
+
+    // 4. The text of each group: its group values and its totals.
+    let mut dim_exprs: Vec<Vec<Option<String>>> = Vec::new();
+    let mut dim_types: Vec<Option<DType>> = vec![None; nd];
+    let mut member_exprs: Vec<Vec<String>> = Vec::new();
+    let mut plain_names: BTreeMap<(usize, usize), (String, DType)> = BTreeMap::new();
+    for (gi, g) in groups.iter().enumerate() {
+        let sc = &scopes[gi];
+        let mut exprs = Vec::new();
+        for (i, d) in read[gi].dims.iter().enumerate() {
+            exprs.push(match d {
+                Some(d) => {
+                    let (e, t) = sc.expr_via(&d.table, d.via.as_deref(), &d.column, d.grain)?;
+                    dim_types[i].get_or_insert(t);
+                    Some(e)
+                }
+                None => None,
+            });
+        }
+        dim_exprs.push(exprs);
+        let mut ms = Vec::new();
+        for (mi, m) in g.members.iter().enumerate() {
+            ms.push(match m {
+                Member::Sql(s) => s.clone(),
+                Member::Plain(m) => {
+                    let (e, t, name) = sc.measure(m)?;
+                    plain_names.insert((gi, mi), (name, t));
+                    e
+                }
+            });
+        }
+        member_exprs.push(ms);
+    }
+
+    // 5. The words for what a part cannot reach (V4-D85).
+    let mut notes: Vec<Vec<String>> = vec![Vec::new(); groups.len()];
+    for (gi, g) in groups.iter().enumerate() {
+        let table = label(catalog, &g.home);
+        let has_main = main_date(catalog, env.tables, &g.home).is_some();
+        for (i, d) in q.dimensions.iter().enumerate() {
+            if read[gi].dims[i].is_none() && read.iter().any(|r| r.dims[i].is_some()) {
+                let c = column_label(catalog, &d.table, &d.column);
+                let time = d.grain.is_some() && is_date(catalog, &d.table, &d.column);
+                notes[gi].push(if time && !has_main {
+                    format!("{table} has no main date, so it is not split by {c}.")
+                } else {
+                    format!("{table} is not split by {c}.")
+                });
+            }
+        }
+        for (j, f) in q.filters.iter().enumerate() {
+            if read[gi].filters[j].is_none()
+                && catalog.table(&f.table).is_some()
+                && read.iter().any(|r| r.filters[j].is_some())
+            {
+                let c = column_label(catalog, &f.table, &f.column);
+                notes[gi].push(if is_date(catalog, &f.table, &f.column) && !has_main {
+                    format!("{table} has no main date, so it is not filtered by {c}.")
+                } else {
+                    format!("{table} is not filtered by {c}.")
+                });
+            }
+        }
+        notes[gi].dedup();
+    }
+    let mut parts = Vec::new();
+    for (j, mine) in slots.iter().enumerate() {
+        let mut seen: Vec<usize> = Vec::new();
+        for s in mine {
+            if seen.contains(&s.group) {
+                continue;
+            }
+            seen.push(s.group);
+            for n in &notes[s.group] {
+                let p = PartNote {
+                    measure: j,
+                    note: n.clone(),
+                };
+                if !parts.contains(&p) {
+                    parts.push(p);
+                }
+            }
+        }
+    }
+
+    // The columns of the answer.
+    let mut columns = Vec::new();
+    let mut ordered = Vec::new();
+    for (i, d) in q.dimensions.iter().enumerate() {
+        let dtype = dim_types[i].unwrap_or(DType::Text);
+        ordered.push(
+            dtype.is_temporal()
+                || (d.grain.is_some_and(Grain::is_part) && is_date(catalog, &d.table, &d.column)),
+        );
+        columns.push(OutColumn {
+            name: d.column.clone(),
+            role: "dimension".into(),
+            dtype,
+            unit: None,
+        });
+    }
+    for (j, item) in items.iter().enumerate() {
+        let (name, dtype) = match item {
+            Item::Named(r) => (r.name.clone(), r.dtype),
+            Item::Plain(_) => {
+                let s = slots[j][0];
+                plain_names
+                    .get(&(s.group, s.member))
+                    .cloned()
+                    .unwrap_or_else(|| ("Rows".into(), DType::Number))
+            }
+        };
+        columns.push(OutColumn {
+            name,
+            role: "measure".into(),
+            dtype,
+            unit: None,
+        });
+    }
+
+    // The links the sub-queries cross that have something to tell the reader.
+    let mut crossed: Vec<String> = Vec::new();
+    for (gi, sc) in scopes.iter().enumerate() {
+        let from_formulas = groups[gi]
+            .joins
+            .iter()
+            .filter(|j| j.warn)
+            .map(|j| j.rel.clone());
+        for id in sc.crossed.iter().cloned().chain(from_formulas) {
+            if !crossed.contains(&id) {
+                crossed.push(id);
+            }
+        }
+    }
+
+    // 6. The SQL.
+    let one_total_each = items.iter().all(|i| match i {
+        Item::Named(r) => r.is_one_total(),
+        Item::Plain(_) => true,
+    });
+    let order = order_limit(q, columns.len(), &ordered, true);
+    if groups.len() == 1 && one_total_each {
+        // The fast path: one SELECT, as a plain question from the table is.
+        let sc = &scopes[0];
+        let mut select = Vec::new();
+        for (i, e) in dim_exprs[0].iter().enumerate() {
+            let Some(e) = e else {
+                // Cannot happen: a group that no table reaches was refused above.
+                continue;
+            };
+            select.push(format!("{e} AS {}", ident(&format!("d{i}"))));
+        }
+        for (j, item) in items.iter().enumerate() {
+            let s = slots[j][0];
+            let expr = match item {
+                Item::Named(r) => out_sql(
+                    &r.agg.fill(std::slice::from_ref(&member_exprs[0][s.member])),
+                    r.dtype,
+                ),
+                Item::Plain(_) => member_exprs[0][s.member].clone(),
+            };
+            select.push(format!("{expr} AS {}", ident(&format!("m{}", nd + j))));
+        }
+        let mut sql = format!("SELECT {}", select.join(", "));
+        sql.push_str(&sc.from_joins);
+        for j in &groups[0].joins {
+            sql.push_str(&j.to_sql());
+        }
+        sql.push_str(&sc.where_clause);
+        if nd > 0 {
+            let g: Vec<String> = (1..=nd).map(|i| i.to_string()).collect();
+            sql.push_str(&format!(" GROUP BY {}", g.join(", ")));
+        }
+        sql.push_str(&order);
+        return Ok(Compiled {
+            sql,
+            params: sc.params.clone(),
+            columns,
+            ignored_filters: ignored,
+            crossed,
+            parts,
+        });
+    }
+
+    // The general path: one sub-query for each group, then the outer query.
+    let mut ctes = Vec::new();
+    let mut params = Vec::new();
+    for (gi, g) in groups.iter().enumerate() {
+        let sc = &scopes[gi];
+        let mut select = Vec::new();
+        let mut kept = 0;
+        for (i, e) in dim_exprs[gi].iter().enumerate() {
+            if let Some(e) = e {
+                select.push(format!("{e} AS {}", ident(&format!("d{i}"))));
+                kept += 1;
+            }
+        }
+        for (mi, e) in member_exprs[gi].iter().enumerate() {
+            select.push(format!("{e} AS {}", ident(&format!("v{mi}"))));
+        }
+        let mut sql = format!("g{gi} AS (SELECT {}", select.join(", "));
+        sql.push_str(&sc.from_joins);
+        for j in &g.joins {
+            sql.push_str(&j.to_sql());
+        }
+        sql.push_str(&sc.where_clause);
+        if kept > 0 {
+            let by: Vec<String> = (1..=kept).map(|i| i.to_string()).collect();
+            sql.push_str(&format!(" GROUP BY {}", by.join(", ")));
+        }
+        sql.push(')');
+        ctes.push(sql);
+        params.extend(sc.params.iter().cloned());
+    }
+
+    // The group values of the tile: the sub-queries that reach all of them, side by side.
+    let has = |gi: usize, i: usize| dim_exprs[gi][i].is_some();
+    let full: Vec<usize> = (0..groups.len())
+        .filter(|&gi| (0..nd).all(|i| has(gi, i)))
+        .collect();
+    let d = |gi: usize, i: usize| format!("g{gi}.{}", ident(&format!("d{i}")));
+    let mut from = String::new();
+    let mut key: Vec<String> = Vec::new();
+    let mut partial: Vec<usize> = (0..groups.len()).collect();
+    if nd == 0 {
+        from.push_str(&format!("g{}", 0));
+        for gi in 1..groups.len() {
+            from.push_str(&format!(" CROSS JOIN g{gi}"));
+        }
+        partial.clear();
+    } else if let Some(&first) = full.first() {
+        from.push_str(&format!("g{first}"));
+        let mut so_far = vec![first];
+        let keys_of = |so_far: &[usize], i: usize| -> String {
+            if so_far.len() == 1 {
+                d(so_far[0], i)
+            } else {
+                format!(
+                    "COALESCE({})",
+                    so_far
+                        .iter()
+                        .map(|&g| d(g, i))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        };
+        for &gi in full.iter().skip(1) {
+            let on: Vec<String> = (0..nd)
+                .map(|i| format!("{} IS NOT DISTINCT FROM {}", d(gi, i), keys_of(&so_far, i)))
+                .collect();
+            from.push_str(&format!(" FULL OUTER JOIN g{gi} ON {}", on.join(" AND ")));
+            so_far.push(gi);
+        }
+        for i in 0..nd {
+            key.push(keys_of(&so_far, i));
+        }
+        partial.retain(|g| !full.contains(g));
+    } else {
+        // No sub-query reaches all the groups: every value of each group, in every combination.
+        let mut sources = Vec::new();
+        for i in 0..nd {
+            let gi = (0..groups.len()).find(|&g| has(g, i)).unwrap_or(0);
+            sources.push(format!(
+                "(SELECT DISTINCT {} AS {} FROM g{gi}) AS k{i}",
+                d(gi, i),
+                ident(&format!("d{i}"))
+            ));
+            key.push(format!("k{i}.{}", ident(&format!("d{i}"))));
+        }
+        from.push_str(&sources.join(" CROSS JOIN "));
+    }
+    if nd == 0 {
+        key.clear();
+    } else if key.is_empty() {
+        unreachable!("a question with groups has a key");
+    }
+    for gi in partial {
+        let on: Vec<String> = (0..nd)
+            .filter(|&i| has(gi, i))
+            .map(|i| format!("{} IS NOT DISTINCT FROM {}", d(gi, i), key[i]))
+            .collect();
+        from.push_str(&format!(
+            " LEFT JOIN g{gi} ON {}",
+            if on.is_empty() {
+                "TRUE".to_string()
+            } else {
+                on.join(" AND ")
+            }
+        ));
+    }
+
+    let mut select = Vec::new();
+    for (i, k) in key.iter().enumerate() {
+        select.push(format!("{k} AS {}", ident(&format!("d{i}"))));
+    }
+    for (j, item) in items.iter().enumerate() {
+        let value = |s: &Slot| format!("g{}.{}", s.group, ident(&format!("v{}", s.member)));
+        let expr = match item {
+            Item::Named(r) => {
+                let vals: Vec<String> = slots[j].iter().map(value).collect();
+                out_sql(&r.agg.fill(&vals), r.dtype)
+            }
+            Item::Plain(m) => {
+                let v = value(&slots[j][0]);
+                // A group this table has no rows for: nothing to add up is 0 for a sum or a count.
+                if m.per.is_none() && matches!(m.agg, Agg::Sum | Agg::Count | Agg::CountDistinct) {
+                    format!("COALESCE({v}, 0e0)")
+                } else {
+                    v
+                }
+            }
+        };
+        select.push(format!("{expr} AS {}", ident(&format!("m{}", nd + j))));
+    }
+    let sql = format!(
+        "WITH {} SELECT {} FROM {}{}",
+        ctes.join(", "),
+        select.join(", "),
+        from,
+        order
+    );
+    Ok(Compiled {
+        sql,
+        params,
+        columns,
+        ignored_filters: ignored,
+        crossed,
+        parts,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::combine_is_linear;
+
+    #[test]
+    fn only_sums_differences_and_scaling_are_linear() {
+        for yes in [
+            "$p0",
+            "($p0 - $p1)",
+            "($p0 + $p1)",
+            "($p0 * 1.11e0)",
+            "(-$p0)",
+            "($p0 / 1e2)",
+            "(2e0 * ($p0 + $p1))",
+            "$p0 - $p1 + $p2",
+        ] {
+            assert!(combine_is_linear(yes), "{yes}");
+        }
+        for no in [
+            "($p0 + 5e0)",
+            "($p0 * $p1)",
+            "($p0 / $p1)",
+            "list_transform([$p0], v0 -> v0)[1]",
+            "COALESCE($p0, 0e0)",
+            "5e0",
+            "($p0 / (1e0 - $p1))",
+            "($p0",
+            "",
+        ] {
+            assert!(!combine_is_linear(no), "{no}");
+        }
+    }
+}

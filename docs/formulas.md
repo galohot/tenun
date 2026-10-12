@@ -368,3 +368,94 @@ The same limits hold when a file is **opened**. A calculated column past the 50t
 10,000 characters, stays in the file and is not built. The table says so in its notes, and the
 columns before it work as usual.
 
+## Measures
+
+A measure is a formula of totals with a name. You write it once and use it in any tile: a number, a
+bar by store, a line by month. It can add up tables from different files and databases.
+
+Example: `Achievement` is `SUM([sales].[amount]) / SUM([targets].[target])`.
+
+1. Turn on **Advanced features** in Settings.
+2. Open the **Data** view. Under the sources, choose **New measure**.
+3. Give the measure a name and write the formula. Type `[` to see the tables, then `.[` to see the
+   columns of the table you chose. Type the start of a function to see what it takes.
+4. Tenun checks the formula as you type. You see the type, and the result for all the data. If the
+   formula is wrong, the part that is wrong is underlined and a sentence says why.
+5. Optional: choose how the number is written (a currency, decimals, short or full, a percent). A tile
+   can still set its own format.
+6. Choose **Add measure**.
+
+In the tile editor, open the field list of a value. The measures are at the top, under **Measures**,
+with an ƒ mark. A tile that uses a measure keeps working when you change the name or the formula, and it
+shows the new numbers at once. Turning Advanced features off hides how to make and change measures, but
+the tiles that use them go on working.
+
+### Why the numbers are right
+
+`sales` has many rows for each store and month. `targets` has one row for each store and month. If
+Tenun joined the two tables first and added up after, each target would be counted once for each
+sale. A store with three sales would show three times its target.
+
+So Tenun adds up **each table on its own,** for the groups of the tile (the store, the month). Then it
+puts the results side by side on the group values and runs your formula. The target is counted once. This holds
+for every grouping: the whole, a store, a month, a store in a month.
+
+- **A group that one table does not have** counts as 0 for a sum or a count, and as blank for an
+  average, a middle value, and the like. A store with sales but no target has an achievement that is blank,
+  because you cannot divide by 0. A month with a target and no sales has an achievement of 0.
+- **A blank group is a group.** Sales with no region and targets with no region meet on "blank".
+- **A measure beside a plain value** in one tile works. The plain value is calculated by itself, as it
+  is in a tile of its own.
+
+### Dates: the main date
+
+A time group needs a date in each table. A chart of `Achievement` by month groups `sales` by its
+date. The table `targets` is not related to `sales`, so it uses its own date, cut to the same month.
+That date is the **main date** of the table.
+
+- A table with one date column uses it. Nothing to do.
+- A table with two or more date columns needs you to pick one. In the Data view, open the table and
+  use **Main date**. The control shows when a table has two dates, or when a measure reads the table.
+- A date filter works the same way. A filter on "last 30 days" of `sales.date` also filters
+  `targets` by its main date.
+- If a table has no main date, a chart over time cannot split it. It says so (see below).
+
+### When a table cannot be split or filtered
+
+The note under a tile says what a table could not follow, in words that name the table and the column:
+
+- `targets is not split by product.` The table `targets` has nothing to say about a product. Its
+  total stands against each product, and the note tells you.
+- `targets is not filtered by product.` A filter on `product` filters the sales and leaves the targets alone.
+- `targets has no main date, so it is not split by date.` Pick a main date.
+
+The notes name tables and columns only. They go with a download, an exported file and a published
+page as they are.
+
+### What a measure does in each tile
+
+- **A number, a bar, a line, an area, a table, a pivot, a heat map, a funnel, a scatter chart, a bullet
+  chart, a compare chart, a calendar, a waterfall** can use a measure. The total row of a table, the
+  rows and columns of a pivot, the "Other" of a top N, the comparison with last year and the number tile's
+  comparison with the period before are all calculated again by Tenun with the same formula. Nothing is
+  added up from numbers already added up.
+- **Show as.** A share of the total, a running total and a year to date add values up. They work with
+  a measure that adds up: a sum, a count, or the difference of two of them. For a ratio or an average, Tenun
+  shows the value as it is and says why.
+- **Share charts, waterfalls by category, Sankey charts,** a split chart's "Other", and a pace on a number tile
+  also add values up, so they need a measure that adds up. A ratio like `Achievement` does not
+  make a share, because the parts do not add up to a whole.
+- **A histogram, a box plot, a cohort grid and a Gantt chart** read columns, not a formula. A measure
+  is not offered there.
+- **Show rows** lists the rows of the table behind a number. If a measure adds up two tables, there is
+  no single list of rows, and Tenun says so.
+
+### Changes and limits
+
+- Rename a column, a name shown or a link, and the formulas of your measures follow.
+- Deleting a measure that tiles use shows the tiles and asks. If you say yes, those tiles show an error
+  until you pick another measure.
+- A workspace uses up to 200 measures, and a formula has up to 10,000 characters. A file with more keeps
+  them, and a tile that uses one says why it does not work.
+- A measure is a formula only. There is no SQL mode for measures.
+

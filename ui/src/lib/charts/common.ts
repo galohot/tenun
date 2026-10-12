@@ -9,7 +9,8 @@ import type { EChartsCoreOption } from 'echarts/core';
 import type { Cell, QueryResult, Tile } from '../api';
 import { cell, measureLabel, OTHER_KEY, resultDim0, type Named } from '../format';
 import { effectiveShowAs } from '../showas';
-import { assignSlots } from './math';
+import { assignSlots, foldable, splitKeep } from './math';
+import { addsUp as tileAddsUp } from '../measures';
 
 export interface Colors {
   surface: string;
@@ -108,7 +109,9 @@ export function pivot(res: QueryResult, tile: Tile, tables: Named[] = []): Pivot
     totals.set(k, t);
   }
   const ranked = [...totals.entries()].sort((a, b) => b[1].total - a[1].total);
-  const keep = ranked.length > MAX_SERIES ? ranked.slice(0, MAX_SERIES - 1) : ranked;
+  // "Other" adds the small groups up. That is right for a sum or a count and wrong for a ratio, an
+  // average or any value that does not add up (V4-D85d): those keep every group.
+  const keep = ranked.slice(0, splitKeep(ranked.length, MAX_SERIES, tileAddsUp(tile)));
   // Order kept series by name. Their colour comes from the tile's colour memory, not from this order.
   keep.sort((a, b) => String(a[1].raw).localeCompare(String(b[1].raw), undefined, { numeric: true }));
   const names = new Map(keep.map(([k], i) => [k, i]));
@@ -213,9 +216,10 @@ export function makeLabel(res: QueryResult, tile: Tile) {
 
 export const FOLDED = OTHER_KEY;
 
-/** Keeps the biggest categories that fit and folds the rest into one "Other" bar. */
-export function fold(p: Pivot, max: number): Pivot {
-  if (p.categories.length <= max || p.series.length !== 1) return p;
+/** Keeps the biggest categories that fit and folds the rest into one "Other" bar. Only values that add up are folded. */
+export function fold(p: Pivot, max: number, addsUp = true): Pivot {
+  // The rest are added up into one bar, which is wrong for a value that does not add up (V4-D85d).
+  if (!foldable({ addsUp, categories: p.categories.length, max, series: p.series.length })) return p;
   const keep = max - 1;
   const values = p.series[0].values;
   const rest = values.slice(keep).reduce<number>((s, v) => s + (v ?? 0), 0);

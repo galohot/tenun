@@ -3,6 +3,7 @@
 import { guessLocale } from './locale';
 import { PHONE_MAX } from './layout';
 import { setLinkLabels } from './links';
+import { setKnownMeasures } from './measures';
 import { api, type CloudStatus, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
 
 export type Route =
@@ -85,6 +86,7 @@ class App {
   set snap(v: Snapshot | null) {
     this.#snap = v;
     setLinkLabels(v?.workspace.relationships ?? [], v?.tables ?? []);
+    setKnownMeasures(v?.workspace.measures, v?.measure_info);
   }
 
   constructor() {

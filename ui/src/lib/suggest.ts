@@ -1,7 +1,8 @@
 // "Also try": other tile types that suit the fields a tile already has. Types that do not fit are
-// never offered. Pure code with no imports at run time, so the node tests can load it.
+// never offered. Pure code with only pure imports at run time, so the node tests can load it.
 
 import type { Dim, DType, Table, Tile, TileType } from './api';
+import { additive } from './measures.ts';
 
 export interface Suggestion {
   type: TileType;
@@ -50,7 +51,8 @@ export function suggestTypes(tile: Tile, tables: Pick<Table, 'id' | 'columns'>[]
   }
   if (d0 && group(t0) && groups !== null && groups <= SMALL_CATEGORY) {
     add('bar', { horizontal: true });
-    add('share', { measures: tile.measures.slice(0, 1) });
+    // Shares are the parts of a whole: only values that add up (V4-D85d).
+    if (!m0 || additive(m0)) add('share', { measures: tile.measures.slice(0, 1) });
     add('table');
   }
   if (d0 && group(t0) && tile.measures.length >= 2) {

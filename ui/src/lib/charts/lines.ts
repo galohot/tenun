@@ -28,6 +28,15 @@ export function shownSeries(series: { values: (number | null)[] }[], totals: boo
   });
 }
 
+/**
+ * Reference lines and a trend read the numbers shown. A 100 % chart has none. On a split chart they read
+ * the total of the groups, which is right only when the values add up (V4-D85d): for a ratio or an average
+ * there is no such total, so the chart draws no lines.
+ */
+export function linesAllowed(o: { percent: boolean; perValue: boolean; multi: boolean; addsUp: boolean }): boolean {
+  return !o.percent && (o.addsUp || o.perValue || !o.multi);
+}
+
 /** The numbers a statistic is read from: no gaps, and none from a category that `skip` names ("Other"). */
 export function usableValues<C>(values: (number | null)[], categories: C[], skip: (c: C) => boolean): number[] {
   return values.filter((v, i): v is number => typeof v === 'number' && Number.isFinite(v) && !skip(categories[i]));

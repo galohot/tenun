@@ -13,6 +13,7 @@ import { buildPdf, pageSize } from './pdf';
 import { pictureNote } from './picture';
 import { partialNote } from './run';
 import { fileName, tileTable, toCsv } from './tabular';
+import { withNamedFormats } from './measures';
 import type { DashFilter } from './tiles';
 import Capture from '../components/dash/Capture.svelte';
 
@@ -50,7 +51,8 @@ export function downloadCsv(tile: Tile, res: QueryResult, tables: Named[], title
 
 /** Excel: the server runs the tile again with the same filters and writes the file. */
 export async function downloadXlsx(tile: Tile, res: QueryResult, filters: DashFilter[], tables: Named[], title: string, native: boolean): Promise<void> {
-  const body = { tile, filters, headers: plainOf(tile, res, tables).heads, title };
+  // A value with no format of its own is written the way its named measure is.
+  const body = { tile: withNamedFormats(tile), filters, headers: plainOf(tile, res, tables).heads, title };
   if (native) {
     const { paths } = await api.pick({ kind: 'save_xlsx', name: title || 'tenun' });
     if (!paths[0]) return;
@@ -75,7 +77,7 @@ async function chartPicture(tile: Tile, res: QueryResult, tables: Named[], title
   let url = '';
   let note = '';
   try {
-    const built = buildOption({ res, tile, colors, selected: null, width: w, height: h, tables });
+    const built = buildOption({ res, tile: withNamedFormats(tile), colors, selected: null, width: w, height: h, tables });
     // A picture leaves the computer: it says it with no key value and no file name.
     note = pictureNote(res, built.note, partialNote(res, tile.dims[0]?.grain));
     const chart = echarts.init(holder, null, { renderer: 'canvas', width: w, height: h });

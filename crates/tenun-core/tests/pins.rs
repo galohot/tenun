@@ -540,3 +540,398 @@ fn an_old_file_is_written_back_byte_for_byte_when_no_calculated_column_is_added(
         assert_eq!(std::fs::read_to_string(&back).unwrap(), text, "{name}");
     }
 }
+
+/// A file made by build 02: calculated columns, and no measures and no main date.
+const FILE_CALC: &str = r##"{
+  "version": 1,
+  "name": "Coffee",
+  "sources": [
+    {
+      "id": "s1",
+      "name": "coffee.xlsx",
+      "kind": "excel",
+      "path": "coffee.xlsx"
+    },
+    {
+      "id": "s2",
+      "name": "stores.csv",
+      "kind": "csv",
+      "path": "stores.csv"
+    }
+  ],
+  "relationships": [
+    {
+      "id": "r1",
+      "from": {
+        "table": "s1/Orders",
+        "column": "store_id"
+      },
+      "to": {
+        "table": "s2/stores",
+        "column": "id"
+      },
+      "name": "Sold at"
+    }
+  ],
+  "dashboards": [
+    {
+      "id": "d1",
+      "refresh": 60,
+      "tiles": [
+        {
+          "dims": [],
+          "h": 2,
+          "id": "t1",
+          "measures": [
+            {
+              "agg": "sum",
+              "column": "amount",
+              "table": "s1/Orders"
+            }
+          ],
+          "title": "",
+          "type": "kpi",
+          "w": 3,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "title": "Coffee overview"
+    }
+  ],
+  "layout": {},
+  "locale": "id",
+  "tables": {
+    "s1/Orders": {
+      "header_row": 4,
+      "columns": {
+        "amount": {
+          "label": "Sales",
+          "dtype": "number"
+        }
+      }
+    },
+    "s2/stores": {
+      "columns": {
+        "id": {
+          "label": "Store"
+        }
+      },
+      "calc": [
+        {
+          "name": "Place",
+          "formula": "[city] & \" (\" & [id] & \")\"",
+          "description": "City and number"
+        },
+        {
+          "name": "Big",
+          "formula": "[id] * 2"
+        }
+      ]
+    }
+  }
+}"##;
+
+/// A file made by build 03: measures and a main date.
+const FILE_MEASURES: &str = r##"{
+  "version": 1,
+  "name": "Coffee",
+  "sources": [
+    {
+      "id": "s1",
+      "name": "coffee.xlsx",
+      "kind": "excel",
+      "path": "coffee.xlsx"
+    },
+    {
+      "id": "s2",
+      "name": "stores.csv",
+      "kind": "csv",
+      "path": "stores.csv"
+    }
+  ],
+  "relationships": [
+    {
+      "id": "r1",
+      "from": {
+        "table": "s1/Orders",
+        "column": "store_id"
+      },
+      "to": {
+        "table": "s2/stores",
+        "column": "id"
+      },
+      "name": "Sold at"
+    }
+  ],
+  "dashboards": [
+    {
+      "id": "d1",
+      "refresh": 60,
+      "tiles": [
+        {
+          "dims": [],
+          "h": 2,
+          "id": "t1",
+          "measures": [
+            {
+              "agg": "sum",
+              "column": "amount",
+              "table": "s1/Orders"
+            }
+          ],
+          "title": "",
+          "type": "kpi",
+          "w": 3,
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "title": "Coffee overview"
+    }
+  ],
+  "layout": {},
+  "locale": "id",
+  "tables": {
+    "s1/Orders": {
+      "header_row": 4,
+      "columns": {
+        "amount": {
+          "label": "Sales",
+          "dtype": "number"
+        }
+      },
+      "mainDate": "date"
+    },
+    "s2/stores": {
+      "columns": {
+        "id": {
+          "label": "Store"
+        }
+      },
+      "calc": [
+        {
+          "name": "Place",
+          "formula": "[city] & \" (\" & [id] & \")\"",
+          "description": "City and number"
+        },
+        {
+          "name": "Big",
+          "formula": "[id] * 2"
+        }
+      ]
+    }
+  },
+  "measures": [
+    {
+      "id": "m1",
+      "name": "Achievement",
+      "formula": "SUM([Orders].[amount]) / SUM([targets].[target])",
+      "format": {
+        "decimals": 1,
+        "percent": true
+      },
+      "description": "Sales against the targets"
+    },
+    {
+      "id": "m2",
+      "name": "Revenue",
+      "formula": "SUM([Orders].[amount])"
+    }
+  ]
+}"##;
+
+#[test]
+fn a_02_file_is_written_back_byte_for_byte_and_a_03_file_keeps_its_measures() {
+    use tenun_core::workspace::Workspace;
+    let dir = std::env::temp_dir().join(format!("tenun-pin-file-03-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, text) in [
+        ("v3", FILE_V3),
+        ("named-links", FILE_NAMED_LINKS),
+        ("calc", FILE_CALC),
+        ("measures", FILE_MEASURES),
+    ] {
+        let path = dir.join(format!("{name}.tenun"));
+        std::fs::write(&path, text).unwrap();
+        let ws = Workspace::load(&path).unwrap();
+        // The new fields are there only when the file has them.
+        assert_eq!(!ws.measures.is_empty(), name == "measures", "{name}");
+        assert_eq!(
+            ws.tables.values().any(|t| t.main_date.is_some()),
+            name == "measures",
+            "{name}"
+        );
+        let back = dir.join(format!("{name}-again.tenun"));
+        ws.save(&back).unwrap();
+        assert_eq!(std::fs::read_to_string(&back).unwrap(), text, "{name}");
+    }
+}
+
+/// Named measures (build 03). A formula that is one total on one table is one SELECT, the shape of
+/// a plain measure, so the fast path is pinned. The general path (a sub-query for each table, then
+/// the combining outer query) is pinned too, so a change to either shows in review.
+fn named_world() -> (
+    Catalog,
+    Vec<Relationship>,
+    Vec<tenun_core::workspace::NamedMeasure>,
+) {
+    let (cat, rels) = world();
+    let measure = |id: &str, name: &str, formula: &str| tenun_core::workspace::NamedMeasure {
+        id: id.into(),
+        name: name.into(),
+        formula: formula.into(),
+        ..Default::default()
+    };
+    let list = vec![
+        measure("m1", "Revenue", "SUM([orders].[amount])"),
+        measure(
+            "m2",
+            "Per customer",
+            "SUM([orders].[amount]) / COUNTD([orders].[customer])",
+        ),
+        measure(
+            "m3",
+            "Moved against sold",
+            "SUM([transfers].[qty]) / SUM([orders].[amount])",
+        ),
+    ];
+    (cat, rels, list)
+}
+
+fn named_queries() -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        (
+            "a named total on one table",
+            json!({"measures": [{"named": "m1"}],
+                   "dimensions": [{"table": "s3/regions", "column": "name"}]}),
+        ),
+        (
+            "a named total beside a plain measure of the same table",
+            json!({"measures": [{"named": "m1"}, {"table": "s1/orders", "column": null, "agg": "count"}],
+                   "dimensions": [{"table": "s2/stores", "column": "city"}],
+                   "filters": [{"table": "s1/orders", "column": "amount", "op": "gte", "values": [10]}]}),
+        ),
+        (
+            "two totals of one table",
+            json!({"measures": [{"named": "m2"}],
+                   "dimensions": [{"table": "s2/stores", "column": "city"}]}),
+        ),
+        (
+            "totals of two tables by a group both reach",
+            json!({"measures": [{"named": "m3"}],
+                   "dimensions": [{"table": "s2/stores", "column": "city"}]}),
+        ),
+        (
+            "totals of two tables with no group",
+            json!({"measures": [{"named": "m3"}]}),
+        ),
+        (
+            "a time group one table reads from its main date",
+            json!({"measures": [{"named": "m3"}],
+                   "dimensions": [{"table": "s1/orders", "column": "date", "grain": "month"}],
+                   "filters": [{"table": "s1/orders", "column": "customer", "op": "in", "values": ["x"]}]}),
+        ),
+    ]
+}
+
+#[test]
+fn named_measures_compile_to_the_sql_they_are_pinned_to() {
+    use std::collections::BTreeMap;
+    use tenun_core::measures::{Env, compile};
+    use tenun_core::workspace::TableSetup;
+    let (mut cat, rels, list) = named_world();
+    // The transfers have a date, which is their main date; the orders have two, so none.
+    cat.tables
+        .iter_mut()
+        .find(|t| t.id == "s6/transfers")
+        .unwrap()
+        .columns
+        .push(Column::new("moved".into(), DType::Date, String::new()));
+    cat.tables
+        .iter_mut()
+        .find(|t| t.id == "s1/orders")
+        .unwrap()
+        .columns
+        .push(Column::new("shipped".into(), DType::Date, String::new()));
+    let health: Health = rels
+        .iter()
+        .map(|r| {
+            (
+                r.id.clone(),
+                LinkHealth {
+                    one_rows: 50,
+                    many_dups: 20,
+                    ..LinkHealth::default()
+                },
+            )
+        })
+        .collect();
+    let tables: BTreeMap<String, TableSetup> = BTreeMap::from([(
+        "s1/orders".to_string(),
+        TableSetup {
+            main_date: Some("date".into()),
+            ..Default::default()
+        },
+    )]);
+    let today = NaiveDate::from_ymd_opt(2026, 10, 14).unwrap();
+    let env = Env {
+        measures: &list,
+        tables: &tables,
+        rels: &rels,
+        health: &health,
+        now: today.and_hms_opt(12, 0, 0).unwrap(),
+    };
+    let mut got = Vec::new();
+    for (name, q) in named_queries() {
+        let q: SemanticQuery = serde_json::from_value(q).unwrap();
+        let out = match compile(&q, &cat, today, &env) {
+            Ok(c) => format!(
+                "{}\n  params: {:?}\n  parts: {:?}",
+                c.sql, c.params, c.parts
+            ),
+            Err(e) => format!("error: {e}"),
+        };
+        got.push((name, out));
+    }
+    if std::env::var("PRINT_PINS").is_ok() {
+        for (n, o) in &got {
+            println!("PIN\t{n}\t{}", o.replace('\n', "\\n"));
+        }
+        return;
+    }
+    for (n, o) in &got {
+        let want = NAMED_PINS
+            .iter()
+            .find(|(m, _)| m == n)
+            .unwrap_or_else(|| panic!("no pin for {n}"));
+        assert_eq!(o, &want.1.replace("\\n", "\n"), "{n}");
+    }
+}
+
+const NAMED_PINS: &[(&str, &str)] = &[
+    (
+        "a named total on one table",
+        "SELECT CAST(t2.\"name\" AS VARCHAR) AS \"d0\", CAST(COALESCE(sum(CAST(t0.\"amount\" AS DOUBLE)), 0e0) AS DOUBLE) AS \"m1\" FROM \"s_s1\".\"orders\" AS t0 LEFT JOIN \"s_s2\".\"stores\" AS t1 ON t0.\"store_id\" = t1.\"id\" LEFT JOIN \"s_s3\".\"regions\" AS t2 ON t1.\"region_code\" = t2.\"code\" GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000\\n  params: []\\n  parts: []",
+    ),
+    (
+        "a named total beside a plain measure of the same table",
+        "SELECT CAST(t1.\"city\" AS VARCHAR) AS \"d0\", CAST(COALESCE(sum(CAST(t0.\"amount\" AS DOUBLE)), 0e0) AS DOUBLE) AS \"m1\", CAST(count(*) AS DOUBLE) AS \"m2\" FROM \"s_s1\".\"orders\" AS t0 LEFT JOIN \"s_s2\".\"stores\" AS t1 ON t0.\"store_id\" = t1.\"id\" WHERE CAST(t0.\"amount\" AS DOUBLE) >= ? GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000\\n  params: [Double(10.0)]\\n  parts: []",
+    ),
+    (
+        "two totals of one table",
+        "WITH g0 AS (SELECT CAST(t1.\"city\" AS VARCHAR) AS \"d0\", sum(CAST(t0.\"amount\" AS DOUBLE)) AS \"v0\", CAST(count(DISTINCT NULLIF(CAST(t0.\"customer\" AS VARCHAR), '')) AS DOUBLE) AS \"v1\" FROM \"s_s1\".\"orders\" AS t0 LEFT JOIN \"s_s2\".\"stores\" AS t1 ON t0.\"store_id\" = t1.\"id\" GROUP BY 1) SELECT g0.\"d0\" AS \"d0\", CAST(list_transform([(COALESCE(g0.\"v0\", 0e0) / COALESCE(g0.\"v1\", 0e0))], v0 -> CASE WHEN isfinite(v0) THEN v0 END)[1] AS DOUBLE) AS \"m1\" FROM g0 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000\\n  params: []\\n  parts: []",
+    ),
+    (
+        "totals of two tables by a group both reach",
+        "WITH g0 AS (SELECT CAST(t1.\"city\" AS VARCHAR) AS \"d0\", sum(CAST(t0.\"qty\" AS DOUBLE)) AS \"v0\" FROM \"s_s6\".\"transfers\" AS t0 LEFT JOIN \"s_s2\".\"stores\" AS t1 ON t0.\"from_store\" = t1.\"id\" GROUP BY 1), g1 AS (SELECT CAST(t1.\"city\" AS VARCHAR) AS \"d0\", sum(CAST(t0.\"amount\" AS DOUBLE)) AS \"v0\" FROM \"s_s1\".\"orders\" AS t0 LEFT JOIN \"s_s2\".\"stores\" AS t1 ON t0.\"store_id\" = t1.\"id\" GROUP BY 1) SELECT COALESCE(g0.\"d0\", g1.\"d0\") AS \"d0\", CAST(list_transform([(COALESCE(g0.\"v0\", 0e0) / COALESCE(g1.\"v0\", 0e0))], v0 -> CASE WHEN isfinite(v0) THEN v0 END)[1] AS DOUBLE) AS \"m1\" FROM g0 FULL OUTER JOIN g1 ON g1.\"d0\" IS NOT DISTINCT FROM g0.\"d0\" ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000\\n  params: []\\n  parts: []",
+    ),
+    (
+        "totals of two tables with no group",
+        "WITH g0 AS (SELECT sum(CAST(t0.\"qty\" AS DOUBLE)) AS \"v0\" FROM \"s_s6\".\"transfers\" AS t0), g1 AS (SELECT sum(CAST(t0.\"amount\" AS DOUBLE)) AS \"v0\" FROM \"s_s1\".\"orders\" AS t0) SELECT CAST(list_transform([(COALESCE(g0.\"v0\", 0e0) / COALESCE(g1.\"v0\", 0e0))], v0 -> CASE WHEN isfinite(v0) THEN v0 END)[1] AS DOUBLE) AS \"m0\" FROM g0 CROSS JOIN g1 LIMIT 1000\\n  params: []\\n  parts: []",
+    ),
+    (
+        "a time group one table reads from its main date",
+        "WITH g0 AS (SELECT strftime(date_trunc('month', t0.\"moved\"), '%Y-%m-%d') AS \"d0\", sum(CAST(t0.\"qty\" AS DOUBLE)) AS \"v0\" FROM \"s_s6\".\"transfers\" AS t0 GROUP BY 1), g1 AS (SELECT strftime(date_trunc('month', t0.\"date\"), '%Y-%m-%d') AS \"d0\", sum(CAST(t0.\"amount\" AS DOUBLE)) AS \"v0\" FROM \"s_s1\".\"orders\" AS t0 WHERE (CAST(t0.\"customer\" AS VARCHAR) IN (?)) GROUP BY 1) SELECT COALESCE(g0.\"d0\", g1.\"d0\") AS \"d0\", CAST(list_transform([(COALESCE(g0.\"v0\", 0e0) / COALESCE(g1.\"v0\", 0e0))], v0 -> CASE WHEN isfinite(v0) THEN v0 END)[1] AS DOUBLE) AS \"m1\" FROM g0 FULL OUTER JOIN g1 ON g1.\"d0\" IS NOT DISTINCT FROM g0.\"d0\" ORDER BY 1 ASC LIMIT 1000\\n  params: [Text(\"x\")]\\n  parts: [PartNote { measure: 0, note: \"transfers is not filtered by customer.\" }]",
+    ),
+];

@@ -1,7 +1,8 @@
-// The arithmetic behind the stack modes and the waterfall. Pure functions with no imports
+// The arithmetic behind the stack modes and the waterfall. Pure functions with only pure imports
 // at run time, so the node tests can load this file on its own.
 
 import type { Measure, NumFormat, ShowAs, Tile } from '../api';
+import { additive } from '../measures.ts';
 
 /** Sums and counts add up, so they can be stacked. An average, a minimum or a distinct count cannot. */
 export const STACKABLE: readonly string[] = ['sum', 'count'];
@@ -17,12 +18,14 @@ export const stackable = (aggs: readonly string[]): boolean => aggs.every((a) =>
  * unit only when they come from the same column, and rows counted in one table share it too.
  * A sum of Amount and a sum of Quantity are different units: a stack of them adds money to units.
  */
-export function unitOf(m: Pick<Measure, 'table' | 'column' | 'agg' | 'per'>, f?: NumFormat | null, how?: ShowAs | null): string {
+export function unitOf(m: Pick<Measure, 'table' | 'column' | 'agg' | 'per' | 'named'>, f?: NumFormat | null, how?: ShowAs | null): string {
   // A share or a rank is its own unit, whatever the value was.
   if (how === 'rank') return 'rank';
   if (how === 'pct_total' || how === 'pct_group' || how === 'pct_change') return 'percent';
   if (f?.currency) return `currency:${f.currency}`;
   if (f?.percent) return 'percent';
+  // A named measure is a unit of its own: its formula may mix tables, so it matches no column.
+  if (m.named) return `named:${m.named}`;
   if (m.per) return `ratio:${m.table}.${m.column}/${m.per.table}.${m.per.column ?? ''}`;
   if (m.agg === 'count' || m.column === null) return `rows:${m.table}`;
   return `column:${m.table}.${m.column}`;
@@ -38,7 +41,8 @@ const aggFamily = (agg: string): string =>
  * units belong in separate panels or on an indexed chart.
  */
 export function sameUnit(tile: Pick<Tile, 'measures' | 'formats' | 'showAs'>): boolean {
-  const keys = tile.measures.map((m, i) => `${aggFamily(m.agg)}|${unitOf(m, tile.formats?.[i], tile.showAs?.[i])}`);
+  const family = (m: Measure) => (m.named ? (additive(m) ? 'total' : 'level') : aggFamily(m.agg));
+  const keys = tile.measures.map((m, i) => `${family(m)}|${unitOf(m, tile.formats?.[i], tile.showAs?.[i])}`);
   return new Set(keys).size <= 1;
 }
 
@@ -69,7 +73,7 @@ export function stackMode(tile: Pick<Tile, 'stack' | 'measures' | 'formats' | 's
  */
 export function stackableTile(tile: Pick<Tile, 'measures' | 'showAs'>, perValue: boolean): boolean {
   const used = perValue ? tile.measures : tile.measures.slice(0, 1);
-  return used.every((m, i) => !m.per && stackable([m.agg]) && tile.showAs?.[i] !== 'rank' && tile.showAs?.[i] !== 'pct_change');
+  return used.every((m, i) => additive(m) && tile.showAs?.[i] !== 'rank' && tile.showAs?.[i] !== 'pct_change');
 }
 
 /**
@@ -173,3 +177,26 @@ export function farFromZero(values: number[]): boolean {
   if (hi < 0) return hi / lo > 0.5;
   return false;
 }
+
+/**
+ * Why a waterfall cannot be drawn from this value, or null. Steps by category add one value to the
+ * next, so the values have to add up. Steps by date are differences, which any value has (V4-D85d).
+ */
+export function waterfallProblem(measure: Pick<Measure, 'agg' | 'per' | 'named'> | undefined, byDate: boolean): string | null {
+  if (!measure || byDate || additive(measure)) return null;
+  return 'A waterfall adds one category to the next. Its value has to be a sum or a count, not a ratio or an average.';
+}
+
+/**
+ * Does a bar chart fold its small bars into one "Other" bar? Only a single series of values that add up
+ * does: "Other" is the sum of the bars it hides, which is wrong for a ratio or an average (V4-D85d).
+ */
+export const foldable = (o: { addsUp: boolean; categories: number; max: number; series: number }): boolean =>
+  o.addsUp && o.series === 1 && o.categories > o.max;
+
+/**
+ * How many groups of a split chart get a series of their own. With more than `max` groups, the biggest
+ * `max - 1` stay and the rest become one "Other" series, which adds them up. A value that does not add up
+ * keeps every group instead (V4-D85d).
+ */
+export const splitKeep = (groups: number, max: number, addsUp: boolean): number => (addsUp && groups > max ? max - 1 : groups);

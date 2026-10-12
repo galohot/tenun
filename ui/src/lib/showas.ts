@@ -1,8 +1,9 @@
 // "Show value as": which ways a tile offers and how they read. The engine computes the numbers
 // (`shape::show_as`); this file only decides what the Inspector lists and what the words are.
-// Pure code with no imports at run time, so the node tests can load it.
+// Pure code with only pure imports at run time, so the node tests can load it.
 
 import type { ShowAs, Tile } from './api';
+import { additive } from './measures.ts';
 
 /** What the first group-by field is: a date, a part of a date (month of year…), or something else. */
 export type Dim0Kind = 'date' | 'part' | 'other' | 'none';
@@ -83,6 +84,10 @@ export function effectiveShowAs(
 ): ShowAs | null {
   const how = tile.showAs?.[i];
   if (!how || how === 'value' || !SHOW_AS_TYPES.includes(tile.type) || !groupCount(tile)) return null;
+  // A share of the whole, a running total and a year to date add values up. The engine shows a named
+  // measure that does not add up as it is, with words (V4-D85d), so its name does not take the suffix.
+  const m = tile.measures[i];
+  if (m?.named && !additive(m) && ['pct_total', 'pct_group', 'running', 'ytd'].includes(how)) return null;
   if (how === 'ytd' && dim0 !== 'date') return null;
   if (ORDERED.includes(how) && dim0 !== 'date' && dim0 !== 'part') return null;
   if (how === 'pct_group' && groupCount(tile) < 2) return 'pct_total';

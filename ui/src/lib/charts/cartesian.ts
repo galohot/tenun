@@ -18,8 +18,9 @@ import {
   type Built,
 } from './common';
 import { axisSpan, levelMarkLine, NAME_ROW, needsSecondRow, resolveLevels, wantsTrend, widestName } from './guides';
-import { fitAt, MAX_LINES, shownSeries, stepWord, trendFit, trendSentence, usableValues } from './lines';
+import { fitAt, linesAllowed, MAX_LINES, shownSeries, stepWord, trendFit, trendSentence, usableValues } from './lines';
 import { normalizeShares, sameUnit, stackMode } from './math';
+import { addsUp as tileAddsUp } from '../measures';
 
 /** The name of the trend line in the legend and the tooltip. */
 const TREND = 'Trend';
@@ -32,6 +33,9 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   // has its own format; split series all show the first value.
   const loc = getLocale();
   const perValue = bySeriesPerMeasure(res);
+  // The values of the groups add up to the whole (a sum or a count). Folding the small bars into one
+  // "Other", and a line over the total of a split, are right only then (V4-D85d).
+  const addsUp = tileAddsUp(tile);
   const nd = res.columns.filter((x) => x.role === 'dimension').length;
   // A value shown as a share or a rank carries its unit; it formats as a percent or "#3".
   const unitOf = (si: number) => res.columns[nd + (perValue ? si : 0)]?.unit;
@@ -54,7 +58,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const room = horizontal ? Math.floor((height - 16) / 26) : Math.floor(width / 44);
   // A result that already has its "Other" is never folded again.
   const whole = pivot(res, tile, tables);
-  const { categories, series } = temporal || noFold || tile.type !== 'bar' || res.other ? whole : fold(whole, Math.max(4, room));
+  const { categories, series } = temporal || noFold || tile.type !== 'bar' || res.other ? whole : fold(whole, Math.max(4, room), addsUp);
   const multi = series.length > 1;
   const hasBar = combo ? series.some((_, si) => drawnAs(si) === 'bar') : tile.type === 'bar';
   // Series are drawn in the order of `built`; the combo decides bar or line for each value.
@@ -325,7 +329,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   // Reference lines and the trend line. A 100 % chart has no values to compare with.
   // The numbers are those shown: the first value, or the total of each category when the series pile
   // up (a split, or several stacked values). "Other" never counts.
-  const guided = !percent;
+  const guided = linesAllowed({ percent, perValue, multi, addsUp });
   const isRest = (v: Cell) => v === FOLDED || isOther(v);
   const aligned = shownSeries(series, (!perValue && multi) || (perValue && stacked));
   // The statistics read every category, also the ones a short tile folds into "Other", so the lines do

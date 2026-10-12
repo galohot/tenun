@@ -24,12 +24,15 @@ pub struct SemanticQuery {
     pub limit: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Measure {
+    /// Not set for a named measure, which reads its tables from its formula.
+    #[serde(default)]
     pub table: String,
     /// `None` with `count` means "number of rows".
     #[serde(default)]
     pub column: Option<String>,
+    #[serde(default)]
     pub agg: Agg,
     /// Makes a ratio: `agg(column)` divided by `agg(per.column)`, in the same SELECT.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -38,10 +41,14 @@ pub struct Measure {
     /// (V4-D28). Not set: the default path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub via: Option<String>,
+    /// A named measure (V4-D4): the id of a workspace measure. `table`, `column`, `agg`, `per` and
+    /// `via` are then ignored; the formula says what is added up, and from which tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub named: Option<String>,
 }
 
 /// The bottom of a ratio measure. It may come from any table the query can reach.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Per {
     pub table: String,
     #[serde(default)]
@@ -52,9 +59,10 @@ pub struct Per {
     pub via: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Agg {
+    #[default]
     Sum,
     Avg,
     Min,
@@ -280,6 +288,17 @@ pub struct Compiled {
     /// The links this query crosses that have something to tell the reader: a key repeats on
     /// the side it joins into, or the link is read the other way round (relationship ids).
     pub crossed: Vec<String>,
+    /// What a named measure could not split or filter by, in words (V4-D4, V4-D85). Table labels
+    /// and column names only, so the notes may leave the computer as they are.
+    pub parts: Vec<PartNote>,
+}
+
+/// A group or a filter that one table of a named measure cannot reach (V4-D4, V4-D85).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartNote {
+    /// The index of the measure in the question.
+    pub measure: usize,
+    pub note: String,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -309,9 +328,20 @@ pub enum QueryError {
     BadValue,
     #[error("A date filter needs a date column. {0} is not one.")]
     NotADate(String),
+    #[error("This tile uses a measure that was deleted. Pick the measure again.")]
+    UnknownMeasure,
+    /// A named measure whose formula does not work now: the words say why.
+    #[error("The measure {0} cannot be worked out. {1}")]
+    MeasureBroken(String, String),
+    /// A named measure past the limits of V4-D85 (too many measures, or a formula that is too long).
+    #[error("The measure {0} is not used: {1}")]
+    MeasureLimit(String, String),
+    /// A kind of question that reads a column, not a formula.
+    #[error("A named measure cannot be used here. {0}")]
+    NamedHere(String),
 }
 
-const DEFAULT_LIMIT: u32 = 1000;
+pub(crate) const DEFAULT_LIMIT: u32 = 1000;
 const MAX_LIMIT: u32 = 10_000;
 
 /// The FROM, JOIN and WHERE part of a semantic query, with its parameters.
@@ -322,6 +352,11 @@ const MAX_LIMIT: u32 = 10_000;
 pub struct Scope<'a> {
     /// ` FROM <base> AS t0 LEFT JOIN … [WHERE …]`, with a leading space.
     pub from_where: String,
+    /// The same without the `WHERE`: ` FROM <base> AS t0 LEFT JOIN …`. A caller that must add
+    /// joins of its own (the aggregates of a named measure) puts them after this.
+    pub from_joins: String,
+    /// ` WHERE …`, with a leading space, or empty.
+    pub where_clause: String,
     /// One value for each `?` in `from_where`, in order.
     pub params: Vec<Param>,
     /// Indexes of filters that could not reach the base table and were skipped.
@@ -374,6 +409,11 @@ fn plan<'a>(
     catalog: &'a Catalog,
     links: Links<'a>,
 ) -> Result<(Joins<'a>, Vec<usize>), QueryError> {
+    if q.measures.iter().any(|m| m.named.is_some()) {
+        return Err(QueryError::NamedHere(
+            "Pick a column and a way to add it up here.".into(),
+        ));
+    }
     let base_id = q
         .measures
         .first()
@@ -418,7 +458,7 @@ fn plan<'a>(
 ///   table repeats its key.
 /// - A field names a link that is not on any way to its table.
 /// - Otherwise the tables are not related.
-fn explain(
+pub(crate) fn explain(
     catalog: &Catalog,
     links: Links<'_>,
     base: &str,
@@ -556,13 +596,17 @@ pub fn scope_on<'a>(
             j.alias
         ));
     }
+    let from_joins = sql.clone();
+    let mut where_clause = String::new();
     if !wheres.is_empty() {
-        sql.push_str(" WHERE ");
-        sql.push_str(&wheres.join(" AND "));
+        where_clause = format!(" WHERE {}", wheres.join(" AND "));
+        sql.push_str(&where_clause);
     }
     let crossed = crossed_of(&joins);
     Ok(Scope {
         from_where: sql,
+        from_joins,
+        where_clause,
         params,
         ignored_filters: ignored,
         crossed,
@@ -638,10 +682,37 @@ pub fn compile_on<'a>(
         sql.push_str(&format!(" GROUP BY {}", g.join(", ")));
     }
 
+    sql.push_str(&order_limit(
+        q,
+        columns.len(),
+        &ordered,
+        !q.measures.is_empty(),
+    ));
+
+    Ok(Compiled {
+        sql,
+        params: scope.params,
+        columns,
+        ignored_filters: scope.ignored_filters,
+        crossed: scope.crossed,
+        parts: Vec::new(),
+    })
+}
+
+/// ` ORDER BY … LIMIT n` of a question: the sort the tile asked for, else time left to right or
+/// the biggest value first; ties are broken by every other group, so the same question always
+/// returns rows in the same order. `ordered[i]` is true when group `i` reads in order (a date).
+pub(crate) fn order_limit(
+    q: &SemanticQuery,
+    columns: usize,
+    ordered: &[bool],
+    has_measures: bool,
+) -> String {
+    let nd = q.dimensions.len();
     let mut order: Vec<String> = q
         .sort
         .iter()
-        .filter(|s| s.by < columns.len())
+        .filter(|s| s.by < columns)
         .map(|s| {
             format!(
                 "{} {} NULLS LAST",
@@ -650,18 +721,16 @@ pub fn compile_on<'a>(
             )
         })
         .collect();
-    if order.is_empty() && !columns.is_empty() {
+    if order.is_empty() && columns > 0 {
         // Time reads left to right; otherwise biggest first.
         if let Some(i) = ordered.iter().position(|&o| o) {
             order.push(format!("{} ASC", i + 1));
-        } else if nd > 0 && !q.measures.is_empty() {
+        } else if nd > 0 && has_measures {
             order.push(format!("{} DESC NULLS LAST", nd + 1));
         } else if nd > 0 {
             order.push("1 ASC".into());
         }
     }
-    // Ties are broken by every other dimension, so the same question always
-    // returns rows in the same order.
     for i in 1..=nd {
         if !order
             .iter()
@@ -670,35 +739,29 @@ pub fn compile_on<'a>(
             order.push(format!("{i} ASC NULLS LAST"));
         }
     }
+    let mut sql = String::new();
     if !order.is_empty() {
         sql.push_str(&format!(" ORDER BY {}", order.join(", ")));
     }
     let limit = q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     sql.push_str(&format!(" LIMIT {limit}"));
-
-    Ok(Compiled {
-        sql,
-        params: scope.params,
-        columns,
-        ignored_filters: scope.ignored_filters,
-        crossed: scope.crossed,
-    })
+    sql
 }
 
-fn lookup<'a>(catalog: &'a Catalog, id: &str) -> Result<&'a Table, QueryError> {
+pub(crate) fn lookup<'a>(catalog: &'a Catalog, id: &str) -> Result<&'a Table, QueryError> {
     catalog
         .table(id)
         .ok_or_else(|| QueryError::UnknownTable(id.to_string()))
 }
 
-fn label(catalog: &Catalog, id: &str) -> String {
+pub(crate) fn label(catalog: &Catalog, id: &str) -> String {
     catalog
         .table(id)
         .map(|t| t.label.clone())
         .unwrap_or_else(|| id.to_string())
 }
 
-fn col<'a>(t: &'a Table, c: &str) -> Result<&'a crate::catalog::Column, QueryError> {
+pub(crate) fn col<'a>(t: &'a Table, c: &str) -> Result<&'a crate::catalog::Column, QueryError> {
     t.column(c)
         .ok_or_else(|| QueryError::UnknownColumn(t.label.clone(), c.to_string()))
 }
@@ -715,7 +778,7 @@ struct Step {
 /// The tables a query joins, each under an alias named after the path that reaches it, not
 /// after the table: one table joined through two links is two aliases (V4-D28). The base table
 /// is `t0`; the others are numbered in the order they are first needed.
-struct Joins<'a> {
+pub(crate) struct Joins<'a> {
     base: String,
     paths: Paths<'a>,
     /// The path of each alias, as the link ids crossed from the base. `keys[0]` is empty.
@@ -724,7 +787,7 @@ struct Joins<'a> {
 }
 
 impl<'a> Joins<'a> {
-    fn new(base: &str, links: Links<'a>) -> Self {
+    pub(crate) fn new(base: &str, links: Links<'a>) -> Self {
         Self {
             base: base.to_string(),
             paths: Paths::new(base, links),
@@ -734,7 +797,7 @@ impl<'a> Joins<'a> {
     }
 
     /// Adds the joins that reach `table`, crossing the link `via` when one is named.
-    fn add(&mut self, table: &str, via: Option<&str>) -> Result<(), PathError> {
+    pub(crate) fn add(&mut self, table: &str, via: Option<&str>) -> Result<(), PathError> {
         let path = self.paths.path(table, via)?;
         let mut key: Vec<String> = Vec::new();
         let mut from = 0;
@@ -1115,6 +1178,7 @@ mod tests {
             agg: Agg::Sum,
             per: None,
             via: None,
+            named: None,
         }
     }
 
@@ -1192,6 +1256,7 @@ mod tests {
                 agg: Agg::Count,
                 per: None,
                 via: None,
+                named: None,
             }],
             filters: vec![Filter {
                 table: "s1/orders".into(),
@@ -1258,6 +1323,7 @@ mod tests {
                 agg: Agg::Sum,
                 per: None,
                 via: None,
+                named: None,
             }],
             ..Default::default()
         };
@@ -1275,6 +1341,7 @@ mod tests {
                 agg: Agg::Sum,
                 per: None,
                 via: None,
+                named: None,
             }],
             ..Default::default()
         };
@@ -1646,6 +1713,7 @@ mod tests {
             agg: Agg::Sum,
             per: None,
             via: None,
+            named: None,
         }
     }
 
@@ -1863,6 +1931,7 @@ mod tests {
                 agg: Agg::Count,
                 per: None,
                 via: None,
+                named: None,
             }],
             dimensions: vec![Dimension {
                 table: "s1/orders".into(),
@@ -1922,6 +1991,7 @@ mod tests {
                 agg: Agg::Count,
                 per: None,
                 via: None,
+                named: None,
             }],
             dimensions: vec![Dimension {
                 table: "s1/orders".into(),
@@ -2002,6 +2072,7 @@ mod tests {
                 agg: Agg::Count,
                 per: None,
                 via: None,
+                named: None,
             }],
             dimensions: vec![Dimension {
                 table: "s1/orders".into(),
@@ -2032,6 +2103,7 @@ mod tests {
                 agg: Agg::Count,
                 per: None,
                 via: None,
+                named: None,
             }],
             dimensions: vec![Dimension {
                 table: "s2/stores".into(),

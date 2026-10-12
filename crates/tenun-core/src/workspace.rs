@@ -74,6 +74,27 @@ pub struct Workspace {
     /// (`<source id>/<table name>`). Not written until a table is set up (V3-D11).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tables: BTreeMap<String, TableSetup>,
+    /// Named measures (V4-D4): formulas of totals that any tile can use. Not written until one is
+    /// made (V3-D11), so a file made before they existed is written back as it was.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub measures: Vec<NamedMeasure>,
+}
+
+/// A measure with a name: a formula of totals, such as `SUM([Sales].[amount]) / SUM([Targets].[target])`,
+/// which a tile uses by its id (`{ named: "m1" }`). The parts of the formula may come from
+/// different tables; each table is totalled on its own (V4-D4).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct NamedMeasure {
+    /// `m<n>`. A tile keeps this id, so it does not change when the name does.
+    pub id: String,
+    pub name: String,
+    pub formula: String,
+    /// How the value is written (decimals, currency, compact, percent), as a tile's own format
+    /// is. A tile's own format wins. The core does not read it; the app does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 impl Default for Workspace {
@@ -87,6 +108,7 @@ impl Default for Workspace {
             layout: serde_json::Value::Null,
             locale: None,
             tables: BTreeMap::new(),
+            measures: Vec::new(),
         }
     }
 }
@@ -109,6 +131,11 @@ pub struct TableSetup {
     /// (V3-D11), so a file made before this field existed is written back as it was.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calc: Vec<CalcColumn>,
+    /// The date column a time group uses for this table when a measure adds up tables that have
+    /// no date in common (V4-D5). Not set: the table's only date or date-time column, if it has
+    /// just one. Not written until set (V3-D11).
+    #[serde(default, rename = "mainDate", skip_serializing_if = "Option::is_none")]
+    pub main_date: Option<String>,
 }
 
 /// A column that is computed from the others, in the view of its table (V4-D3).
@@ -132,6 +159,7 @@ impl TableSetup {
             && self.columns.is_empty()
             && self.transforms.is_empty()
             && self.calc.is_empty()
+            && self.main_date.is_none()
     }
 
     /// Drops overrides that say nothing, so a cleared menu leaves no trace in the file.
@@ -157,6 +185,13 @@ impl TableSetup {
             }
         }
         self.columns.retain(|_, c| *c != ColumnSetup::default());
+        if self
+            .main_date
+            .as_deref()
+            .is_some_and(|d| d.trim().is_empty())
+        {
+            self.main_date = None;
+        }
         for c in &mut self.calc {
             c.name = c.name.trim().to_string();
             c.formula = c.formula.trim().to_string();

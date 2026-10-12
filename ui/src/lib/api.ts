@@ -74,6 +74,8 @@ export interface TableSetup {
   transforms?: Transform[];
   /** Calculated columns, in order. A column may use an earlier one, never a later one. */
   calc?: CalcColumn[];
+  /** The date column a measure uses to line this table up with others over time. Not set: its only date column. */
+  mainDate?: string;
 }
 
 /** The place of a problem in a formula, in UTF-16 units: `formula.slice(at, at + len)` is the culprit. */
@@ -249,6 +251,7 @@ export const DATE_PARTS: readonly Grain[] = ['month_of_year', 'weekday', 'hour']
 export const isPart = (g: Grain | null | undefined): boolean => !!g && DATE_PARTS.includes(g);
 
 export interface Measure {
+  /** A named measure has no table: its formula says what it reads. */
   table: string;
   column: string | null;
   agg: Agg;
@@ -256,6 +259,32 @@ export interface Measure {
   per?: { table: string; column: string | null; agg: Agg; via?: string };
   /** The link (a relationship id) the path to `table` crosses, when two links lead to it. Not set: the first. */
   via?: string;
+  /**
+   * A measure of the workspace (`NamedMeasure.id`). Then `table`, `column` and `agg` mean nothing: the
+   * formula says what is added up. A tile stores `{ named, table: '', column: null, agg: 'sum' }`.
+   */
+  named?: string;
+}
+
+/** A formula of totals with a name, which any tile can use. It may add up tables from different sources. */
+export interface NamedMeasure {
+  /** `m<n>`. A tile keeps this id, so the name can change. A new measure is sent with an empty id. */
+  id: string;
+  name: string;
+  formula: string;
+  /** How the value is written. A tile's own format wins. */
+  format?: NumFormat;
+  description?: string;
+}
+
+/** What the engine knows about a measure: its type, whether its values add up, and why it does not work. */
+export interface MeasureInfo {
+  dtype?: DType;
+  /** The values of the groups add up to the whole (a sum, a count, a difference of them). A share or a running total needs it. */
+  additive: boolean;
+  /** The ids of the tables the formula adds up. */
+  tables: string[];
+  error?: string;
 }
 
 export interface Dim {
@@ -342,6 +371,8 @@ export interface QueryResult {
   sparks?: Record<string, (number | null)[]>;
   /** Compare charts over two periods: the two periods, in the order of the two value columns. */
   pair?: { periods: Cell[] | null };
+  /** Named measures: a group or a filter that one table of the formula cannot reach, so it is left out of it. The words are also in `notes`. */
+  parts?: { measure: number; note: string }[];
 }
 
 /**
@@ -571,6 +602,8 @@ export interface Workspace {
   locale?: 'id' | 'en';
   /** How each table is prepared, by table id. */
   tables?: Record<string, TableSetup>;
+  /** Named measures, in the order they were made. */
+  measures?: NamedMeasure[];
 }
 
 export interface Snapshot {
@@ -589,6 +622,8 @@ export interface Snapshot {
   health?: Record<string, LinkHealth>;
   /** Link id → why its name no longer works: a table now has that name, or another link does. */
   link_clashes?: Record<string, string>;
+  /** Measure id → its type, whether its values add up, the tables it adds up and why it does not work. */
+  measure_info?: Record<string, MeasureInfo>;
   dirty: boolean;
 }
 
@@ -624,6 +659,36 @@ export interface LinkSettings {
   records?: string;
   pages?: Paging | null;
   key?: KeyIn | null;
+}
+
+/** A measure that cannot be saved. Nothing was saved. */
+export class MeasureRefused extends Error {
+  /** The index of the measure in the list that was sent. */
+  measure: number;
+  name: string;
+  error: FormulaError;
+  constructor(r: { measure: number; name: string; error: FormulaError }) {
+    super(r.error.message);
+    this.measure = r.measure;
+    this.name = r.name;
+    this.error = r.error;
+  }
+}
+
+/** A tile that uses a measure. */
+export interface TileRef {
+  dashboard: string;
+  dashboardTitle: string;
+  tile: string;
+  title: string;
+  kind: string;
+}
+
+/** A measure that tiles use, and the tiles. The save waits for a yes. */
+export interface MeasureUse {
+  measure: string;
+  name: string;
+  tiles: TileRef[];
 }
 
 export class ApiError extends Error {}
@@ -723,6 +788,19 @@ export const api = {
     // A calculated column that cannot be saved is a normal answer, not an HTTP error (V4-D35).
     if ('ok' in r && r.ok === false) throw new SetupRefused(r);
     return r as Snapshot;
+  },
+  /**
+   * Saves the whole list of named measures. A new measure has an empty id. A formula that cannot be saved
+   * throws `MeasureRefused`. A save that would delete measures that tiles use answers `{ used }` and saves
+   * nothing, until it is sent again with `confirm`.
+   */
+  setMeasures: async (measures: NamedMeasure[], confirm = false): Promise<{ saved: Snapshot } | { used: MeasureUse[] }> => {
+    const r = await call<Snapshot | { ok: false; measure: number; name: string; error: FormulaError } | { ok: false; used: MeasureUse[] }>('PUT', '/workspace/measures', { measures, confirm });
+    if ('ok' in r && r.ok === false) {
+      if ('used' in r) return { used: r.used };
+      throw new MeasureRefused(r);
+    }
+    return { saved: r as Snapshot };
   },
   /** Checks a formula and gives its type and first values, or the place of the problem. */
   checkFormula: (req: FormulaCheckRequest) => call<FormulaCheck>('POST', '/formula/check', req),

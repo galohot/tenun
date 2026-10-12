@@ -7,14 +7,16 @@ use crate::fetch;
 use crate::folder;
 use crate::formula;
 use crate::links::{self, Health, HealthOut, LinkHealth, Links};
+use crate::measures;
 use crate::paste;
 use crate::prep::{self, ColInfo};
 use crate::query::{self, Param, SemanticQuery};
 use crate::secrets::Secrets;
 use crate::suggest::{self, Suggestion};
 use crate::workspace::{
-    CalcColumn, DEFAULT_PATTERN, DbConn, Every, FieldRef, KeyPlace, LinkKey, Locale, Paging,
-    Relationship, Source, SourceKind, TableSetup, Transform, Workspace, resolve_path, store_path,
+    CalcColumn, DEFAULT_PATTERN, DbConn, Every, FieldRef, KeyPlace, LinkKey, Locale, NamedMeasure,
+    Paging, Relationship, Source, SourceKind, TableSetup, Transform, Workspace, resolve_path,
+    store_path,
 };
 use chrono::NaiveDate;
 use duckdb::Connection;
@@ -31,6 +33,113 @@ use std::time::{Duration, SystemTime};
 
 /// Called when a check of live database links that ran off the request path has written its answer.
 type Listener = Arc<dyn Fn() + Send + Sync>;
+
+/// A measure that cannot be saved: which one, why, and the place to underline (in characters of the
+/// formula). It is the error of [`Engine::set_measures`]; the API answers it as a normal reply, with
+/// the place in UTF-16 units (V4-D23, V4-D35).
+#[derive(Debug, Clone)]
+pub struct MeasureRefused {
+    /// The place of the measure in the list that was sent.
+    pub index: usize,
+    pub name: String,
+    pub formula: String,
+    pub error: formula::FormulaError,
+}
+
+impl std::fmt::Display for MeasureRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.name, self.error.message)
+    }
+}
+
+impl std::error::Error for MeasureRefused {}
+
+impl MeasureRefused {
+    /// The reply of `PUT /api/workspace/measures` for a measure that cannot be saved.
+    pub fn reply(&self) -> serde_json::Value {
+        let e = self.error.in_utf16(&self.formula);
+        serde_json::json!({
+            "ok": false,
+            "measure": self.index,
+            "name": self.name,
+            "error": { "message": e.message, "at": e.at, "len": e.len },
+        })
+    }
+}
+
+/// A tile that uses a measure.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TileRef {
+    pub dashboard: String,
+    #[serde(rename = "dashboardTitle")]
+    pub dashboard_title: String,
+    pub tile: String,
+    pub title: String,
+    pub kind: String,
+}
+
+/// A measure that tiles use, and the tiles.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MeasureUse {
+    pub measure: String,
+    pub name: String,
+    pub tiles: Vec<TileRef>,
+}
+
+/// The measures a save would delete while tiles use them. Nothing was saved; the caller asks the
+/// user, and sends the list again with `confirm`.
+#[derive(Debug, Clone)]
+pub struct MeasureInUse {
+    pub used: Vec<MeasureUse>,
+}
+
+impl std::fmt::Display for MeasureInUse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Tiles use a measure that this would delete.")
+    }
+}
+
+impl std::error::Error for MeasureInUse {}
+
+impl MeasureInUse {
+    /// The reply of `PUT /api/workspace/measures`: `{ ok: false, used: [...] }`.
+    pub fn reply(&self) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "used": self.used })
+    }
+}
+
+/// The tiles of the dashboards that use the measure `id`.
+pub fn tiles_using(dashboards: &[serde_json::Value], id: &str) -> Vec<TileRef> {
+    let text = |v: &serde_json::Value, k: &str| {
+        v.get(k)
+            .and_then(|x| x.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let mut out = Vec::new();
+    for d in dashboards {
+        let tiles = d.get("tiles").and_then(|t| t.as_array());
+        for t in tiles.into_iter().flatten() {
+            let uses = t
+                .get("measures")
+                .and_then(|m| m.as_array())
+                .is_some_and(|ms| {
+                    ms.iter()
+                        .any(|m| m.get("named").and_then(|n| n.as_str()) == Some(id))
+                });
+            if uses {
+                out.push(TileRef {
+                    dashboard: text(d, "id"),
+                    dashboard_title: text(d, "title"),
+                    tile: text(t, "id"),
+                    title: text(t, "title"),
+                    kind: text(t, "type"),
+                });
+            }
+        }
+    }
+    out
+}
 
 /// The most rows of a live database table that a link check reads (V4-D51).
 pub const LIVE_CHECK_ROWS: u64 = 1_000_000;
@@ -135,6 +244,10 @@ pub struct Snapshot {
     /// Link id → why its name no longer works: a table now has that name, or another link does.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub link_clashes: BTreeMap<String, String>,
+    /// Measure id → its type, whether its values add up, the tables it adds up, and why it does
+    /// not work (V4-D4). The app never works this out itself.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub measure_info: BTreeMap<String, measures::MeasureInfo>,
     pub dirty: bool,
 }
 
@@ -273,6 +386,11 @@ pub struct QueryResult {
     /// Compare charts: what the two value columns stand for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pair: Option<Pair>,
+    /// Named measures: a group or a filter that one table of the formula cannot reach, so that
+    /// table is left out of it (V4-D4, V4-D85). Table labels and column names only, so the words
+    /// may leave the computer as they are. The same sentences are also in `notes` and `publicNotes`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<query::PartNote>,
 }
 
 /// A compare chart with one value reads two periods of a field. `periods` are those two values, in
@@ -305,6 +423,7 @@ impl QueryResult {
             pair: None,
             notes: Vec::new(),
             public_notes: Vec::new(),
+            parts: Vec::new(),
         }
     }
 }
@@ -415,6 +534,7 @@ impl Engine {
                 .collect(),
             health: health_out(&s),
             link_clashes: link_clashes(&s),
+            measure_info: measures::infos(&measure_env(&s, self.today()), &s.catalog),
             dirty: s.dirty,
         }
     }
@@ -1394,9 +1514,9 @@ impl Engine {
     /// the same two tables.
     ///
     /// **Whoever stores formulas must follow a rename here.** The formulas of calculated columns
-    /// are rewritten from this function with `formula::rename_link(text, old, new)`, in the same
-    /// step that names the link (V4-D46). Measures and group values (03) join them when they
-    /// exist. A link that gives up its name leaves its formulas as they are: they say so.
+    /// and of measures are rewritten from this function with `formula::rename_link(text, old, new)`,
+    /// in the same step that names the link (V4-D46, V4-D85e). Group values (04) join them when
+    /// they exist. A link that gives up its name leaves its formulas as they are: they say so.
     pub fn rename_links(&self, names: BTreeMap<String, Option<String>>) -> anyhow::Result<()> {
         {
             let mut s = self.state.write().unwrap();
@@ -1485,11 +1605,249 @@ impl Engine {
                         c.formula = calc::rename_links_in(&c.formula, &renames);
                     }
                 }
+                for m in s.ws.measures.iter_mut() {
+                    m.formula = calc::rename_links_in(&m.formula, &renames);
+                }
             }
         }
         self.rebuild_calc(calc::Roots::All);
         self.persist();
         Ok(())
+    }
+
+    // ---- measures (build 03) ---------------------------------------------------------------
+
+    /// The named measures of the workspace.
+    pub fn measures(&self) -> Vec<NamedMeasure> {
+        self.state.read().unwrap().ws.measures.clone()
+    }
+
+    /// Saves the whole list of named measures (V4-D4). A new measure (empty `id`) gets the next
+    /// `m<n>`. A measure that is new or whose formula changed is checked by build 01 and refused with
+    /// its place when it does not work ([`MeasureRefused`]); one that was saved before and fails now
+    /// stays and says so on the tiles that use it, so a rename or a lost column never stops the user
+    /// from saving another measure (as V4-D68 does for columns). A measure that tiles use cannot go
+    /// without a question: without `confirm` the tiles are returned ([`MeasureInUse`]) and nothing is saved.
+    pub fn set_measures(&self, mut list: Vec<NamedMeasure>, confirm: bool) -> anyhow::Result<()> {
+        if list.len() > measures::MAX_MEASURES {
+            anyhow::bail!(
+                "A workspace can have up to {} measures. Delete one that is not needed.",
+                measures::MAX_MEASURES
+            );
+        }
+        for m in &mut list {
+            m.name = m.name.split_whitespace().collect::<Vec<_>>().join(" ");
+            m.formula = m.formula.trim().to_string();
+            m.id = m.id.trim().to_string();
+            if m.description
+                .as_deref()
+                .is_some_and(|d| d.trim().is_empty())
+            {
+                m.description = None;
+            }
+            if m.format
+                .as_ref()
+                .is_some_and(|f| f.as_object().is_none_or(|o| o.is_empty()))
+            {
+                m.format = None;
+            }
+        }
+        let (old, catalog, rels, health, dashboards) = {
+            let s = self.state.read().unwrap();
+            (
+                s.ws.measures.clone(),
+                s.catalog.clone(),
+                s.ws.relationships.clone(),
+                s.health.clone(),
+                s.ws.dashboards.clone(),
+            )
+        };
+        // Ids: a new measure takes the next number; a repeated id is a mistake of the caller.
+        let number = |id: &str| id.strip_prefix('m').and_then(|n| n.parse::<u64>().ok());
+        // A tile may still name a measure that was deleted. Its id is not given again, or the tile would
+        // quietly turn into another measure.
+        let dangling: Vec<String> = dashboards
+            .iter()
+            .flat_map(|d| {
+                d.get("tiles")
+                    .and_then(|t| t.as_array())
+                    .into_iter()
+                    .flatten()
+            })
+            .flat_map(|t| {
+                t.get("measures")
+                    .and_then(|m| m.as_array())
+                    .into_iter()
+                    .flatten()
+            })
+            .filter_map(|m| m.get("named").and_then(|n| n.as_str()).map(str::to_string))
+            .collect();
+        let mut next = old
+            .iter()
+            .map(|m| &m.id)
+            .chain(list.iter().map(|m| &m.id))
+            .chain(dangling.iter())
+            .filter_map(|id| number(id))
+            .max()
+            .unwrap_or(0);
+        for m in &mut list {
+            if m.id.is_empty() {
+                next += 1;
+                m.id = format!("m{next}");
+            }
+        }
+        for (i, m) in list.iter().enumerate() {
+            if list[..i].iter().any(|o| o.id == m.id) {
+                anyhow::bail!("Two measures have the id {}.", m.id);
+            }
+        }
+        let refuse = |index: usize, m: &NamedMeasure, message: &str| MeasureRefused {
+            index,
+            name: m.name.clone(),
+            formula: m.formula.clone(),
+            error: formula::FormulaError::new(message, 0, 0),
+        };
+        for (i, m) in list.iter().enumerate() {
+            if m.name.is_empty() {
+                return Err(refuse(i, m, "Give the measure a name.").into());
+            }
+            if m.name.chars().count() > 60 {
+                return Err(
+                    refuse(i, m, "Keep the name of a measure to 60 letters or fewer.").into(),
+                );
+            }
+            let same = |a: &str| a.to_lowercase() == m.name.to_lowercase();
+            if list[..i].iter().any(|o| same(&o.name)) {
+                return Err(refuse(
+                    i,
+                    m,
+                    &format!(
+                        "Another measure is called {}. Give this one another name.",
+                        m.name
+                    ),
+                )
+                .into());
+            }
+        }
+        // The measures that are new, or changed.
+        let today = self.today();
+        let cx = formula::Context {
+            catalog: &catalog,
+            rels: &rels,
+            health: &health,
+            today,
+            now: today.and_time(chrono::Local::now().time()),
+            view: false,
+        };
+        for (i, m) in list.iter().enumerate() {
+            if old.iter().any(|o| o.id == m.id && o.formula == m.formula) {
+                continue;
+            }
+            if m.formula.is_empty() {
+                return Err(refuse(i, m, "Write a formula, such as SUM([Sales].[amount]).").into());
+            }
+            if m.formula.chars().count() > measures::MAX_FORMULA {
+                return Err(refuse(
+                    i,
+                    m,
+                    &format!(
+                        "Keep a formula to {} characters or fewer.",
+                        measures::MAX_FORMULA
+                    ),
+                )
+                .into());
+            }
+            match formula::compile(&m.formula, formula::Kind::Measure, None, &cx) {
+                Ok(c) if matches!(c.body, formula::Body::Aggregate(_)) => {}
+                Ok(_) => {
+                    return Err(refuse(
+                        i,
+                        m,
+                        "A measure adds things up. Use SUM, AVERAGE, COUNT or another total.",
+                    )
+                    .into());
+                }
+                Err(e) => {
+                    return Err(MeasureRefused {
+                        index: i,
+                        name: m.name.clone(),
+                        formula: m.formula.clone(),
+                        error: e,
+                    }
+                    .into());
+                }
+            }
+        }
+        // A measure that tiles use does not go without a question.
+        if !confirm {
+            let mut used = Vec::new();
+            for o in old.iter().filter(|o| !list.iter().any(|m| m.id == o.id)) {
+                let tiles = tiles_using(&dashboards, &o.id);
+                if !tiles.is_empty() {
+                    used.push(MeasureUse {
+                        measure: o.id.clone(),
+                        name: o.name.clone(),
+                        tiles,
+                    });
+                }
+            }
+            if !used.is_empty() {
+                return Err(MeasureInUse { used }.into());
+            }
+        }
+        {
+            let mut s = self.state.write().unwrap();
+            if s.ws.measures == list {
+                return Ok(());
+            }
+            s.ws.measures = list;
+        }
+        self.persist();
+        Ok(())
+    }
+
+    /// The type, the additivity and the tables of each measure, by id (see [`measures::MeasureInfo`]).
+    pub fn measure_info(&self) -> BTreeMap<String, measures::MeasureInfo> {
+        let s = self.state.read().unwrap();
+        measures::infos(&measure_env(&s, self.today()), &s.catalog)
+    }
+
+    /// What a question about these measures needs to know about each (see [`measures::Facts`]).
+    pub fn measure_facts(&self, m: &query::Measure) -> Result<measures::Facts, query::QueryError> {
+        let s = self.state.read().unwrap();
+        measures::facts(&measure_env(&s, self.today()), &s.catalog, m)
+    }
+
+    /// What a measure gives where there is nothing to add up: 0 for a sum or a count, and blank for
+    /// the rest. A time chart fills a quiet period with it, and a trend column too. Index-aligned
+    /// with `ms`.
+    pub fn empty_values(&self, ms: &[query::Measure]) -> Vec<serde_json::Value> {
+        ms.iter()
+            .map(|m| match &m.named {
+                None => match m.agg {
+                    query::Agg::Sum | query::Agg::Count | query::Agg::CountDistinct
+                        if m.per.is_none() =>
+                    {
+                        serde_json::json!(0.0)
+                    }
+                    _ => serde_json::Value::Null,
+                },
+                Some(id) => {
+                    let sql = {
+                        let s = self.state.read().unwrap();
+                        measures::resolve(&measure_env(&s, self.today()), &s.catalog, id)
+                            .map(|r| r.empty_sql())
+                    };
+                    sql.ok()
+                        .and_then(|sql| {
+                            let conn = self.conn().ok()?;
+                            run(&conn, &sql, &[]).ok()
+                        })
+                        .and_then(|rows| rows.into_iter().next()?.into_iter().next())
+                        .unwrap_or(serde_json::Value::Null)
+                }
+            })
+            .collect()
     }
 
     /// Saves the dashboards the UI sends. The publish status that only the
@@ -1556,38 +1914,17 @@ impl Engine {
         let compiled = {
             let s = self.state.read().unwrap();
             note_blank_calc(&s, q);
-            query::compile_on(
-                q,
-                &s.catalog,
-                Links::new(&s.ws.relationships, Some(&s.health)),
-                today,
-            )?
+            measures::compile(q, &s.catalog, today, &measure_env(&s, today))?
         };
         note_crossed(&compiled.crossed);
         let start = std::time::Instant::now();
         let conn = self.conn()?;
         let rows = run(&conn, &compiled.sql, &compiled.params)?;
-        Ok(QueryResult {
-            columns: compiled.columns,
-            rows,
-            ignored_filters: compiled.ignored_filters,
-            ms: start.elapsed().as_millis(),
-            kpi: None,
-            partial: None,
-            other: None,
-            other_of: None,
-            bins: None,
-            totals: None,
-            compare: None,
-            total_rows: None,
-            repeat: None,
-            real: None,
-            outliers: None,
-            sparks: None,
-            pair: None,
-            notes: Vec::new(),
-            public_notes: Vec::new(),
-        })
+        let mut res = QueryResult::new(compiled.columns, rows);
+        res.ignored_filters = compiled.ignored_filters;
+        res.ms = start.elapsed().as_millis();
+        res.parts = compiled.parts;
+        Ok(res)
     }
 
     /// Runs a custom SELECT that builds on the scope of a semantic query (its FROM, JOINs and
@@ -1816,6 +2153,18 @@ impl Engine {
         if let Some(why) = calc::unpivot_sql_problem(&old, &setup) {
             anyhow::bail!(why);
         }
+        // The main date is a date column of the table (V4-D5), or a calculated column it will have.
+        if let Some(d) = setup.main_date.as_deref() {
+            let will_have = setup.calc.iter().any(|c| c.name == d);
+            match table.column(d) {
+                Some(c) if !c.dtype.is_temporal() && !c.calc => {
+                    anyhow::bail!("{d} is not a date column, so it cannot be the main date.");
+                }
+                Some(_) => {}
+                None if will_have => {}
+                None => anyhow::bail!("The column {d} is not in {}.", table.label),
+            }
+        }
         // The formulas follow the names that changed. The check below judges what was sent.
         let sent = setup.calc.clone();
         let renames = calc::renamed_columns(&table, &old, &setup);
@@ -1826,11 +2175,17 @@ impl Engine {
             self.check_calc_setup(&table, &old, &setup, &sent)?;
         }
         let calc_changed = setup.calc != old.calc;
+        // A tile that adds up this table reads its main date, so the tiles ask again.
+        let main_changed = setup.main_date != old.main_date;
         let (reload, touched) = {
             let mut s = self.state.write().unwrap();
-            // The other tables' formulas that name this table's column.
+            // The other tables' formulas that name this table's column, and the measures.
             let mut touched = Vec::new();
             if !renames.is_empty() {
+                for m in s.ws.measures.iter_mut() {
+                    m.formula =
+                        calc::follow_renames(&m.formula, &table, &renames, false, &link_names);
+                }
                 for (id, other) in
                     s.ws.tables
                         .iter_mut()
@@ -1880,7 +2235,7 @@ impl Engine {
             self.rebuild_calc(calc::Roots::Tables(&ids));
         }
         self.persist();
-        Ok(reloaded || calc_changed || !renames.is_empty())
+        Ok(reloaded || calc_changed || main_changed || !renames.is_empty())
     }
 
     /// The check of a setup's calculated columns before it is saved (see [`Engine::set_table_setup`]).
@@ -2277,6 +2632,17 @@ fn health_out(s: &State) -> BTreeMap<String, HealthOut> {
             Some((r.id.clone(), links::health_out(r, h, &s.catalog, &lookup)))
         })
         .collect()
+}
+
+/// What named measures are read against: the measures, the main dates, the links and the clock.
+fn measure_env(s: &State, today: NaiveDate) -> measures::Env<'_> {
+    measures::Env {
+        measures: &s.ws.measures,
+        tables: &s.ws.tables,
+        rels: &s.ws.relationships,
+        health: &s.health,
+        now: today.and_time(chrono::Local::now().time()),
+    }
 }
 
 /// The id a tile note uses for a calculated column that could not be computed.

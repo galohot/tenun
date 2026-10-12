@@ -362,3 +362,56 @@ fn a_column_that_reads_back_across_a_one_to_one_link_into_a_live_table_heals_whe
     // The windows were told.
     assert!(told.load(std::sync::atomic::Ordering::SeqCst) >= 1);
 }
+
+#[test]
+fn a_named_measure_never_doubles_a_total_across_a_live_table_with_a_repeated_key() {
+    use tenun_core::workspace::NamedMeasure;
+    let e = engine("measure");
+    e.set_measures(
+        vec![
+            NamedMeasure {
+                name: "East and West".into(),
+                formula: "SUMIF([orders].[amount], [stores].[region] = \"East\") \
+                          + SUMIF([orders].[amount], [stores].[region] = \"West\")"
+                    .into(),
+                ..Default::default()
+            },
+            NamedMeasure {
+                name: "Revenue".into(),
+                formula: "SUM([orders].[amount])".into(),
+                ..Default::default()
+            },
+        ],
+        false,
+    )
+    .unwrap();
+    let kpi = |id: &str| -> f64 {
+        let t: Tile = serde_json::from_value(json!({
+            "id": "t", "type": "kpi", "title": "", "x": 0, "y": 0, "w": 3, "h": 2,
+            "measures": [{ "named": id, "table": "", "column": null, "agg": "sum" }],
+            "dims": [],
+        }))
+        .unwrap();
+        run_tile(&e, &t, &[]).unwrap().rows[0][0].as_f64().unwrap()
+    };
+    let by_region_named = || -> f64 {
+        let t: Tile = serde_json::from_value(json!({
+            "id": "t", "type": "bar", "title": "", "x": 0, "y": 0, "w": 6, "h": 4,
+            "measures": [{ "named": "m2", "table": "", "column": null, "agg": "sum" }],
+            "dims": [{ "table": "s1/stores", "column": "region" }],
+        }))
+        .unwrap();
+        run_tile(&e, &t, &[])
+            .unwrap()
+            .rows
+            .iter()
+            .map(|r| r[1].as_f64().unwrap())
+            .sum()
+    };
+    // While the link of the live table is still unknown, and after it was read: every order once.
+    assert_eq!(kpi("m1"), 475.5);
+    assert_eq!(by_region_named(), 475.5);
+    wait_for_checks(&e);
+    assert_eq!(kpi("m1"), 475.5);
+    assert_eq!(by_region_named(), 475.5);
+}

@@ -215,6 +215,7 @@ pub fn options(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
                 agg,
                 per: None,
                 via: d.via.clone(),
+                named: None,
             };
             let mut res = engine.query(&SemanticQuery {
                 measures: vec![ask(Agg::Min), ask(Agg::Max)],
@@ -235,6 +236,7 @@ pub fn options(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
                     agg: Agg::Count,
                     per: None,
                     via: d.via.clone(),
+                    named: None,
                 }],
                 dimensions: vec![plain],
                 filters: filters.to_vec(),
@@ -286,6 +288,7 @@ fn range_bins(
             agg: Agg::Count,
             per: None,
             via: d.via.clone(),
+            named: None,
         }],
         dimensions: vec![],
         filters: filters.to_vec(),
@@ -390,6 +393,27 @@ pub fn rows_behind(
     q.limit = None;
     if let Some(c) = click {
         q.filters.push(c);
+    }
+    // A named measure adds up the rows of the tables its formula reads. With one table the rows
+    // behind it are that table's; with more, there is no one list of rows, and the words say so.
+    if let Some(m) = q.measures.iter().find(|m| m.named.is_some()) {
+        let f = engine.measure_facts(m)?;
+        let [home] = f.homes.as_slice() else {
+            let catalog = engine.catalog();
+            let labels: Vec<String> = f
+                .homes
+                .iter()
+                .map(|t| catalog.table(t).map_or(t.clone(), |t| t.label.clone()))
+                .collect();
+            anyhow::bail!(
+                "{} adds up rows of more than one table ({}), so there is no one list of rows behind it.",
+                f.name,
+                labels.join(", ")
+            );
+        };
+        let home = home.clone();
+        q.measures.retain(|m| m.named.is_none());
+        q.measures.insert(0, crate::snapshot::count_rows(&home));
     }
     let base = q
         .measures

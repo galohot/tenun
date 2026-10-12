@@ -60,6 +60,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/workspace/save", post(ws_save))
         .route("/workspace/rename", post(ws_rename))
         .route("/workspace/locale", put(ws_locale))
+        .route("/workspace/measures", put(put_measures))
         .route("/sample", post(open_sample))
         .route("/sources", post(add_source))
         .route("/sources/{id}", delete(remove_source))
@@ -450,6 +451,42 @@ async fn table_setup(State(s): S, Json(b): Json<SetupBody>) -> R<Json<Value>> {
                         Some(refused) => Ok(refused.reply()),
                         None => Err(e),
                     };
+                }
+            }
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct MeasuresBody {
+    /// The whole list. A new measure has an empty `id`.
+    measures: Vec<tenun_core::workspace::NamedMeasure>,
+    /// Yes to deleting measures that tiles use.
+    #[serde(default)]
+    confirm: bool,
+}
+
+/// Saves the named measures (the whole list). Every new or changed formula is checked by build 01.
+///
+/// Two normal answers are not errors (V4-D35): `{ ok: false, measure, name, error: { message, at,
+/// len } }` for a formula that cannot be saved, and `{ ok: false, used: [...] }` when the save would
+/// delete a measure that tiles use and `confirm` is not set. Nothing is saved then. A good save
+/// answers the snapshot.
+async fn put_measures(State(s): S, Json(b): Json<MeasuresBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            match st.engine.set_measures(b.measures, b.confirm) {
+                Ok(()) => st.emit(json!({ "type": "data-changed", "tables": [] })),
+                Err(e) => {
+                    if let Some(refused) = e.downcast_ref::<tenun_core::engine::MeasureRefused>() {
+                        return Ok(refused.reply());
+                    }
+                    if let Some(used) = e.downcast_ref::<tenun_core::engine::MeasureInUse>() {
+                        return Ok(used.reply());
+                    }
+                    return Err(e);
                 }
             }
             Ok(serde_json::to_value(st.engine.snapshot())?)

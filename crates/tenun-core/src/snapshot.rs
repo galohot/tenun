@@ -173,6 +173,7 @@ pub(crate) fn count_rows(table: &str) -> Measure {
         agg: Agg::Count,
         per: None,
         via: None,
+        named: None,
     }
 }
 
@@ -339,6 +340,17 @@ pub fn run_tile(
     let mut res = res?;
     res.notes = engine.link_notes(&crossed);
     res.public_notes = engine.public_link_notes(&crossed);
+    // What a named measure could not split or filter by names tables and columns only, so the
+    // same words go where the other notes go (V4-D85b).
+    let mut words: Vec<&str> = Vec::new();
+    for p in &res.parts {
+        if !words.contains(&p.note.as_str()) {
+            words.push(&p.note);
+        }
+    }
+    let words: Vec<String> = words.into_iter().map(str::to_string).collect();
+    res.notes.extend(words.iter().cloned());
+    res.public_notes.extend(words);
     Ok(res)
 }
 
@@ -446,6 +458,7 @@ fn run_tile_inner(
             agg: Agg::Max,
             per: None,
             via: d.via.clone(),
+            named: None,
         }],
         dimensions: vec![],
         filters: q.filters.clone(),
@@ -528,6 +541,7 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
             agg: Agg::Max,
             per: None,
             via: d.via.clone(),
+            named: None,
         }],
         dimensions: vec![],
         filters: fs.clone(),
@@ -1031,17 +1045,44 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         }
     }
 
-    let used: HashSet<&str> = tiles
-        .iter()
-        .flat_map(|t| {
-            t.measures
-                .iter()
-                .flat_map(|m| {
-                    std::iter::once(m.table.as_str())
-                        .chain(m.per.as_ref().map(|p| p.table.as_str()))
-                })
-                .chain(t.dims.iter().map(|d| d.table.as_str()))
-                .chain(t.spark.iter().map(|d| d.table.as_str()))
+    // The measures the tiles name: what the viewer needs to write their names and to know whether
+    // their values add up (V4-D85d). The formula stays at home.
+    let mut named: Vec<String> = Vec::new();
+    for m in tiles.iter().flat_map(|t| t.measures.iter()) {
+        if let Some(id) = &m.named
+            && !named.contains(id)
+        {
+            named.push(id.clone());
+        }
+    }
+    let info = engine.measure_info();
+    let mut used: HashSet<String> = HashSet::new();
+    for t in &tiles {
+        for m in &t.measures {
+            used.insert(m.table.clone());
+            if let Some(p) = &m.per {
+                used.insert(p.table.clone());
+            }
+            if let Some(i) = m.named.as_ref().and_then(|id| info.get(id)) {
+                used.extend(i.tables.iter().cloned());
+            }
+        }
+        used.extend(t.dims.iter().map(|d| d.table.clone()));
+        used.extend(t.spark.iter().map(|d| d.table.clone()));
+    }
+    let measures: Vec<Value> = engine
+        .measures()
+        .into_iter()
+        .filter(|m| named.contains(&m.id))
+        .map(|m| {
+            let i = info.get(&m.id);
+            json!({
+                "id": m.id,
+                "name": m.name,
+                "format": m.format,
+                "dtype": i.and_then(|i| i.dtype),
+                "additive": i.is_some_and(|i| i.additive),
+            })
         })
         .collect();
     let tables: Vec<Value> = engine
@@ -1100,6 +1141,9 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
     });
     if !links.is_empty() {
         payload["links"] = json!(links);
+    }
+    if !measures.is_empty() {
+        payload["measures"] = json!(measures);
     }
     Ok(payload)
 }

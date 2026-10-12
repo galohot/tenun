@@ -1,9 +1,10 @@
 <script lang="ts">
-  import type { DType } from '../../lib/api';
+  import type { DType, NamedMeasure } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { typeIcon } from '../../lib/ui';
   import { blankNote, isShown } from '../../lib/prep';
   import { fieldGroups, groupOf, labelOfLink } from '../../lib/links';
+  import { nameOf } from '../../lib/measures';
   import Icon from '../Icon.svelte';
 
   let {
@@ -17,6 +18,9 @@
     reachable,
     numbersOnly = false,
     datesOnly = false,
+    measures = [],
+    named = null,
+    onnamed,
     onchange,
     onclear,
   }: {
@@ -36,6 +40,12 @@
     numbersOnly?: boolean;
     /** Lists date columns only, and no row count (a Gantt chart reads a start and an end date). */
     datesOnly?: boolean;
+    /** The measures of the workspace that can be picked here (build 03). They are listed first, under "Measures". */
+    measures?: NamedMeasure[];
+    /** The measure this field holds now. */
+    named?: string | null;
+    /** A measure was picked. Without it no measures are offered. */
+    onnamed?: (id: string) => void;
     onchange: (table: string, column: string | null, via?: string) => void;
     onclear?: () => void;
   } = $props();
@@ -83,6 +93,19 @@
     q = '';
   }
 
+  function pickNamed(id: string) {
+    onnamed?.(id);
+    open = false;
+    q = '';
+  }
+
+  /** The measures that fit the search. A measure is offered for a value, never for a group. */
+  const offered = $derived(
+    mode === 'measure' && onnamed && !numbersOnly && !datesOnly
+      ? measures.filter((x) => !q || x.name.toLowerCase().includes(q.toLowerCase()))
+      : [],
+  );
+
   function outside(e: MouseEvent) {
     if (open && root && !root.contains(e.target as Node)) open = false;
   }
@@ -93,8 +116,11 @@
 <svelte:window onmousedown={outside} onkeydown={(e) => open && e.key === 'Escape' && (open = false)} />
 
 <div class="fp" bind:this={root}>
-  <button class="trigger" class:empty={!table} onclick={() => (open = !open)} aria-expanded={open}>
-    {#if table}
+  <button class="trigger" class:empty={!table && !named} onclick={() => (open = !open)} aria-expanded={open}>
+    {#if named}
+      <span class="tbl fxm" aria-label="Measure"><Icon name="fx" size={12} /></span>
+      <span class="col">{nameOf(named)}</span>
+    {:else if table}
       <span class="tbl">{labelOfLink(via) ? `${labelOfLink(via)} ›` : current?.label}</span>
       <span class="col">{label}</span>
     {:else}
@@ -102,7 +128,7 @@
     {/if}
     <Icon name="chevronDown" size={12} />
   </button>
-  {#if table && onclear}
+  {#if (table || named) && onclear}
     <button class="clear" aria-label="Remove field" onclick={onclear}><Icon name="x" size={12} /></button>
   {/if}
   {#if open}
@@ -110,6 +136,17 @@
       <!-- svelte-ignore a11y_autofocus -->
       <input class="field" placeholder="Search fields" bind:value={q} autofocus />
       <div class="list">
+        {#if offered.length}
+          <div class="group">
+            <div class="gh"><Icon name="fx" size={12} />Measures</div>
+            {#each offered as x (x.id)}
+              <button class="opt" class:on={named === x.id} title={x.description || x.formula} onclick={() => pickNamed(x.id)}>
+                <Icon name="fx" size={12} />
+                <span class="nm">{x.name}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
         {#each groups as { g, cols } (g.key)}
           {@const far = reachable && !reachable.has(g.table.id)}
           <div class="group" class:far>
@@ -133,7 +170,7 @@
             {/each}
           </div>
         {:else}
-          <p class="nothing">No field matches “{q}”.</p>
+          {#if !offered.length}<p class="nothing">No field matches “{q}”.</p>{/if}
         {/each}
       </div>
     </div>
@@ -158,6 +195,8 @@
   .trigger:hover { border-color: var(--sep-strong); }
   .trigger :global(svg) { margin-left: auto; color: var(--text-2); flex: none; }
   .tbl { color: var(--text-2); font-size: 12px; white-space: nowrap; }
+  .tbl.fxm { display: inline-flex; color: var(--accent-text); }
+  .trigger .tbl.fxm :global(svg) { margin-left: 0; color: var(--accent-text); }
   .col { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ph { color: var(--text-2); }
   .clear { width: 26px; border: 0; background: none; color: var(--text-2); border-radius: var(--r-control); display: grid; place-items: center; }

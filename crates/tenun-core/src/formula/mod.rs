@@ -191,6 +191,11 @@ pub struct Join {
     pub alias: String,
     /// The condition after `ON`, with the aliases of both sides.
     pub on: String,
+    /// The id of the relationship this join crosses.
+    pub rel: String,
+    /// The data of the link has something to tell the reader of a result that crosses it (a key
+    /// repeats on the side joined, V4-D26). The measures in 03 collect these for the tile note.
+    pub warn: bool,
 }
 
 impl Join {
@@ -225,6 +230,10 @@ pub struct Part {
     /// wrap such a part as `COALESCE(part, 0)`; the join on group values in 03 does the same
     /// for a group that has no rows in this part's table.
     pub zero_when_empty: bool,
+    /// The values of the groups add up to the value of the whole: a sum or a count of rows or of
+    /// filled cells. An average, a middle value, a distinct count, a least or a most do not. A
+    /// share of the whole, a running total and a pile of bars are only right for these.
+    pub additive: bool,
 }
 
 impl AggregateSql {

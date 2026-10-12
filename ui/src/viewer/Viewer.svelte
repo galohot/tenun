@@ -12,6 +12,7 @@
   import { filterText } from '../lib/filterText';
   import { partialNote } from '../lib/run';
   import { setLinkNames } from '../lib/links';
+  import { setKnownFromFile } from '../lib/measures';
   import { isColFilter, stageOf } from '../lib/filters';
   import { EMPTY_RESULT, isStatic } from '../lib/tiles';
   import { phoneLayout, PHONE_MAX, readingOrder } from '../lib/layout';
@@ -47,6 +48,8 @@
 
   // The names of the links the tiles use, so a title can say "Shipped from › region".
   $effect.pre(() => setLinkNames(data.links));
+  // The same for the named measures: their names for the titles, and whether their values add up.
+  $effect.pre(() => setKnownFromFile(data.measures));
 
   $effect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';

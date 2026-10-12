@@ -10,6 +10,7 @@
   import { isCleared, isPeriod } from '../../lib/filters';
   import { defaultDim, defaultMeasure, dtypeOf, isRepeated, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, type DashFilter } from '../../lib/tiles';
   import { reachableFrom } from '../../lib/links';
+  import { additive, formatOf, namedMeasure } from '../../lib/measures';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
   import Suggestions from './Suggestions.svelte';
@@ -116,7 +117,8 @@
 
   function setFormat(i: number, patch: Partial<NumFormat>) {
     const formats = tile.measures.map((_, j) => tile.formats?.[j] ?? null);
-    const next: NumFormat = { ...(formats[i] ?? {}), ...patch };
+    // A value starts from the format of its named measure, if it has one and no format of its own.
+    const next: NumFormat = { ...(formats[i] ?? formatOf(tile, i) ?? {}), ...patch };
     for (const k of Object.keys(next) as (keyof NumFormat)[]) if (next[k] === undefined) delete next[k];
     formats[i] = Object.keys(next).length ? next : null;
     set({ formats: formats.some(Boolean) ? formats : undefined });
@@ -140,6 +142,24 @@
     const ms = [...tile.measures];
     ms[i] = { ...defaultMeasure(app.tables, table, column, via), ...(ms[i]?.per ? { per: ms[i].per } : {}) };
     set({ measures: ms });
+  }
+
+  /** Value `i` is a measure of the workspace. Its table, column and way of adding up mean nothing then. */
+  function swapNamed(i: number, id: string) {
+    const ms = [...tile.measures];
+    ms[i] = namedMeasure(id);
+    set({ measures: ms, ...(isBullet && i === 1 ? { target: undefined } : {}) });
+  }
+
+  /**
+   * What a field that holds a value needs to offer the measures of the workspace. Not offered where the
+   * chart reads a column (a histogram, a box plot, who to follow, a date) or adds flows up (a Sankey chart
+   * takes the measures that add up).
+   */
+  function namedProps(i: number, on = true) {
+    if (!on || !namedList.length) return {};
+    const list = isSankey ? namedList.filter((x) => measureInfo[x.id]?.additive) : namedList;
+    return { measures: list, named: tile.measures[i]?.named ?? null, onnamed: (id: string) => swapNamed(i, id) };
   }
 
   /** Sets or clears what value `i` is divided by. */
@@ -176,7 +196,19 @@
 
   const m = $derived(tile.measures[0]);
   const rels = $derived(app.snap!.workspace.relationships);
-  const reach = $derived(m ? reachableFrom(m.table, rels, app.linkHealth) : null);
+  // The table the other fields are read from. A named measure has none: it adds up the tables of its formula,
+  // and a field is related when some one of those tables can reach it.
+  const baseTable = $derived(m && !m.named ? m.table : null);
+  const measureInfo = $derived(app.snap!.measure_info ?? {});
+  const reach = $derived.by(() => {
+    if (!m) return null;
+    if (!m.named) return reachableFrom(m.table, rels, app.linkHealth);
+    const homes = measureInfo[m.named]?.tables ?? [];
+    if (!homes.length) return null;
+    return new Set(homes.flatMap((h) => [...reachableFrom(h, rels, app.linkHealth)]));
+  });
+  /** The measures of the workspace a value can be (Advanced makes them; a dashboard that uses one works without the switch). */
+  const namedList = $derived(app.snap!.workspace.measures ?? []);
   /** The ways a value can be added up: a number column can be summed, any other column only counted. */
   const aggsOf = (x: Measure | undefined): Agg[] =>
     !x || x.column === null
@@ -606,7 +638,7 @@
 </script>
 
 {#snippet formatRow(i: number)}
-  {@const f = tile.formats?.[i] ?? null}
+  {@const f = formatOf(tile, i)}
   <div class="fmt" role="group" aria-label="Format of this value">
     <span class="label">Format</span>
     <div class="pair">
@@ -637,14 +669,16 @@
 {#snippet valueRows(i: number)}
   {@const x = tile.measures[i]}
   {#if x && !numberOnly}
-    {#if x.per}
+    {#if x.named}
+      <!-- A named measure divides inside its formula. -->
+    {:else if x.per}
       <div class="per">
         <span class="label">Divide by</span>
         <FieldPicker
           mode="measure"
           table={x.per.table}
           column={x.per.column} via={x.per.via}
-          reachable={reach} base={m?.table ?? null}
+          reachable={reach} base={baseTable}
           onchange={(t, c, v) => setPer(i, defaultMeasure(app.tables, t, c, v))}
           onclear={() => setPer(i, null)} />
         <select
@@ -658,7 +692,7 @@
     {:else if dividing === i}
       <div class="per">
         <span class="label">Divide by</span>
-        <FieldPicker mode="measure" table={null} column={null} placeholder="What to divide by" reachable={reach} base={m?.table ?? null} onchange={(t, c, v) => setPer(i, defaultMeasure(app.tables, t, c, v))} />
+        <FieldPicker mode="measure" table={null} column={null} placeholder="What to divide by" reachable={reach} base={baseTable} onchange={(t, c, v) => setPer(i, defaultMeasure(app.tables, t, c, v))} />
         <button class="link" onclick={() => (dividing = null)}>Cancel</button>
       </div>
     {:else}
@@ -898,13 +932,14 @@
       placeholder={isGantt ? 'The column the work starts in' : isCohort ? 'A column like customer_id' : numberOnly ? 'A column of numbers' : 'What to measure'}
       numbersOnly={numberOnly}
       datesOnly={isGantt}
+      {...namedProps(0, !numberOnly && !plainValue)}
       onchange={(t, c, v) => (isGantt ? setDateValue(0, t, c, v) : isCohort ? setEntity(t, c, v) : swapField(0, t, c, v))} />
     {#if m && isCohort}
       <p class="hint tight">Each different value in this column is one customer, user or item. It joins the cohort of the first period it appears in.</p>
     {/if}
     {#if m && !plainValue}
       <!-- A histogram and a box plot read every row of the column, so there is nothing to add up. -->
-      {#if !numberOnly}
+      {#if !numberOnly && !m.named}
         <select class="field" value={m.agg} onchange={(e) => set({ measures: [{ ...m, agg: e.currentTarget.value as Agg }, ...tile.measures.slice(1)] })}>
           {#each aggs as a}<option value={a}>{aggNames[a]}</option>{/each}
         </select>
@@ -918,13 +953,16 @@
         table={tile.measures[1]?.table ?? null}
         column={tile.measures[1]?.column ?? null} via={tile.measures[1]?.via}
         placeholder="What to measure"
-        reachable={reach} base={m?.table ?? null}
+        reachable={reach} base={baseTable}
+        {...namedProps(1)}
         onchange={(t, c, v) => swapField(1, t, c, v)}
         onclear={() => removeMeasure(1)} />
       {#if tile.measures[1]}
+        {#if !tile.measures[1].named}
         <select class="field" value={tile.measures[1].agg} onchange={(e) => set({ measures: [m, { ...tile.measures[1], agg: e.currentTarget.value as Agg }, ...tile.measures.slice(2)] })}>
           {#each aggsOf(tile.measures[1]) as a}<option value={a}>{aggNames[a]}</option>{/each}
         </select>
+        {/if}
         {@render valueRows(1)}
       {/if}
       <!-- A third value sets the area of each dot (Advanced). -->
@@ -935,13 +973,16 @@
           table={tile.measures[2]?.table ?? null}
           column={tile.measures[2]?.column ?? null} via={tile.measures[2]?.via}
           placeholder="Make the dots bigger for more"
-          reachable={reach} base={m?.table ?? null}
+          reachable={reach} base={baseTable}
+          {...namedProps(2)}
           onchange={(t, c, v) => set({ measures: [m, tile.measures[1], defaultMeasure(app.tables, t, c, v)] })}
           onclear={() => removeMeasure(2)} />
         {#if tile.measures[2]}
+          {#if !tile.measures[2].named}
           <select class="field" aria-label="How to add up the size" value={tile.measures[2].agg} onchange={(e) => set({ measures: [m, tile.measures[1], { ...tile.measures[2], agg: e.currentTarget.value as Agg }] })}>
             {#each aggsOf(tile.measures[2]) as a}<option value={a}>{aggNames[a]}</option>{/each}
           </select>
+          {/if}
           {@render valueRows(2)}
         {/if}
       {/if}
@@ -953,13 +994,16 @@
         table={tile.measures[1]?.table ?? null}
         column={tile.measures[1]?.column ?? null} via={tile.measures[1]?.via}
         placeholder="A value that holds the target"
-        reachable={reach} base={m?.table ?? null}
+        reachable={reach} base={baseTable}
+        {...namedProps(1)}
         onchange={(t, c, v) => set({ measures: [m, defaultMeasure(app.tables, t, c, v)], target: undefined })}
         onclear={() => removeMeasure(1)} />
       {#if tile.measures[1]}
+        {#if !tile.measures[1].named}
         <select class="field" aria-label="How to add up the target" value={tile.measures[1].agg} onchange={(e) => set({ measures: [m, { ...tile.measures[1], agg: e.currentTarget.value as Agg }] })}>
           {#each aggsOf(tile.measures[1]) as a}<option value={a}>{aggNames[a]}</option>{/each}
         </select>
+        {/if}
       {:else}
         <input
           class="field"
@@ -980,13 +1024,16 @@
         table={tile.measures[1]?.table ?? null}
         column={tile.measures[1]?.column ?? null} via={tile.measures[1]?.via}
         placeholder="A second value, or compare two periods"
-        reachable={reach} base={m?.table ?? null}
+        reachable={reach} base={baseTable}
+        {...namedProps(1)}
         onchange={(t, c, v) => set({ measures: [m, defaultMeasure(app.tables, t, c, v)] })}
         onclear={() => removeMeasure(1)} />
       {#if tile.measures[1]}
+        {#if !tile.measures[1].named}
         <select class="field" aria-label="How to add up the second value" value={tile.measures[1].agg} onchange={(e) => set({ measures: [m, { ...tile.measures[1], agg: e.currentTarget.value as Agg }] })}>
           {#each aggsOf(tile.measures[1]) as a}<option value={a}>{aggNames[a]}</option>{/each}
         </select>
+        {/if}
         <p class="hint tight">Two dots for each row, joined by a line. The biggest gap comes first.</p>
       {:else}
         <p class="hint tight">With one value, pick a date below and two of its periods. Each row then draws as a line from the first to the second.</p>
@@ -1000,7 +1047,7 @@
         column={tile.measures[1]?.column ?? null} via={tile.measures[1]?.via}
         placeholder="The column the work ends in"
         datesOnly
-        reachable={reach} base={m?.table ?? null}
+        reachable={reach} base={baseTable}
         onchange={(t, c, v) => setDateValue(1, t, c, v)}
         onclear={() => removeMeasure(1)} />
       <p class="hint tight">Each row is a bar from its earliest start to its latest end. The first 100 rows are drawn.</p>
@@ -1013,7 +1060,7 @@
         column={tile.measures[1]?.column ?? null} via={tile.measures[1]?.via}
         placeholder="Show a total, not a share"
         numbersOnly
-        reachable={reach} base={m?.table ?? null}
+        reachable={reach} base={baseTable}
         onchange={setCohortSum}
         onclear={() => removeMeasure(1)} />
     {/if}
@@ -1023,7 +1070,8 @@
           mode="measure"
           table={extra.table}
           column={extra.column} via={extra.via}
-          reachable={reach} base={m?.table ?? null}
+          reachable={reach} base={baseTable}
+          {...namedProps(k + 1)}
           onchange={(t, c, v) => swapField(k + 1, t, c, v)}
           onclear={() => removeMeasure(k + 1)} />
         {@render valueRows(k + 1)}
@@ -1034,7 +1082,9 @@
           table={null}
           column={null}
           placeholder="Add another value"
-          reachable={reach} base={m?.table ?? null}
+          reachable={reach} base={baseTable}
+          measures={namedList}
+          onnamed={(id) => set({ measures: [...tile.measures, namedMeasure(id)] })}
           onchange={(t, c, v) => set({ measures: [...tile.measures, defaultMeasure(app.tables, t, c, v)] })} />
       {/if}
     {/if}
@@ -1048,7 +1098,7 @@
         table={tile.dims[0]?.table ?? null}
         column={tile.dims[0]?.column ?? null} via={tile.dims[0]?.via}
         placeholder={tile.type === 'kpi' ? 'A date, for the trend' : isScatter ? 'One dot for each of these' : isFunnel ? 'The steps, like visit and sale' : isBox ? 'One box for each of these' : isBullet ? 'One bar for each of these' : isGantt ? 'A task, a project or an id' : isCalendar || isCohort ? 'A date column' : isSankey ? 'Where it starts, like a channel' : 'Category or date'}
-        reachable={reach} base={m?.table ?? null}
+        reachable={reach} base={baseTable}
         onchange={(t, c, v) => c && setDim(0, t, c, v)}
         onclear={() => removeDim(0)} />
       {#if tile.dims[0] && (dimTypes[0] === 'date' || dimTypes[0] === 'datetime') && !isCalendar && !isGantt}
@@ -1093,7 +1143,7 @@
     <div class="sec">
       <span class="label">Next stages</span>
       {#each tile.dims.slice(1, 3) as d, k}
-        <FieldPicker mode="dim" table={d.table} column={d.column} via={d.via} reachable={reach} base={m?.table ?? null} onchange={(t, c, v) => c && setDim(k + 1, t, c, v)} onclear={() => removeDim(k + 1)} />
+        <FieldPicker mode="dim" table={d.table} column={d.column} via={d.via} reachable={reach} base={baseTable} onchange={(t, c, v) => c && setDim(k + 1, t, c, v)} onclear={() => removeDim(k + 1)} />
       {/each}
       {#if tile.dims.length < 3}
         <FieldPicker
@@ -1101,7 +1151,7 @@
           table={null}
           column={null}
           placeholder={tile.dims.length < 2 ? 'Where it goes next, like a category' : 'A third stage (optional)'}
-          reachable={reach} base={m?.table ?? null}
+          reachable={reach} base={baseTable}
           onchange={(t, c, v) => c && setDim(tile.dims.length, t, c, v)} />
       {/if}
       <p class="hint tight">A band is as wide as its value. A stage shows 25 nodes at most; the smallest are added up as Other.</p>
@@ -1116,7 +1166,7 @@
         table={tile.dims[1]?.table ?? null}
         column={tile.dims[1]?.column ?? null} via={tile.dims[1]?.via}
         placeholder="A date, like the year"
-        reachable={reach} base={m?.table ?? null}
+        reachable={reach} base={baseTable}
         onchange={(t, c, v) => c && set({ dims: [tile.dims[0], defaultDim(app.tables, t, c, v)], periods: undefined })}
         onclear={() => set({ dims: tile.dims.slice(0, 1), periods: undefined })} />
       {#if tile.dims[1] && (dim1Type === 'date' || dim1Type === 'datetime')}
@@ -1147,7 +1197,7 @@
         table={tile.dims[1]?.table ?? null}
         column={tile.dims[1]?.column ?? null} via={tile.dims[1]?.via}
         placeholder={tile.type === 'table' ? 'Another column' : 'Colour by a category'}
-        reachable={reach} base={m?.table ?? null}
+        reachable={reach} base={baseTable}
         onchange={(t, c, v) => c && setDim(1, t, c, v)}
         onclear={() => removeDim(1)} />
     </div>
@@ -1165,10 +1215,10 @@
       <div class="sec">
         <span class="label">Then by (optional)</span>
         {#each tile.dims.slice(1, PIVOT_MAX_ROWS) as d, k}
-          <FieldPicker mode="dim" table={d.table} column={d.column} via={d.via} reachable={reach} base={m?.table ?? null} onchange={(t, c, v) => c && setDim(k + 1, t, c, v)} onclear={() => removeDim(k + 1)} />
+          <FieldPicker mode="dim" table={d.table} column={d.column} via={d.via} reachable={reach} base={baseTable} onchange={(t, c, v) => c && setDim(k + 1, t, c, v)} onclear={() => removeDim(k + 1)} />
         {/each}
         {#if tile.dims.length < PIVOT_MAX_ROWS}
-          <FieldPicker mode="dim" table={null} column={null} placeholder="Another row field" reachable={reach} base={m?.table ?? null} onchange={(t, c, v) => c && setDim(tile.dims.length, t, c, v)} />
+          <FieldPicker mode="dim" table={null} column={null} placeholder="Another row field" reachable={reach} base={baseTable} onchange={(t, c, v) => c && setDim(tile.dims.length, t, c, v)} />
         {/if}
       </div>
     {/if}
@@ -1179,7 +1229,7 @@
         table={tile.cols?.table ?? null}
         column={tile.cols?.column ?? null} via={tile.cols?.via}
         placeholder="The field across the top"
-        reachable={reach} base={m?.table ?? null}
+        reachable={reach} base={baseTable}
         onchange={(t, c, v) => c && set({ cols: defaultDim(app.tables, t, c, v) })}
         onclear={() => set({ cols: undefined })} />
       {#if tile.cols && ['date', 'datetime'].includes(dtypeOf(app.tables, tile.cols.table, tile.cols.column) ?? '')}
@@ -1227,7 +1277,7 @@
             table={tile.spark.table}
             column={tile.spark.column} via={tile.spark.via}
             datesOnly
-            reachable={reach} base={m?.table ?? null}
+            reachable={reach} base={baseTable}
             onchange={(t, c, v) => c && set({ spark: { table: t, column: c, ...(v ? { via: v } : {}), grain: tile.spark?.grain ?? 'month' } })} />
           <div class="grains" role="radiogroup" aria-label="Period of the trend">
             {#each SPARK_GRAINS as g}
@@ -1296,6 +1346,9 @@
         {/if}
       {:else}
         <p class="hint tight">A tile can have up to {MAX_LINES} lines.</p>
+      {/if}
+      {#if !isScatter && tile.dims[1] && tile.measures.length < 2 && !additive(m)}
+        <p class="hint tight">This value does not add up across the groups, so a split chart draws no lines. Remove the split to use them.</p>
       {/if}
     </div>
   {/if}
@@ -1443,7 +1496,7 @@
         table={tile.repeat?.table ?? null}
         column={tile.repeat?.column ?? null} via={tile.repeat?.via}
         placeholder="One chart for each…"
-        reachable={reach} base={m?.table ?? null}
+        reachable={reach} base={baseTable}
         onchange={(t, c, v) => c && set({ repeat: defaultDim(app.tables, t, c, v), layout: undefined, mix: undefined })}
         onclear={() => set({ repeat: undefined, ownScale: undefined })} />
       {#if tile.repeat}

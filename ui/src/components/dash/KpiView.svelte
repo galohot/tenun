@@ -5,6 +5,7 @@
   import type { Colors } from '../../lib/chart';
   import { compact, pctChange, pctOfTarget, tip } from '../../lib/format';
   import { targetInfo, targetWords } from '../../lib/kpi';
+  import { paceElapsed } from '../../lib/measures';
   import Icon from '../Icon.svelte';
 
   let { kpi, tile, colors }: { kpi: KpiInfo; tile: Tile; colors: Colors } = $props();
@@ -15,7 +16,9 @@
 
   // A target adds a line, so the figure gets a little smaller to leave room for it.
   const target = $derived(tile.target?.value ?? null);
-  const goal = $derived(targetInfo(kpi.value, target, kpi.elapsed, tile.better ?? 'up'));
+  // The pace is the value so far scaled up to the whole period. That is right for a sum or a count and
+  // wrong for a ratio or an average, whose value so far is already the value of the period (V4-D85d).
+  const goal = $derived(targetInfo(kpi.value, target, paceElapsed(tile, kpi.elapsed), tile.better ?? 'up'));
   // Only a period that is not over has a pace: the value so far, scaled up to the whole period.
   const words = $derived(goal ? targetWords(goal, tile.better ?? 'up') : null);
   const pace = $derived(words?.pace ?? '');

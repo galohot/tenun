@@ -26,3 +26,8 @@ export function scopeFor(
     firsts: (t) => firstLinks(table.id, t, list, health),
   };
 }
+
+/** The scope of a measure: no table of its own, and every table can be totalled (a measure reads any of them). */
+export function measureScope(tables: readonly Table[], rels: readonly Relationship[]): Scope {
+  return { table: null, tables, rels, kind: 'measure', reach: null };
+}

@@ -5,6 +5,7 @@ import { isPart, type Agg, type Cell, type Column, type Dim, type DType, type Gr
 import { dim0Kind, effectiveShowAs, SHOW_AS_WORDS, type Dim0Kind } from './showas';
 import { labelOf } from './prep';
 import { fieldWithLink } from './links';
+import { nameOf } from './measures';
 import * as L from './locale';
 import type { Locale } from './locale';
 import { localeState } from './localeState.svelte';
@@ -193,7 +194,8 @@ export type Named = Pick<Table, 'id' | 'name' | 'label'> & { columns?: Column[] 
  * another way adds its words: "Revenue (% of total)".
  */
 export function measureLabel(m: Measure, tables: Named[], how?: ShowAs | null): string {
-  const base = ratioLabel(m, tables);
+  // A named measure is called what the user called it; its formula says the rest.
+  const base = m.named ? nameOf(m.named) : ratioLabel(m, tables);
   return how && how !== 'value' ? `${base} (${SHOW_AS_WORDS[how]})` : base;
 }
 
@@ -213,6 +215,7 @@ function ratioLabel(m: Measure, tables: Named[]): string {
 }
 
 function plainLabel(m: Measure, tables: Named[]): string {
+  if (m.named) return nameOf(m.named);
   const t = tables.find((x) => x.id === m.table);
   if (m.column === null) return `Number of ${(t?.label ?? 'rows').toLowerCase()}`;
   const base = labelOf(tables, m.table, m.column) ? null : idBase(m.column);

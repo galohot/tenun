@@ -335,6 +335,7 @@ pub fn boxplot(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
             agg: crate::query::Agg::Count,
             per: None,
             via: m.via.clone(),
+            named: None,
         }],
         dimensions: group.cloned().into_iter().collect(),
         filters: filters.to_vec(),
@@ -469,6 +470,7 @@ pub fn boxplot(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
         pair: None,
         notes: Vec::new(),
         public_notes: Vec::new(),
+        parts: Vec::new(),
     })
 }
 
@@ -682,6 +684,12 @@ pub fn sankey(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resul
         .first()
         .cloned()
         .unwrap_or_else(|| count_rows(&stages[0].table));
+    // Nodes and "Other" add the link values up, so the values must add up (V4-D85d).
+    if m.named.is_some() && !engine.measure_facts(&m)?.additive {
+        anyhow::bail!(
+            "A Sankey chart adds the flows up. Pick a measure that is a sum or a count, not a ratio or an average."
+        );
+    }
     let start = std::time::Instant::now();
     let mut links: Vec<(usize, Value, Value, f64)> = Vec::new();
     let mut ignored = vec![];
@@ -832,6 +840,7 @@ pub fn cohort(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resul
         agg: Agg::Count,
         per: None,
         via: ent.via.clone(),
+        named: None,
     }];
     measures.extend(amount.cloned());
     let q = SemanticQuery {
@@ -968,6 +977,7 @@ fn latest_day(engine: &Engine, field: &Dimension, filters: &[Filter]) -> Option<
                 agg: Agg::Max,
                 per: None,
                 via: field.via.clone(),
+                named: None,
             }],
             dimensions: vec![],
             filters: filters.to_vec(),
@@ -1053,12 +1063,10 @@ pub fn sparks(
         limit: Some(10_000),
     })?;
     // Nothing happened is 0 for a sum or a count and a gap for the rest.
-    let empty = if matches!(m0.agg, Agg::Sum | Agg::Count | Agg::CountDistinct) && m0.per.is_none()
-    {
-        Some(0.0)
-    } else {
-        None
-    };
+    let empty = engine
+        .empty_values(std::slice::from_ref(m0))
+        .first()
+        .and_then(Value::as_f64);
     let mut lines: BTreeMap<String, Vec<Option<f64>>> = BTreeMap::new();
     for r in &res.rows {
         if js_key(&r[0]) != OTHER_KEY {
