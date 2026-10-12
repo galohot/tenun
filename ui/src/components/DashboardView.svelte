@@ -18,6 +18,8 @@
   import RowsSheet from './dash/RowsSheet.svelte';
   import FocusSheet from './dash/FocusSheet.svelte';
   import { drawnTile } from '../lib/card';
+  import { flowOrder, insertInOrder, isFlow, moveInOrder } from '../lib/flow';
+  import FlowLayout from './dash/FlowLayout.svelte';
   import { buildClip, clipText, dashboardCopy, freeName, joinMeasures, joinStyles, landTiles, measureIds, placeBelow, readClip, renamesFor, rewriteFormula, sameWorkspace, type Clip, type Matches } from '../lib/clipboard';
   import MatchFields from './dash/MatchFields.svelte';
   import CardStyles from './dash/CardStyles.svelte';
@@ -128,6 +130,9 @@
     tiles: Tile[];
     grain: Grain | null;
     filters: DashFilter[];
+    /** A story's layout and order (build 11). */
+    layout: Dashboard['layout'];
+    order: string[] | undefined;
   }
   /** A dashboard this view made (Duplicate dashboard): undo takes it away again, redo puts it back. */
   interface Added {
@@ -159,6 +164,8 @@
       tiles: $state.snapshot(dash!.tiles) as Tile[],
       grain: dash!.grain ?? null,
       filters: $state.snapshot(dash!.filters ?? []) as DashFilter[],
+      layout: dash!.layout,
+      order: dash!.order ? [...dash!.order] : undefined,
     };
   }
 
@@ -181,6 +188,8 @@
     dash!.tiles = step.tiles;
     dash!.grain = step.grain;
     dash!.filters = step.filters.length ? step.filters : undefined;
+    dash!.layout = step.layout;
+    dash!.order = step.order;
     burst = { key: '', at: 0 };
     if (selectedTile && !step.tiles.some((t) => t.id === selectedTile)) selectedTile = null;
     filters = filters.filter((f) => step.tiles.some((t) => t.id === f.fromTile));
@@ -287,8 +296,9 @@
   // Advanced chart types join the Add tile menu while the switch is on.
   const advanced = $derived(advancedOn());
 
-  function addTile(type: TileType) {
+  function addTile(type: TileType, where?: number) {
     addMenu = false;
+    insertAt = null;
     const size = defaultSize(type);
     const at = place(dash!.tiles, size.w, size.h);
     const t: Tile = {
@@ -304,8 +314,42 @@
       // A new map starts on Indonesia's provinces (build 06).
       ...(type === 'map' ? { map: { level: 'province' as const, country: 'ID' } } : {}),
     };
-    update((ts) => [...ts, t]);
+    // In a story the tile goes where "+" was clicked, or at the end (build 11).
+    if (story) {
+      record();
+      dash!.order = insertInOrder(flowOrder(dash!), where ?? dash!.tiles.length, t.id);
+      dash!.tiles = [...dash!.tiles, t];
+      app.saveDashboards();
+    } else update((ts) => [...ts, t]);
     selectedTile = t.id;
+  }
+
+  // ---- story pages (build 11) -------------------------------------------------------------------------------------
+
+  const story = $derived(isFlow(dash));
+  /** "+" in a story: the menu of tiles to put in at that place. */
+  let insertAt = $state<{ at: number; x: number; y: number } | null>(null);
+  function openInsert(at: number, e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    insertAt = { at, x: r.left, y: r.bottom + 4 };
+  }
+  function moveTile(from: number, to: number) {
+    if (!dash) return;
+    record();
+    dash.order = moveInOrder(flowOrder(dash), from, to);
+    app.saveDashboards();
+  }
+  /** A tile's width or height in a story. */
+  function setFlow(id: string, f: NonNullable<Tile['flow']>) {
+    const t = dash?.tiles.find((x) => x.id === id);
+    if (t) change({ ...t, flow: { ...(t.flow ?? {}), ...f } });
+  }
+  /** Grid or story: the tiles keep their places on the grid, so the page switches back as it was. */
+  function setLayout(layout: 'grid' | 'flow') {
+    if (!dash || (dash.layout ?? 'grid') === layout) return;
+    record();
+    dash.layout = layout === 'grid' ? undefined : 'flow';
+    app.saveDashboards();
   }
 
   /** `otherOf` comes with a click on the "Other" group of a top N: everything except those groups. */
@@ -520,6 +564,8 @@
       results: rs,
       tables: app.tables,
       theme,
+      // A story prints as a column in its order, on A4 pages (build 11).
+      ...(story ? { layout: 'flow' as const, order: flowOrder(dash!).map((t) => t.id), width: 1180 } : {}),
     };
   }
 
@@ -898,8 +944,17 @@
         { label: 'Duplicate dashboard', run: duplicateDashboard },
         { label: 'Paste', run: pasteFromMenu },
         { label: 'Card styles…', run: () => (stylesOpen = true) },
+        { label: 'Layout', sub: [{ label: story ? 'Grid' : 'Grid  ✓', run: () => setLayout('grid') }, { label: story ? 'Story  ✓' : 'Story', run: () => setLayout('flow') }] },
       ]}
       onclose={() => (dashMenu = null)} />
+  {/if}
+  {#if insertAt}
+    {@const place = insertAt.at}
+    <Menu
+      x={insertAt.x}
+      y={insertAt.y}
+      items={[['text', 'Text'], ['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['pie', 'Pie chart'], ['map', 'Map'], ['table', 'Table'], ['image', 'Image']].map(([t, label]) => ({ label, run: () => addTile(t as TileType, place) }))}
+      onclose={() => (insertAt = null)} />
   {/if}
   {#if matching}
     <MatchFields clip={matching} tables={app.tables} onpaste={(m) => matching && land(matching, m)} onclose={() => (matching = null)} />
@@ -946,7 +1001,7 @@
   {/if}
 
   <div class="body">
-    <div class="scroll" onpointerdown={(e) => e.target === e.currentTarget && (selectedTile = null)} role="presentation">
+    <div class="scroll" class:paper={story} onpointerdown={(e) => e.target === e.currentTarget && (selectedTile = null)} role="presentation">
       {#if !dash.tiles.length}
         <div class="empty">
           <Icon name="dashboard" size={32} />
@@ -965,6 +1020,45 @@
           {/if}
         </div>
       {/if}
+      {#snippet tileView(t: Tile, inFlow: boolean)}
+        <TileView
+          tile={shownOf(t)}
+          filters={allFilters}
+          {tick}
+          active={selectedTile === t.id}
+          onpick={(v, otherOf, bins, stage) => pick(shownOf(t), v, otherOf, bins, stage)}
+          onpickcol={(v) => pickCol(shownOf(t), v)}
+          onresult={(r, k) => setResult(t.id, r, k)}
+          onfilter={(f) => setFilter(t.id, f)}
+          onrows={(v, otherOf, bins) => showRows(t.id, v, otherOf, bins)}
+          onfocus={() => (focusId = t.id)}
+          onselect={() => (selectedTile = t.id)}
+          onwidths={(w) => change({ ...(dash.tiles.find((x) => x.id === t.id) ?? t), widths: w })}
+          onlayout={(layout) => change({ ...(dash.tiles.find((x) => x.id === t.id) ?? t), layout })}
+          {phone}
+          dashboards={app.dashboards.filter((d) => d.id !== dash.id).map((d) => ({ id: d.id, title: d.title }))}
+          onduplicate={() => duplicate(t.id)}
+          oncopy={(to) => copyTo(t.id, to)}
+          onclip={() => {
+            const tiles = picked.includes(t.id) ? copyTargets() : dash.tiles.filter((x) => x.id === t.id);
+            copyToClipboard(clipOf(tiles), copiedWords(tiles.length));
+          }}
+          onremove={() => removeTile(t.id)}
+          onnav={(step) => navTile(t.id, step)}
+          onopen={() => openTile(t.id)}
+          flow={inFlow ? (t.flow ?? {}) : undefined}
+          onflow={inFlow ? (f) => setFlow(t.id, f) : undefined}
+          ondragstart={(e) => !inFlow && startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'move')}
+          onresizestart={(e) => !inFlow && startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'resize')} />
+      {/snippet}
+      {#if story}
+        <!-- A story reads like a document: a column of tiles in the page's order (build 11). -->
+        <div class="story">
+          <FlowLayout tiles={flowOrder(dash).map(shownOf)} editing={!phone} onadd={(at, e) => openInsert(at, e)} onmove={moveTile}>
+            {#snippet cell(t)}{@render tileView(t, true)}{/snippet}
+          </FlowLayout>
+        </div>
+      {:else}
       <div class="grid" bind:this={gridEl} style:height="{height}px">
         {#if preview}
           {@const ghost = preview.find((t) => t.id === (dragging?.id ?? ''))}
@@ -995,36 +1089,11 @@
               : `translate(${p.left}px, ${p.top}px)`}
             style:width="{p.w}px"
             style:height="{p.h}px">
-            <TileView
-              tile={shownOf(t)}
-              filters={allFilters}
-              {tick}
-              active={selectedTile === t.id}
-              onpick={(v, otherOf, bins, stage) => pick(shownOf(t), v, otherOf, bins, stage)}
-              onpickcol={(v) => pickCol(shownOf(t), v)}
-              onresult={(r, k) => setResult(t.id, r, k)}
-              onfilter={(f) => setFilter(t.id, f)}
-              onrows={(v, otherOf, bins) => showRows(t.id, v, otherOf, bins)}
-              onfocus={() => (focusId = t.id)}
-              onselect={() => (selectedTile = t.id)}
-              onwidths={(w) => change({ ...(dash.tiles.find((x) => x.id === t.id) ?? t), widths: w })}
-              onlayout={(layout) => change({ ...(dash.tiles.find((x) => x.id === t.id) ?? t), layout })}
-              {phone}
-              dashboards={app.dashboards.filter((d) => d.id !== dash.id).map((d) => ({ id: d.id, title: d.title }))}
-              onduplicate={() => duplicate(t.id)}
-              oncopy={(to) => copyTo(t.id, to)}
-              onclip={() => {
-                const tiles = picked.includes(t.id) ? copyTargets() : dash.tiles.filter((x) => x.id === t.id);
-                copyToClipboard(clipOf(tiles), copiedWords(tiles.length));
-              }}
-              onremove={() => removeTile(t.id)}
-              onnav={(step) => navTile(t.id, step)}
-              onopen={() => openTile(t.id)}
-              ondragstart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'move')}
-              onresizestart={(e) => startDrag(e, dash.tiles.find((x) => x.id === t.id)!, 'resize')} />
+            {@render tileView(t, false)}
           </div>
         {/each}
       </div>
+      {/if}
     </div>
     {#if sel && !phone}
       <Inspector
@@ -1158,6 +1227,9 @@
   .scroll { flex: 1; min-width: 0; overflow: auto; padding: 16px; }
   @media (max-width: 699px) { .scroll { padding: 10px; } }
   .grid { position: relative; min-height: 100%; }
+  /* A story is a page: its tiles sit on the surface, in a column (build 11). */
+  .scroll.paper { background: var(--surface); }
+  .story { padding: 8px 28px 0; }
   .cell {
     position: absolute;
     top: 0;

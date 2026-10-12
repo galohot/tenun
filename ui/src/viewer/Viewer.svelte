@@ -9,6 +9,8 @@
   import Icon from '../components/Icon.svelte';
   import FocusSheet from '../components/dash/FocusSheet.svelte';
   import TileBody from '../components/dash/TileBody.svelte';
+  import FlowLayout from '../components/dash/FlowLayout.svelte';
+  import { flowOrder } from '../lib/flow';
   import { cardGround } from '../lib/card';
   import { filterText } from '../lib/filterText';
   import { partialNote } from '../lib/run';
@@ -58,6 +60,8 @@
   });
 
   const narrow = $derived(screen < PHONE_MAX);
+  /** A story reads like a document: a column in its own order (build 11). */
+  const story = $derived(data.layout === 'flow');
   const colW = $derived((width - GAP * 11) / 12);
 
   // In reading order, so Tab goes through the tiles the way a person reads them.
@@ -177,57 +181,74 @@
     </div>
   {/if}
 
+  <!-- One tile's frame: on the grid at its place, or in a story's column (build 11). -->
+  {#snippet frame(t: Tile, box: { x: number; y: number; w: number; h: number } | null)}
+    {@const r = resultFor(t)}
+    {@const name = data.titles?.[t.id] ?? tileTitle(t, data.tables, r?.res?.parts)}
+    <!-- A number card fills its tile with its ground and draws its own title (build 08). -->
+    {@const ground = cardGround(t)}
+    <!-- A tile is a stop for the keyboard: arrows go to the next and the previous tile, Enter opens it large. -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+    <article
+      class="tile"
+      tabindex="0"
+      data-tile={t.id}
+      aria-label={name || 'Tile'}
+      onkeydown={(e) => onkey(e, t)}
+      class:flowtile={!box}
+      class:grounded={!!ground && ground !== 'surface'}
+      style:transform={box ? `translate(${box.x}px, ${box.y}px)` : undefined}
+      style:width={box ? `${box.w}px` : undefined}
+      style:height={box ? `${box.h}px` : undefined}
+      style:background={ground ? `var(--${ground})` : undefined}>
+      {#if name !== '' && !ground}
+        <h3>{name}</h3>
+      {/if}
+      {#if r.res && !isStatic(t.type) && t.type !== 'filter'}
+        <button class="expand" title="Open large" aria-label="Open large" onclick={() => (focusId = t.id)}><Icon name="expand" size={14} /></button>
+      {/if}
+      <div class="body" class:bare={((isStatic(t.type) || t.type === 'filter') && !t.title) || !!ground}>
+        {#if r.res || isStatic(t)}
+          <TileBody
+            tile={t}
+            res={r.res ?? EMPTY_RESULT}
+            colors={colors!}
+            tables={data.tables}
+            title={name}
+            selected={pick?.tile === t.id && !pick.col ? [pick.value] : null}
+            selectedCol={pick?.tile === t.id && pick.col ? [pick.value] : null}
+            selectedStage={pick?.tile === t.id && !pick.col ? (pick.stage ?? null) : null}
+            onpick={data.cross[t.id] ? (v, stage) => onpick(t, v, false, stage) : undefined}
+            onpickcol={data.cross[t.id] && t.cols ? (v) => onpick(t, v, true) : undefined} />
+        {/if}
+      </div>
+      {#if r.res && t.type !== 'kpi' && partialNote(r.res, t.dims[0]?.grain)}
+        <p class="note">{partialNote(r.res, t.dims[0]?.grain)}</p>
+      {/if}
+      {#each r.res?.notes ?? [] as n (n)}
+        <p class="note link-note"><Icon name="warning" size={12} /> {n}</p>
+      {/each}
+      {#if r.offline && !isStatic(t) && t.type !== 'filter'}<p class="note">Not filtered in this file</p>{/if}
+    </article>
+  {/snippet}
+
+  {#if story}
+    <div class="story" bind:clientWidth={width}>
+      {#if colors}
+        <FlowLayout tiles={flowOrder({ tiles: data.tiles, order: data.order })}>
+          {#snippet cell(t)}{@render frame(t, null)}{/snippet}
+        </FlowLayout>
+      {/if}
+    </div>
+  {:else}
   <div class="grid" bind:clientWidth={width} style:height="{height}px">
     {#if colors}
       {#each layout as l (l.t.id)}
-        {@const r = resultFor(l.t)}
-        {@const name = data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables, r?.res?.parts)}
-        <!-- A number card fills its tile with its ground and draws its own title (build 08). -->
-        {@const ground = cardGround(l.t)}
-        <!-- A tile is a stop for the keyboard: arrows go to the next and the previous tile, Enter opens it large. -->
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-        <article
-          class="tile"
-          tabindex="0"
-          data-tile={l.t.id}
-          aria-label={name || 'Tile'}
-          onkeydown={(e) => onkey(e, l.t)}
-          style:transform="translate({l.x}px, {l.y}px)"
-          style:width="{l.w}px"
-          style:height="{l.h}px"
-          style:background={ground ? `var(--${ground})` : undefined}>
-          {#if name !== '' && !ground}
-            <h3>{name}</h3>
-          {/if}
-          {#if r.res && !isStatic(l.t.type) && l.t.type !== 'filter'}
-            <button class="expand" title="Open large" aria-label="Open large" onclick={() => (focusId = l.t.id)}><Icon name="expand" size={14} /></button>
-          {/if}
-          <div class="body" class:bare={((isStatic(l.t.type) || l.t.type === 'filter') && !l.t.title) || !!ground}>
-            {#if r.res || isStatic(l.t)}
-              <TileBody
-                tile={l.t}
-                res={r.res ?? EMPTY_RESULT}
-                {colors}
-                tables={data.tables}
-                title={name}
-                selected={pick?.tile === l.t.id && !pick.col ? [pick.value] : null}
-                selectedCol={pick?.tile === l.t.id && pick.col ? [pick.value] : null}
-                selectedStage={pick?.tile === l.t.id && !pick.col ? (pick.stage ?? null) : null}
-                onpick={data.cross[l.t.id] ? (v, stage) => onpick(l.t, v, false, stage) : undefined}
-                onpickcol={data.cross[l.t.id] && l.t.cols ? (v) => onpick(l.t, v, true) : undefined} />
-            {/if}
-          </div>
-          {#if r.res && l.t.type !== 'kpi' && partialNote(r.res, l.t.dims[0]?.grain)}
-            <p class="note">{partialNote(r.res, l.t.dims[0]?.grain)}</p>
-          {/if}
-          {#each r.res?.notes ?? [] as n (n)}
-            <p class="note link-note"><Icon name="warning" size={12} /> {n}</p>
-          {/each}
-          {#if r.offline && !isStatic(l.t) && l.t.type !== 'filter'}<p class="note">Not filtered in this file</p>{/if}
-        </article>
+        {@render frame(l.t, l)}
       {/each}
     {/if}
   </div>
+  {/if}
 
   {#if focusId && colors}
     {@const ft = data.tiles.find((t) => t.id === focusId)}
@@ -280,6 +301,11 @@
   .chip.static { display: inline-flex; gap: 5px; padding-right: 10px; background: var(--inset); color: var(--text-2); }
   .chip button { border: 0; background: none; color: inherit; font-size: 15px; line-height: 1; padding: 0 6px; cursor: pointer; }
   .grid { position: relative; }
+  /* A story: the tiles in a column, without a ring, on the page's ground (build 11). */
+  .story { padding-top: 4px; }
+  .tile.flowtile { position: relative; width: 100%; height: 100%; background: transparent; box-shadow: none; }
+  .tile.flowtile h3 { padding-left: 0; font-size: 15px; }
+  .tile.flowtile:not(.grounded) .body { padding-left: 0; padding-right: 0; }
   .tile {
     position: absolute;
     top: 0;

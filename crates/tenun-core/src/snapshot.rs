@@ -1381,6 +1381,13 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
     if !measures.is_empty() {
         payload["measures"] = json!(measures);
     }
+    // A story draws as a column in its own order (build 11); a grid page says nothing, as before.
+    if dash.get("layout").and_then(Value::as_str) == Some("flow") {
+        payload["layout"] = json!("flow");
+        if let Some(order) = dash.get("order").filter(|o| o.is_array()) {
+            payload["order"] = order.clone();
+        }
+    }
     Ok(payload)
 }
 

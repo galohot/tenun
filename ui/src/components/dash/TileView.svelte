@@ -36,6 +36,8 @@
     onduplicate,
     oncopy,
     onclip,
+    flow,
+    onflow,
     onremove,
     onnav,
     onopen,
@@ -71,6 +73,9 @@
     oncopy: (dashboard: string | null) => void;
     /** Copy the tile to the clipboard, to paste on any dashboard of any workspace (build 09). */
     onclip?: () => void;
+    /** In a story (build 11): its width and height there, and how to change them. Not set: a grid tile. */
+    flow?: NonNullable<Tile['flow']>;
+    onflow?: (f: NonNullable<Tile['flow']>) => void;
     onremove: () => void;
     /** An arrow key on the tile: 1 for the next tile in reading order, -1 for the one before. */
     onnav: (step: 1 | -1) => void;
@@ -186,6 +191,14 @@
     }
     return [
       ...(onclip ? [{ label: 'Copy', run: onclip }] : []),
+      ...(flow && onflow
+        ? [
+            { label: 'Width', sub: (['full', 'half'] as const).map((w) => ({ label: `${w === 'full' ? 'Full' : 'Half'}${(flow.width ?? 'full') === w ? '  ✓' : ''}`, run: () => onflow({ width: w }) })) },
+            ...(tile.type === 'text'
+              ? []
+              : [{ label: 'Height', sub: (['s', 'm', 'l'] as const).map((h) => ({ label: `${{ s: 'Small', m: 'Medium', l: 'Large' }[h]}${(flow.height ?? (tile.type === 'kpi' ? 's' : 'm')) === h ? '  ✓' : ''}`, run: () => onflow({ height: h }) })) }]),
+          ]
+        : []),
       { label: 'Duplicate', run: onduplicate },
       { label: 'Copy to dashboard', sub: [...dashboards.map((d) => ({ label: d.title || 'Untitled', run: () => oncopy(d.id) })), { label: 'New dashboard', run: () => oncopy(null) }] },
       { label: 'Download as PNG', run: png },
@@ -219,7 +232,7 @@
 
 <!-- A tile is a stop for the keyboard: arrows go to the next and the previous tile, Enter opens it. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-<article class="tile" class:active class:bare class:phone class:onaccent={ground === 'accent'} style:background={ground ? `var(--${ground})` : undefined} bind:this={el} tabindex="0" data-tile={tile.id} aria-label={title || 'Tile'} onkeydown={onkey}>
+<article class="tile" class:active class:bare class:phone class:flow={!!flow} class:grounded={!!ground && ground !== 'surface'} class:onaccent={ground === 'accent'} style:background={ground ? `var(--${ground})` : undefined} bind:this={el} tabindex="0" data-tile={tile.id} aria-label={title || 'Tile'} onkeydown={onkey}>
   <header role="group" aria-label={phone ? undefined : 'Drag to move'} onpointerdown={phone ? undefined : ondragstart}>
     <h3 title={title}>{title}</h3>
     {#if loading}<span class="spin" aria-label="Loading"></span>{/if}
@@ -293,7 +306,7 @@
   {#if menu}
     <Menu x={menu.x} y={menu.y} items={menuItems} onclose={() => (menu = null)} />
   {/if}
-  {#if !phone}
+  {#if !phone && !flow}
     <button class="resize" aria-label="Resize tile" onpointerdown={onresizestart}><Icon name="resize" size={14} /></button>
   {/if}
 </article>
@@ -344,6 +357,13 @@
   .bare header { position: absolute; top: 4px; right: 4px; z-index: 2; height: 24px; padding: 0; background: transparent; border-radius: 12px; }
   .bare:hover header, .bare.active header { background: var(--surface); }
   .bare h3 { display: none; }
+  /* In a story the frame steps back: no ring, the page's ground, a title in the heading style (build 11). */
+  .tile.flow { box-shadow: none; background: transparent; }
+  .tile.flow.active, .tile.flow:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+  .tile.flow h3 { font-size: 15px; letter-spacing: -0.01em; }
+  /* A tile on the page's ground lines up with the text; a card keeps its ground and its padding. */
+  .tile.flow:not(.grounded) header { padding-left: 0; }
+  .tile.flow:not(.grounded) .body { padding-left: 0; padding-right: 0; }
   /* On the accent ground the words around the card take its ink (build 08). */
   .onaccent footer, .onaccent .resize { color: var(--on-accent); }
   /* A phone shows the one button at all times: on the accent it sits on a pill of the surface, so it reads. */

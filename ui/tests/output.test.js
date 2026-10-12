@@ -1,7 +1,7 @@
 // Output and layout (build 11): the PDF file, the phone layout, the chart sentence and the CSV.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPdf, pageSize, PAGE_MAX, PAGE_WIDTH } from '../src/lib/pdf.ts';
+import { A4, buildPdf, buildPdfPages, pageSize, PAGE_MAX, PAGE_WIDTH } from '../src/lib/pdf.ts';
 import { phoneLayout, PHONE_CHART_HEIGHT, readingOrder } from '../src/lib/layout.ts';
 import { chartSummary } from '../src/lib/summary.ts';
 import { csvCell, fileName, kpiRows, tileTable, toCsv } from '../src/lib/tabular.ts';
@@ -32,6 +32,28 @@ test('pdf: header, trailer and every xref offset points at its object', () => {
   assert.match(text, new RegExp(`/Size ${count} /Root 1 0 R`));
   // Every xref line is 20 bytes.
   assert.ok(table.slice(2, 2 + count).every((l) => l.length + 1 === 20));
+});
+
+test('pdf: a printed story has A4 pages, each with its own picture drawn from the top', () => {
+  const jpeg = (k) => Uint8Array.from([0xff, 0xd8, k, k, k, 0xff, 0xd9]);
+  // Three slices of a 1128 px wide picture: two full pages and a short last one.
+  const pages = [1460, 1460, 600].map((h, k) => ({ jpeg: jpeg(k + 1), px: { w: 1128, h }, page: A4, draw: { w: A4.w, h: (A4.w * h) / 1128 } }));
+  const text = latin1(buildPdfPages(pages, 'Story'));
+  assert.match(text, /\/Kids \[3 0 R 6 0 R 9 0 R\] \/Count 3/);
+  assert.equal((text.match(/\/MediaBox \[0 0 595.28 841.89\]/g) ?? []).length, 3);
+  // The last picture is 600 px high: 595.28 × 600 / 1128 = 316.64 pt, drawn from the top: 841.89 − 316.64 = 525.25.
+  assert.match(text, /q 595.28 0 0 316.64 0 525.25 cm \/Im2 Do Q/);
+  // Every xref offset points at its object, and each picture is its own JPEG.
+  const start = Number(/startxref\n(\d+)\n%%EOF\n$/.exec(text)[1]);
+  const table = text.slice(start).split('\n');
+  const count = Number(table[1].split(' ')[1]);
+  assert.equal(count, 13); // the free entry, catalog, tree, three objects for each of three pages, the info
+  for (let n = 1; n < count; n++) {
+    const offset = Number(table[2 + n].split(' ')[0]);
+    assert.equal(text.slice(offset, offset + `${n} 0 obj`.length), `${n} 0 obj`);
+  }
+  assert.match(text, /\/Info 12 0 R/);
+  for (let k = 0; k < 3; k++) assert.ok(text.includes(latin1(jpeg(k + 1))));
 });
 
 test('pdf: the image stream is the JPEG, byte for byte, and its length is right', () => {

@@ -644,6 +644,8 @@ export interface Tile {
   /** Text tiles: a style for the whole text, and its alignment (build 10). Not set: body, left. */
   textStyle?: 'body' | 'lead' | 'note';
   textAlign?: 'start' | 'center';
+  /** In a story (build 11): full or half width, and a chart's height. The grid place stays, for a switch back. */
+  flow?: { width?: 'full' | 'half'; height?: 's' | 'm' | 'l' };
   /** Table: add a total row. Pivot: totals are on unless this is false. */
   totals?: boolean;
   /** Pivot: the field whose values become the columns. The rows are `dims`. */
@@ -692,6 +694,10 @@ export interface Dashboard {
   grain?: Grain | null;
   /** Filters the dashboard keeps ("Keep only", "Exclude"). They apply to every tile. */
   filters?: DashFilter[];
+  /** A grid of tiles, or a story that reads like a document (build 11). Not set: grid. */
+  layout?: 'grid' | 'flow';
+  /** A story's order of tiles, by id (build 11). Tiles it does not name follow in reading order. */
+  order?: string[];
 }
 
 /** The raw rows behind a tile or one of its marks. */

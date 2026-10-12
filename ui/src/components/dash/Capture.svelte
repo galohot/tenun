@@ -7,6 +7,8 @@
   import { tileTitle, type Named } from '../../lib/format';
   import { COLS, EMPTY_RESULT, isStatic } from '../../lib/tiles';
   import TileBody from './TileBody.svelte';
+  import FlowLayout from './FlowLayout.svelte';
+  import { flowOrder } from '../../lib/flow';
   import { cardGround } from '../../lib/card';
 
   let {
@@ -18,6 +20,8 @@
     tables,
     colors,
     width,
+    layout,
+    order,
   }: {
     title: string;
     subtitle: string;
@@ -27,7 +31,11 @@
     tables: Named[];
     colors: Colors;
     width: number;
+    /** A story draws as a column in its order (build 11). */
+    layout?: 'grid' | 'flow';
+    order?: string[];
   } = $props();
+  const story = $derived(layout === 'flow');
 
   const ROW = 76;
   const GAP = 12;
@@ -49,29 +57,48 @@
   const height = $derived(Math.max(0, ...placed.map((p) => p.top + p.h)));
 </script>
 
-<div class="page" style:width="{width}px" style:padding="{PAD}px">
+<div class="page" class:paper={story} style:width="{width}px" style:padding="{PAD}px">
   <header>
     <h1>{title}</h1>
     <p>{subtitle}</p>
     {#if filters.length}<p class="filters">Filtered by: {filters.join(' · ')}</p>{/if}
   </header>
-  <div class="grid" style:height="{height}px">
-    {#each placed as p (p.t.id)}
-      {@const res = results[p.t.id] ?? EMPTY_RESULT}
-      {@const name = tileTitle(p.t, tables, res.parts)}
-      {@const ground = cardGround(p.t)}
-      <article class="tile" style:transform="translate({p.left}px, {p.top}px)" style:width="{p.w}px" style:height="{p.h}px" style:background={ground ? `var(--${ground})` : undefined}>
-        <!-- A number card fills its tile with its ground and draws its own title (build 08). -->
-        {#if name && !ground}<h3>{name}</h3>{/if}
-        <div class="body" class:bare={!name || !!ground}>
-          <TileBody tile={p.t} {res} {colors} {tables} selected={null} title={name} />
-        </div>
-        {#if p.t.type !== 'kpi' && !isStatic(p.t) && partialNote(res, p.t.dims[0]?.grain)}
-          <p class="note">{partialNote(res, p.t.dims[0]?.grain)}</p>
-        {/if}
-      </article>
-    {/each}
-  </div>
+  <!-- One tile: on the grid at its place, or in a story's column (build 11). A text may be cut across pages of a PDF. -->
+  {#snippet frame(t: Tile, box: { left: number; top: number; w: number; h: number } | null)}
+    {@const res = results[t.id] ?? EMPTY_RESULT}
+    {@const name = tileTitle(t, tables, res.parts)}
+    {@const ground = cardGround(t)}
+    <article
+      class="tile"
+      class:flowtile={!box}
+      class:grounded={!!ground && ground !== 'surface'}
+      data-tile={t.id}
+      data-split={t.type === 'text' ? '1' : undefined}
+      style:transform={box ? `translate(${box.left}px, ${box.top}px)` : undefined}
+      style:width={box ? `${box.w}px` : undefined}
+      style:height={box ? `${box.h}px` : undefined}
+      style:background={ground ? `var(--${ground})` : undefined}>
+      <!-- A number card fills its tile with its ground and draws its own title (build 08). -->
+      {#if name && !ground}<h3>{name}</h3>{/if}
+      <div class="body" class:bare={!name || !!ground}>
+        <TileBody tile={t} {res} {colors} {tables} selected={null} title={name} />
+      </div>
+      {#if t.type !== 'kpi' && !isStatic(t) && partialNote(res, t.dims[0]?.grain)}
+        <p class="note">{partialNote(res, t.dims[0]?.grain)}</p>
+      {/if}
+    </article>
+  {/snippet}
+  {#if story}
+    <FlowLayout tiles={flowOrder({ tiles: shown, order })}>
+      {#snippet cell(t)}{@render frame(t, null)}{/snippet}
+    </FlowLayout>
+  {:else}
+    <div class="grid" style:height="{height}px">
+      {#each placed as p (p.t.id)}
+        {@render frame(p.t, p)}
+      {/each}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -80,6 +107,10 @@
   h1 { font-size: 22px; }
   header p { margin: 4px 0 0; color: var(--text-2); font-size: 12px; }
   .grid { position: relative; }
+  .page.paper { background: var(--surface); }
+  .tile.flowtile { position: relative; width: 100%; height: 100%; background: transparent; box-shadow: none; }
+  .tile.flowtile h3 { padding-left: 0; font-size: 15px; }
+  .tile.flowtile:not(.grounded) .body { padding-left: 0; padding-right: 0; }
   .tile {
     position: absolute;
     top: 0;

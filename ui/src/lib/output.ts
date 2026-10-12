@@ -9,7 +9,8 @@ import { echarts } from './echarts';
 import { columnHeads, measureLabel, type Named } from './format';
 import { saveBlob, saveBytes } from './download';
 import { motion } from './motion';
-import { buildPdf, pageSize } from './pdf';
+import { A4, buildPdf, buildPdfPages, pageSize, type PdfPage } from './pdf';
+import { pageCuts, type Box } from './flow';
 import { pictureKind, pictureNote } from './picture';
 import { partialNote } from './run';
 import { fileName, tileTable, toCsv } from './tabular';
@@ -207,10 +208,18 @@ export interface DashboardPicture {
   theme: 'light' | 'dark';
   /** The width of the dashboard in pixels. */
   width?: number;
+  /** A story draws as a column in its order, and prints on A4 pages cut between tiles (build 11). */
+  layout?: 'grid' | 'flow';
+  order?: string[];
 }
 
 /** Draws the dashboard off screen with the real tile components and returns it as one canvas at 2x. */
 async function dashboardCanvas(p: DashboardPicture): Promise<HTMLCanvasElement> {
+  return (await dashboardDrawing(p)).canvas;
+}
+
+/** The picture, and where each tile sits on it, top to bottom, in the canvas's pixels (for the pages of a story). */
+async function dashboardDrawing(p: DashboardPicture): Promise<{ canvas: HTMLCanvasElement; boxes: Box[] }> {
   const root = document.documentElement;
   const before = root.dataset.theme;
   const switched = p.theme !== before;
@@ -235,7 +244,13 @@ async function dashboardCanvas(p: DashboardPicture): Promise<HTMLCanvasElement> 
     const node = holder.firstElementChild as HTMLElement;
     const side = Math.max(node.offsetWidth, node.offsetHeight);
     const ratio = Math.min(SCALE, MAX_SIDE / side);
-    return await withControlState(node, () => toCanvas(node, { pixelRatio: ratio, backgroundColor: colors.surface }));
+    const top = node.getBoundingClientRect().top;
+    const boxes: Box[] = [...node.querySelectorAll<HTMLElement>('[data-tile]')].map((el) => {
+      const r = el.getBoundingClientRect();
+      return { top: (r.top - top) * ratio, bottom: (r.bottom - top) * ratio, split: el.dataset.split === '1' };
+    });
+    const canvas = await withControlState(node, () => toCanvas(node, { pixelRatio: ratio, backgroundColor: colors.surface }));
+    return { canvas, boxes };
   } finally {
     motion.still = false;
     unmount(app);
@@ -253,8 +268,22 @@ export async function downloadDashboardPng(p: DashboardPicture): Promise<void> {
 }
 
 export async function downloadDashboardPdf(p: DashboardPicture): Promise<void> {
-  const canvas = await dashboardCanvas({ ...p, theme: 'light' });
-  const jpeg = new Uint8Array(await (await toBlob(canvas, 'image/jpeg', 0.92)).arrayBuffer());
+  const { canvas, boxes } = await dashboardDrawing({ ...p, theme: 'light' });
+  const jpegOf = async (c: HTMLCanvasElement) => new Uint8Array(await (await toBlob(c, 'image/jpeg', 0.92)).arrayBuffer());
+  if (p.layout === 'flow') {
+    // A story prints on A4 pages, cut between tiles: never inside a chart (build 11).
+    const pageH = Math.floor((canvas.width * A4.h) / A4.w);
+    const pages: PdfPage[] = [];
+    for (const [start, end] of pageCuts(boxes, canvas.height, pageH)) {
+      const slice = document.createElement('canvas');
+      slice.width = canvas.width;
+      slice.height = Math.max(1, Math.round(end - start));
+      slice.getContext('2d')!.drawImage(canvas, 0, Math.round(start), canvas.width, slice.height, 0, 0, canvas.width, slice.height);
+      pages.push({ jpeg: await jpegOf(slice), px: { w: slice.width, h: slice.height }, page: A4, draw: { w: A4.w, h: (A4.w * slice.height) / canvas.width } });
+    }
+    saveBytes(buildPdfPages(pages, p.title), fileName(p.title, 'pdf'), 'application/pdf');
+    return;
+  }
   const px = { w: canvas.width, h: canvas.height };
-  saveBytes(buildPdf(jpeg, px, pageSize(px.w, px.h), p.title), fileName(p.title, 'pdf'), 'application/pdf');
+  saveBytes(buildPdf(await jpegOf(canvas), px, pageSize(px.w, px.h), p.title), fileName(p.title, 'pdf'), 'application/pdf');
 }

@@ -1,7 +1,9 @@
 <script lang="ts">
   import { app, go, type ThemePref } from '../lib/state.svelte';
   import { api } from '../lib/api';
-  import { newDashboard } from '../lib/tiles';
+  import { newDashboard, newId } from '../lib/tiles';
+  import { newStory } from '../lib/flow';
+  import Menu from './dash/Menu.svelte';
   import Icon from './Icon.svelte';
   import FileBrowser from './FileBrowser.svelte';
 
@@ -23,8 +25,11 @@
     if (name && name !== ws.name) await app.run(null, () => api.rename(name));
   }
 
-  function addDashboard() {
-    const d = newDashboard(app.dashboards.length);
+  /** A new page: a grid of tiles, or a story that reads like a document (build 11). */
+  let newMenu = $state<{ x: number; y: number } | null>(null);
+  function addDashboard(kind: 'grid' | 'story' = 'grid') {
+    const n = app.dashboards.length;
+    const d = kind === 'story' ? newStory(newId('d'), app.dashboards.filter((x) => x.layout === 'flow').length, newId) : newDashboard(n);
     app.snap!.workspace.dashboards.push(d);
     app.saveDashboards();
     go({ view: 'dashboard', id: d.id });
@@ -119,7 +124,25 @@
 
   <div class="heading">
     <span>Dashboards</span>
-    <button class="btn plain icon small" title="New dashboard" onclick={addDashboard}><Icon name="plus" size={14} /></button>
+    <button
+      class="btn plain icon small"
+      title="New dashboard or story"
+      aria-label="New dashboard or story"
+      aria-haspopup="menu"
+      onclick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        newMenu = newMenu ? null : { x: r.left, y: r.bottom + 4 };
+      }}><Icon name="plus" size={14} /></button>
+    {#if newMenu}
+      <Menu
+        x={newMenu.x}
+        y={newMenu.y}
+        items={[
+          { label: 'Dashboard', run: () => addDashboard('grid') },
+          { label: 'Story', run: () => addDashboard('story') },
+        ]}
+        onclose={() => (newMenu = null)} />
+    {/if}
   </div>
   <div class="group dashboards">
     {#each app.dashboards as d (d.id)}
@@ -127,7 +150,7 @@
         class="item"
         class:on={route.view === 'dashboard' && route.id === d.id}
         onclick={() => go({ view: 'dashboard', id: d.id })}>
-        <Icon name="dashboard" />
+        <Icon name={d.layout === 'flow' ? 'text' : 'dashboard'} />
         <span class="ellipsis">{d.title}</span>
       </button>
     {:else}

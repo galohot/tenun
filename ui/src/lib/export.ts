@@ -26,6 +26,9 @@ export interface ExportPayload {
   saved?: DashFilter[];
   /** The one grain the dashboard set for every chart over time, if it set one. */
   grain?: Grain | null;
+  /** A story's layout and order (build 11). Not set: a grid page. */
+  layout?: 'grid' | 'flow';
+  order?: string[];
   /** Link id → what the link is called, for the links the tiles name. Not set when none does. */
   links?: Record<string, string>;
   /** The named measures the tiles use: their name and format, the type of the value and whether the values add up. Never the formula. */

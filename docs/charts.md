@@ -93,6 +93,19 @@ A text tile is written in blocks. Select the tile: the Inspector shows each bloc
 
 In an exported file the numbers are there and follow a click; a link to another dashboard is plain text.
 
+## Story pages
+
+A story is a dashboard that reads like a document. Make one with **+** beside **Dashboards** › **Story**, or turn a
+dashboard into one with its **⋯** menu › **Layout** › **Story**.
+
+- The tiles run down one column in the story's order. Text keeps to a reading width; charts may go wider.
+- A tile's **⋯** menu sets its **Width** (full or half) and its **Height** (small, medium, large). Two half-width
+  tiles share a row on a wide screen and stack on a phone. A text is as tall as its words.
+- **+** between two tiles adds a tile there. Drag the handle on the left of a tile to move it.
+- **Layout** › **Grid** turns the story back into a dashboard: every tile is where it was on the grid.
+- An exported file shows the story as a column. **Export** › **PDF** prints it on A4 pages, cut between tiles: never
+  through a chart.
+
 ## Advanced
 
 | Type | Use it when | Fields |

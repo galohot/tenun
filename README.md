@@ -69,6 +69,8 @@ every other chart filters. Save the Excel file and the dashboard updates.
   and **Exclude** pin a filter. **Show rows** lists the data behind a bar.
 - **Text with live numbers:** text tiles with headings, lists, quotes, callouts and links to other dashboards, and
   numbers that follow the filters: "Revenue is 18.4K in Oct 1–14, ▲ 6.3 % against the same days before."
+- **Story pages:** a dashboard that reads like a document: text, live numbers, charts and cards in one column, two
+  half-width tiles side by side, printed on A4 pages that never cut a chart.
 - **Copy and paste:** copy tiles (Shift-click picks several, then Ctrl+C or ⌘C) or a whole dashboard, and paste
   them on any dashboard, in this workspace or another. Named measures and card styles come along. From another
   workspace, **Match fields** asks which table and column here holds the same data, with a first guess filled in.
