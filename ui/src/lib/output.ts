@@ -10,7 +10,7 @@ import { columnHeads, measureLabel, type Named } from './format';
 import { saveBlob, saveBytes } from './download';
 import { motion } from './motion';
 import { buildPdf, pageSize } from './pdf';
-import { pictureNote } from './picture';
+import { pictureKind, pictureNote } from './picture';
 import { partialNote } from './run';
 import { fileName, tileTable, toCsv } from './tabular';
 import { withNamedFormats } from './measures';
@@ -79,7 +79,7 @@ async function chartPicture(tile: Tile, res: QueryResult, tables: Named[], title
   try {
     const built = buildOption({ res, tile: withNamedFormats(tile), colors, selected: null, width: w, height: h, tables });
     // A picture leaves the computer: it says it with no key value and no file name.
-    note = pictureNote(res, built.note, partialNote(res, tile.dims[0]?.grain));
+    note = pictureNote(res, built.note, built.gateNote, partialNote(res, tile.dims[0]?.grain));
     const chart = echarts.init(holder, null, { renderer: 'canvas', width: w, height: h });
     chart.setOption({ ...built.option, animation: false });
     url = chart.getDataURL({ pixelRatio: SCALE, backgroundColor: colors.surface });
@@ -186,7 +186,7 @@ function withNote(canvas: HTMLCanvasElement, note: string, colors: Colors): HTML
 export async function downloadTilePng(el: HTMLElement, tile: Tile, res: QueryResult | null, tables: Named[], title: string): Promise<void> {
   const colors = readColors();
   const canvas =
-    res && (CHART_TYPES as readonly string[]).includes(tile.type) && res.rows.length > 0
+    res && pictureKind(tile, res, CHART_TYPES) === 'chart'
       ? await chartPicture(tile, res, tables, title, colors, { w: el.clientWidth, h: el.clientHeight })
       : await domPicture(el, colors, pictureNote(res, res && tile.type !== 'kpi' ? partialNote(res, tile.dims[0]?.grain) : null));
   saveBlob(await toBlob(canvas, 'image/png'), fileName(title, 'png'));

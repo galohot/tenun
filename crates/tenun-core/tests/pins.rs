@@ -875,12 +875,14 @@ fn named_measures_compile_to_the_sql_they_are_pinned_to() {
         },
     )]);
     let today = NaiveDate::from_ymd_opt(2026, 10, 14).unwrap();
+    let grains = BTreeMap::new();
     let env = Env {
         measures: &list,
         tables: &tables,
         rels: &rels,
         health: &health,
         now: today.and_hms_opt(12, 0, 0).unwrap(),
+        grains: &grains,
     };
     let mut got = Vec::new();
     for (name, q) in named_queries() {
@@ -932,6 +934,6 @@ const NAMED_PINS: &[(&str, &str)] = &[
     ),
     (
         "a time group one table reads from its main date",
-        "WITH g0 AS (SELECT strftime(date_trunc('month', t0.\"moved\"), '%Y-%m-%d') AS \"d0\", sum(CAST(t0.\"qty\" AS DOUBLE)) AS \"v0\" FROM \"s_s6\".\"transfers\" AS t0 GROUP BY 1), g1 AS (SELECT strftime(date_trunc('month', t0.\"date\"), '%Y-%m-%d') AS \"d0\", sum(CAST(t0.\"amount\" AS DOUBLE)) AS \"v0\" FROM \"s_s1\".\"orders\" AS t0 WHERE (CAST(t0.\"customer\" AS VARCHAR) IN (?)) GROUP BY 1) SELECT COALESCE(g0.\"d0\", g1.\"d0\") AS \"d0\", CAST(list_transform([(COALESCE(g0.\"v0\", 0e0) / COALESCE(g1.\"v0\", 0e0))], v0 -> CASE WHEN isfinite(v0) THEN v0 END)[1] AS DOUBLE) AS \"m1\" FROM g0 FULL OUTER JOIN g1 ON g1.\"d0\" IS NOT DISTINCT FROM g0.\"d0\" ORDER BY 1 ASC LIMIT 1000\\n  params: [Text(\"x\")]\\n  parts: [PartNote { measure: 0, note: \"transfers is not filtered by customer.\" }]",
+        "WITH g0 AS (SELECT strftime(date_trunc('month', t0.\"moved\"), '%Y-%m-%d') AS \"d0\", sum(CAST(t0.\"qty\" AS DOUBLE)) AS \"v0\" FROM \"s_s6\".\"transfers\" AS t0 GROUP BY 1), g1 AS (SELECT strftime(date_trunc('month', t0.\"date\"), '%Y-%m-%d') AS \"d0\", sum(CAST(t0.\"amount\" AS DOUBLE)) AS \"v0\" FROM \"s_s1\".\"orders\" AS t0 WHERE (CAST(t0.\"customer\" AS VARCHAR) IN (?)) GROUP BY 1) SELECT COALESCE(g0.\"d0\", g1.\"d0\") AS \"d0\", CAST(list_transform([(COALESCE(g0.\"v0\", 0e0) / COALESCE(g1.\"v0\", 0e0))], v0 -> CASE WHEN isfinite(v0) THEN v0 END)[1] AS DOUBLE) AS \"m1\" FROM g0 FULL OUTER JOIN g1 ON g1.\"d0\" IS NOT DISTINCT FROM g0.\"d0\" ORDER BY 1 ASC LIMIT 1000\\n  params: [Text(\"x\")]\\n  parts: [PartNote { measure: 0, note: \"transfers is not filtered by customer.\", repeats: false }]",
     ),
 ];

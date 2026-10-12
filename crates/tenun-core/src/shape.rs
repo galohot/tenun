@@ -619,10 +619,11 @@ pub fn show_as(tile: &Tile, q: &SemanticQuery, engine: &Engine, res: &mut QueryR
         // A share of the whole, a running total and a year to date add the values up. A named
         // measure whose values do not add up (a ratio, an average) is shown as it is, with words
         // (V4-D85d).
-        if let Some(why) = refuses_to_add(engine, &q.measures[j], how) {
+        if let Some(why) = refuses_to_add(engine, &q.measures[j], how, repeats_at(res, j)) {
             res.parts.push(PartNote {
                 measure: j,
                 note: why,
+                repeats: false,
             });
             continue;
         }
@@ -696,21 +697,32 @@ fn adds_up(how: ShowAs) -> bool {
     )
 }
 
-/// Why a named measure cannot be shown this way: its values do not add up to the whole, so a
-/// share of the whole or a running total of them would be wrong. `None` when it can.
-fn refuses_to_add(engine: &Engine, m: &Measure, how: ShowAs) -> Option<String> {
-    if m.named.is_none() || !adds_up(how) {
+/// Why a value cannot be shown this way, or `None` when it can (V4-D85d, V4-D99). A share of the whole, a
+/// running total and a year to date add values up. A value whose groups do not add up to the whole is shown
+/// as it is, with words: an average, a middle value, a distinct count, a least or a most, a ratio, a named
+/// formula that is not a sum, and any measure that repeats a table across the groups of the tile (`repeats`).
+fn refuses_to_add(engine: &Engine, m: &Measure, how: ShowAs, repeats: bool) -> Option<String> {
+    if !adds_up(how) {
         return None;
     }
     let f = engine.measure_facts(m).ok()?;
-    if f.additive {
+    let why = if !f.additive {
+        "its values do not add up"
+    } else if repeats {
+        "a table it reads is not split by these groups, so its values do not add up"
+    } else {
         return None;
-    }
+    };
     Some(format!(
-        "{} is not shown as {}: its values do not add up. The value is shown instead.",
+        "{} is not shown as {}: {why}. The value is shown instead.",
         f.name,
         how.suffix()
     ))
+}
+
+/// A table of the value has the same number for every group of the tile (V4-D99a).
+fn repeats_at(res: &QueryResult, j: usize) -> bool {
+    res.parts.iter().any(|p| p.measure == j && p.repeats)
 }
 
 /// Orders the first-column values of a time chart: dates (ISO text) and date parts (numbers).
@@ -938,7 +950,7 @@ pub fn compare(
         .as_ref()
         .and_then(|l| l.first().copied().flatten())
         .filter(|h| !matches!(h, ShowAs::Value | ShowAs::Unknown))
-        .filter(|h| refuses_to_add(engine, &q.measures[0], *h).is_none())
+        .filter(|h| refuses_to_add(engine, &q.measures[0], *h, repeats_at(res, 0)).is_none())
         .map(|h| {
             if h == ShowAs::PctGroup {
                 ShowAs::PctTotal

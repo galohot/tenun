@@ -32,7 +32,7 @@ use crate::query::{
 };
 use crate::snapshot::count_rows;
 use crate::workspace::{NamedMeasure, Relationship, TableSetup};
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{Datelike, NaiveDate, NaiveDateTime};
 use std::collections::BTreeMap;
 
 /// A workspace uses at most this many named measures. The rest stay in the file and are not
@@ -50,6 +50,111 @@ pub struct Env<'a> {
     pub health: &'a Health,
     /// What `NOW()` is. `TODAY()` is its date.
     pub now: NaiveDateTime,
+    /// The main dates that hold only the first day of a month, a quarter or a year, as (table id,
+    /// column) → the period (V4-D101). Read from the data once for each load, by the engine. A
+    /// main date not in the map is read as it is: any day.
+    pub grains: &'a BTreeMap<(String, String), Period>,
+}
+
+/// The period a main date counts in when every one of its values is the first day of a period
+/// (V4-D101): a table of targets with a row for each month has a monthly main date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Period {
+    Month,
+    Quarter,
+    Year,
+}
+
+impl Period {
+    fn word(self) -> &'static str {
+        match self {
+            Period::Month => "month",
+            Period::Quarter => "quarter",
+            Period::Year => "year",
+        }
+    }
+
+    /// The first day of the period that holds `d`.
+    fn first(self, d: NaiveDate) -> NaiveDate {
+        let month = match self {
+            Period::Month => d.month(),
+            Period::Quarter => (d.month() - 1) / 3 * 3 + 1,
+            Period::Year => 1,
+        };
+        NaiveDate::from_ymd_opt(d.year(), month, 1).unwrap_or(d)
+    }
+
+    /// The last day of the period that holds `d`.
+    fn last(self, d: NaiveDate) -> NaiveDate {
+        let next = match self {
+            Period::Month => 1,
+            Period::Quarter => 3,
+            Period::Year => 12,
+        };
+        self.first(d)
+            .checked_add_months(chrono::Months::new(next))
+            .and_then(|n| n.pred_opt())
+            .unwrap_or(d)
+    }
+
+    /// The name of the period that holds `d`: "March", "Q1" or "2025".
+    fn name(self, d: NaiveDate, year: bool) -> String {
+        let y = if year {
+            format!(" {}", d.year())
+        } else {
+            String::new()
+        };
+        match self {
+            Period::Month => format!("{}{y}", d.format("%B")),
+            Period::Quarter => format!("Q{}{y}", (d.month() - 1) / 3 + 1),
+            Period::Year => d.year().to_string(),
+        }
+    }
+
+    /// The unit a group of grain `g` counts in when that is finer than the period: a row of the
+    /// period then has a value only on the first day (or month) of each period.
+    fn finer_unit(self, g: Grain) -> Option<&'static str> {
+        match (self, g) {
+            (_, Grain::Day | Grain::Week | Grain::Weekday | Grain::Hour) => Some("day"),
+            (Period::Quarter | Period::Year, Grain::Month | Grain::MonthOfYear) => Some("month"),
+            (Period::Year, Grain::Quarter) => Some("quarter"),
+            _ => None,
+        }
+    }
+}
+
+/// The SELECT that reads the grain of a main date: how many values it has, and how many of them
+/// are the first day of a month, of a quarter and of a year.
+pub fn grain_sql(column: &str, sql_ref: &str) -> String {
+    let c = ident(column);
+    let day_one = format!(
+        "day({c}) = 1 AND CAST({c} AS TIMESTAMP) = date_trunc('day', CAST({c} AS TIMESTAMP))"
+    );
+    format!(
+        "SELECT CAST(count({c}) AS DOUBLE), \
+         CAST(count(*) FILTER (WHERE {day_one}) AS DOUBLE), \
+         CAST(count(*) FILTER (WHERE {day_one} AND month({c}) IN (1, 4, 7, 10)) AS DOUBLE), \
+         CAST(count(*) FILTER (WHERE {day_one} AND month({c}) = 1) AS DOUBLE) \
+         FROM {sql_ref} WHERE {c} IS NOT NULL"
+    )
+}
+
+/// The period of a main date from the row `grain_sql` gave, or `None` when it holds other days.
+pub fn period_of(row: &[serde_json::Value]) -> Option<Period> {
+    let n = row.first()?.as_f64()?;
+    let at = |i: usize| row.get(i).and_then(|v| v.as_f64());
+    if n < 1.0 {
+        return None;
+    }
+    if at(3) == Some(n) {
+        Some(Period::Year)
+    } else if at(2) == Some(n) {
+        Some(Period::Quarter)
+    } else if at(1) == Some(n) {
+        Some(Period::Month)
+    } else {
+        None
+    }
 }
 
 impl<'a> Env<'a> {
@@ -64,6 +169,9 @@ pub struct Resolved {
     pub name: String,
     pub agg: AggregateSql,
     pub dtype: DType,
+    /// The calculated columns the formula reads that could not be computed, as (table id, column).
+    /// A part that reads one is blank, never 0 (V4-D103).
+    pub broken: Vec<(String, String)>,
 }
 
 impl Resolved {
@@ -272,11 +380,34 @@ pub fn resolve(env: &Env<'_>, catalog: &Catalog, id: &str) -> Result<Resolved, Q
     let c = formula::compile(&nm.formula, Kind::Measure, None, &cx)
         .map_err(|e| QueryError::MeasureBroken(nm.name.clone(), e.message))?;
     match c.body {
-        Body::Aggregate(agg) => Ok(Resolved {
-            name: nm.name.clone(),
-            agg,
-            dtype: c.dtype,
-        }),
+        Body::Aggregate(mut agg) => {
+            // A part that reads a calculated column that failed has no value: its sum of blanks is
+            // blank, and a blank is not the 0 of a table with no rows (V4-D22, V4-D103).
+            let mut broken: Vec<(String, String)> = Vec::new();
+            for p in &mut agg.parts {
+                let bad: Vec<&(String, String)> = p
+                    .reads
+                    .iter()
+                    .filter(|(t, c)| column_failed(catalog, t, c))
+                    .collect();
+                if !bad.is_empty() {
+                    for b in bad {
+                        if !broken.contains(b) {
+                            broken.push(b.clone());
+                        }
+                    }
+                    p.sql = typed_null(p.dtype);
+                    p.joins.clear();
+                    p.zero_when_empty = false;
+                }
+            }
+            Ok(Resolved {
+                name: nm.name.clone(),
+                agg,
+                dtype: c.dtype,
+                broken,
+            })
+        }
         Body::Column(_) => Err(QueryError::MeasureBroken(
             nm.name.clone(),
             "A measure adds things up. Use SUM, AVERAGE, COUNT or another total.".into(),
@@ -413,6 +544,14 @@ pub fn main_date<'a>(
     }
 }
 
+/// A calculated column that could not be computed, so its values are blank (V4-D67).
+fn column_failed(catalog: &Catalog, table: &str, column: &str) -> bool {
+    catalog
+        .table(table)
+        .and_then(|t| t.column(column))
+        .is_some_and(|c| c.error.is_some())
+}
+
 fn is_date(catalog: &Catalog, table: &str, column: &str) -> bool {
     catalog
         .table(table)
@@ -433,6 +572,29 @@ fn column_label(catalog: &Catalog, table: &str, column: &str) -> String {
 struct Reads {
     dims: Vec<Option<Dimension>>,
     filters: Vec<Option<Filter>>,
+    /// The group or the filter is read through the main date of this table, not as the question
+    /// wrote it (V4-D98).
+    remapped_dims: Vec<bool>,
+    remapped_filters: Vec<bool>,
+}
+
+/// A date column is a main date for the question when it is the main date of its table, and either the user
+/// picked it, or the table is an event table: some link starts from it (many rows to one), as the sales and the
+/// targets do. A date that only describes a row of a table other tables point at (the launch of a product, the
+/// day a store opened) is not a time axis, so a part is not split by it through its own dates (V4-D98, V4-D100).
+fn is_main(catalog: &Catalog, env: &Env<'_>, table: &str, column: &str) -> bool {
+    let Some(c) = main_date(catalog, env.tables, table) else {
+        return false;
+    };
+    if c.name != column {
+        return false;
+    }
+    let picked = env
+        .tables
+        .get(table)
+        .and_then(|s| s.main_date.as_deref())
+        .is_some();
+    picked || env.rels.iter().any(|r| r.from.table == table)
 }
 
 fn reads(
@@ -447,43 +609,182 @@ fn reads(
     };
     let main = main_date(catalog, env.tables, home).map(|c| c.name.clone());
     let mut dims = Vec::new();
+    let mut remapped_dims = Vec::new();
     for d in &q.dimensions {
         lookup(catalog, &d.table)?;
+        let mut remapped = false;
         dims.push(match reaches(&d.table, d.via.as_deref()) {
             Ok(()) => Some(d.clone()),
             Err(PathError::Gone) => return Err(QueryError::LinkGone),
-            // A date at a grain is read from the main date of this table, at the same grain.
-            Err(_) => match (&main, d.grain) {
-                (Some(m), Some(g)) if is_date(catalog, &d.table, &d.column) => Some(Dimension {
-                    table: home.to_string(),
-                    column: m.clone(),
-                    grain: Some(g),
-                    via: None,
-                }),
-                _ => None,
-            },
+            Err(_) => {
+                if d.via.is_some() && reaches(&d.table, None).is_ok() {
+                    // The group names a link this part does not cross. The part reaches the same
+                    // table and column by its own way, and is split by that (V4-D107).
+                    Some(Dimension {
+                        via: None,
+                        ..d.clone()
+                    })
+                } else {
+                    match (&main, d.grain) {
+                        // A date at a grain that is a main date is read from the main date of
+                        // this table, at the same grain.
+                        (Some(m), Some(g)) if is_main(catalog, env, &d.table, &d.column) => {
+                            remapped = true;
+                            Some(Dimension {
+                                table: home.to_string(),
+                                column: m.clone(),
+                                grain: Some(g),
+                                via: None,
+                            })
+                        }
+                        _ => None,
+                    }
+                }
+            }
         });
+        remapped_dims.push(remapped);
     }
     let mut filters = Vec::new();
+    let mut remapped_filters = Vec::new();
     for f in &q.filters {
+        let mut remapped = false;
         filters.push(if catalog.table(&f.table).is_none() {
             None
         } else {
             match reaches(&f.table, f.via.as_deref()) {
                 Ok(()) => Some(f.clone()),
+                Err(_) if f.via.is_some() && reaches(&f.table, None).is_ok() => Some(Filter {
+                    via: None,
+                    ..f.clone()
+                }),
                 Err(_) => match &main {
-                    Some(m) if is_date(catalog, &f.table, &f.column) => Some(Filter {
-                        table: home.to_string(),
-                        column: m.clone(),
-                        via: None,
-                        ..f.clone()
-                    }),
+                    Some(m) if is_main(catalog, env, &f.table, &f.column) => {
+                        remapped = true;
+                        Some(Filter {
+                            table: home.to_string(),
+                            column: m.clone(),
+                            via: None,
+                            ..f.clone()
+                        })
+                    }
                     _ => None,
                 },
             }
         });
+        remapped_filters.push(remapped);
     }
-    Ok(Reads { dims, filters })
+    Ok(Reads {
+        dims,
+        filters,
+        remapped_dims,
+        remapped_filters,
+    })
+}
+
+/// The days a date filter lets through, as `(first, last)`, either open (V4-D98). Filters that are not a
+/// window of days (a list of values, blank) have none.
+fn window(f: &Filter, today: NaiveDate) -> Option<(Option<NaiveDate>, Option<NaiveDate>)> {
+    use crate::query::FilterOp;
+    let f = query::resolve_relative(f, today);
+    let day = |i: usize| {
+        f.values
+            .get(i)
+            .and_then(|v| v.as_str())
+            .and_then(|s| NaiveDate::parse_from_str(s.get(..10)?, "%Y-%m-%d").ok())
+    };
+    match f.op {
+        FilterOp::Between => Some((day(0), day(1))),
+        // lo <= x < hi: the last day let through is the one before hi.
+        FilterOp::Range => Some((day(0), day(1).and_then(|d| d.pred_opt()))),
+        FilterOp::Gte => Some((day(0), None)),
+        FilterOp::Lte => Some((None, day(0))),
+        _ => None,
+    }
+}
+
+/// What a part read by a coarse main date cannot say about a filter window: a period counts when the
+/// window holds its first day, so a window that starts inside a period leaves it out and one that
+/// ends inside a period keeps it whole (V4-D98, V4-D101). No prorating.
+fn window_notes(table: &str, period: Period, f: &Filter, today: NaiveDate) -> Vec<String> {
+    let Some((lo, hi)) = window(f, today) else {
+        return Vec::new();
+    };
+    // A window across years names the year, so "March" is not ambiguous.
+    let year = matches!((lo, hi), (Some(a), Some(b)) if a.year() != b.year());
+    let on = |d: NaiveDate| {
+        if year {
+            format!("{} {}", d.day(), d.format("%B %Y"))
+        } else {
+            format!("{} {}", d.day(), d.format("%B"))
+        }
+    };
+    let mut out = Vec::new();
+    if let Some(lo) = lo.filter(|d| period.first(*d) != *d) {
+        out.push(format!(
+            "{table} is read by {}: {} is left out because the window starts on {}.",
+            period.word(),
+            period.name(lo, year),
+            on(lo)
+        ));
+    }
+    if let Some(hi) = hi.filter(|d| period.last(*d) != *d) {
+        out.push(format!(
+            "{table} is read by {}: {} is counted whole because the window ends on {}.",
+            period.word(),
+            period.name(hi, year),
+            on(hi)
+        ));
+    }
+    out
+}
+
+/// The question as the part with this home table reads it: the groups and filters it can reach, or can read
+/// through its main date, and no others.
+pub fn narrow(
+    q: &SemanticQuery,
+    catalog: &Catalog,
+    env: &Env<'_>,
+    home: &str,
+) -> Result<SemanticQuery, QueryError> {
+    let r = reads(catalog, env, env.links(), home, q)?;
+    Ok(SemanticQuery {
+        dimensions: r.dims.into_iter().flatten().collect(),
+        filters: r.filters.into_iter().flatten().collect(),
+        ..q.clone()
+    })
+}
+
+/// The main dates a question reads, as (table id, column, SQL reference), for the engine to read the
+/// grain of (V4-D101): one for each table a total of the question adds up.
+pub fn grain_wants(
+    q: &SemanticQuery,
+    catalog: &Catalog,
+    env: &Env<'_>,
+) -> Vec<(String, String, String)> {
+    let mut homes: Vec<String> = Vec::new();
+    let mut add = |t: String| {
+        if !homes.contains(&t) {
+            homes.push(t);
+        }
+    };
+    for m in &q.measures {
+        match &m.named {
+            Some(id) => {
+                if let Ok(r) = resolve(env, catalog, id) {
+                    r.homes().into_iter().for_each(&mut add);
+                }
+            }
+            None => add(m.table.clone()),
+        }
+    }
+    homes
+        .into_iter()
+        .filter_map(|h| {
+            let c = main_date(catalog, env.tables, &h)?;
+            let t = catalog.table(&h)?;
+            Some((h.clone(), c.name.clone(), t.sql_ref.clone()))
+        })
+        .collect()
 }
 
 /// Compiles a question that has a named measure in it. A question with none is compiled by
@@ -508,6 +809,42 @@ pub fn compile(
                 Item::Plain(m.clone())
             }
         });
+    }
+    // The calculated columns that failed and that a value reads: the value is blank (V4-D103).
+    let mut blank_reads: Vec<(String, String)> = Vec::new();
+    let mut plain_blank: Vec<bool> = Vec::new();
+    for item in &items {
+        let mut bad = false;
+        match item {
+            Item::Named(r) => {
+                for b in &r.broken {
+                    if !blank_reads.contains(b) {
+                        blank_reads.push(b.clone());
+                    }
+                }
+            }
+            Item::Plain(m) => {
+                let cols = m
+                    .column
+                    .iter()
+                    .map(|c| (m.table.as_str(), c.as_str()))
+                    .chain(
+                        m.per
+                            .iter()
+                            .filter_map(|p| p.column.as_deref().map(|c| (p.table.as_str(), c))),
+                    );
+                for (t, c) in cols {
+                    if column_failed(catalog, t, c) {
+                        bad = true;
+                        let b = (t.to_string(), c.to_string());
+                        if !blank_reads.contains(&b) {
+                            blank_reads.push(b);
+                        }
+                    }
+                }
+            }
+        }
+        plain_blank.push(bad);
     }
     let mut groups: Vec<Group> = Vec::new();
     let mut slots: Vec<Vec<Slot>> = Vec::new();
@@ -664,20 +1001,39 @@ pub fn compile(
         member_exprs.push(ms);
     }
 
-    // 5. The words for what a part cannot reach (V4-D85).
-    let mut notes: Vec<Vec<String>> = vec![Vec::new(); groups.len()];
+    // 5. The words for what a part cannot reach, or can read only by period (V4-D85, V4-D98).
+    let mut notes: Vec<Vec<(String, bool)>> = vec![Vec::new(); groups.len()];
     for (gi, g) in groups.iter().enumerate() {
         let table = label(catalog, &g.home);
-        let has_main = main_date(catalog, env.tables, &g.home).is_some();
+        let main = main_date(catalog, env.tables, &g.home);
+        let has_main = main.is_some();
+        let period = main.and_then(|c| env.grains.get(&(g.home.clone(), c.name.clone())).copied());
         for (i, d) in q.dimensions.iter().enumerate() {
             if read[gi].dims[i].is_none() && read.iter().any(|r| r.dims[i].is_some()) {
                 let c = column_label(catalog, &d.table, &d.column);
-                let time = d.grain.is_some() && is_date(catalog, &d.table, &d.column);
-                notes[gi].push(if time && !has_main {
-                    format!("{table} has no main date, so it is not split by {c}.")
-                } else {
-                    format!("{table} is not split by {c}.")
-                });
+                let time = d.grain.is_some() && is_main(catalog, env, &d.table, &d.column);
+                // This table has the same value for every group: the groups do not add up (V4-D99a).
+                notes[gi].push((
+                    if time && !has_main {
+                        format!("{table} has no main date, so it is not split by {c}.")
+                    } else {
+                        format!("{table} is not split by {c}.")
+                    },
+                    true,
+                ));
+            }
+            if read[gi].remapped_dims[i]
+                && let (Some(p), Some(gr)) = (period, d.grain)
+                && let Some(unit) = p.finer_unit(gr)
+            {
+                notes[gi].push((
+                    format!(
+                        "{table} is read by {}: only the first {unit} of each {} has a value, so the other {unit}s are blank.",
+                        p.word(),
+                        p.word()
+                    ),
+                    false,
+                ));
             }
         }
         for (j, f) in q.filters.iter().enumerate() {
@@ -686,11 +1042,22 @@ pub fn compile(
                 && read.iter().any(|r| r.filters[j].is_some())
             {
                 let c = column_label(catalog, &f.table, &f.column);
-                notes[gi].push(if is_date(catalog, &f.table, &f.column) && !has_main {
-                    format!("{table} has no main date, so it is not filtered by {c}.")
-                } else {
-                    format!("{table} is not filtered by {c}.")
-                });
+                let time = is_main(catalog, env, &f.table, &f.column);
+                notes[gi].push((
+                    if time && !has_main {
+                        format!("{table} has no main date, so it is not filtered by {c}.")
+                    } else {
+                        format!("{table} is not filtered by {c}.")
+                    },
+                    false,
+                ));
+            }
+            if read[gi].remapped_filters[j]
+                && let Some(p) = period
+            {
+                for n in window_notes(&table, p, f, today) {
+                    notes[gi].push((n, false));
+                }
             }
         }
         notes[gi].dedup();
@@ -703,10 +1070,11 @@ pub fn compile(
                 continue;
             }
             seen.push(s.group);
-            for n in &notes[s.group] {
+            for (n, repeats) in &notes[s.group] {
                 let p = PartNote {
                     measure: j,
                     note: n.clone(),
+                    repeats: *repeats,
                 };
                 if !parts.contains(&p) {
                     parts.push(p);
@@ -811,6 +1179,7 @@ pub fn compile(
             ignored_filters: ignored,
             crossed,
             parts,
+            blank_reads,
         });
     }
 
@@ -888,6 +1257,54 @@ pub fn compile(
             key.push(keys_of(&so_far, i));
         }
         partial.retain(|g| !full.contains(g));
+        // A group value that only a part which cannot see all the groups has (a store with a target
+        // and no sale, in a chart of stores by category) would vanish: the keys come from the parts
+        // that reach every group. It appears once, with the groups that part cannot reach left blank
+        // (V4-D108). Parts that reach no group have nothing to say about a key.
+        let extra: Vec<usize> = partial
+            .iter()
+            .copied()
+            .filter(|&g| (0..nd).any(|i| has(g, i)))
+            .collect();
+        if !extra.is_empty() {
+            let own: Vec<String> = (0..nd)
+                .map(|i| format!("{} AS {}", key[i], ident(&format!("d{i}"))))
+                .collect();
+            ctes.push(format!("kf AS (SELECT {} FROM {})", own.join(", "), from));
+            let kd = |i: usize| ident(&format!("d{i}"));
+            let more: Vec<String> = extra
+                .iter()
+                .map(|&g| {
+                    let cols: Vec<String> = (0..nd)
+                        .map(|i| {
+                            if has(g, i) {
+                                format!("{} AS {}", d(g, i), kd(i))
+                            } else {
+                                format!("NULL AS {}", kd(i))
+                            }
+                        })
+                        .collect();
+                    let same: Vec<String> = (0..nd)
+                        .filter(|&i| has(g, i))
+                        .map(|i| format!("kf.{} IS NOT DISTINCT FROM {}", kd(i), d(g, i)))
+                        .collect();
+                    format!(
+                        "SELECT {} FROM g{g} WHERE NOT EXISTS (SELECT 1 FROM kf WHERE {})",
+                        cols.join(", "),
+                        same.join(" AND ")
+                    )
+                })
+                .collect();
+            ctes.push(format!(
+                "k AS (SELECT * FROM kf UNION ALL SELECT * FROM ({}))",
+                more.join(" UNION ")
+            ));
+            from = "k".to_string();
+            for (i, k) in key.iter_mut().enumerate() {
+                *k = format!("k.{}", kd(i));
+            }
+            partial = (0..groups.len()).collect();
+        }
     } else {
         // No sub-query reaches all the groups: every value of each group, in every combination.
         let mut sources = Vec::new();
@@ -936,7 +1353,10 @@ pub fn compile(
             Item::Plain(m) => {
                 let v = value(&slots[j][0]);
                 // A group this table has no rows for: nothing to add up is 0 for a sum or a count.
-                if m.per.is_none() && matches!(m.agg, Agg::Sum | Agg::Count | Agg::CountDistinct) {
+                if !plain_blank[j]
+                    && m.per.is_none()
+                    && matches!(m.agg, Agg::Sum | Agg::Count | Agg::CountDistinct)
+                {
                     format!("COALESCE({v}, 0e0)")
                 } else {
                     v
@@ -959,6 +1379,7 @@ pub fn compile(
         ignored_filters: ignored,
         crossed,
         parts,
+        blank_reads,
     })
 }
 

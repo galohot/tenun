@@ -2,9 +2,12 @@
 // already-added numbers on the client (V4-D85d). Pure functions, no browser.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   addsUp,
+  addsUpHere,
   additive,
+  baseFormat,
   formatOf,
   formulaProblem,
   MAX_FORMULA,
@@ -12,15 +15,23 @@ import {
   nameOf,
   nameProblem,
   namedMeasure,
+  ownFormat,
   paceElapsed,
+  repeatsAt,
   setKnownFromFile,
   setKnownMeasures,
+  stepsByDate,
+  targetUnit,
+  tileProblem,
   tilesWith,
+  whyNotAdded,
   withNamedFormats,
 } from '../src/lib/measures.ts';
-import { foldable, splitKeep, stackableTile, stackMode, unitOf, sameUnit, waterfallProblem } from '../src/lib/charts/math.ts';
-import { linesAllowed } from '../src/lib/charts/lines.ts';
-import { effectiveShowAs } from '../src/lib/showas.ts';
+import { foldable, splitKeep, stackableTile, stackMode, unitOf, sameUnit } from '../src/lib/charts/math.ts';
+import { foldSeries, splitKept } from '../src/lib/charts/fold.ts';
+import { lineSource, pointsOf } from '../src/lib/charts/lines.ts';
+import { pictureKind } from '../src/lib/picture.ts';
+import { effectiveShowAs, showAsOptions } from '../src/lib/showas.ts';
 import { suggestTypes } from '../src/lib/suggest.ts';
 import { suggest } from '../src/lib/formula.ts';
 import { targetInfo } from '../src/lib/kpi.ts';
@@ -61,20 +72,55 @@ test('a viewer file carries the name, the format and whether the values add up',
   assert.equal(nameOf('m9'), 'A deleted measure');
 });
 
-test('a value with no format of its own is written the way its measure is', () => {
+test('V4-D106: a tile writes a value in the format of its measure, with its own fields over it', () => {
   const t = tile('bar', [namedMeasure('m2'), plain('sum')]);
   assert.deepEqual(formatOf(t, 0), { currency: 'IDR', compact: true });
   assert.equal(formatOf(t, 1), null);
   assert.deepEqual(withNamedFormats(t).formats, [{ currency: 'IDR', compact: true }, null]);
-  // The tile's own format wins.
+  // What the tile sets wins, field by field: the decimals are its own, the currency is the measure's.
   const own = tile('bar', [namedMeasure('m2')], { formats: [{ decimals: 1 }] });
-  assert.deepEqual(withNamedFormats(own).formats, [{ decimals: 1 }]);
-  assert.equal(withNamedFormats(own), own, 'nothing to add: the same tile');
+  assert.deepEqual(formatOf(own, 0), { currency: 'IDR', compact: true, decimals: 1 });
+  assert.deepEqual(withNamedFormats(own).formats, [{ currency: 'IDR', compact: true, decimals: 1 }]);
   // No named measure, or one with no format: the same tile.
   const none = tile('bar', [plain('sum')]);
   assert.equal(withNamedFormats(none), none);
   const bare = tile('bar', [namedMeasure('m1')]);
   assert.equal(withNamedFormats(bare), bare);
+  // The format of the measure is read on its own too.
+  assert.deepEqual(baseFormat(t, 0), { currency: 'IDR', compact: true });
+  assert.equal(baseFormat(t, 1), null);
+});
+
+test('V4-D106: a tile stores only what it changed, so swapping the measure leaves no copy of the old format', () => {
+  const base = { currency: 'IDR', compact: true, decimals: 2 };
+  // Touching one control stores that field only.
+  assert.deepEqual(ownFormat(base, null, { decimals: 0 }), { decimals: 0 });
+  // Setting a field to what the measure says stores nothing.
+  assert.equal(ownFormat(base, null, { currency: 'IDR' }), null);
+  assert.deepEqual(ownFormat(base, { decimals: 0 }, { decimals: 2 }), null);
+  // Saying no where the measure says yes is stored as a no.
+  assert.deepEqual(ownFormat(base, null, { currency: '' }), { currency: '' });
+  assert.deepEqual(ownFormat({ percent: true }, null, { percent: false }), { percent: false });
+  // Automatic decimals cannot undo the decimals of the measure: it goes back to them.
+  assert.equal(ownFormat(base, { decimals: 0 }, { decimals: undefined }), null);
+  // A measure with no format: the field is stored, and clearing it removes it.
+  assert.deepEqual(ownFormat(null, null, { currency: 'USD' }), { currency: 'USD' });
+  assert.equal(ownFormat(null, { currency: 'USD' }, { currency: undefined }), null);
+  assert.deepEqual(ownFormat(null, null, { compact: false }), { compact: false }, 'an explicit full size is a choice');
+  // The sequence of the bug: pick a measure with a format, change nothing but the decimals, swap it.
+  const t1 = tile('bar', [namedMeasure('m2')]);
+  const own = ownFormat(baseFormat(t1, 0), null, { decimals: 0 });
+  const swapped = tile('bar', [namedMeasure('m1')], { formats: [own] });
+  assert.deepEqual(formatOf(swapped, 0), { decimals: 0 }, 'no currency and no short size from the first measure');
+});
+
+test('V4-D110: a target of a value written as a percent is typed as 95 and stored as 0.95', () => {
+  setKnownMeasures([{ ...ratio, format: { percent: true } }, revenue], info);
+  assert.deepEqual(targetUnit(tile('kpi', [namedMeasure('m1')]), 0), { scale: 100, unit: '%' });
+  assert.deepEqual(targetUnit(tile('kpi', [namedMeasure('m2')]), 0), { scale: 1, unit: '' });
+  assert.deepEqual(targetUnit(tile('kpi', [plain('sum')], { formats: [{ percent: true }] }), 0), { scale: 100, unit: '%' });
+  assert.deepEqual(targetUnit(tile('bar', [plain('sum')], { showAs: ['pct_total'] }), 0), { scale: 100, unit: '%' });
+  assert.deepEqual(targetUnit(tile('bar', [plain('sum')], { showAs: ['rank'] }), 0), { scale: 1, unit: '' });
 });
 
 test('stacking, a bar and line combo and the units read a named measure as what it is', () => {
@@ -104,28 +150,81 @@ test('V4-D85d: a split chart folds its small groups into Other only when their v
   assert.equal(splitKeep(6, 8, true), 6);
 });
 
-test('V4-D85d: reference lines on a split chart read a total that a ratio does not have', () => {
-  assert.equal(linesAllowed({ percent: false, perValue: false, multi: true, addsUp: true }), true);
-  assert.equal(linesAllowed({ percent: false, perValue: false, multi: true, addsUp: false }), false);
+test('V4-D109: lines on a split chart read the total of the groups, or every point when there is none', () => {
+  const split = { perValue: false, multi: true, stacked: false };
+  assert.equal(lineSource({ ...split, addsUp: true }), 'total');
+  assert.equal(lineSource({ ...split, addsUp: false }), 'points', 'an average has no total of its groups');
   // One series, or one series for each value: nothing is added.
-  assert.equal(linesAllowed({ percent: false, perValue: false, multi: false, addsUp: false }), true);
-  assert.equal(linesAllowed({ percent: false, perValue: true, multi: true, addsUp: false }), true);
-  assert.equal(linesAllowed({ percent: true, perValue: false, multi: false, addsUp: true }), false);
+  assert.equal(lineSource({ perValue: false, multi: false, stacked: false, addsUp: false }), 'first');
+  assert.equal(lineSource({ perValue: true, multi: true, stacked: false, addsUp: false }), 'first');
+  assert.equal(lineSource({ perValue: true, multi: true, stacked: true, addsUp: true }), 'total');
+  // Every point drawn, "Other" left out.
+  const series = [{ values: [1, 2, null] }, { values: [10, 20, 30] }];
+  assert.deepEqual(pointsOf(series, ['a', 'b', 'rest'], (c) => c === 'rest'), [1, 2, 10, 20]);
 });
 
-test('V4-D85d: a waterfall by category adds the steps up, so it needs values that add up', () => {
-  assert.equal(waterfallProblem(namedMeasure('m1'), false) !== null, true);
-  assert.equal(waterfallProblem(namedMeasure('m2'), false), null);
-  assert.equal(waterfallProblem(plain('avg'), false) !== null, true);
-  // By date each step is a difference, which any value has.
-  assert.equal(waterfallProblem(namedMeasure('m1'), true), null);
-  assert.equal(waterfallProblem(undefined, false), null);
+test('V4-D99: a value adds up on a tile when its measure does and no table of it repeats across the groups', () => {
+  const t = tile('bar', [namedMeasure('m2'), plain('avg')]);
+  const parts = [{ measure: 0, note: 'targets is not split by product.', repeats: true }, { measure: 1, note: 'x', repeats: false }];
+  assert.equal(addsUpHere(t, 0), true);
+  assert.equal(addsUpHere(t, 0, parts), false, 'the engine says a table of it is repeated');
+  assert.equal(addsUpHere(t, 1, parts), false, 'an average never adds up');
+  assert.equal(repeatsAt(parts, 0), true);
+  assert.equal(repeatsAt(parts, 1), false, 'a note about a filter does not repeat a table across the groups');
+  assert.equal(addsUp(t, parts), false);
+  // The words for each case, as the start of a sentence.
+  assert.equal(whyNotAdded(tile('bar', [plain('avg')]), 0), 'Averages are not added up');
+  assert.equal(whyNotAdded(tile('bar', [plain('sum', true)]), 0), 'Ratios are not added up');
+  assert.equal(whyNotAdded(tile('bar', [namedMeasure('m1')]), 0), 'Achievement is not added up');
+  assert.match(whyNotAdded(t, 0, parts), /^Revenue is not added up here, because a table it reads is the same for every group$/);
+  assert.equal(whyNotAdded(t, 0), null);
+  // Stacking asks the same gate.
+  assert.equal(stackableTile(t, false), true);
+  assert.equal(stackableTile(t, false, parts), false);
+  assert.equal(stackMode(t, false, parts), 'side');
+  // So do the ways of showing a value that add values up, and what the name of the value says.
+  const dims = [{ table: 's1/sales', column: 'region' }];
+  const shown = tile('bar', [namedMeasure('m2')], { dims, showAs: ['pct_total'] });
+  assert.equal(effectiveShowAs(shown, 0, 'other'), 'pct_total');
+  assert.equal(effectiveShowAs(shown, 0, 'other', parts), null);
+  assert.ok(showAsOptions(shown, 'other', 0).includes('pct_total'));
+  assert.ok(!showAsOptions(shown, 'other', 0, parts).includes('pct_total'));
+  assert.ok(showAsOptions(shown, 'other', 0, parts).includes('rank'), 'a rank adds nothing up');
+});
+
+test('V4-D99: a share chart and a waterfall by category are refused with words by one gate, for the screen and every picture', () => {
+  const ratio = namedMeasure('m1');
+  const sum = namedMeasure('m2');
+  const parts = [{ measure: 0, note: 'n', repeats: true }];
+  assert.match(tileProblem(tile('waterfall', [ratio]), undefined, false), /^A waterfall adds one category to the next\. Achievement is not added up/);
+  assert.equal(tileProblem(tile('waterfall', [ratio]), undefined, true), null, 'steps over time are differences');
+  assert.equal(tileProblem(tile('waterfall', [sum]), undefined, false), null);
+  assert.ok(tileProblem(tile('waterfall', [sum]), parts, false), 'a table repeated across the categories');
+  assert.match(tileProblem(tile('share', [plain('avg')])), /^Averages are not added up, so it has no shares/);
+  assert.match(tileProblem(tile('donut', [ratio])), /no shares/);
+  assert.equal(tileProblem(tile('bar', [ratio])), null);
+  // A waterfall steps over time when its first field is a date or a part of a date.
+  assert.equal(stepsByDate({ dims: [{ grain: 'month_of_year' }] }, { columns: [{ dtype: 'number' }] }), true);
+  assert.equal(stepsByDate({ dims: [{}] }, { columns: [{ dtype: 'date' }] }), true);
+  assert.equal(stepsByDate({ dims: [{}] }, { columns: [{ dtype: 'text' }] }), false);
+  // A picture asks the same gate: a refused tile is copied from the screen, never drawn again as a chart.
+  const rows = [['a', 1]];
+  const res = { rows, columns: [{ dtype: 'text' }, { dtype: 'number' }] };
+  const charts = ['bar', 'line', 'waterfall'];
+  assert.equal(pictureKind(tile('waterfall', [ratio]), res, charts), 'screen');
+  assert.equal(pictureKind(tile('waterfall', [sum]), res, charts), 'chart');
+  assert.equal(pictureKind(tile('waterfall', [sum]), { ...res, parts }, charts), 'screen');
+  assert.equal(pictureKind(tile('waterfall', [ratio]), { ...res, columns: [{ dtype: 'date' }, { dtype: 'number' }] }, charts), 'chart');
+  assert.equal(pictureKind(tile('bar', [ratio]), res, charts), 'chart');
+  assert.equal(pictureKind(tile('bar', [ratio]), { ...res, rows: [] }, charts), 'screen');
+  assert.equal(pictureKind(tile('bar', [ratio]), null, charts), 'screen');
 });
 
 test('V4-D85d: a pace scales the value so far up to the period, which a ratio does not have', () => {
   assert.equal(paceElapsed(tile('kpi', [namedMeasure('m2')]), 0.5), 0.5);
   assert.equal(paceElapsed(tile('kpi', [namedMeasure('m1')]), 0.5), null);
   assert.equal(paceElapsed(tile('kpi', [plain('avg')]), 0.5), null);
+  assert.equal(paceElapsed(tile('kpi', [namedMeasure('m2')]), 0.5, [{ measure: 0, repeats: true }]), null);
   // With no pace the value itself is compared with the target.
   const sum = targetInfo(40, 100, paceElapsed(tile('kpi', [namedMeasure('m2')]), 0.5));
   assert.equal(sum.projected, 80);
@@ -207,4 +306,58 @@ test('the formula field offers the tables of a measure, which has no table of it
   // A column has no totals, so it is offered the row functions only.
   const colScope = { ...scope, table: tables[0], kind: 'column' };
   assert.ok(!suggest('SU', 2, colScope).items.some((i) => i.label === 'SUM'));
+});
+
+test('V4-D85d: the small bars of a bar chart are summed into Other only when their values add up', () => {
+  const cats = ['a', 'b', 'c', 'd', 'e', 'f'];
+  const vals = [10, 8, 6, 4, 2, 1];
+  const out = foldSeries(cats, vals, 1, 4, true, 'OTHER');
+  assert.deepEqual(out.categories, ['a', 'b', 'c', 'OTHER']);
+  assert.deepEqual(out.values, [10, 8, 6, 7], 'Other is 4 + 2 + 1');
+  // A value that does not add up keeps every bar: 7 of averages would be a sum of averages.
+  assert.equal(foldSeries(cats, vals, 1, 4, false, 'OTHER'), null);
+  assert.equal(foldSeries(cats, vals, 2, 4, true, 'OTHER'), null, 'more than one series');
+  assert.equal(foldSeries(cats, vals, 1, 6, true, 'OTHER'), null, 'they fit');
+  // A gap counts as nothing.
+  assert.deepEqual(foldSeries(cats, [1, 2, 3, null, 5, 6], 1, 4, true, 'O').values, [1, 2, 3, 11]);
+  assert.deepEqual(splitKept(['g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9', 'g10'], 8, true), {
+    kept: ['g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7'],
+    other: true,
+  });
+  const every = splitKept(['g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9', 'g10'], 8, false);
+  assert.equal(every.kept.length, 10);
+  assert.equal(every.other, false);
+  assert.deepEqual(splitKept(['g1', 'g2'], 8, true), { kept: ['g1', 'g2'], other: false });
+});
+
+// The files that draw the chart and the sheet import Svelte and ECharts, which node cannot load. What they
+// must call is pinned here by reading them, so a change that drops the gate from one fails a test.
+const source = (f) => readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8');
+
+test('the code that draws asks the gate (read from the files that node cannot load)', () => {
+  const common = source('lib/charts/common.ts');
+  assert.match(common, /foldSeries\(p\.categories, p\.series\[0\]\?\.values \?\? \[\], p\.series\.length, max, addsUp, FOLDED\)/);
+  assert.match(common, /splitKept\(ranked, MAX_SERIES, tileAddsUp\(tile, res\.parts\)\)/);
+  const cartesian = source('lib/charts/cartesian.ts');
+  assert.match(cartesian, /tileAddsUp\(tile, res\.parts\)/);
+  assert.match(cartesian, /fold\(whole, Math\.max\(4, room\), addsUp\)/);
+  assert.match(cartesian, /lineSource\(\{ perValue, multi, stacked, addsUp \}\)/);
+  assert.match(cartesian, /stackMode\(tile, perValue, res\.parts\)/);
+  assert.match(cartesian, /source !== 'points'/, 'no trend over a split of values that do not add up');
+  const body = source('components/dash/TileBody.svelte');
+  assert.match(body, /tileProblem\(tile, res\.parts, stepsByDate\(tile, res\)\)/);
+  const output = source('lib/output.ts');
+  assert.match(output, /pictureKind\(tile, res, CHART_TYPES\) === 'chart'/);
+  assert.match(output, /pictureNote\(res, built\.note, built\.gateNote,/);
+  assert.match(output, /withNamedFormats\(tile\)/);
+  const kpi = source('components/dash/KpiView.svelte');
+  assert.match(kpi, /paceElapsed\(tile, kpi\.elapsed, parts\)/);
+  const viewer = source('viewer/Viewer.svelte');
+  assert.match(viewer, /setKnownFromFile\(data\.measures\)/);
+  const sheet = source('components/data/MeasureSheet.svelte');
+  assert.match(sheet, /formulaProblem\(formula\)/);
+  assert.match(sheet, /nameProblem\(name, all, editing\)/);
+  assert.match(sheet, /onclose=\{close\}/, 'the sheet asks before it closes with typing');
+  const state = source('lib/state.svelte.ts');
+  assert.match(state, /setKnownMeasures\(v\?\.workspace\.measures, v\?\.measure_info\)/);
 });

@@ -2,7 +2,7 @@
 // at run time, so the node tests can load this file on its own.
 
 import type { Measure, NumFormat, ShowAs, Tile } from '../api';
-import { additive } from '../measures.ts';
+import { additive, addsUpHere, type Parts } from '../measures.ts';
 
 /** Sums and counts add up, so they can be stacked. An average, a minimum or a distinct count cannot. */
 export const STACKABLE: readonly string[] = ['sum', 'count'];
@@ -62,8 +62,8 @@ export function defaultStack(tile: Pick<Tile, 'measures' | 'formats' | 'showAs'>
  * (stacking averages) is ignored. `perValue` is true when the series are the tile's values, false
  * when they are the split groups.
  */
-export function stackMode(tile: Pick<Tile, 'stack' | 'measures' | 'formats' | 'showAs'>, perValue: boolean): StackMode {
-  if (!stackableTile(tile, perValue)) return 'side';
+export function stackMode(tile: Pick<Tile, 'stack' | 'measures' | 'formats' | 'showAs'>, perValue: boolean, parts?: Parts): StackMode {
+  if (!stackableTile(tile, perValue, parts)) return 'side';
   return tile.stack ?? defaultStack(tile, perValue);
 }
 
@@ -71,9 +71,9 @@ export function stackMode(tile: Pick<Tile, 'stack' | 'measures' | 'formats' | 's
  * Can the series of this tile be piled up? Every value has to add up: a sum or a count, not a ratio,
  * and not shown as a rank or a percent change (those do not add up either).
  */
-export function stackableTile(tile: Pick<Tile, 'measures' | 'showAs'>, perValue: boolean): boolean {
+export function stackableTile(tile: Pick<Tile, 'measures' | 'showAs'>, perValue: boolean, parts?: Parts): boolean {
   const used = perValue ? tile.measures : tile.measures.slice(0, 1);
-  return used.every((m, i) => additive(m) && tile.showAs?.[i] !== 'rank' && tile.showAs?.[i] !== 'pct_change');
+  return used.every((_, i) => addsUpHere(tile, i, parts) && tile.showAs?.[i] !== 'rank' && tile.showAs?.[i] !== 'pct_change');
 }
 
 /**
@@ -176,15 +176,6 @@ export function farFromZero(values: number[]): boolean {
   if (lo > 0) return lo / hi > 0.5;
   if (hi < 0) return hi / lo > 0.5;
   return false;
-}
-
-/**
- * Why a waterfall cannot be drawn from this value, or null. Steps by category add one value to the
- * next, so the values have to add up. Steps by date are differences, which any value has (V4-D85d).
- */
-export function waterfallProblem(measure: Pick<Measure, 'agg' | 'per' | 'named'> | undefined, byDate: boolean): string | null {
-  if (!measure || byDate || additive(measure)) return null;
-  return 'A waterfall adds one category to the next. Its value has to be a sum or a count, not a ratio or an average.';
 }
 
 /**

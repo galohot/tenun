@@ -24,7 +24,7 @@ export function buildPanels({ res, tile, colors: c, selected, height, tables = [
   const kind = resultDim0(res, tile);
   const partialKey = res.partial?.key;
   const fmts = series.map((_, i) => numberFormatter(tile.formats?.[i], loc, res.columns[res.columns.length - all.length + i]?.unit));
-  const names = series.map((_, i) => (tile.measures[i] ? measureLabel(tile.measures[i], tables, effectiveShowAs(tile, i, kind)) : series[i].name));
+  const names = series.map((_, i) => (tile.measures[i] ? measureLabel(tile.measures[i], tables, effectiveShowAs(tile, i, kind, res.parts)) : series[i].name));
 
   // One plot height for all: what is left after the names, the gaps and the x axis.
   const plot = Math.max(34, Math.floor((height - 4 - n * NAME - (n - 1) * GAP - AXIS) / n));

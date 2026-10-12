@@ -372,7 +372,7 @@ export interface QueryResult {
   /** Compare charts over two periods: the two periods, in the order of the two value columns. */
   pair?: { periods: Cell[] | null };
   /** Named measures: a group or a filter that one table of the formula cannot reach, so it is left out of it. The words are also in `notes`. */
-  parts?: { measure: number; note: string }[];
+  parts?: { measure: number; note: string; repeats?: boolean }[];
 }
 
 /**
@@ -666,11 +666,14 @@ export class MeasureRefused extends Error {
   /** The index of the measure in the list that was sent. */
   measure: number;
   name: string;
+  /** What the message is about: the `name`, the `formula`, or the `list` (too many measures, a repeated id). */
+  field: 'name' | 'formula' | 'list';
   error: FormulaError;
-  constructor(r: { measure: number; name: string; error: FormulaError }) {
+  constructor(r: { measure: number; name: string; field?: 'name' | 'formula' | 'list'; error: FormulaError }) {
     super(r.error.message);
     this.measure = r.measure;
     this.name = r.name;
+    this.field = r.field ?? 'formula';
     this.error = r.error;
   }
 }
@@ -795,7 +798,7 @@ export const api = {
    * nothing, until it is sent again with `confirm`.
    */
   setMeasures: async (measures: NamedMeasure[], confirm = false): Promise<{ saved: Snapshot } | { used: MeasureUse[] }> => {
-    const r = await call<Snapshot | { ok: false; measure: number; name: string; error: FormulaError } | { ok: false; used: MeasureUse[] }>('PUT', '/workspace/measures', { measures, confirm });
+    const r = await call<Snapshot | { ok: false; measure: number; name: string; field?: 'name' | 'formula' | 'list'; error: FormulaError } | { ok: false; used: MeasureUse[] }>('PUT', '/workspace/measures', { measures, confirm });
     if ('ok' in r && r.ok === false) {
       if ('used' in r) return { used: r.used };
       throw new MeasureRefused(r);

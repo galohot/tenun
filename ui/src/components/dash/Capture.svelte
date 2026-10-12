@@ -57,7 +57,7 @@
   <div class="grid" style:height="{height}px">
     {#each placed as p (p.t.id)}
       {@const res = results[p.t.id] ?? EMPTY_RESULT}
-      {@const name = tileTitle(p.t, tables)}
+      {@const name = tileTitle(p.t, tables, res.parts)}
       <article class="tile" style:transform="translate({p.left}px, {p.top}px)" style:width="{p.w}px" style:height="{p.h}px">
         {#if name}<h3>{name}</h3>{/if}
         <div class="body" class:bare={!name}>

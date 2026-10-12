@@ -19,6 +19,7 @@
     numbersOnly = false,
     datesOnly = false,
     measures = [],
+    kinds,
     named = null,
     onnamed,
     onchange,
@@ -42,6 +43,8 @@
     datesOnly?: boolean;
     /** The measures of the workspace that can be picked here (build 03). They are listed first, under "Measures". */
     measures?: NamedMeasure[];
+    /** The types of value this field can hold. Not set: any. A chart takes numbers; a table can show a date or a text too. */
+    kinds?: DType[];
     /** The measure this field holds now. */
     named?: string | null;
     /** A measure was picked. Without it no measures are offered. */
@@ -100,9 +103,17 @@
   }
 
   /** The measures that fit the search. A measure is offered for a value, never for a group. */
+  const info = $derived(app.snap?.measure_info ?? {});
   const offered = $derived(
     mode === 'measure' && onnamed && !numbersOnly && !datesOnly
-      ? measures.filter((x) => !q || x.name.toLowerCase().includes(q.toLowerCase()))
+      ? measures
+          .filter((x) => !q || x.name.toLowerCase().includes(q.toLowerCase()))
+          // A measure that does not work is listed, and cannot be picked. One of another type than the field
+          // takes is not listed (a date or a text where a number is drawn).
+          .filter((x) => {
+            const t = info[x.id]?.dtype;
+            return info[x.id]?.error || !kinds || !t || kinds.includes(t);
+          })
       : [],
   );
 
@@ -140,9 +151,11 @@
           <div class="group">
             <div class="gh"><Icon name="fx" size={12} />Measures</div>
             {#each offered as x (x.id)}
-              <button class="opt" class:on={named === x.id} title={x.description || x.formula} onclick={() => pickNamed(x.id)}>
+              {@const bad = info[x.id]?.error}
+              <button class="opt" class:on={named === x.id} class:off={!!bad} disabled={!!bad} title={bad || x.description || x.formula} onclick={() => pickNamed(x.id)}>
                 <Icon name="fx" size={12} />
                 <span class="nm">{x.name}</span>
+                {#if bad}<span class="why">{bad}</span>{/if}
               </button>
             {/each}
           </div>
@@ -237,6 +250,10 @@
   .opt:hover { background: var(--accent); color: #fff; }
   .opt:hover :global(svg) { color: #fff; }
   .opt.on { font-weight: 600; }
+  .opt.off { opacity: 0.6; cursor: default; }
+  .opt.off:hover { background: none; color: inherit; }
+  .opt.off:hover :global(svg) { color: var(--text-2); }
+  .why { margin-left: auto; min-width: 0; max-width: 60%; font-size: 11px; color: var(--danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fx { display: inline-flex; flex: none; color: var(--text-2); }
   .opt:hover .fx, .opt:hover .fx :global(svg) { color: #fff; }

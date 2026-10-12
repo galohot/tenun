@@ -139,7 +139,7 @@
   const note = $derived(res && tile.type !== 'kpi' ? partialNote(res, tile.dims[0]?.grain) : null);
   // A link this tile crosses repeats a key on its one side, so the first row was used (V4-D26).
   const linkNotes = $derived(res?.notes ?? []);
-  const title = $derived(tileTitle(tile, app.tables));
+  const title = $derived(tileTitle(tile, app.tables, res?.parts));
   // A note or a picture with no title has no header, so the whole tile drags.
   const bare = $derived((fixed || tile.type === 'filter') && !title);
   const canPick = $derived(tile.type === 'histogram' ? tile.measures.length > 0 : tile.type !== 'kpi' && tile.type !== 'cohort' && tile.type !== 'filter' && tile.dims.length > 0);

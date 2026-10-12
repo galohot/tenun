@@ -3,8 +3,7 @@
   // shares as a ranked list. Colours follow the category, never its rank.
   import type { Cell, QueryResult, Tile } from '../../lib/api';
   import { key, type Colors } from '../../lib/chart';
-  import { cell, compact, full, measureLabel, OTHER_KEY, pctShare as pct, tip } from '../../lib/format';
-  import { addsUp as tileAddsUp } from '../../lib/measures';
+  import { cell, compact, full, OTHER_KEY, pctShare as pct, tip } from '../../lib/format';
 
   let {
     res,
@@ -24,8 +23,7 @@
 
   const fmt = $derived(tile.formats?.[0] ?? null);
   let h = $state(240);
-  // Shares are the parts of a whole, so the values have to add up. A ratio or an average does not (V4-D85d).
-  const addsUp = $derived(tileAddsUp(tile));
+
 
   const items = $derived.by(() => {
     const mi = res.columns.findIndex((c) => c.role === 'measure');
@@ -66,11 +64,6 @@
   const isSel = (v: Cell, folded: boolean) => !selected || (!folded && selected.some((s) => key(s) === key(v)));
 </script>
 
-{#if !addsUp}
-  <p class="refuse">
-    {measureLabel(tile.measures[0], [])} does not add up to a whole, so it has no shares. A share chart needs a sum or a count.
-  </p>
-{:else}
 <div class="share" bind:clientHeight={h}>
   <div class="strip" role="img" aria-label="Share of the total">
     {#each items.list as it}
@@ -105,10 +98,8 @@
   </ol>
   <div class="total"><span>Total</span><span>{full(items.total, fmt)}</span></div>
 </div>
-{/if}
 
 <style>
-  .refuse { margin: 0; padding: 12px 4px; color: var(--text-2); font-size: 13px; line-height: 1.45; }
   .share { height: 100%; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
   .strip { display: flex; gap: 2px; height: 10px; flex: none; border-radius: 5px; overflow: hidden; }
   .strip span { min-width: 2px; flex-basis: 0; transition: opacity 200ms; }

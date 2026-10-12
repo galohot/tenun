@@ -38,16 +38,27 @@
 
   type Check = { state: 'idle' | 'checking' | 'ok' | 'bad'; reply?: FormulaCheck };
   let check = $state<Check>({ state: 'idle' });
-  /** The engine refused the save: the same kind of answer as a check. */
-  let refused = $state<FormulaError | null>(null);
+  /** The engine refused the save: the same kind of answer as a check, and which field it is about. */
+  let refused = $state<{ field: 'name' | 'formula' | 'list'; error: FormulaError } | null>(null);
   let saving = $state(false);
   let seq = 0;
 
   const scope = $derived(measureScope(app.tables, app.snap!.workspace.relationships));
-  const nameBad = $derived(name.trim() ? nameProblem(name, all, editing) : null);
+  const nameBad = $derived((name.trim() ? nameProblem(name, all, editing) : null) ?? (refused?.field === 'name' ? refused.error.message : null));
   const formulaBad = $derived(formula.trim() ? formulaProblem(formula) : null);
-  const error = $derived<FormulaError | null>(refused ?? (check.state === 'bad' ? (check.reply?.error ?? null) : null));
+  const error = $derived<FormulaError | null>(refused?.field === 'formula' ? refused.error : check.state === 'bad' ? (check.reply?.error ?? null) : null);
   const valid = $derived(!nameProblem(name, all, editing) && !formulaProblem(formula) && check.state === 'ok' && !refused && !saving);
+  /** Something was typed that is not saved: closing asks first (V4-D58). */
+  const dirty = $derived(
+    name.trim() !== (old?.name ?? '') ||
+      formula.trim() !== (old?.formula ?? '') ||
+      description.trim() !== (old?.description ?? '') ||
+      JSON.stringify(fmt) !== JSON.stringify(old?.format ?? {}),
+  );
+  function close() {
+    if (dirty && !confirm('Close without saving what you typed?')) return;
+    onclose();
+  }
   const used = $derived(editing ? tilesWith(app.dashboards, editing).length : 0);
   const readsTables = $derived((check.reply?.uses ?? []).map((id) => app.table(id)?.label ?? id));
 
@@ -82,6 +93,7 @@
     const next: NumFormat = { ...fmt, ...patch };
     for (const k of Object.keys(next) as (keyof NumFormat)[]) if (next[k] === undefined || next[k] === false) delete next[k];
     fmt = next;
+    refused = null;
   }
   const size = $derived(fmt.compact === undefined ? 'auto' : fmt.compact ? 'short' : 'full');
   const hasFormat = $derived(Object.keys(fmt).length > 0);
@@ -112,7 +124,7 @@
         onclose();
       }
     } catch (e) {
-      if (e instanceof MeasureRefused) refused = e.error;
+      if (e instanceof MeasureRefused) refused = { field: e.field, error: e.error };
       else app.error(e);
     } finally {
       saving = false;
@@ -121,7 +133,7 @@
   }
 </script>
 
-<Modal title={editing === undefined ? 'New measure' : `Measure ${old?.name ?? ''}`} width={600} {onclose}>
+<Modal title={editing === undefined ? 'New measure' : `Measure ${old?.name ?? ''}`} width={600} onclose={close}>
   <form
     id="measure-form"
     onsubmit={(e) => {
@@ -130,7 +142,7 @@
     }}>
     <label class="row">
       <span class="label">Name</span>
-      <input class="field" bind:value={name} placeholder="Achievement" autocomplete="off" aria-invalid={!!nameBad} />
+      <input class="field" bind:value={name} placeholder="Achievement" autocomplete="off" aria-invalid={!!nameBad} oninput={() => (refused = null)} />
     </label>
     {#if nameBad}<p class="bad">{nameBad}</p>{/if}
     {#if editing !== undefined && used}
@@ -198,10 +210,11 @@
 
     <label class="row">
       <span class="label">Description <em>(optional)</em></span>
-      <input class="field" bind:value={description} placeholder="What does this measure tell?" autocomplete="off" />
+      <input class="field" bind:value={description} placeholder="What does this measure tell?" autocomplete="off" oninput={() => (refused = null)} />
     </label>
   </form>
   {#snippet footer()}
+    {#if refused?.field === 'list'}<p class="bad foot"><Icon name="warning" size={13} /> {refused.error.message}</p>{/if}
     <button type="button" class="btn" onclick={onclose}>Cancel</button>
     <button type="submit" form="measure-form" class="btn primary" disabled={!valid}>{editing === undefined ? 'Add measure' : 'Save measure'}</button>
   {/snippet}
@@ -244,6 +257,7 @@
   }
   .v.blank { color: var(--text-2); font-style: italic; font-weight: 400; }
   .fmt { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .foot { margin-right: auto; }
   .check { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-2); }
   @media (max-width: 520px) {
     .fmt { grid-template-columns: 1fr; }

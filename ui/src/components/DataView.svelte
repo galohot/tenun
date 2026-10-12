@@ -239,7 +239,8 @@
   // The main date: the date a measure uses to line this table up with the others over time (V4-D5).
   const dateColumns = $derived((table?.columns ?? []).filter((c) => c.dtype === 'date' || c.dtype === 'datetime'));
   const readByMeasure = $derived(!!table && Object.values(measureInfo).some((i) => i.tables.includes(table.id)));
-  const showMainDate = $derived(dateColumns.length >= 2 || (readByMeasure && dateColumns.length >= 1));
+  // Advanced makes and changes what a measure reads, the main date included (V4-D20).
+  const showMainDate = $derived(canCalc && (dateColumns.length >= 2 || (readByMeasure && dateColumns.length >= 1)));
 
   // Column menu and hover profile.
   let menu = $state<{ column: string; x: number; y: number } | null>(null);

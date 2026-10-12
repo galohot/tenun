@@ -1,6 +1,6 @@
 <script lang="ts">
   // Draws one tile from its result. Used by the app and by exported files.
-  import { isPart, type Cell, type QueryResult, type Tile, type TileFilter } from '../../lib/api';
+  import type { Cell, QueryResult, Tile, TileFilter } from '../../lib/api';
   import { buildOption, CHART_TYPES, type Colors } from '../../lib/chart';
   import { barScale, barSpan, barStyle, goodBad } from '../../lib/cells';
   import { cell, columnHeads, full, numberFormatter, OTHER_KEY, resultDim0, type Named } from '../../lib/format';
@@ -8,8 +8,7 @@
   import { sparkKey, sparkPath, SPARK_H, SPARK_W } from '../../lib/charts/spark';
   import { effectiveShowAs } from '../../lib/showas';
   import { isRepeated } from '../../lib/tiles';
-  import { withNamedFormats } from '../../lib/measures';
-  import { waterfallProblem } from '../../lib/charts/math';
+  import { stepsByDate, tileProblem, withNamedFormats } from '../../lib/measures';
   import BulletView from './BulletView.svelte';
   import CalendarView from './CalendarView.svelte';
   import ChartView from './ChartView.svelte';
@@ -84,12 +83,10 @@
       return 'A scatter chart needs two values and a field to draw one dot for each.';
     }
     if (tile.type === 'waterfall' && !tile.dims.length) return 'A waterfall needs a category or a date to step through.';
-    // Steps by category add the values up, which a ratio or an average does not do (V4-D85d).
-    if (tile.type === 'waterfall') {
-      const byDate = res.columns[0]?.dtype === 'date' || res.columns[0]?.dtype === 'datetime' || isPart(tile.dims[0]?.grain);
-      const why = waterfallProblem(tile.measures[0], byDate);
-      if (why) return why;
-    }
+    // A share chart and a waterfall by category add values up. One gate says whether they can, here and in every
+    // picture of the tile (V4-D99).
+    const refused = tileProblem(tile, res.parts, stepsByDate(tile, res));
+    if (refused) return refused;
     if (tile.type === 'heatmap' && (!tile.dims.length || !tile.cols || !tile.measures.length)) {
       return 'A heat map needs a value, a field for the rows and a field for the columns.';
     }
@@ -161,11 +158,11 @@
   const kind = $derived(resultDim0(res, tile));
   const verdictOf = (v: Cell, i: number) => {
     const cond = condOf(i);
-    return cond?.kind === 'goodbad' ? goodBad(typeof v === 'number' ? v : null, cond, effectiveShowAs(tile, i - groups, kind), showText(v, i), lineText(i)) : null;
+    return cond?.kind === 'goodbad' ? goodBad(typeof v === 'number' ? v : null, cond, effectiveShowAs(tile, i - groups, kind, res.parts), showText(v, i), lineText(i)) : null;
   };
   /** The line a verdict is read against, for the tooltip: "Above 100". */
   const lineText = (i: number) => {
-    const how = effectiveShowAs(tile, i - groups, kind);
+    const how = effectiveShowAs(tile, i - groups, kind, res.parts);
     const t = how === 'change' || how === 'pct_change' ? 0 : (condOf(i)?.threshold ?? 0);
     return cell(t, 'number', null, false, how === 'pct_change' ? { percent: true } : formatOf(i));
   };
@@ -250,7 +247,7 @@
 {:else if tile.type === 'filter'}
   <FilterView {tile} {res} {tables} {selected} onchange={onfilter} {onpick} />
 {:else if tile.type === 'kpi' && res.kpi}
-  <KpiView kpi={res.kpi} {tile} {colors} />
+  <KpiView kpi={res.kpi} {tile} {colors} parts={res.parts} />
 {:else if unfinished}
   <div class="placeholder">{missing}</div>
 {:else if res.rows.length === 0}
@@ -404,6 +401,9 @@
           <span class="n">{it.label}</span>
         {/each}
       </div>
+    {/if}
+    {#if built?.gateNote}
+      <p class="size-note">{built.gateNote}</p>
     {/if}
     {#if note}
       <p class="size-note">

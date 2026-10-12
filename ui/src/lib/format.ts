@@ -232,7 +232,7 @@ function plainLabel(m: Measure, tables: Named[]): string {
  * differ by their way of adding up, so they are never both "amount".
  */
 export function columnHeads(
-  res: Pick<QueryResult, 'columns'>,
+  res: Pick<QueryResult, 'columns' | 'parts'>,
   tile: Pick<Tile, 'type' | 'dims' | 'measures' | 'cols' | 'showAs'>,
   tables: Named[],
 ): string[] {
@@ -248,7 +248,7 @@ export function columnHeads(
     }
     const i = j++;
     const m = tile.measures[i];
-    return m ? measureLabel(m, tables, effectiveShowAs(tile, i, kind)) : pretty(c.name);
+    return m ? measureLabel(m, tables, effectiveShowAs(tile, i, kind, res.parts)) : pretty(c.name);
   });
 }
 
@@ -276,13 +276,13 @@ function dimWord(d: Dim, tables: Named[]): string {
   return fieldWord(tables, d.table, d.column);
 }
 
-export function tileTitle(t: Tile, tables: Named[]): string {
+export function tileTitle(t: Tile, tables: Named[], parts?: QueryResult['parts']): string {
   if (t.title) return t.title;
   // A value shown another way adds its words to its name; the engine ignores a way that does not fit.
   const d0 = t.dims[0];
   const dtype = d0 ? tables.find((x) => x.id === d0.table)?.columns?.find((c) => c.name === d0.column)?.dtype : undefined;
   const kind = d0 ? dim0Kind(dtype, d0.grain) : 'none';
-  const label = (x: Measure, i: number) => measureLabel(x, tables, effectiveShowAs(t, i, kind));
+  const label = (x: Measure, i: number) => measureLabel(x, tables, effectiveShowAs(t, i, kind, parts));
   // A note or a picture needs no title.
   if (t.type === 'text' || t.type === 'image' || t.type === 'filter') return '';
   if (!t.measures.length && !t.dims.length) return 'New tile';

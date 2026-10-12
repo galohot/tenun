@@ -3,7 +3,7 @@
 // Pure code with only pure imports at run time, so the node tests can load it.
 
 import type { ShowAs, Tile } from './api';
-import { additive } from './measures.ts';
+import { addsUpHere, ADDING_WAYS, type Parts } from './measures.ts';
 
 /** What the first group-by field is: a date, a part of a date (month of year…), or something else. */
 export type Dim0Kind = 'date' | 'part' | 'other' | 'none';
@@ -63,14 +63,15 @@ export function dim0Kind(dtype: string | undefined, grain: string | null | undef
  * split. Running, moving, change and percent change only make sense in an order, so they need a
  * date or a part of a date. Year to date needs a date.
  */
-export function showAsOptions(tile: Pick<Tile, 'type' | 'dims' | 'measures' | 'cols'>, dim0: Dim0Kind): ShowAs[] {
+export function showAsOptions(tile: Pick<Tile, 'type' | 'dims' | 'measures' | 'cols'>, dim0: Dim0Kind, i?: number, parts?: Parts): ShowAs[] {
   if (!SHOW_AS_TYPES.includes(tile.type) || !groupCount(tile)) return [];
   const out: ShowAs[] = ['value', 'pct_total'];
   if (groupCount(tile) > 1) out.push('pct_group');
   if (dim0 === 'date' || dim0 === 'part') out.push(...ORDERED);
   out.push('rank');
   if (dim0 === 'date') out.push('ytd');
-  return out;
+  // The ways that add values up are not offered for a value that does not add up (V4-D99).
+  return i !== undefined && !addsUpHere(tile, i, parts) ? out.filter((o) => !ADDING_WAYS.includes(o)) : out;
 }
 
 /**
@@ -81,13 +82,13 @@ export function effectiveShowAs(
   tile: Pick<Tile, 'type' | 'dims' | 'measures' | 'cols' | 'showAs'>,
   i: number,
   dim0: Dim0Kind,
+  parts?: Parts,
 ): ShowAs | null {
   const how = tile.showAs?.[i];
   if (!how || how === 'value' || !SHOW_AS_TYPES.includes(tile.type) || !groupCount(tile)) return null;
-  // A share of the whole, a running total and a year to date add values up. The engine shows a named
-  // measure that does not add up as it is, with words (V4-D85d), so its name does not take the suffix.
-  const m = tile.measures[i];
-  if (m?.named && !additive(m) && ['pct_total', 'pct_group', 'running', 'ytd'].includes(how)) return null;
+  // A share of the whole, a running total and a year to date add values up. The engine shows a value that does
+  // not add up as it is, with words (V4-D85d, V4-D99), so its name does not take the suffix.
+  if (ADDING_WAYS.includes(how) && !addsUpHere(tile, i, parts)) return null;
   if (how === 'ytd' && dim0 !== 'date') return null;
   if (ORDERED.includes(how) && dim0 !== 'date' && dim0 !== 'part') return null;
   if (how === 'pct_group' && groupCount(tile) < 2) return 'pct_total';

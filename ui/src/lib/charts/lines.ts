@@ -29,12 +29,19 @@ export function shownSeries(series: { values: (number | null)[] }[], totals: boo
 }
 
 /**
- * Reference lines and a trend read the numbers shown. A 100 % chart has none. On a split chart they read
- * the total of the groups, which is right only when the values add up (V4-D85d): for a ratio or an average
- * there is no such total, so the chart draws no lines.
+ * Where the numbers of the reference lines and the trend come from (V4-D99, V4-D109). The first series; the
+ * total of the series when they pile up or are the groups of a split whose values add up; and, for a split of a
+ * value that does not add up (an average, a ratio), every point drawn, because there is no total of such groups.
  */
-export function linesAllowed(o: { percent: boolean; perValue: boolean; multi: boolean; addsUp: boolean }): boolean {
-  return !o.percent && (o.addsUp || o.perValue || !o.multi);
+export function lineSource(o: { perValue: boolean; multi: boolean; stacked: boolean; addsUp: boolean }): 'first' | 'total' | 'points' {
+  if (o.perValue) return o.stacked ? 'total' : 'first';
+  if (!o.multi) return 'first';
+  return o.addsUp ? 'total' : 'points';
+}
+
+/** Every number the series draw, one list, leaving out the categories `skip` names ("Other"). */
+export function pointsOf<C>(series: { values: (number | null)[] }[], categories: C[], skip: (c: C) => boolean): number[] {
+  return series.flatMap((s) => usableValues(s.values, categories, skip));
 }
 
 /** The numbers a statistic is read from: no gaps, and none from a category that `skip` names ("Other"). */

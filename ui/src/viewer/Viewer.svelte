@@ -180,7 +180,7 @@
     {#if colors}
       {#each layout as l (l.t.id)}
         {@const r = resultFor(l.t)}
-        {@const name = data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables)}
+        {@const name = data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables, r?.res.parts)}
         <!-- A tile is a stop for the keyboard: arrows go to the next and the previous tile, Enter opens it large. -->
         <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
         <article
@@ -233,7 +233,7 @@
         tile={ft}
         res={fr}
         {colors}
-        title={data.titles?.[ft.id] ?? tileTitle(ft, data.tables)}
+        title={data.titles?.[ft.id] ?? tileTitle(ft, data.tables, fr?.parts)}
         tables={data.tables}
         onclose={() => (focusId = null)} />
     {/if}

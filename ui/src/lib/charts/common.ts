@@ -9,7 +9,8 @@ import type { EChartsCoreOption } from 'echarts/core';
 import type { Cell, QueryResult, Tile } from '../api';
 import { cell, measureLabel, OTHER_KEY, resultDim0, type Named } from '../format';
 import { effectiveShowAs } from '../showas';
-import { assignSlots, foldable, splitKeep } from './math';
+import { assignSlots } from './math';
+import { foldSeries, splitKept } from './fold';
 import { addsUp as tileAddsUp } from '../measures';
 
 export interface Colors {
@@ -42,7 +43,7 @@ export function readColors(el: Element = document.documentElement): Colors {
   };
 }
 
-const MAX_SERIES = 8;
+export const MAX_SERIES = 8;
 export const OTHER = 'Other';
 
 /** Key used to compare a category value with a filter value. */
@@ -95,7 +96,7 @@ export function pivot(res: QueryResult, tile: Tile, tables: Named[] = []): Pivot
       for (const r of res.rows) values[catIdx.get(key(r[0]))!] = r[k] as number | null;
       const m = tile.measures[k - mi];
       const many = res.columns.length - mi > 1;
-      const name = many && m ? measureLabel(m, tables, effectiveShowAs(tile, k - mi, resultDim0(res, tile))) : (res.columns[k]?.name ?? '');
+      const name = many && m ? measureLabel(m, tables, effectiveShowAs(tile, k - mi, resultDim0(res, tile), res.parts)) : (res.columns[k]?.name ?? '');
       series.push({ name, raw: name, values, slot: k - mi });
     }
     return { categories, series };
@@ -111,7 +112,7 @@ export function pivot(res: QueryResult, tile: Tile, tables: Named[] = []): Pivot
   const ranked = [...totals.entries()].sort((a, b) => b[1].total - a[1].total);
   // "Other" adds the small groups up. That is right for a sum or a count and wrong for a ratio, an
   // average or any value that does not add up (V4-D85d): those keep every group.
-  const keep = ranked.slice(0, splitKeep(ranked.length, MAX_SERIES, tileAddsUp(tile)));
+  const keep = splitKept(ranked, MAX_SERIES, tileAddsUp(tile, res.parts)).kept;
   // Order kept series by name. Their colour comes from the tile's colour memory, not from this order.
   keep.sort((a, b) => String(a[1].raw).localeCompare(String(b[1].raw), undefined, { numeric: true }));
   const names = new Map(keep.map(([k], i) => [k, i]));
@@ -191,6 +192,8 @@ export interface Built {
   note?: string | null;
   /** The way out the note offers, as a link beside it (Advanced): draw the values in separate panels. */
   noteAction?: 'panels';
+  /** What a value that does not add up made the chart leave out, in one line ("Averages are not added up, so there is no Other bar."). */
+  gateNote?: string | null;
   /** How many plots stand above each other, when more than one. A click is found in any of them. */
   grids?: number;
   /** The categories run down the side (horizontal bars, box plots). Not set: read it from the tile. */
@@ -219,13 +222,7 @@ export const FOLDED = OTHER_KEY;
 /** Keeps the biggest categories that fit and folds the rest into one "Other" bar. Only values that add up are folded. */
 export function fold(p: Pivot, max: number, addsUp = true): Pivot {
   // The rest are added up into one bar, which is wrong for a value that does not add up (V4-D85d).
-  if (!foldable({ addsUp, categories: p.categories.length, max, series: p.series.length })) return p;
-  const keep = max - 1;
-  const values = p.series[0].values;
-  const rest = values.slice(keep).reduce<number>((s, v) => s + (v ?? 0), 0);
-  return {
-    categories: [...p.categories.slice(0, keep), FOLDED],
-    series: [{ ...p.series[0], values: [...values.slice(0, keep), rest] }],
-  };
+  const f = foldSeries(p.categories, p.series[0]?.values ?? [], p.series.length, max, addsUp, FOLDED);
+  return f ? { categories: f.categories, series: [{ ...p.series[0], values: f.values }] } : p;
 }
 

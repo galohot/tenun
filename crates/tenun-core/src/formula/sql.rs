@@ -180,6 +180,8 @@ pub(crate) struct Gen<'a> {
     parts: Vec<Part>,
     /// The next name for a bound value: `v0`, `v1`…
     next_var: usize,
+    /// The columns read so far, as (table id, column): what a part of a measure reads (V4-D103).
+    reads: Vec<(String, String)>,
 }
 
 /// True for a value that costs nothing to write again: a number, a text, a column, a name.
@@ -210,6 +212,7 @@ impl<'a> Gen<'a> {
             plan: JoinPlan::new(cx, root),
             parts: Vec::new(),
             next_var: 0,
+            reads: Vec::new(),
         }
     }
 
@@ -220,6 +223,10 @@ impl<'a> Gen<'a> {
             TNode::Bool(b) => if *b { "TRUE" } else { "FALSE" }.into(),
             TNode::Sql { sql, .. } => sql.clone(),
             TNode::Col { table, column, via } => {
+                let read = (table.clone(), column.clone());
+                if !self.reads.contains(&read) {
+                    self.reads.push(read);
+                }
                 let a = self.plan.alias(table, via.as_deref());
                 let r = format!("{a}.{}", ident(column));
                 match e.ty {
@@ -255,6 +262,7 @@ impl<'a> Gen<'a> {
             home_table: home.to_string(),
             sql,
             joins: sub.plan.joins,
+            reads: sub.reads,
             dtype: ty.dtype(),
             // A sum or a count of no rows is 0 (V4-D22). The rest stay blank.
             zero_when_empty: matches!(

@@ -85,9 +85,13 @@ pub struct Workspace {
 /// different tables; each table is totalled on its own (V4-D4).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct NamedMeasure {
-    /// `m<n>`. A tile keeps this id, so it does not change when the name does.
+    /// `m<n>`. A tile keeps this id, so it does not change when the name does. A measure that is sent
+    /// with no id is new, and gets the next one.
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub formula: String,
     /// How the value is written (decimals, currency, compact, percent), as a tile's own format
     /// is. A tile's own format wins. The core does not read it; the app does.

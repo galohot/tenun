@@ -10,7 +10,7 @@
   import { isCleared, isPeriod } from '../../lib/filters';
   import { defaultDim, defaultMeasure, dtypeOf, isRepeated, MAX_CHART_MEASURES, PIVOT_MAX_MEASURES, PIVOT_MAX_ROWS, type DashFilter } from '../../lib/tiles';
   import { reachableFrom } from '../../lib/links';
-  import { additive, formatOf, namedMeasure } from '../../lib/measures';
+  import { addsUpHere, baseFormat, formatOf, namedMeasure, ownFormat, targetUnit, whyNotAdded } from '../../lib/measures';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
   import Suggestions from './Suggestions.svelte';
@@ -117,10 +117,9 @@
 
   function setFormat(i: number, patch: Partial<NumFormat>) {
     const formats = tile.measures.map((_, j) => tile.formats?.[j] ?? null);
-    // A value starts from the format of its named measure, if it has one and no format of its own.
-    const next: NumFormat = { ...(formats[i] ?? formatOf(tile, i) ?? {}), ...patch };
-    for (const k of Object.keys(next) as (keyof NumFormat)[]) if (next[k] === undefined) delete next[k];
-    formats[i] = Object.keys(next).length ? next : null;
+    // Only what differs from the format of the named measure is stored, so swapping the measure never
+    // leaves a copy of the old one behind (V4-D106).
+    formats[i] = ownFormat(baseFormat(tile, i), formats[i], patch);
     set({ formats: formats.some(Boolean) ? formats : undefined });
   }
 
@@ -159,7 +158,9 @@
   function namedProps(i: number, on = true) {
     if (!on || !namedList.length) return {};
     const list = isSankey ? namedList.filter((x) => measureInfo[x.id]?.additive) : namedList;
-    return { measures: list, named: tile.measures[i]?.named ?? null, onnamed: (id: string) => swapNamed(i, id) };
+    // A value is a number, except in a table, which can show a date or a text as well.
+    const kinds = tile.type === 'table' ? undefined : (['number'] as DType[]);
+    return { measures: list, kinds, named: tile.measures[i]?.named ?? null, onnamed: (id: string) => swapNamed(i, id) };
   }
 
   /** Sets or clears what value `i` is divided by. */
@@ -328,9 +329,11 @@
   const showSplit = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area' || tile.type === 'table' || isScatter);
   // Several values draw one series each; otherwise the series are the groups of a split.
   const perValue = $derived(tile.measures.length > 1);
-  const stackAble = $derived(stackableTile({ measures: tile.measures.slice(0, MAX_CHART_MEASURES), showAs: tile.showAs }, perValue));
+  /** What the engine could not follow in the result on show: a table the same for every group does not add up. */
+  const parts = $derived(current?.res.parts);
+  const stackAble = $derived(stackableTile({ measures: tile.measures.slice(0, MAX_CHART_MEASURES), showAs: tile.showAs }, perValue, parts));
   // The choice on show: the saved one, or the default for these values.
-  const stackNow = $derived(stackMode(tile, perValue));
+  const stackNow = $derived(stackMode(tile, perValue, parts));
   const stackDefault = $derived(defaultStack(tile, perValue));
   // Stacking needs more than one series: a split, or several values.
   const hasSeries = $derived((tile.type === 'bar' || tile.type === 'area') && !!tile.measures.length && (!!tile.dims[1] || tile.measures.length > 1));
@@ -350,13 +353,15 @@
   let lineAxis = $state<'x' | 'y'>('y');
   let askTarget = $state(false);
   let targetValue = $state('');
+  // A line is read in the unit of the value it is drawn for: Y of a scatter chart, the first value of the others.
+  const lineUnit = $derived(targetUnit(tile, isScatter && lineAxis === 'y' ? 1 : 0));
   let targetLabel = $state('');
   const lines = $derived((tile.lines ?? []).filter((l) => l.kind !== 'band'));
   const hasLine = (kind: TileLine['kind']) =>
     lines.some((l) => l.kind === kind && (kind === 'trend' || !isScatter || !l.axis || l.axis === lineAxis));
 
   function lineWords(l: TileLine): string {
-    const value = l.value === undefined ? '' : ` ${cell(l.value, 'number', null, false, tile.formats?.[0])}`;
+    const value = l.value === undefined ? '' : ` ${cell(l.value, 'number', null, false, formatOf(tile, 0))}`;
     const of = !isScatter || l.kind === 'trend' ? '' : l.axis === 'x' ? ' of X (across)' : l.axis === 'y' ? ' of Y (up)' : l.kind === 'median' ? ' of X and Y' : ' of Y (up)';
     const name = l.label?.trim() || LINE_MENU.find((o) => o.id === l.kind)?.label.replace('…', '') || l.kind;
     return `${name}${l.kind === 'target' ? value : ''}${of}`;
@@ -379,7 +384,7 @@
   }
 
   function addTarget() {
-    const v = Number(targetValue.replace(/\s/g, ''));
+    const v = Number(targetValue.replace(/\s/g, '')) / lineUnit.scale;
     if (targetValue.trim() === '' || !Number.isFinite(v) || lines.length >= MAX_LINES) return;
     const label = targetLabel.trim();
     setLines([...lines, { kind: 'target', value: v, ...(label ? { label } : {}), ...(isScatter ? { axis: lineAxis } : {}) }]);
@@ -572,7 +577,7 @@
 
   const dimTypes = $derived(tile.dims.map((d) => dtypeOf(app.tables, d.table, d.column)));
   const dim0 = $derived(dim0Kind(dimTypes[0], tile.dims[0]?.grain));
-  const showAsChoices = $derived(showAsOptions(tile, dim0));
+  const showAsFor = (i: number) => showAsOptions(tile, dim0, i, current?.res.parts);
   /** A trend needs an order: a date or part of a date, or the two values of a scatter. */
   const trendFits = $derived(isScatter || dim0 === 'date' || dim0 === 'part');
   const menu = $derived(LINE_MENU.filter((o) => (o.id === 'target' ? true : o.id === 'trend' ? trendFits && !hasLine('trend') : !hasLine(o.id))));
@@ -582,9 +587,13 @@
 
   /** A target of 0 or less, or an empty box, clears the target. */
   function setTarget(raw: string) {
-    const v = Number(raw.replace(/\s/g, ''));
+    // A value written as a percent is typed as 95 and stored as 0.95 (V4-D110).
+    const v = Number(raw.replace(/\s/g, '')) / unit0.scale;
     set({ target: raw.trim() !== '' && Number.isFinite(v) && v > 0 ? { value: v } : undefined });
   }
+  /** What the target of this tile is typed in, and the number as it is typed. */
+  const unit0 = $derived(targetUnit(tile, 0));
+  const typed = (v: number | undefined, scale: number) => (v === undefined ? '' : Math.round(v * scale * 1e8) / 1e8);
 
   // The picture of an image tile. The desktop app asks the system; a browser asks the page.
   const MAX_IMAGE = 1_048_576;
@@ -698,20 +707,23 @@
     {:else}
       <button class="link" onclick={() => (dividing = i)}>Divide by…</button>
     {/if}
-    {#if showAsChoices.length}
+    {#if showAsFor(i).length}
       {@const saved = tile.showAs?.[i] ?? 'value'}
+      {@const choices = showAsFor(i)}
+      {@const why = whyNotAdded(tile, i, parts)}
       <div class="showas">
         <span class="label">Show as</span>
         <select class="field" aria-label="Show this value as" value={saved} onchange={(e) => setShowAs(i, e.currentTarget.value)}>
-          {#each showAsChoices as o}<option value={o}>{SHOW_AS_LABELS[o]}</option>{/each}
-          {#if !showAsChoices.includes(saved)}<option value={saved} disabled>{SHOW_AS_LABELS[saved]} (not available here)</option>{/if}
+          {#each choices as o}<option value={o}>{SHOW_AS_LABELS[o]}</option>{/each}
+          {#if !choices.includes(saved)}<option value={saved} disabled>{SHOW_AS_LABELS[saved]} (not available here)</option>{/if}
         </select>
       </div>
+      {#if why}<p class="hint tight">{why}, so there is no % of total, running total or year to date.</p>{/if}
     {/if}
   {/if}
   {#if tableLike && x}
     {@const cf = tile.cond?.[i] ?? null}
-    {@const how = effectiveShowAs(tile, i, dim0)}
+    {@const how = effectiveShowAs(tile, i, dim0, parts)}
     <div class="cells">
       <span class="label">Cells</span>
       <div class="grains stack" role="radiogroup" aria-label="How the cells of this value look">
@@ -753,7 +765,7 @@
       <span class="label sub">Bands</span>
       {#each bands as b}
         <div class="linerow">
-          <span>{b.label?.trim() || 'Band'} {cell(b.value ?? 0, 'number', null, false, tile.formats?.[0])} to {cell(b.to ?? 0, 'number', null, false, tile.formats?.[0])}</span>
+          <span>{b.label?.trim() || 'Band'} {cell(b.value ?? 0, 'number', null, false, formatOf(tile, 0))} to {cell(b.to ?? 0, 'number', null, false, formatOf(tile, 0))}</span>
           <button class="btn plain icon" aria-label="Remove band" onclick={() => set({ lines: (tile.lines ?? []).filter((l) => l !== b) })}><Icon name="x" size={12} /></button>
         </div>
       {/each}
@@ -824,15 +836,18 @@
     {#if tile.type === 'kpi'}
       <div class="target">
         <span class="label">Target (optional)</span>
+        <span class="withunit">
         <input
           class="field"
           type="number"
           min="0"
           step="any"
           placeholder="No target"
-          aria-label="Target for this number"
-          value={tile.target?.value ?? ''}
+          aria-label="Target for this number{unit0.unit ? ` in ${unit0.unit}` : ''}"
+          value={typed(tile.target?.value, unit0.scale)}
           onchange={(e) => setTarget(e.currentTarget.value)} />
+        {#if unit0.unit}<span class="unit" aria-hidden="true">{unit0.unit}</span>{/if}
+        </span>
       </div>
     {/if}
     {#if tile.type === 'bar'}
@@ -1005,15 +1020,18 @@
         </select>
         {/if}
       {:else}
+        <span class="withunit">
         <input
           class="field"
           type="number"
           min="0"
           step="any"
           placeholder="Or type one target for every bar"
-          aria-label="One target for every bar"
-          value={tile.target?.value ?? ''}
+          aria-label="One target for every bar{unit0.unit ? ` in ${unit0.unit}` : ''}"
+          value={typed(tile.target?.value, unit0.scale)}
           onchange={(e) => setTarget(e.currentTarget.value)} />
+        {#if unit0.unit}<span class="unit" aria-hidden="true">{unit0.unit}</span>{/if}
+        </span>
       {/if}
       <p class="hint tight">The thin bar is the value and the tick is the target. Add bands below for poor, fair and good.</p>
     {/if}
@@ -1309,7 +1327,7 @@
           <p class="hint tight">These values are not in one unit, so they sit side by side. Pick Stacked to pile them up.</p>
         {/if}
       {:else}
-        <p class="hint tight">Averages, lowest and highest values cannot be stacked, so they sit side by side.</p>
+        <p class="hint tight">{whyNotAdded(tile, 0, parts) ?? 'These values are not added up'}, so they cannot be stacked and sit side by side.</p>
       {/if}
     </div>
   {/if}
@@ -1336,7 +1354,7 @@
         </select>
         {#if askTarget}
           <div class="targetform">
-            <input class="field" type="number" step="any" placeholder="Target value" aria-label="Target value" bind:value={targetValue} />
+            <span class="withunit"><input class="field" type="number" step="any" placeholder="Target value" aria-label="Target value{lineUnit.unit ? ` in ${lineUnit.unit}` : ''}" bind:value={targetValue} />{#if lineUnit.unit}<span class="unit" aria-hidden="true">{lineUnit.unit}</span>{/if}</span>
             <input class="field" placeholder="Name (optional)" aria-label="Name of the target" bind:value={targetLabel} />
             <div class="row">
               <button class="btn small" disabled={targetValue.trim() === ''} onclick={addTarget}>Add target</button>
@@ -1347,8 +1365,8 @@
       {:else}
         <p class="hint tight">A tile can have up to {MAX_LINES} lines.</p>
       {/if}
-      {#if !isScatter && tile.dims[1] && tile.measures.length < 2 && !additive(m)}
-        <p class="hint tight">This value does not add up across the groups, so a split chart draws no lines. Remove the split to use them.</p>
+      {#if !isScatter && tile.dims[1] && tile.measures.length < 2 && !addsUpHere(tile, 0, parts)}
+        <p class="hint tight">{whyNotAdded(tile, 0, parts)}, so on a split chart each line is read from every point drawn, and there is no trend.</p>
       {/if}
     </div>
   {/if}
@@ -1621,6 +1639,9 @@
   .targetform { display: flex; flex-direction: column; gap: 6px; }
   .targetform .row { display: flex; align-items: center; gap: 12px; }
   .target { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .withunit { display: flex; align-items: center; gap: 6px; }
+  .withunit .field { flex: 1; min-width: 0; }
+  .unit { color: var(--text-2); font-size: 12px; }
   textarea.field { height: auto; padding: 8px 10px; line-height: 1.4; resize: vertical; font-family: inherit; }
   .hidden { display: none; }
   .label.sub { margin-top: 8px; font-size: 11px; }

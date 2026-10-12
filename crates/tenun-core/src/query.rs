@@ -291,6 +291,9 @@ pub struct Compiled {
     /// What a named measure could not split or filter by, in words (V4-D4, V4-D85). Table labels
     /// and column names only, so the notes may leave the computer as they are.
     pub parts: Vec<PartNote>,
+    /// The calculated columns that could not be computed and that a named measure reads, as (table
+    /// id, column): the tile carries the note of each (V4-D103).
+    pub blank_reads: Vec<(String, String)>,
 }
 
 /// A group or a filter that one table of a named measure cannot reach (V4-D4, V4-D85).
@@ -299,6 +302,10 @@ pub struct PartNote {
     /// The index of the measure in the question.
     pub measure: usize,
     pub note: String,
+    /// A table of the measure has the same value for every group of the tile, so adding the groups
+    /// up counts it again for each. The measure does not add up on this tile (V4-D99a).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub repeats: bool,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -696,6 +703,7 @@ pub fn compile_on<'a>(
         ignored_filters: scope.ignored_filters,
         crossed: scope.crossed,
         parts: Vec::new(),
+        blank_reads: Vec::new(),
     })
 }
 

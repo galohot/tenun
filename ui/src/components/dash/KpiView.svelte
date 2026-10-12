@@ -5,10 +5,10 @@
   import type { Colors } from '../../lib/chart';
   import { compact, pctChange, pctOfTarget, tip } from '../../lib/format';
   import { targetInfo, targetWords } from '../../lib/kpi';
-  import { paceElapsed } from '../../lib/measures';
+  import { paceElapsed, whyNotAdded, type Parts } from '../../lib/measures';
   import Icon from '../Icon.svelte';
 
-  let { kpi, tile, colors }: { kpi: KpiInfo; tile: Tile; colors: Colors } = $props();
+  let { kpi, tile, colors, parts }: { kpi: KpiInfo; tile: Tile; colors: Colors; parts?: Parts } = $props();
 
   const fmt = $derived(tile.formats?.[0] ?? null);
   let w = $state(300);
@@ -18,7 +18,7 @@
   const target = $derived(tile.target?.value ?? null);
   // The pace is the value so far scaled up to the whole period. That is right for a sum or a count and
   // wrong for a ratio or an average, whose value so far is already the value of the period (V4-D85d).
-  const goal = $derived(targetInfo(kpi.value, target, paceElapsed(tile, kpi.elapsed), tile.better ?? 'up'));
+  const goal = $derived(targetInfo(kpi.value, target, paceElapsed(tile, kpi.elapsed, parts), tile.better ?? 'up'));
   // Only a period that is not over has a pace: the value so far, scaled up to the whole period.
   const words = $derived(goal ? targetWords(goal, tile.better ?? 'up') : null);
   const pace = $derived(words?.pace ?? '');
@@ -32,7 +32,11 @@
   const size = $derived(
     mini ? Math.round(Math.max(16, Math.min(30, h - 6, w / 7))) : Math.round(Math.max(26, Math.min(48, Math.min(w / 8.5, h / (goal ? (narrow ? 3 : 3.3) : 2.4))))),
   );
-  const goalWords = $derived(target === null || !goal ? '' : `Target ${compact(target, fmt)} · ${pctOfTarget(goal.share)} of target${pace ? ` · ${pace}` : ''}`);
+  // A value that does not add up has no pace: the period is not over, and the line says why there is none.
+  const noPace = $derived(typeof kpi.elapsed === 'number' && kpi.elapsed > 0 && kpi.elapsed < 1 ? whyNotAdded(tile, 0, parts) : null);
+  const goalWords = $derived(
+    target === null || !goal ? '' : `Target ${compact(target, fmt)} · ${pctOfTarget(goal.share)} of target${pace ? ` · ${pace}` : ''}${noPace ? ` · ${noPace}, so no pace` : ''}`,
+  );
 
   // Under half a percent is "about the same", not a trend.
   const tone = $derived.by(() => {

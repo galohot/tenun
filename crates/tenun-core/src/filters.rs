@@ -414,6 +414,11 @@ pub fn rows_behind(
         let home = home.clone();
         q.measures.retain(|m| m.named.is_none());
         q.measures.insert(0, crate::snapshot::count_rows(&home));
+        // The groups and filters this table cannot reach are read the way the measure reads them: a date
+        // that is a main date through the main date of this table, the rest left out. A click on a month
+        // of a chart of sales by month, for a measure that adds up targets, is a click on its month
+        // (V4-D98).
+        q = engine.narrow_for_rows(&q, &home)?;
     }
     let base = q
         .measures

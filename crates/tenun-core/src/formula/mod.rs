@@ -225,6 +225,9 @@ pub struct Part {
     pub sql: String,
     /// The joins `sql` needs to reach related tables (`r1`…).
     pub joins: Vec<Join>,
+    /// The columns the aggregate reads, as (table id, column). A part that reads a calculated
+    /// column that failed is blank, not 0 (V4-D103).
+    pub reads: Vec<(String, String)>,
     pub dtype: DType,
     /// A sum or a count: over no rows it is 0, not blank (V4-D22). `fill` and `grand_total`
     /// wrap such a part as `COALESCE(part, 0)`; the join on group values in 03 does the same

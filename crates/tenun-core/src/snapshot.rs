@@ -361,9 +361,29 @@ pub fn run_tile_public(
     tile: &Tile,
     filters: &[DashFilter],
 ) -> anyhow::Result<QueryResult> {
-    let mut res = run_tile(engine, tile, filters)?;
+    let mut res = run_tile(engine, tile, filters).map_err(|e| public_error(tile, e))?;
     res.notes = std::mem::take(&mut res.public_notes);
     Ok(res)
+}
+
+/// The error of a tile that leaves the computer (a snapshot, an exported or published page, an agent log, a
+/// publish error saved in the file): the words of the app may quote a formula or a text typed in it
+/// (`"web secret" is text`), so a tile with a named measure says only which measure and what happened
+/// (V4-D52, V4-D54, V4-D104).
+fn public_error(tile: &Tile, e: anyhow::Error) -> anyhow::Error {
+    use crate::query::QueryError;
+    match e.downcast_ref::<QueryError>() {
+        Some(QueryError::MeasureBroken(name, _)) => {
+            anyhow::anyhow!("The measure {name} cannot be worked out.")
+        }
+        // The words of the other query errors name tables and columns only.
+        Some(_) => e,
+        // A message of the database may quote a value.
+        None if tile.measures.iter().any(|m| m.named.is_some()) => {
+            anyhow::anyhow!("A tile that uses a measure could not be worked out.")
+        }
+        None => e,
+    }
 }
 
 fn run_tile_inner(

@@ -16,11 +16,12 @@ import {
   tooltipBase,
   type BuildArgs,
   type Built,
+  MAX_SERIES,
 } from './common';
 import { axisSpan, levelMarkLine, NAME_ROW, needsSecondRow, resolveLevels, wantsTrend, widestName } from './guides';
-import { fitAt, linesAllowed, MAX_LINES, shownSeries, stepWord, trendFit, trendSentence, usableValues } from './lines';
-import { normalizeShares, sameUnit, stackMode } from './math';
-import { addsUp as tileAddsUp } from '../measures';
+import { fitAt, lineSource, MAX_LINES, pointsOf, shownSeries, stepWord, trendFit, trendSentence, usableValues } from './lines';
+import { foldable, normalizeShares, sameUnit, stackMode } from './math';
+import { addsUp as tileAddsUp, whyNotAdded } from '../measures';
 
 /** The name of the trend line in the legend and the tooltip. */
 const TREND = 'Trend';
@@ -35,7 +36,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const perValue = bySeriesPerMeasure(res);
   // The values of the groups add up to the whole (a sum or a count). Folding the small bars into one
   // "Other", and a line over the total of a split, are right only then (V4-D85d).
-  const addsUp = tileAddsUp(tile);
+  const addsUp = tileAddsUp(tile, res.parts);
   const nd = res.columns.filter((x) => x.role === 'dimension').length;
   // A value shown as a share or a rank carries its unit; it formats as a percent or "#3".
   const unitOf = (si: number) => res.columns[nd + (perValue ? si : 0)]?.unit;
@@ -65,7 +66,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const lineLike = tile.type !== 'bar' || combo;
   // Bars and areas with more than one series stack, side by side, or fill the whole height (100 %).
   // The default is stacked for sums and counts and side by side for everything else. Lines ignore it.
-  const mode = tile.type === 'line' || combo || indexed ? 'side' : stackMode(tile, perValue);
+  const mode = tile.type === 'line' || combo || indexed ? 'side' : stackMode(tile, perValue, res.parts);
   const stacked = multi && mode !== 'side';
   const percent = stacked && mode === 'percent';
   // "Same period last year": a grey series lined up with the categories.
@@ -329,12 +330,17 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   // Reference lines and the trend line. A 100 % chart has no values to compare with.
   // The numbers are those shown: the first value, or the total of each category when the series pile
   // up (a split, or several stacked values). "Other" never counts.
-  const guided = linesAllowed({ percent, perValue, multi, addsUp });
+  const guided = !percent;
   const isRest = (v: Cell) => v === FOLDED || isOther(v);
-  const aligned = shownSeries(series, (!perValue && multi) || (perValue && stacked));
+  const source = lineSource({ perValue, multi, stacked, addsUp });
+  const aligned = shownSeries(series, source === 'total');
   // The statistics read every category, also the ones a short tile folds into "Other", so the lines do
-  // not change with the height of the tile.
-  const shown = usableValues(shownSeries(whole.series, (!perValue && multi) || (perValue && stacked)), whole.categories, isRest);
+  // not change with the height of the tile. A split of values that do not add up has no total: every point
+  // is read, and there is no trend (V4-D109).
+  const shown =
+    source === 'points'
+      ? pointsOf(whole.series, whole.categories, isRest)
+      : usableValues(shownSeries(whole.series, source === 'total'), whole.categories, isRest);
   // An indexed chart shows where it started: the line at 100.
   const levels = guided ? [...resolveLevels(tile.lines, false, () => shown), ...(indexed ? [{ axis: 'y' as const, value: 100, name: 'Start' }] : [])] : [];
   // The unfinished last period is left out of the fit, so a half month never bends the line.
@@ -342,7 +348,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   categories.forEach((v, i) => {
     if (isRest(v) || (partialKey !== undefined && v === partialKey)) rest.add(i);
   });
-  const fit = guided && wantsTrend(tile.lines) ? trendFit(aligned, undefined, rest) : null;
+  const fit = guided && source !== 'points' && wantsTrend(tile.lines) ? trendFit(aligned, undefined, rest) : null;
   const trendTip = fit ? trendSentence(fit, fmtOf(0).short(Math.abs(fit.slope)), `per ${stepWord(temporal ? grain : null)}`) : '';
   const lineKey = horizontal ? 'xAxis' : 'yAxis';
   // The plot is about as tall (or wide) as the chart less its margins and axis text.
@@ -564,10 +570,19 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   };
   // The note about values of very different sizes comes with a way out; an indexed chart has no need of it.
   const note = indexed || combo ? null : sizeNote(res);
+  // One line where a value that does not add up made the chart leave something out (V4-D99c).
+  const why = addsUp ? null : whyNotAdded(tile, 0, res.parts);
+  const left: string[] = [];
+  if (why && !temporal && !noFold && tile.type === 'bar' && !res.other && foldable({ addsUp: true, categories: whole.categories.length, max: Math.max(4, room), series: whole.series.length })) {
+    left.push(`${why}, so there is no Other bar.`);
+  }
+  if (why && !perValue && whole.series.length > MAX_SERIES) left.push(`${why}, so every group has its own series and there is no Other.`);
+  if (why && source === 'points' && wantsTrend(tile.lines)) left.push(`${why}, so a split chart has no trend line.`);
   return {
     option,
     categories: categories.map((v) => (v === FOLDED && !res.other ? undefined : v)),
     note,
+    gateNote: left.length ? left.join(' ') : null,
     noteAction: note ? 'panels' : undefined,
     horizontal,
   };

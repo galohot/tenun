@@ -31,6 +31,9 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, SystemTime};
 
+/// (table id, main date column) → the data generation it was read under, and its period (V4-D101).
+type GrainCache = BTreeMap<(String, String), (u64, Option<measures::Period>)>;
+
 /// Called when a check of live database links that ran off the request path has written its answer.
 type Listener = Arc<dyn Fn() + Send + Sync>;
 
@@ -42,7 +45,10 @@ pub struct MeasureRefused {
     /// The place of the measure in the list that was sent.
     pub index: usize,
     pub name: String,
+    /// The text that was sent, which the place counts in.
     pub formula: String,
+    /// What the message is about: `name`, `formula`, or `list` (too many measures, a repeated id).
+    pub field: &'static str,
     pub error: formula::FormulaError,
 }
 
@@ -62,6 +68,7 @@ impl MeasureRefused {
             "ok": false,
             "measure": self.index,
             "name": self.name,
+            "field": self.field,
             "error": { "message": e.message, "at": e.at, "len": e.len },
         })
     }
@@ -159,6 +166,8 @@ pub struct Engine {
     /// Milliseconds a link check waits before it reads the data. Tests use it to hold the moment
     /// after a reload open; the app never sets it.
     check_delay: Arc<AtomicU64>,
+    /// (table id, main date column) → the `State.data_gen` it was read under, and its period (V4-D101).
+    grain_cache: Mutex<GrainCache>,
 }
 
 thread_local! {
@@ -214,6 +223,10 @@ struct State {
     /// Bumped when a load puts new tables in the catalog, so a pass that began before it is
     /// thrown away instead of writing old tables back.
     tables_gen: u64,
+    /// Moves whenever the data a question reads may have changed: a load, a removed source, a calculated
+    /// view built again, a workspace put in. What the engine read from the data once (the grain of a
+    /// main date) is read again when it moves (V4-D101). Never goes back.
+    data_gen: u64,
     dirty: bool,
 }
 
@@ -502,6 +515,7 @@ impl Engine {
             listener: Arc::new(Mutex::new(None)),
             live_rows: Arc::new(AtomicU64::new(LIVE_CHECK_ROWS)),
             check_delay: Arc::new(AtomicU64::new(0)),
+            grain_cache: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -534,7 +548,7 @@ impl Engine {
                 .collect(),
             health: health_out(&s),
             link_clashes: link_clashes(&s),
-            measure_info: measures::infos(&measure_env(&s, self.today()), &s.catalog),
+            measure_info: measures::infos(&measure_env(&s, self.today(), &NO_GRAINS), &s.catalog),
             dirty: s.dirty,
         }
     }
@@ -596,9 +610,11 @@ impl Engine {
         }
         {
             let mut s = self.state.write().unwrap();
+            let gen_before = s.data_gen;
             *s = State {
                 ws: ws.clone(),
                 path,
+                data_gen: gen_before + 1,
                 ..State::default()
             };
         }
@@ -828,6 +844,7 @@ impl Engine {
             s.calc_memory.types.retain(|k, _| !k.starts_with(&prefix));
             s.calc_memory.reads.retain(|k, _| !k.starts_with(&prefix));
             s.tables_gen += 1;
+            s.data_gen += 1;
         }
         // Tables that read the removed ones now say so.
         self.rebuild_calc(calc::Roots::All);
@@ -950,6 +967,7 @@ impl Engine {
         s.calc_related.retain(|(k, _)| !k.starts_with(&prefix));
         s.calc_day.retain(|k, _| !k.starts_with(&prefix));
         s.tables_gen += 1;
+        s.data_gen += 1;
         match result {
             Ok(mut tables) => {
                 for t in &mut tables {
@@ -1629,11 +1647,28 @@ impl Engine {
     /// from saving another measure (as V4-D68 does for columns). A measure that tiles use cannot go
     /// without a question: without `confirm` the tiles are returned ([`MeasureInUse`]) and nothing is saved.
     pub fn set_measures(&self, mut list: Vec<NamedMeasure>, confirm: bool) -> anyhow::Result<()> {
+        // The formulas as they were sent: a place in an error counts in this text, which is the text the
+        // live check read, not the trimmed one that is stored (V4-D105).
+        let raw: Vec<String> = list.iter().map(|m| m.formula.clone()).collect();
+        let refuse =
+            |index: usize, m: &NamedMeasure, field: &'static str, message: &str| MeasureRefused {
+                index,
+                name: m.name.clone(),
+                formula: raw.get(index).cloned().unwrap_or_default(),
+                field,
+                error: formula::FormulaError::new(message, 0, 0),
+            };
         if list.len() > measures::MAX_MEASURES {
-            anyhow::bail!(
-                "A workspace can have up to {} measures. Delete one that is not needed.",
-                measures::MAX_MEASURES
-            );
+            let at = measures::MAX_MEASURES;
+            return Err(refuse(
+                at,
+                &list[at],
+                "list",
+                &format!(
+                    "A workspace can have up to {at} measures. Delete one that is not needed."
+                ),
+            )
+            .into());
         }
         for m in &mut list {
             m.name = m.name.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1698,29 +1733,30 @@ impl Engine {
         }
         for (i, m) in list.iter().enumerate() {
             if list[..i].iter().any(|o| o.id == m.id) {
-                anyhow::bail!("Two measures have the id {}.", m.id);
+                return Err(
+                    refuse(i, m, "list", &format!("Two measures have the id {}.", m.id)).into(),
+                );
             }
         }
-        let refuse = |index: usize, m: &NamedMeasure, message: &str| MeasureRefused {
-            index,
-            name: m.name.clone(),
-            formula: m.formula.clone(),
-            error: formula::FormulaError::new(message, 0, 0),
-        };
         for (i, m) in list.iter().enumerate() {
             if m.name.is_empty() {
-                return Err(refuse(i, m, "Give the measure a name.").into());
+                return Err(refuse(i, m, "name", "Give the measure a name.").into());
             }
             if m.name.chars().count() > 60 {
-                return Err(
-                    refuse(i, m, "Keep the name of a measure to 60 letters or fewer.").into(),
-                );
+                return Err(refuse(
+                    i,
+                    m,
+                    "name",
+                    "Keep the name of a measure to 60 letters or fewer.",
+                )
+                .into());
             }
             let same = |a: &str| a.to_lowercase() == m.name.to_lowercase();
             if list[..i].iter().any(|o| same(&o.name)) {
                 return Err(refuse(
                     i,
                     m,
+                    "name",
                     &format!(
                         "Another measure is called {}. Give this one another name.",
                         m.name
@@ -1744,12 +1780,19 @@ impl Engine {
                 continue;
             }
             if m.formula.is_empty() {
-                return Err(refuse(i, m, "Write a formula, such as SUM([Sales].[amount]).").into());
-            }
-            if m.formula.chars().count() > measures::MAX_FORMULA {
                 return Err(refuse(
                     i,
                     m,
+                    "formula",
+                    "Write a formula, such as SUM([Sales].[amount]).",
+                )
+                .into());
+            }
+            if raw[i].chars().count() > measures::MAX_FORMULA {
+                return Err(refuse(
+                    i,
+                    m,
+                    "formula",
                     &format!(
                         "Keep a formula to {} characters or fewer.",
                         measures::MAX_FORMULA
@@ -1757,12 +1800,13 @@ impl Engine {
                 )
                 .into());
             }
-            match formula::compile(&m.formula, formula::Kind::Measure, None, &cx) {
+            match formula::compile(&raw[i], formula::Kind::Measure, None, &cx) {
                 Ok(c) if matches!(c.body, formula::Body::Aggregate(_)) => {}
                 Ok(_) => {
                     return Err(refuse(
                         i,
                         m,
+                        "formula",
                         "A measure adds things up. Use SUM, AVERAGE, COUNT or another total.",
                     )
                     .into());
@@ -1771,7 +1815,8 @@ impl Engine {
                     return Err(MeasureRefused {
                         index: i,
                         name: m.name.clone(),
-                        formula: m.formula.clone(),
+                        formula: raw[i].clone(),
+                        field: "formula",
                         error: e,
                     }
                     .into());
@@ -1806,16 +1851,32 @@ impl Engine {
         Ok(())
     }
 
+    /// The question with the groups and filters that `home` cannot reach read as a part of a measure reads
+    /// them (V4-D98), for the rows behind a number.
+    pub fn narrow_for_rows(
+        &self,
+        q: &SemanticQuery,
+        home: &str,
+    ) -> Result<SemanticQuery, query::QueryError> {
+        let s = self.state.read().unwrap();
+        measures::narrow(
+            q,
+            &s.catalog,
+            &measure_env(&s, self.today(), &NO_GRAINS),
+            home,
+        )
+    }
+
     /// The type, the additivity and the tables of each measure, by id (see [`measures::MeasureInfo`]).
     pub fn measure_info(&self) -> BTreeMap<String, measures::MeasureInfo> {
         let s = self.state.read().unwrap();
-        measures::infos(&measure_env(&s, self.today()), &s.catalog)
+        measures::infos(&measure_env(&s, self.today(), &NO_GRAINS), &s.catalog)
     }
 
     /// What a question about these measures needs to know about each (see [`measures::Facts`]).
     pub fn measure_facts(&self, m: &query::Measure) -> Result<measures::Facts, query::QueryError> {
         let s = self.state.read().unwrap();
-        measures::facts(&measure_env(&s, self.today()), &s.catalog, m)
+        measures::facts(&measure_env(&s, self.today(), &NO_GRAINS), &s.catalog, m)
     }
 
     /// What a measure gives where there is nothing to add up: 0 for a sum or a count, and blank for
@@ -1835,8 +1896,12 @@ impl Engine {
                 Some(id) => {
                     let sql = {
                         let s = self.state.read().unwrap();
-                        measures::resolve(&measure_env(&s, self.today()), &s.catalog, id)
-                            .map(|r| r.empty_sql())
+                        measures::resolve(
+                            &measure_env(&s, self.today(), &NO_GRAINS),
+                            &s.catalog,
+                            id,
+                        )
+                        .map(|r| r.empty_sql())
                     };
                     sql.ok()
                         .and_then(|sql| {
@@ -1911,12 +1976,22 @@ impl Engine {
 
     pub fn query(&self, q: &SemanticQuery) -> anyhow::Result<QueryResult> {
         let today = self.today();
+        let grains = self.grains_for(q);
         let compiled = {
             let s = self.state.read().unwrap();
             note_blank_calc(&s, q);
-            measures::compile(q, &s.catalog, today, &measure_env(&s, today))?
+            measures::compile(q, &s.catalog, today, &measure_env(&s, today, &grains))?
         };
         note_crossed(&compiled.crossed);
+        // A calculated column that failed and that a measure reads: the tile carries its note.
+        let blank: Vec<String> = compiled
+            .blank_reads
+            .iter()
+            .map(|(t, c)| format!("{CALC_NOTE}{t}\u{1f}{c}"))
+            .collect();
+        if !blank.is_empty() {
+            note_crossed(&blank);
+        }
         let start = std::time::Instant::now();
         let conn = self.conn()?;
         let rows = run(&conn, &compiled.sql, &compiled.params)?;
@@ -1925,6 +2000,47 @@ impl Engine {
         res.ms = start.elapsed().as_millis();
         res.parts = compiled.parts;
         Ok(res)
+    }
+
+    /// The main dates of the question that hold only the first day of a period, read from the data
+    /// once for each `data_gen` (V4-D101). A question with no named measure has none.
+    fn grains_for(&self, q: &SemanticQuery) -> BTreeMap<(String, String), measures::Period> {
+        let mut out = BTreeMap::new();
+        if q.measures.iter().all(|m| m.named.is_none()) {
+            return out;
+        }
+        let today = self.today();
+        let (wants, gen_now) = {
+            let s = self.state.read().unwrap();
+            (
+                measures::grain_wants(q, &s.catalog, &measure_env(&s, today, &NO_GRAINS)),
+                s.data_gen,
+            )
+        };
+        for (table, column, sql_ref) in wants {
+            let key = (table, column);
+            let cached = self.grain_cache.lock().unwrap().get(&key).copied();
+            let period = match cached {
+                Some((g, p)) if g == gen_now => p,
+                _ => {
+                    // A table that cannot be read says nothing: its main date counts as any day.
+                    let p = self
+                        .conn()
+                        .ok()
+                        .and_then(|c| run(&c, &measures::grain_sql(&key.1, &sql_ref), &[]).ok())
+                        .and_then(|rows| rows.first().and_then(|r| measures::period_of(r)));
+                    self.grain_cache
+                        .lock()
+                        .unwrap()
+                        .insert(key.clone(), (gen_now, p));
+                    p
+                }
+            };
+            if let Some(p) = period {
+                out.insert(key, p);
+            }
+        }
+        out
     }
 
     /// Runs a custom SELECT that builds on the scope of a semantic query (its FROM, JOINs and
@@ -2552,6 +2668,9 @@ fn rebuild_calc_in(
             // A load put new tables in while this pass ran. Do it again on them.
             continue;
         }
+        if !out.built.is_empty() {
+            s.data_gen += 1;
+        }
         for b in out.built {
             let id = b.table.id.clone();
             let Some(slot) = s.catalog.tables.iter_mut().find(|t| t.id == id) else {
@@ -2635,15 +2754,23 @@ fn health_out(s: &State) -> BTreeMap<String, HealthOut> {
 }
 
 /// What named measures are read against: the measures, the main dates, the links and the clock.
-fn measure_env(s: &State, today: NaiveDate) -> measures::Env<'_> {
+fn measure_env<'a>(
+    s: &'a State,
+    today: NaiveDate,
+    grains: &'a BTreeMap<(String, String), measures::Period>,
+) -> measures::Env<'a> {
     measures::Env {
         measures: &s.ws.measures,
         tables: &s.ws.tables,
         rels: &s.ws.relationships,
         health: &s.health,
         now: today.and_time(chrono::Local::now().time()),
+        grains,
     }
 }
+
+/// No main date is read as a period: what a caller that only asks about types and tables uses.
+static NO_GRAINS: BTreeMap<(String, String), measures::Period> = BTreeMap::new();
 
 /// The id a tile note uses for a calculated column that could not be computed.
 const CALC_NOTE: &str = "calc:";

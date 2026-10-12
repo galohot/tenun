@@ -6,6 +6,7 @@
 //! targets would give 1300 / 3200 = 0.406 for the whole instead of 700 / 1200 = 0.583, and
 //! 600 / 1800 = 0.333 for Kopi A instead of 300 / 600 = 0.5.
 
+use chrono::NaiveDate;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tenun_core::Engine;
@@ -1327,4 +1328,603 @@ async fn the_route_saves_refuses_asks_and_the_tile_route_uses_the_measure() {
 
 fn v_id(s: &tenun::Running) -> String {
     s.state.engine.measures()[0].id.clone()
+}
+
+// ---- the review of build 03 ------------------------------------------------------------------
+//
+// Stores 1, 2, 3 and 5 (store 5 has a target and no sale), products with a launch date, sales, a
+// monthly target for each store, tickets (their dates belong to no total) and transfers between stores.
+// Sales 530 in all, targets 2600.
+
+const R_STORES: &str =
+    "id,name,region\n1,Kopi A,Java\n2,Kopi B,Java\n3,Kopi C,Bali\n5,Kopi E,Bali\n";
+const R_PRODUCTS: &str = "id,name,category,launch\n1,Latte,Drink,2024-02-01\n2,Mocha,Drink,2025-03-01\n3,Mug,Gear,2024-06-01\n";
+const R_SALES: &str = "id,date,store_id,product_id,amount\n1,2025-01-15,1,1,100\n2,2025-02-10,1,2,50\n\
+    3,2025-03-05,2,1,200\n4,2025-03-25,2,3,30\n5,2025-04-12,3,2,80\n6,2025-05-20,1,1,70\n";
+const R_TARGETS: &str = "store_id,month,target\n1,2025-01-01,300\n1,2025-02-01,300\n1,2025-03-01,300\n\
+    1,2025-04-01,300\n1,2025-05-01,300\n2,2025-03-01,200\n2,2025-04-01,200\n3,2025-04-01,100\n\
+    3,2025-05-01,100\n5,2025-02-01,500\n";
+const R_TICKETS: &str = "store_id,created,closed,n\n1,2025-01-10,2025-01-20,3\n1,2025-03-10,2025-03-12,1\n\
+    2,2025-02-02,2025-02-09,2\n";
+const R_TRANSFERS: &str = "id,from_store,to_store,amount,day\n1,1,2,10,2025-01-05\n2,1,3,20,2025-02-05\n\
+    3,2,1,40,2025-03-05\n4,3,2,80,2025-04-05\n";
+
+struct R {
+    w: World,
+    products: String,
+    tickets: String,
+    transfers: String,
+    sent_from: String,
+}
+
+fn review_world(tag: &str) -> R {
+    review_world_with(tag, R_TARGETS)
+}
+
+fn review_world_with(tag: &str, targets: &str) -> R {
+    let w = world_of(tag, R_SALES, R_STORES, targets);
+    for (f, text) in [
+        ("products.csv", R_PRODUCTS),
+        ("tickets.csv", R_TICKETS),
+        ("transfers.csv", R_TRANSFERS),
+    ] {
+        std::fs::write(w.d.join(f), text).unwrap();
+        w.e.add_source(AddSource::File {
+            path: w.d.join(f).to_string_lossy().into_owned(),
+        })
+        .unwrap();
+    }
+    let snap = w.e.snapshot();
+    let id = |n: &str| snap.tables.iter().find(|t| t.name == n).unwrap().id.clone();
+    let (products, tickets, transfers) = (id("products"), id("tickets"), id("transfers"));
+    w.e.add_relationship(field(&w.sales, "product_id"), field(&products, "id"))
+        .unwrap();
+    w.e.add_relationship(field(&tickets, "store_id"), field(&w.stores, "id"))
+        .unwrap();
+    let from =
+        w.e.add_relationship(field(&transfers, "from_store"), field(&w.stores, "id"))
+            .unwrap();
+    let to =
+        w.e.add_relationship(field(&transfers, "to_store"), field(&w.stores, "id"))
+            .unwrap();
+    w.e.rename_links(
+        [
+            (from.clone(), Some("Sent from".to_string())),
+            (to, Some("Sent to".to_string())),
+        ]
+        .into(),
+    )
+    .unwrap();
+    R {
+        w,
+        products,
+        tickets,
+        transfers,
+        sent_from: from,
+    }
+}
+
+impl R {
+    fn notes(&self, r: &QueryResult) -> Vec<String> {
+        r.parts.iter().map(|p| p.note.clone()).collect()
+    }
+}
+
+#[test]
+fn a_date_that_is_not_a_main_date_is_not_read_through_one() {
+    let r = review_world("d98");
+    let id = r.w.add("Achievement", ACHIEVEMENT);
+    // The launch of a product is not a day of sale. The targets are not split by it: all 2600 stand
+    // against each year, and the words say so (V4-D98).
+    let launch_year = json!({ "table": r.products, "column": "launch", "grain": "year" });
+    let by_year =
+        r.w.q(json!({ "measures": [named(&id)], "dimensions": [launch_year] }));
+    same(&by_year, "2024-01-01", 400.0 / 2600.0);
+    same(&by_year, "2025-01-01", 130.0 / 2600.0);
+    assert_eq!(r.notes(&by_year), ["targets is not split by launch."]);
+    assert!(
+        by_year.parts[0].repeats,
+        "the table repeats across the groups"
+    );
+
+    // The same for a filter on it: only the sales are filtered.
+    let launch_2024 = json!({ "table": r.products, "column": "launch", "op": "between",
+                              "values": ["2024-01-01", "2024-12-31"] });
+    let filtered =
+        r.w.q(json!({ "measures": [named(&id)], "filters": [launch_2024] }));
+    near(&filtered.rows[0][0], 400.0 / 2600.0);
+    assert_eq!(r.notes(&filtered), ["targets is not filtered by launch."]);
+    assert!(
+        !filtered.parts[0].repeats,
+        "a filter does not repeat a table across groups"
+    );
+
+    // A filter on a table no part reaches is applied to no part, and the tile ignores it.
+    let created = json!({ "table": r.tickets, "column": "created", "op": "between",
+                          "values": ["2025-01-01", "2025-02-28"] });
+    let ignored =
+        r.w.q(json!({ "measures": [named(&id)], "filters": [created] }));
+    near(&ignored.rows[0][0], 530.0 / 2600.0);
+    assert_eq!(ignored.ignored_filters, vec![0]);
+
+    // A date the user has picked as the main date of a table is one, whatever the table is for.
+    let setup = TableSetup {
+        main_date: Some("launch".into()),
+        ..Default::default()
+    };
+    r.w.e.set_table_setup(&r.products, Some(setup)).unwrap();
+    let picked = r.w.q(json!({ "measures": [named(&id)], "dimensions": [
+        { "table": r.products, "column": "launch", "grain": "year" }] }));
+    assert!(picked.parts.is_empty(), "{:?}", picked.parts);
+    same(&picked, "2025-01-01", 130.0 / 2600.0);
+}
+
+#[test]
+fn a_day_window_against_a_monthly_main_date_says_which_month_it_leaves_out_or_keeps() {
+    let r = review_world("d98-window");
+    let id = r.w.add("Achievement", ACHIEVEMENT);
+    // 10 March to 20 May. A target counts when the window holds the first day of its month: April and
+    // May count, March does not (its first day is before the window), and May counts whole.
+    let window = json!({ "table": r.w.sales, "column": "date", "op": "between",
+                         "values": ["2025-03-10", "2025-05-20"] });
+    let res =
+        r.w.q(json!({ "measures": [named(&id)], "filters": [window] }));
+    near(&res.rows[0][0], 180.0 / 1000.0);
+    assert_eq!(
+        r.notes(&res),
+        [
+            "targets is read by month: March is left out because the window starts on 10 March.",
+            "targets is read by month: May is counted whole because the window ends on 20 May."
+        ]
+    );
+    // A window on the edges of its months says nothing.
+    let whole = json!({ "table": r.w.sales, "column": "date", "op": "between",
+                        "values": ["2025-03-01", "2025-05-31"] });
+    let res =
+        r.w.q(json!({ "measures": [named(&id)], "filters": [whole] }));
+    assert!(res.parts.is_empty(), "{:?}", res.parts);
+    // A window that crosses a year names the years. "Last 12 months" from 15 June 2025 starts on
+    // 16 June 2024 and ends on 15 June 2025, both inside a month.
+    r.w.e
+        .set_today(Some(NaiveDate::from_ymd_opt(2025, 6, 15).unwrap()));
+    let last = json!({ "table": r.w.sales, "column": "date", "op": "relative", "values": ["last_12_months"] });
+    let res =
+        r.w.q(json!({ "measures": [named(&id)], "filters": [last] }));
+    assert_eq!(
+        r.notes(&res),
+        [
+            "targets is read by month: June 2024 is left out because the window starts on 16 June 2024.",
+            "targets is read by month: June 2025 is counted whole because the window ends on 15 June 2025."
+        ]
+    );
+    // A group by day is finer than the months the targets are read by.
+    let by_day = json!({ "table": r.w.sales, "column": "date", "grain": "day" });
+    let res =
+        r.w.q(json!({ "measures": [named(&id)], "dimensions": [by_day] }));
+    assert_eq!(
+        r.notes(&res),
+        [
+            "targets is read by month: only the first day of each month has a value, so the other days are blank."
+        ]
+    );
+    // Targets with days that are not the first of a month are not read by month.
+    let daily = "store_id,month,target\n1,2025-01-15,300\n1,2025-02-10,300\n";
+    let r2 = review_world_with("d98-daily", daily);
+    let id2 = r2.w.add("Achievement", ACHIEVEMENT);
+    let window = json!({ "table": r2.w.sales, "column": "date", "op": "between",
+                         "values": ["2025-03-10", "2025-05-20"] });
+    let res =
+        r2.w.q(json!({ "measures": [named(&id2)], "filters": [window] }));
+    assert!(res.parts.is_empty(), "{:?}", res.parts);
+}
+
+#[test]
+fn a_measure_that_repeats_a_table_across_the_groups_does_not_add_up() {
+    let r = review_world("repeat-gate");
+    let gap =
+        r.w.add("Gap", "SUM([sales].[amount]) - SUM([targets].[target])");
+    let category = json!({ "table": r.products, "column": "category" });
+    let res =
+        r.w.q(json!({ "measures": [named(&gap)], "dimensions": [category.clone()] }));
+    // 530 of sales against 2600 of targets: the bars are 2100 and 2570 short, 4670 in all, and the whole is
+    // 2070. The targets stand against each group, so the bars do not add up to the whole.
+    same(&res, "Drink", 500.0 - 2600.0);
+    same(&res, "Gear", 30.0 - 2600.0);
+    let bars: f64 = by(&res).iter().filter_map(|(_, v)| *v).sum();
+    let whole = r.w.q(json!({ "measures": [named(&gap)] })).rows[0][0]
+        .as_f64()
+        .unwrap();
+    assert!((bars - whole).abs() > 1.0, "{bars} against {whole}");
+    assert!(res.parts.iter().any(|p| p.repeats), "{:?}", res.parts);
+    // A share of the whole would add the repeated target up, so it is not applied, with words.
+    let t = r.w.tile(
+        "bar",
+        json!([named(&gap)]),
+        json!([category]),
+        json!({ "showAs": ["pct_total"] }),
+    );
+    let shown = run_tile(&r.w.e, &t, &[]).unwrap();
+    same(&shown, "Drink", 500.0 - 2600.0);
+    assert!(shown.columns[1].unit.is_none());
+    assert!(
+        shown
+            .notes
+            .iter()
+            .any(|n| n.contains("Gap is not shown as % of total")
+                && n.contains("not split by these groups")),
+        "{:?}",
+        shown.notes
+    );
+    // A sum of sales alone adds up: the share works.
+    let rev = r.w.add("Revenue", "SUM([sales].[amount])");
+    let t = r.w.tile(
+        "bar",
+        json!([named(&rev)]),
+        json!([{ "table": r.products, "column": "category" }]),
+        json!({ "showAs": ["pct_total"] }),
+    );
+    let ok = run_tile(&r.w.e, &t, &[]).unwrap();
+    same(&ok, "Drink", 500.0 / 530.0);
+}
+
+#[test]
+fn a_plain_measure_that_does_not_add_up_is_not_shown_as_a_share_either() {
+    let w = world("plain-gate");
+    let dims = json!([w.dim("stores", "name")]);
+    let avg = json!([{ "table": w.sales, "column": "amount", "agg": "avg" }]);
+    let t = w.tile("bar", avg, dims.clone(), json!({ "showAs": ["pct_total"] }));
+    let r = run_tile(&w.e, &t, &[]).unwrap();
+    // Kopi A: (100 + 50 + 150) / 3. Not a share, and the name keeps no suffix.
+    same(&r, "Kopi A", 100.0);
+    assert!(r.columns[1].unit.is_none());
+    assert!(!r.columns[1].name.contains('%'), "{}", r.columns[1].name);
+    assert!(
+        r.notes
+            .iter()
+            .any(|n| n.contains("is not shown as % of total: its values do not add up")),
+        "{:?}",
+        r.notes
+    );
+    // A running total of a count of distinct values is not one either; a sum keeps it.
+    let distinct = json!([{ "table": w.sales, "column": "product", "agg": "count_distinct" }]);
+    let t = w.tile(
+        "line",
+        distinct,
+        json!([w.month()]),
+        json!({ "showAs": ["running"] }),
+    );
+    let r = run_tile(&w.e, &t, &[]).unwrap();
+    assert!(
+        r.notes.iter().any(|n| n.contains("running total")),
+        "{:?}",
+        r.notes
+    );
+    let sum = json!([{ "table": w.sales, "column": "amount", "agg": "sum" }]);
+    let t = w.tile(
+        "line",
+        sum,
+        json!([w.month()]),
+        json!({ "showAs": ["running"] }),
+    );
+    let r = run_tile(&w.e, &t, &[]).unwrap();
+    assert!(r.notes.is_empty(), "{:?}", r.notes);
+    near(&r.rows[1][1], 700.0);
+}
+
+#[test]
+fn a_part_that_reads_a_failed_column_is_blank_and_the_tile_says_so() {
+    let w = world("failed-calc");
+    // A column of sales computed from `amount`, and a measure that adds it up.
+    let setup = TableSetup {
+        calc: vec![tenun_core::workspace::CalcColumn {
+            name: "Doubled".into(),
+            formula: "[amount] * 2".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    w.e.set_table_setup(&w.sales, Some(setup)).unwrap();
+    let id = w.add("Doubled sales", "SUM([sales].[Doubled])");
+    let ratio = w.add(
+        "Doubled against targets",
+        "SUM([sales].[Doubled]) / SUM([targets].[target])",
+    );
+    near(&w.q(json!({ "measures": [named(&id)] })).rows[0][0], 1400.0);
+    // The file loses `amount`: the column cannot be computed, and its values are blank.
+    std::fs::write(
+        w.d.join("sales.csv"),
+        "id,date,store_id,product\n1,2026-01-05,1,Latte\n",
+    )
+    .unwrap();
+    let source =
+        w.e.snapshot()
+            .tables
+            .iter()
+            .find(|t| t.id == w.sales)
+            .unwrap()
+            .source_id
+            .clone();
+    w.e.load(&source);
+    let t = w.tile("kpi", json!([named(&id)]), json!([]), json!({}));
+    let res = run_tile(&w.e, &t, &[]).unwrap();
+    // Blank, not 0 (V4-D22's zero is for no rows).
+    assert!(res.rows[0][0].is_null(), "{:?}", res.rows);
+    assert!(
+        res.notes
+            .iter()
+            .any(|n| n.contains("Doubled could not be computed")),
+        "{:?}",
+        res.notes
+    );
+    // What leaves the computer says the table and the column only.
+    let public = snapshot::run_tile_public(&w.e, &t, &[]).unwrap();
+    assert_eq!(public.notes, ["sales: Doubled could not be computed."]);
+    // A formula with another part: the part that reads the failed column is blank, so the ratio is.
+    let t = w.tile("kpi", json!([named(&ratio)]), json!([]), json!({}));
+    let res = run_tile(&w.e, &t, &[]).unwrap();
+    assert!(res.rows[0][0].is_null(), "{:?}", res.rows);
+    // In a tile with a group and a plain sum of the failed column beside it, nothing turns to 0.
+    let plain = json!({ "table": w.sales, "column": "Doubled", "agg": "sum" });
+    let t = w.tile(
+        "bar",
+        json!([named(&ratio), plain]),
+        json!([w.dim("stores", "name")]),
+        json!({}),
+    );
+    let res = run_tile(&w.e, &t, &[]).unwrap();
+    assert!(
+        res.rows.iter().all(|r| r[2].is_null() && r[1].is_null()),
+        "{:?}",
+        res.rows
+    );
+}
+
+#[test]
+fn rows_behind_a_mark_of_a_measure_on_one_table_follow_the_click_through_its_main_date() {
+    let r = review_world("rows-click");
+    let targets = r.w.add("Targets", "SUM([targets].[target])");
+    let t = r.w.tile(
+        "bar",
+        json!([named(&targets)]),
+        json!([{ "table": r.w.sales, "column": "date", "grain": "month" }]),
+        json!({}),
+    );
+    // The click on March of a chart by the date of the sales filters the sales by month; the rows are those of
+    // the targets, read by their main date.
+    let click: tenun_core::query::Filter = serde_json::from_value(json!({
+        "table": r.w.sales, "column": "date", "grain": "month", "op": "in", "values": ["2025-03-01"] }))
+    .unwrap();
+    let rows = tenun_core::filters::rows_behind(&r.w.e, &t, &[], Some(click)).unwrap();
+    assert_eq!(rows.total, 2, "the targets of store 1 and store 2 in March");
+    // And with no click: every row of the table.
+    let all = tenun_core::filters::rows_behind(&r.w.e, &t, &[], None).unwrap();
+    assert_eq!(all.total, 10);
+}
+
+#[test]
+fn what_leaves_the_computer_never_quotes_a_formula_or_a_text_typed_in_it() {
+    let r = review_world("public-error");
+    r.w.add("Fine", "SUM([sales].[amount])");
+    // A file made by hand holds a measure whose message would quote its text.
+    let path = r.w.d.join("secret.tenun");
+    r.w.e.save(Some(path.clone())).unwrap();
+    let mut file: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    file["measures"] = json!([
+        { "id": "m1", "name": "Secret", "formula": "SUMIF([sales].[amount], [sales].[amount] = \"web secret\")" }
+    ]);
+    std::fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+    r.w.e.open(&path).unwrap();
+    let tile = json!({ "id": "t", "type": "kpi", "title": "", "x": 0, "y": 0, "w": 3, "h": 2,
+                       "measures": [named("m1")], "dims": [] });
+    r.w.e.set_dashboards(vec![
+        json!({ "id": "d1", "title": "Main", "tiles": [tile.clone()] }),
+    ]);
+    let t: Tile = serde_json::from_value(tile).unwrap();
+    // The app says why, with the words of the check.
+    let app = run_tile(&r.w.e, &t, &[]).unwrap_err().to_string();
+    assert!(app.contains("web secret"), "{app}");
+    // Everything that leaves the computer says which measure and what happened.
+    let public = snapshot::run_tile_public(&r.w.e, &t, &[])
+        .unwrap_err()
+        .to_string();
+    assert_eq!(public, "The measure Secret cannot be worked out.");
+    let built = snapshot::build(&r.w.e, "d1", &[]).unwrap_err().to_string();
+    assert!(
+        !built.contains("web secret") && built.contains("Secret"),
+        "{built}"
+    );
+}
+
+#[test]
+fn a_refusal_counts_in_the_text_that_was_sent_and_says_which_field() {
+    let w = world("save-places");
+    // The live check reads the text as it is typed; so does the save.
+    let raw = "   SUM([sales].[amoun])";
+    let checked =
+        w.e.check_formula(&tenun_core::formula::CheckRequest {
+            formula: raw.into(),
+            kind: tenun_core::formula::Kind::Measure,
+            table: None,
+        })
+        .unwrap();
+    let live = checked.error.unwrap();
+    let err =
+        w.e.set_measures(vec![measure("Bad", raw)], false)
+            .unwrap_err();
+    let refused = err.downcast_ref::<MeasureRefused>().unwrap();
+    let reply = refused.reply();
+    assert_eq!(reply["field"], "formula");
+    assert_eq!(reply["error"]["at"], live.at as u64);
+    assert_eq!(reply["error"]["len"], live.len as u64);
+    // A name that cannot be used is about the name, not the formula.
+    let err =
+        w.e.set_measures(vec![measure("", "SUM([sales].[amount])")], false)
+            .unwrap_err();
+    assert_eq!(
+        err.downcast_ref::<MeasureRefused>().unwrap().reply()["field"],
+        "name"
+    );
+    // Too many measures, or a repeated id, are a normal refusal too, about the list.
+    let many: Vec<NamedMeasure> = (0..201)
+        .map(|i| NamedMeasure {
+            id: format!("m{}", i + 1),
+            name: format!("Measure {i}"),
+            formula: "SUM([sales].[amount])".into(),
+            ..Default::default()
+        })
+        .collect();
+    let err = w.e.set_measures(many, false).unwrap_err();
+    let reply = err.downcast_ref::<MeasureRefused>().unwrap().reply();
+    assert_eq!(
+        (
+            reply["ok"].clone(),
+            reply["field"].clone(),
+            reply["measure"].clone()
+        ),
+        (json!(false), json!("list"), json!(200))
+    );
+    let twice = vec![
+        NamedMeasure {
+            id: "m1".into(),
+            name: "One".into(),
+            formula: "SUM([sales].[amount])".into(),
+            ..Default::default()
+        },
+        NamedMeasure {
+            id: "m1".into(),
+            name: "Two".into(),
+            formula: "SUM([sales].[amount])".into(),
+            ..Default::default()
+        },
+    ];
+    let err = w.e.set_measures(twice, false).unwrap_err();
+    let reply = err.downcast_ref::<MeasureRefused>().unwrap().reply();
+    assert_eq!(
+        (reply["field"].clone(), reply["measure"].clone()),
+        (json!("list"), json!(1))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_measure_sent_with_no_id_gets_one() {
+    let (s, _sales, _stores, _targets) = served("route-noid").await;
+    // The server gives the id: a measure of the body may leave it out.
+    let (status, v) = send(
+        &s,
+        "PUT",
+        "/api/workspace/measures",
+        json!({ "measures": [{ "name": "Revenue", "formula": "SUM([sales].[amount])" }] }),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(v["workspace"]["measures"][0]["id"], "m1");
+    // And a refusal is the same normal answer, with the field and the place in the text that was sent.
+    let (status, v) = send(
+        &s,
+        "PUT",
+        "/api/workspace/measures",
+        json!({ "measures": [{ "name": "", "formula": "SUM([sales].[amount])" }] }),
+    )
+    .await;
+    assert_eq!(
+        (status, v["ok"].clone(), v["field"].clone()),
+        (200, json!(false), json!("name"))
+    );
+}
+
+#[test]
+fn a_part_follows_a_group_that_names_a_link_by_its_own_way_to_the_same_table() {
+    let r = review_world("via");
+    let id = r.w.add(
+        "Moved against targets",
+        "SUM([transfers].[amount]) / SUM([targets].[target])",
+    );
+    // Transfers by the store that sent them. The targets have their own link to the stores, and are split
+    // by it: 30 sent by Kopi A against its 1500 of targets, and so on (V4-D107).
+    let res = r.w.q(json!({
+        "measures": [named(&id)],
+        "dimensions": [{ "table": r.w.stores, "column": "name", "via": r.sent_from }],
+    }));
+    assert!(res.parts.is_empty(), "{:?}", res.parts);
+    same(&res, "Kopi A", 30.0 / 1500.0);
+    same(&res, "Kopi B", 40.0 / 400.0);
+    same(&res, "Kopi C", 80.0 / 200.0);
+    // Kopi E has targets and sent nothing.
+    same(&res, "Kopi E", 0.0);
+    let _ = r.transfers;
+}
+
+#[test]
+fn a_group_value_only_a_part_that_cannot_see_all_the_groups_has_appears_once() {
+    let r = review_world("vanish");
+    let id = r.w.add("Achievement", ACHIEVEMENT);
+    let res = r.w.q(json!({
+        "measures": [named(&id)],
+        "dimensions": [
+            { "table": r.w.stores, "column": "name" },
+            { "table": r.products, "column": "category" }
+        ],
+    }));
+    // The sales have rows for stores 1, 2 and 3 by category. Store 5 has a target and no sale: it is a row
+    // of its own with the category blank, and its value is what the rules give (no sales is 0, over 500).
+    let at = |s: &str, c: Option<&str>| -> Vec<f64> {
+        res.rows
+            .iter()
+            .filter(|r| r[0] == json!(s) && r[1] == c.map_or(Value::Null, |c| json!(c)))
+            .map(|r| r[2].as_f64().unwrap())
+            .collect()
+    };
+    assert_eq!(at("Kopi E", None), [0.0]);
+    assert!((at("Kopi A", Some("Drink"))[0] - 220.0 / 1500.0).abs() < 1e-9);
+    assert!((at("Kopi B", Some("Drink"))[0] - 0.5).abs() < 1e-9);
+    assert!((at("Kopi B", Some("Gear"))[0] - 30.0 / 400.0).abs() < 1e-9);
+    assert!((at("Kopi C", Some("Drink"))[0] - 0.4).abs() < 1e-9);
+    // A store that has sales has no extra blank row.
+    for s in ["Kopi A", "Kopi B", "Kopi C"] {
+        assert!(at(s, None).is_empty(), "{s}");
+    }
+    assert_eq!(res.rows.len(), 5, "{:?}", res.rows);
+}
+
+#[test]
+fn a_plain_measure_beside_a_named_one_is_zero_for_a_group_it_has_no_rows_for() {
+    // Sales in January and April, targets in January and March: March has no sale.
+    let sales =
+        "id,date,store_id,product,amount\n1,2026-01-05,1,Latte,10\n2,2026-04-02,1,Latte,30\n";
+    let targets = "store_id,month,target\n1,2026-01-01,20\n1,2026-03-01,40\n";
+    let w = world_of("plain-zero", sales, STORES, targets);
+    let ratio = w.add("Achievement", ACHIEVEMENT);
+    let count = json!({ "table": w.sales, "column": null, "agg": "count" });
+    let sum = json!({ "table": w.sales, "column": "amount", "agg": "sum" });
+    let avg = json!({ "table": w.sales, "column": "amount", "agg": "avg" });
+    let r = w.q(json!({ "measures": [named(&ratio), count, sum, avg], "dimensions": [w.month()] }));
+    let mar = r.rows.iter().find(|r| r[0] == json!("2026-03-01")).unwrap();
+    // A count and a sum of no rows are 0, an average of no rows is blank.
+    assert_eq!(mar[2], json!(0.0));
+    assert_eq!(mar[3], json!(0.0));
+    assert!(mar[4].is_null());
+}
+
+#[test]
+fn a_change_of_main_date_alone_makes_the_tiles_ask_again() {
+    let w = world("main-signal");
+    let set = |c: Option<&str>| {
+        w.e.set_table_setup(
+            &w.targets,
+            Some(TableSetup {
+                main_date: c.map(String::from),
+                ..Default::default()
+            }),
+        )
+        .unwrap()
+    };
+    assert!(
+        set(Some("month")),
+        "a new main date is a change the tiles must read"
+    );
+    assert!(!set(Some("month")), "the same again is not");
+    assert!(
+        set(None),
+        "and neither is going back to the default a non-change"
+    );
 }

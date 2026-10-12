@@ -415,22 +415,28 @@ That date is the **main date** of the table.
 
 - A table with one date column uses it. Nothing to do.
 - A table with two or more date columns needs you to pick one. In the Data view, open the table and
-  use **Main date**. The control shows when a table has two dates, or when a measure reads the table.
-- A date filter works the same way. A filter on "last 30 days" of `sales.date` also filters
-  `targets` by its main date.
+  use **Main date** (with Advanced features on). The control shows when a table has two dates, or when
+  a measure reads the table.
+- **Only a main date is read through another table's main date.** The date of `sales` can line up
+  `targets` because both tables hold events: some link starts from each of them. The launch date of a
+  product, or the day a store opened, only describes a row. A group or a filter on it follows the plain
+  rule: a table that cannot reach it is not split or not filtered by it, and says so. If you pick a
+  main date for a table yourself, it counts, whatever the table is for.
+- A date filter works the same way. A filter on "last 30 days" of `sales.date` also filters `targets`
+  by its main date.
 - If a table has no main date, a chart over time cannot split it. It says so (see below).
 
-### When a table cannot be split or filtered
+**A main date that holds one row for each month** (or each quarter, or each year, always on the first
+day) is read by that period. Tenun finds this from the data, once each time the data loads. A row
+counts when the window holds its first day. So a filter from 10 March to 20 May counts the targets of
+April and May, not March, and it counts May whole. The tile says so in words, and nothing is prorated:
 
-The note under a tile says what a table could not follow, in words that name the table and the column:
+- `targets is read by month: March is left out because the window starts on 10 March.`
+- `targets is read by month: May is counted whole because the window ends on 20 May.`
 
-- `targets is not split by product.` The table `targets` has nothing to say about a product. Its
-  total stands against each product, and the note tells you.
-- `targets is not filtered by product.` A filter on `product` filters the sales and leaves the targets alone.
-- `targets has no main date, so it is not split by date.` Pick a main date.
-
-The notes name tables and columns only. They go with a download, an exported file and a published
-page as they are.
+A window across years names the years. "Last 12 months" starts in the middle of a month, so the first
+month of the chart has no target and its achievement is blank, with the note above. A group by day is
+finer than months: only the first day of each month has a target, and the note says so.
 
 ### What a measure does in each tile
 
@@ -440,15 +446,19 @@ page as they are.
   comparison with the period before are all calculated again by Tenun with the same formula. Nothing is
   added up from numbers already added up.
 - **Show as.** A share of the total, a running total and a year to date add values up. They work with
-  a measure that adds up: a sum, a count, or the difference of two of them. For a ratio or an average, Tenun
-  shows the value as it is and says why.
+  a value that adds up: a sum, a count, or the difference of two of them. For a ratio, an average, a
+  middle value, a distinct count, a lowest or a highest value (a plain value too), Tenun shows the value as
+  it is and says why. The tile editor does not offer the ways that cannot work.
 - **Share charts, waterfalls by category, Sankey charts,** a split chart's "Other", and a pace on a number tile
   also add values up, so they need a measure that adds up. A ratio like `Achievement` does not
   make a share, because the parts do not add up to a whole.
 - **A histogram, a box plot, a cohort grid and a Gantt chart** read columns, not a formula. A measure
   is not offered there.
 - **Show rows** lists the rows of the table behind a number. If a measure adds up two tables, there is
-  no single list of rows, and Tenun says so.
+  no single list of rows, and Tenun says so. A click on a mark is read the way the measure reads it: for a
+  measure of the targets, a click on a month of the sales is a click on that month of the targets.
+- **A calculated column that could not be computed** makes the part that reads it blank, not 0, and the
+  tile says which column. The same words go with a download or an exported file, with no formula in them.
 
 ### Changes and limits
 
@@ -458,4 +468,5 @@ page as they are.
 - A workspace uses up to 200 measures, and a formula has up to 10,000 characters. A file with more keeps
   them, and a tile that uses one says why it does not work.
 - A measure is a formula only. There is no SQL mode for measures.
+- A target on a number tile for a value written as a percent is typed as 95 for 95 %.
 
