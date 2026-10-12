@@ -149,6 +149,14 @@ pub struct TableSetup {
         skip_serializing_if = "std::ops::Not::not"
     )]
     pub link_table: bool,
+    /// The person said this table is not a link table, so the Model view stops suggesting the mark
+    /// (V4-D119, V4-D124). Not written until set; a marked table never has it.
+    #[serde(
+        default,
+        rename = "notLinkTable",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub not_link_table: bool,
 }
 
 /// A column that is computed from the others, in the view of its table (V4-D3).
@@ -174,10 +182,14 @@ impl TableSetup {
             && self.calc.is_empty()
             && self.main_date.is_none()
             && !self.link_table
+            && !self.not_link_table
     }
 
     /// Drops overrides that say nothing, so a cleared menu leaves no trace in the file.
     pub fn tidy(&mut self) {
+        if self.link_table {
+            self.not_link_table = false;
+        }
         for c in self.columns.values_mut() {
             if c.label.as_deref().is_some_and(|s| s.trim().is_empty()) {
                 c.label = None;

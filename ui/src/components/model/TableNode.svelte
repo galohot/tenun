@@ -84,7 +84,9 @@
   .tag { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--sep); font-size: 11px; }
   .chip { padding: 1px 8px; border-radius: 999px; background: var(--selected); color: var(--accent-text); font-weight: 600; }
   .tag.quiet { opacity: 0; height: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; border-bottom-width: 0; transition: opacity 120ms; }
-  .node:hover .tag.quiet, .node:focus-within .tag.quiet { opacity: 1; height: auto; padding-top: 6px; padding-bottom: 6px; border-bottom-width: 1px; }
+  .node:hover .tag.quiet, .node:focus-within .tag.quiet, :global(.svelte-flow__node.selected) .tag.quiet { opacity: 1; height: auto; padding-top: 6px; padding-bottom: 6px; border-bottom-width: 1px; }
+  /* A touch screen has no pointer to rest on a table, so the switch is always there (V4-D124). */
+  @media (hover: none) { .tag.quiet { opacity: 1; height: auto; padding-top: 6px; padding-bottom: 6px; border-bottom-width: 1px; } }
   .suggest { color: var(--text-2); }
   .suggest .why { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tag .x { margin-left: auto; display: grid; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 4px; background: none; color: var(--text-2); }

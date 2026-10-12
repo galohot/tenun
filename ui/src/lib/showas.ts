@@ -3,7 +3,7 @@
 // Pure code with only pure imports at run time, so the node tests can load it.
 
 import type { ShowAs, Tile } from './api';
-import { addsUpHere, ADDING_WAYS, type Parts } from './measures.ts';
+import { addsUpAlong, addsUpHere, ADDING_WAYS, ALONG_WAYS, type Parts } from './measures.ts';
 
 /** What the first group-by field is: a date, a part of a date (month of year…), or something else. */
 export type Dim0Kind = 'date' | 'part' | 'other' | 'none';
@@ -70,8 +70,10 @@ export function showAsOptions(tile: Pick<Tile, 'type' | 'dims' | 'measures' | 'c
   if (dim0 === 'date' || dim0 === 'part') out.push(...ORDERED);
   out.push('rank');
   if (dim0 === 'date') out.push('ytd');
-  // The ways that add values up are not offered for a value that does not add up (V4-D99).
-  return i !== undefined && !addsUpHere(tile, i, parts) ? out.filter((o) => !ADDING_WAYS.includes(o)) : out;
+  // The ways that add values up are not offered for a value that does not add up (V4-D99). A running total and a
+  // year to date only need it to add up along the first group (V4-D123).
+  if (i === undefined) return out;
+  return out.filter((o) => !ADDING_WAYS.includes(o) || (ALONG_WAYS.includes(o) ? addsUpAlong(tile, i, parts) : addsUpHere(tile, i, parts)));
 }
 
 /**
@@ -88,7 +90,7 @@ export function effectiveShowAs(
   if (!how || how === 'value' || !SHOW_AS_TYPES.includes(tile.type) || !groupCount(tile)) return null;
   // A share of the whole, a running total and a year to date add values up. The engine shows a value that does
   // not add up as it is, with words (V4-D85d, V4-D99), so its name does not take the suffix.
-  if (ADDING_WAYS.includes(how) && !addsUpHere(tile, i, parts)) return null;
+  if (ADDING_WAYS.includes(how) && !(ALONG_WAYS.includes(how) ? addsUpAlong(tile, i, parts) : addsUpHere(tile, i, parts))) return null;
   if (how === 'ytd' && dim0 !== 'date') return null;
   if (ORDERED.includes(how) && dim0 !== 'date' && dim0 !== 'part') return null;
   if (how === 'pct_group' && groupCount(tile) < 2) return 'pct_total';

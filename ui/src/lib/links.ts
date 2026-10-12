@@ -170,6 +170,9 @@ export function behindFrom(base: string, rels: Relationship[], health?: Health, 
  * The links a path from `base` to `table` can start with: the first link of every shortest path.
  * One entry means the way is clear. Two or more mean a field of `table` can mean either link.
  */
+/** A value (a measure) cannot be picked from a table behind a link table; a group or a filter can (V4-D117). */
+export const valueBehind = (mode: string, behind: ReadonlySet<string>, table: string): boolean => mode === 'measure' && behind.has(table);
+
 export function firstLinks(base: string, table: string, rels: Relationship[], health?: Health, linkTables?: Iterable<string>): string[] {
   if (base === table) return [];
   return search(base, rels, health, linkTables).firsts.get(table) ?? [];

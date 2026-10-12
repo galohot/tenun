@@ -619,12 +619,13 @@ pub fn show_as(tile: &Tile, q: &SemanticQuery, engine: &Engine, res: &mut QueryR
         // A share of the whole, a running total and a year to date add the values up. A named
         // measure whose values do not add up (a ratio, an average) is shown as it is, with words
         // (V4-D85d).
-        if let Some(why) = refuses_to_add(engine, &q.measures[j], how, blocked_at(res, j)) {
+        if let Some(why) = refuses_to_add(engine, &q.measures[j], how, blocked_at(res, j, how)) {
             res.parts.push(PartNote {
                 measure: j,
                 note: why,
                 repeats: false,
                 overlap: false,
+                split_only: false,
             });
             continue;
         }
@@ -739,9 +740,16 @@ enum Blocked {
     Overlap,
 }
 
-/// Whether the groups of the tile add up to the whole for value `j`.
-fn blocked_at(res: &QueryResult, j: usize) -> Option<Blocked> {
-    if res.parts.iter().any(|p| p.measure == j && p.overlap) {
+/// Whether the groups of the tile add up to the whole for value `j`, shown as `how`. A running total and
+/// a year to date add along the first group, inside each group of the split: when only the split sits
+/// behind a link table, a row is in each of those sequences once (V4-D123).
+fn blocked_at(res: &QueryResult, j: usize, how: ShowAs) -> Option<Blocked> {
+    let along = matches!(how, ShowAs::Running | ShowAs::Ytd);
+    if res
+        .parts
+        .iter()
+        .any(|p| p.measure == j && p.overlap && !(along && p.split_only))
+    {
         Some(Blocked::Overlap)
     } else if res.parts.iter().any(|p| p.measure == j && p.repeats) {
         Some(Blocked::Repeats)
@@ -975,7 +983,7 @@ pub fn compare(
         .as_ref()
         .and_then(|l| l.first().copied().flatten())
         .filter(|h| !matches!(h, ShowAs::Value | ShowAs::Unknown))
-        .filter(|h| refuses_to_add(engine, &q.measures[0], *h, blocked_at(res, 0)).is_none())
+        .filter(|h| refuses_to_add(engine, &q.measures[0], *h, blocked_at(res, 0, *h)).is_none())
         .map(|h| {
             if h == ShowAs::PctGroup {
                 ShowAs::PctTotal

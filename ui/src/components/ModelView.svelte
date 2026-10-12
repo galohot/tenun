@@ -5,8 +5,8 @@
   import { api, type FieldRef, type Relationship, type Suggestion } from '../lib/api';
   import { app } from '../lib/state.svelte';
   import { firstLinks, kindWords, linkLabel, siblings, unnamedPairs } from '../lib/links';
-  import { suggestLinkTables } from '../lib/linktables';
-  import { isEmptySetup, withLinkTable } from '../lib/prep';
+  import { canMarkLinkTable, notLinkTablesOf, suggestLinkTables } from '../lib/linktables';
+  import { isEmptySetup, withLinkTable, withNotLinkTable } from '../lib/prep';
   import TableNode from './model/TableNode.svelte';
   import RelEdge from './model/RelEdge.svelte';
   import LinkSheet from './model/LinkSheet.svelte';
@@ -24,14 +24,19 @@
   let sheet = $state<string[] | null>(null);
 
   const ws = $derived(app.snap!.workspace);
-  /** Tables the person said are not link tables, for this visit. */
-  let notLinkTables = $state<string[]>([]);
+  /** Tables the person said are not link tables. The file keeps it (V4-D124). */
+  const notLinkTables = $derived(notLinkTablesOf(ws.tables));
   const linkSuggestions = $derived(suggestLinkTables(app.tables, ws.relationships, app.linkHealth, app.linkTables, notLinkTables));
 
   /** Marks a table as a link table, or takes the mark away (V4-D112). */
   async function markLinkTable(id: string, on: boolean) {
     const next = withLinkTable(ws.tables?.[id], on);
     await app.run(null, () => api.setTableSetup(id, isEmptySetup(next) ? null : next));
+  }
+
+  /** "Not a link table": the suggestion goes, and stays gone after the file is opened again. */
+  async function notLinkTable(id: string) {
+    await app.run(null, () => api.setTableSetup(id, withNotLinkTable(ws.tables?.[id])));
   }
   const sk = (s: Suggestion) => `${s.from.table}.${s.from.column}>${s.to.table}.${s.to.column}`;
 
@@ -115,10 +120,10 @@
         warned: warned.get(t.id) ?? new Set(),
         linkTable: app.linkTables.has(t.id),
         suggestion: linkSuggestions.find((s) => s.table === t.id)?.why ?? null,
-        canMark: new Set(ws.relationships.filter((r) => r.from.table === t.id).map((r) => r.from.column)).size >= 2,
+        canMark: canMarkLinkTable(t.id, ws.relationships),
         onmark: () => markLinkTable(t.id, true),
         onunmark: () => markLinkTable(t.id, false),
-        ondismiss: () => (notLinkTables = [...notLinkTables, t.id]),
+        ondismiss: () => notLinkTable(t.id),
       },
       dragHandle: 'header',
     }));

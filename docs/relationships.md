@@ -148,15 +148,22 @@ This table is a **link table**. It holds nothing but links.
 Draw its two lines first: `programme_id` to the programmes, `funder_id` to the funders. Both are the
 usual one-to-many links. Then **mark the table as a link table**:
 
-1. Open **Model**. A table with two links to two different tables, and little else, shows **Looks like a
-   link table** under its name. Click **Mark it**.
-2. Any other table with two or more links from it shows **Mark as link table** when you point at it.
+1. Open **Model**. Tenun suggests the mark for a table with two links to two different tables and little
+   else, when its name names both tables (`programme_funders`, `product_categories`) or every column is a
+   link (`student_id`, `course_id`). The table shows **Looks like a link table** under its name. Click
+   **Mark it**. Click the cross for **Not a link table**: the suggestion goes, and the `.tenun` file keeps
+   that choice as `notLinkTable`.
+2. Any other table with two or more links from it shows **Mark as link table** when you point at it, or
+   when you select it. On a touch screen the button is always there. A table of events, like `sales`
+   with a `store_id` and a `product_id`, is not suggested: it is not a link table.
 3. A marked table shows **Link table** under its name. Click the cross beside it to unmark it. The mark
    is saved in the `.tenun` file as `linkTable`. A file made before this has none.
 
 Marked, the table can be crossed once, from the one side to the many side. A tile of **spending** can
 now group by **funders › name**, and a tile of **programmes** can group by the funders too. A table that
-is not marked is never crossed. Tenun does not guess.
+is not marked is never crossed. Tenun does not guess. Until the mark is set, a tile that needs it says
+which table to mark: *funders can be used with spending only through programme_funders. Mark
+programme_funders as a link table in Model.*
 
 ### What the numbers mean
 
@@ -172,7 +179,9 @@ Gates, B has Ford and Wellcome, C has Gates and EU, and D has none. Spending by 
 | (blank) | 60 (D) |
 
 - **A row is under each of its funders.** The spending of A is in the bar of Ford and in the bar of
-  Gates. The spending of D has no funder, so it is in the blank group, as it always is.
+  Gates. The spending of D has no funder, so it is in the blank group, as it always is. A pair whose
+  funder is not in the funders table is a funder Tenun does not know, so that row is in the blank group
+  too, beside its known funders.
 - **The bars add up to more than the total.** They add up to 370. The spending is 215. The total
   counts each row once, because the total has no group and so does not cross the link table. The
   number tile, the total row of a table, the totals of a pivot and the subtotals all come from a
@@ -191,7 +200,10 @@ Gates, B has Ford and Wellcome, C has Gates and EU, and D has none. Spending by 
 ### Filters
 
 A filter on a field behind a link table keeps **a row when at least one of its funders passes the
-filter**. It keeps the row once.
+filter**. It keeps the row once. So on a number tile, **Keep only Gates** and **Exclude Gates** can both
+keep a row with Gates and another funder: Keep only gives 125 (A and C), Exclude gives 215 (every row,
+because A has Ford, C has EU, and D has no funder). The tile says so: *A row of spending with two funders
+is kept when one of them passes the filter, so Keep only and Exclude can both keep it.*
 
 - A click on the Gates bar filters a monthly line to the spending of the programmes Gates funds:
   A and C. A programme with Ford and Gates is not counted twice.
@@ -200,9 +212,13 @@ filter**. It keeps the row once.
   so B goes.
 - Two filters on the funders mean one funder that passes both: *Gates* and *Public* keeps nothing,
   because no funder is both.
-- When the chart itself groups by the funder, a filter on the funder works on the pairs the chart
+- When the chart itself groups by the funders, a filter on the funders works on the pairs the chart
   shows. **Keep only Ford** leaves one bar. **Exclude Ford** removes the bar and leaves the other bars
-  as they were.
+  as they were. This holds for any field of the funders: **Exclude EU** on a chart by the kind of funder
+  takes C out of **Public** and keeps it in **Private** once, through Gates.
+- A filter tile lists the values of the funders table, with the number of funders for each. The rows
+  with no funder have no value there to tick, so unticking a funder in the list also leaves out the rows
+  with no funder. **Exclude** on a bar keeps them.
 - A chart with **Top N** and **Other** counts **Other** as the rows that have at least one funder
   outside the top N, each row once. The Other bar and the top bars can share a row.
 
@@ -213,8 +229,10 @@ Everything that needs the groups to add up to the whole is off for a group behin
 - A **share strip**, a **donut** and a **pie**, **100 % stacked bars**, **stacked bars**, and the
   value forms **% of total** and **% of group**. The words: *These shares would add up to more than
   100 %, because one row can be in two groups.*
-- A **running total** and a **year to date** along the groups, a **waterfall by category**, and the
-  **Other bar that the app makes itself** when a chart has many bars.
+- A **running total** and a **year to date** along groups behind the link table, a **waterfall by
+  category**, and the **Other bar that the app makes itself** when a chart has many bars. A running total
+  of a monthly line **split** by funder works: each funder's line adds up its own months, and a row is in
+  one month.
 - A **Sankey** chart with a stage behind a link table. It follows each row from one stage to the next.
 
 A change, a rank and a moving average do not need the groups to add up, so they work.
@@ -224,7 +242,16 @@ cannot add up a column of funders, because a funder would count once for each ro
 tile says so. Use the funders as a group or a filter, or start the tile from the funders.
 
 A path crosses **one** link table. If a second link table hangs off the funders, the tables behind it
-are not reachable from spending. Start the tile from the funders to cross it.
+are not reachable from spending. Start the tile from the funders to cross it. The tile says: *tags is
+linked to spending, but a row of spending would need many rows of tags. Start the tile from tags, or from
+a table nearer to it.*
+
+A value of the link table itself (the `share` of a pair) cannot be added up on a tile of spending either:
+it would count once for each pair. Use it as a filter or a group.
+
+When a table has a direct link from spending **and** a way through a link table, the field list uses
+the direct link. To group by the way through the link table, remove the direct link, or start the tile
+from the programmes.
 
 A link table whose two links lead to the **same** table (friends of friends, stock sent from a store to
 a store) does not give a second copy of that table. Use two named links for that, as in

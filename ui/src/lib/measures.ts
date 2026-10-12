@@ -52,7 +52,7 @@ export function additive(m: Pick<Measure, 'agg' | 'per' | 'named'>): boolean {
 // ---- the gate: does a value add up on this tile? (V4-D85d, V4-D99) --------------------------------------
 
 /** What the engine says a measure could not follow (`QueryResult.parts`). Only `repeats` and `overlap` matter here. */
-export type Parts = readonly { measure: number; repeats?: boolean; overlap?: boolean }[] | null | undefined;
+export type Parts = readonly { measure: number; repeats?: boolean; overlap?: boolean; splitOnly?: boolean }[] | null | undefined;
 
 /** A table of value `i` has the same number for every group of the tile (the engine says so in `parts`). */
 export const repeatsAt = (parts: Parts, i: number): boolean => !!parts?.some((p) => p.measure === i && p.repeats);
@@ -71,6 +71,20 @@ export function addsUpHere(tile: Pick<Tile, 'measures'>, i: number, parts?: Part
   if (!m) return true;
   return additive(m) && !repeatsAt(parts, i) && !overlapsAt(parts, i);
 }
+
+/**
+ * Value `i` adds up along the first group of the tile, inside each group of the split: what a running total
+ * and a year to date need. When only the split sits behind a link table, a row is in each series once
+ * (V4-D123), so the gate lets them through where it stops a share.
+ */
+export function addsUpAlong(tile: Pick<Tile, 'measures'>, i: number, parts?: Parts): boolean {
+  const m = tile.measures[i];
+  if (!m) return true;
+  return additive(m) && !repeatsAt(parts, i) && !parts?.some((p) => p.measure === i && p.overlap && !p.splitOnly);
+}
+
+/** The ways of showing a value that add up along the first group only. */
+export const ALONG_WAYS: readonly string[] = ['running', 'ytd'];
 
 /** The first value of the tile adds up here (or the tile has none, and counts rows). */
 export const addsUp = (tile: Pick<Tile, 'measures'>, parts?: Parts): boolean => addsUpHere(tile, 0, parts);

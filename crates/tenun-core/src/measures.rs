@@ -600,6 +600,20 @@ fn is_main(catalog: &Catalog, env: &Env<'_>, table: &str, column: &str) -> bool 
         || !env.rels.iter().any(|r| r.to.table == table)
 }
 
+/// The date a part of `table` is split by when a group or a filter of the question is a main date of
+/// another table: the main date of `table`, if it is a main date itself (`is_main`). A table of things
+/// (stores, with the day each opened) has none, so its part is not split by time (V4-D98, V4-D122).
+fn time_axis<'a>(catalog: &'a Catalog, env: &Env<'_>, table: &str) -> Option<&'a Column> {
+    main_date(catalog, env.tables, table).filter(|c| is_main(catalog, env, table, &c.name))
+}
+
+/// No link starts from the table or points at it.
+fn unlinked(env: &Env<'_>, table: &str) -> bool {
+    !env.rels
+        .iter()
+        .any(|r| r.from.table == table || r.to.table == table)
+}
+
 fn reads(
     catalog: &Catalog,
     env: &Env<'_>,
@@ -610,7 +624,7 @@ fn reads(
     let reaches = |table: &str, via: Option<&str>| -> Result<(), PathError> {
         Joins::new(home, links).add(table, via)
     };
-    let main = main_date(catalog, env.tables, home).map(|c| c.name.clone());
+    let main = time_axis(catalog, env, home).map(|c| c.name.clone());
     let mut dims = Vec::new();
     let mut remapped_dims = Vec::new();
     for d in &q.dimensions {
@@ -783,7 +797,7 @@ pub fn grain_wants(
     homes
         .into_iter()
         .filter_map(|h| {
-            let c = main_date(catalog, env.tables, &h)?;
+            let c = time_axis(catalog, env, &h)?;
             let t = catalog.table(&h)?;
             Some((h.clone(), c.name.clone(), t.sql_ref.clone()))
         })
@@ -1008,8 +1022,17 @@ pub fn compile(
     let mut notes: Vec<Vec<(String, bool)>> = vec![Vec::new(); groups.len()];
     for (gi, g) in groups.iter().enumerate() {
         let table = label(catalog, &g.home);
-        let main = main_date(catalog, env.tables, &g.home);
-        let has_main = main.is_some();
+        let main = time_axis(catalog, env, &g.home);
+        // The only date of a table of things: it is not read as a time (V4-D122).
+        let thing_date = main_date(catalog, env.tables, &g.home)
+            .filter(|_| main.is_none())
+            .map(|c| column_label(catalog, &g.home, &c.name));
+        let no_time = |what: &str, c: &str| match &thing_date {
+            Some(d) => format!(
+                "{table} is not {what} {c}. Its date {d} is not a main date: pick it in Data if it is one."
+            ),
+            None => format!("{table} has no main date, so it is not {what} {c}."),
+        };
         let period = main.and_then(|c| env.grains.get(&(g.home.clone(), c.name.clone())).copied());
         for (i, d) in q.dimensions.iter().enumerate() {
             if read[gi].dims[i].is_none() && read.iter().any(|r| r.dims[i].is_some()) {
@@ -1017,12 +1040,29 @@ pub fn compile(
                 let time = d.grain.is_some() && is_main(catalog, env, &d.table, &d.column);
                 // This table has the same value for every group: the groups do not add up (V4-D99a).
                 notes[gi].push((
-                    if time && !has_main {
-                        format!("{table} has no main date, so it is not split by {c}.")
+                    if time && main.is_none() {
+                        no_time("split by", &c)
                     } else {
                         format!("{table} is not split by {c}.")
                     },
                     true,
+                ));
+            }
+            // A table with no link at all is a table of events (V4-D111), so its date is read as this
+            // part's own date. When that table is not a part of the question, say so: it may be a table of
+            // things whose link is not drawn yet (V4-D122).
+            if read[gi].remapped_dims[i]
+                && unlinked(env, &d.table)
+                && !groups.iter().any(|x| x.home == d.table)
+                && let Some(m) = main
+            {
+                notes[gi].push((
+                    format!(
+                        "{} has no link to {table}, so {table} is split by its own date, {}.",
+                        label(catalog, &d.table),
+                        column_label(catalog, &g.home, &m.name)
+                    ),
+                    false,
                 ));
             }
             if read[gi].remapped_dims[i]
@@ -1047,8 +1087,8 @@ pub fn compile(
                 let c = column_label(catalog, &f.table, &f.column);
                 let time = is_main(catalog, env, &f.table, &f.column);
                 notes[gi].push((
-                    if time && !has_main {
-                        format!("{table} has no main date, so it is not filtered by {c}.")
+                    if time && main.is_none() {
+                        no_time("filtered by", &c)
                     } else {
                         format!("{table} is not filtered by {c}.")
                     },
@@ -1079,6 +1119,7 @@ pub fn compile(
                     note: n.clone(),
                     repeats: *repeats,
                     overlap: false,
+                    split_only: false,
                 };
                 if !parts.contains(&p) {
                     parts.push(p);
@@ -1096,15 +1137,34 @@ pub fn compile(
                 continue;
             }
             seen.push(s.group);
-            for note in scopes[s.group].overlap_notes() {
+            for note in scopes[s.group].filter_notes() {
                 let p = PartNote {
                     measure: j,
                     note,
                     repeats: false,
-                    overlap: true,
+                    overlap: false,
+                    split_only: false,
                 };
                 if !parts.contains(&p) {
                     parts.push(p);
+                }
+            }
+            // The first group of the scope is the first of the tile only when this part reads it.
+            let first = read[s.group].dims.first().is_some_and(Option::is_some)
+                && scopes[s.group].first_behind;
+            for note in scopes[s.group].overlap_notes() {
+                match parts
+                    .iter_mut()
+                    .find(|p| p.measure == j && p.overlap && p.note == note)
+                {
+                    Some(p) => p.split_only &= !first,
+                    None => parts.push(PartNote {
+                        measure: j,
+                        note,
+                        repeats: false,
+                        overlap: true,
+                        split_only: !first,
+                    }),
                 }
             }
         }

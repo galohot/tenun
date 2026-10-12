@@ -1509,6 +1509,104 @@ fn a_date_that_is_not_a_main_date_is_not_read_through_one() {
 }
 
 #[test]
+fn a_table_of_things_with_one_date_is_not_split_by_it_when_it_holds_a_part() {
+    // V4-D122. Sales point at stores; each store has the day it opened. Sales per square metre by the
+    // month of the sale: the floor space is the same 150 in every month, not the space of the stores that
+    // opened in that month (none did, so every month would be blank).
+    let w = world_of(
+        "d122",
+        "date,store_id,amount\n2026-01-10,1,300\n2026-01-20,2,150\n2026-02-05,1,200\n2026-03-15,2,90\n",
+        "id,name,sqm,opened\n1,A,100,2024-05-01\n2,B,50,2025-07-01\n",
+        "store_id,month,target\n1,2026-01-01,1\n",
+    );
+    let id = w.add("Per sqm", "SUM([sales].[amount]) / SUM([stores].[sqm])");
+    let r = w.q(json!({ "measures": [named(&id)], "dimensions": [w.month()] }));
+    same(&r, "2026-01-01", 450.0 / 150.0);
+    same(&r, "2026-02-01", 200.0 / 150.0);
+    same(&r, "2026-03-01", 90.0 / 150.0);
+    let notes: Vec<String> = r.parts.iter().map(|p| p.note.clone()).collect();
+    assert_eq!(
+        notes,
+        [
+            "stores is not split by date. Its date opened is not a main date: pick it in Data if it is one."
+        ]
+    );
+    assert!(r.parts[0].repeats);
+    // A window of sale days filters the sales only.
+    let january = json!({ "table": w.sales, "column": "date", "op": "between",
+                          "values": ["2026-01-01", "2026-01-31"] });
+    let f = w.q(json!({ "measures": [named(&id)], "filters": [january] }));
+    near(&f.rows[0][0], 450.0 / 150.0);
+    let notes: Vec<String> = f.parts.iter().map(|p| p.note.clone()).collect();
+    assert_eq!(
+        notes,
+        [
+            "stores is not filtered by date. Its date opened is not a main date: pick it in Data if it is one."
+        ]
+    );
+}
+
+#[test]
+fn a_date_of_a_table_with_no_link_reads_the_part_by_its_own_date_and_says_so() {
+    // V4-D111 reads a table with no link as a table of events. When that table holds no part of the
+    // question, it may be a table of things whose link is not drawn yet, so the tile says what it did.
+    let d = dir("d122-unlinked");
+    std::fs::write(
+        d.join("sales.csv"),
+        "date,product_id,amount\n2026-01-05,1,100\n2026-02-10,2,40\n2026-02-20,1,60\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.join("products.csv"),
+        "id,launch\n1,2024-02-01\n2,2025-03-01\n",
+    )
+    .unwrap();
+    let e = Engine::new(Secrets::new(d.join("secrets.json"))).unwrap();
+    for f in ["sales.csv", "products.csv"] {
+        e.add_source(AddSource::File {
+            path: d.join(f).to_string_lossy().into_owned(),
+        })
+        .unwrap();
+    }
+    let snap = e.snapshot();
+    let id = |name: &str| {
+        snap.tables
+            .iter()
+            .find(|t| t.name == name)
+            .unwrap()
+            .id
+            .clone()
+    };
+    let w = World {
+        e,
+        d,
+        sales: id("sales"),
+        stores: String::new(),
+        targets: String::new(),
+    };
+    let products = id("products");
+    let sales = w.add("Sales", "SUM([sales].[amount])");
+    let by_launch = json!({ "measures": [named(&sales)],
+        "dimensions": [{ "table": products, "column": "launch", "grain": "month" }] });
+    let r = w.q(by_launch.clone());
+    // Read by the month of the sale: January 100, February 40 + 60.
+    same(&r, "2026-01-01", 100.0);
+    same(&r, "2026-02-01", 100.0);
+    let notes: Vec<String> = r.parts.iter().map(|p| p.note.clone()).collect();
+    assert_eq!(
+        notes,
+        ["products has no link to sales, so sales is split by its own date, date."]
+    );
+    // With the link drawn, the launch month is the launch month: product 1 (Feb 2024) 160, product 2 40.
+    w.e.add_relationship(field(&w.sales, "product_id"), field(&products, "id"))
+        .unwrap();
+    let r = w.q(by_launch);
+    same(&r, "2024-02-01", 160.0);
+    same(&r, "2025-03-01", 40.0);
+    assert!(r.parts.is_empty(), "{:?}", r.parts);
+}
+
+#[test]
 fn a_day_window_against_a_monthly_main_date_says_which_month_it_leaves_out_or_keeps() {
     let r = review_world("d98-window");
     let id = r.w.add("Achievement", ACHIEVEMENT);

@@ -303,7 +303,7 @@ const PINS: &[(&str, &str)] = &[
     ),
     (
         "a field of a table nobody points to",
-        "error: orders is not related to regions. Draw a line between them in Model.",
+        "error: orders is linked to regions, but a row of regions would need many rows of orders. Start the tile from orders, or from a table nearer to it.",
     ),
 ];
 
@@ -1199,15 +1199,15 @@ const LINK_PINS: &[(&str, &str)] = &[
     ),
     (
         "spending by month and by kind of funder",
-        "SELECT strftime(date_trunc('month', t0.\"date\"), '%Y-%m-%d') AS \"d0\", t2.\"c0\" AS \"d1\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m2\" FROM \"s_s1\".\"spending\" AS t0 LEFT JOIN \"s_s2\".\"programmes\" AS t1 ON t0.\"programme_id\" = t1.\"id\" LEFT JOIN (SELECT DISTINCT t2.\"programme_id\" AS \"k\", CAST(t3.\"kind\" AS VARCHAR) AS \"c0\" FROM \"s_s4\".\"programme_funders\" AS t2 LEFT JOIN \"s_s3\".\"funders\" AS t3 ON t2.\"funder_id\" = t3.\"id\") AS t2 ON t1.\"id\" = t2.\"k\" GROUP BY 1, 2 ORDER BY 1 ASC, 2 ASC NULLS LAST LIMIT 1000\\n  params: []\\n  parts: [PartNote { measure: 0, note: \"A row of spending with two funders is under both. The total counts it once.\", repeats: false, overlap: true }]",
+        "SELECT strftime(date_trunc('month', t0.\"date\"), '%Y-%m-%d') AS \"d0\", t2.\"c0\" AS \"d1\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m2\" FROM \"s_s1\".\"spending\" AS t0 LEFT JOIN \"s_s2\".\"programmes\" AS t1 ON t0.\"programme_id\" = t1.\"id\" LEFT JOIN (SELECT DISTINCT t2.\"programme_id\" AS \"k\", CAST(t3.\"kind\" AS VARCHAR) AS \"c0\" FROM \"s_s4\".\"programme_funders\" AS t2 LEFT JOIN \"s_s3\".\"funders\" AS t3 ON t2.\"funder_id\" = t3.\"id\") AS t2 ON t1.\"id\" = t2.\"k\" GROUP BY 1, 2 ORDER BY 1 ASC, 2 ASC NULLS LAST LIMIT 1000\\n  params: []\\n  parts: [PartNote { measure: 0, note: \"A row of spending with two funders is under both. The total counts it once.\", repeats: false, overlap: true, split_only: true }]",
     ),
     (
         "a filter on a funder is a semi-join on the row",
-        "SELECT strftime(date_trunc('month', t0.\"date\"), '%Y-%m-%d') AS \"d0\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m1\" FROM \"s_s1\".\"spending\" AS t0 LEFT JOIN \"s_s2\".\"programmes\" AS t1 ON t0.\"programme_id\" = t1.\"id\" WHERE CAST(t0.\"amount\" AS DOUBLE) >= ? AND EXISTS (SELECT 1 FROM (SELECT t1.\"id\" AS \"k\") AS p LEFT JOIN \"s_s4\".\"programme_funders\" AS s0 ON p.\"k\" = s0.\"programme_id\" LEFT JOIN \"s_s3\".\"funders\" AS s1 ON s0.\"funder_id\" = s1.\"id\" WHERE (CAST(s1.\"name\" AS VARCHAR) IN (?) OR CAST(s1.\"name\" AS VARCHAR) IS NULL) AND NOT COALESCE((CAST(s1.\"kind\" AS VARCHAR) IN (?)), FALSE)) GROUP BY 1 ORDER BY 1 ASC LIMIT 1000\\n  params: [Double(10.0), Text(\"Ford\"), Text(\"Public\")]\\n  parts: []",
+        "SELECT strftime(date_trunc('month', t0.\"date\"), '%Y-%m-%d') AS \"d0\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m1\" FROM \"s_s1\".\"spending\" AS t0 LEFT JOIN \"s_s2\".\"programmes\" AS t1 ON t0.\"programme_id\" = t1.\"id\" WHERE CAST(t0.\"amount\" AS DOUBLE) >= ? AND EXISTS (SELECT 1 FROM (SELECT t1.\"id\" AS \"k\") AS p LEFT JOIN \"s_s4\".\"programme_funders\" AS s0 ON p.\"k\" = s0.\"programme_id\" LEFT JOIN \"s_s3\".\"funders\" AS s1 ON s0.\"funder_id\" = s1.\"id\" WHERE (CAST(s1.\"name\" AS VARCHAR) IN (?) OR CAST(s1.\"name\" AS VARCHAR) IS NULL) AND NOT COALESCE((CAST(s1.\"kind\" AS VARCHAR) IN (?)), FALSE)) GROUP BY 1 ORDER BY 1 ASC LIMIT 1000\\n  params: [Double(10.0), Text(\"Ford\"), Text(\"Public\")]\\n  parts: [PartNote { measure: 0, note: \"A row of spending with two funders is kept when one of them passes the filter, so Keep only and Exclude can both keep it.\", repeats: false }]",
     ),
     (
         "a filter on the field the chart groups by reads the same pairs",
-        "SELECT t2.\"c0\" AS \"d0\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m1\" FROM \"s_s1\".\"spending\" AS t0 LEFT JOIN \"s_s2\".\"programmes\" AS t1 ON t0.\"programme_id\" = t1.\"id\" LEFT JOIN (SELECT DISTINCT t2.\"programme_id\" AS \"k\", CAST(t3.\"name\" AS VARCHAR) AS \"c0\", CAST(t3.\"kind\" AS VARCHAR) AS \"c1\" FROM \"s_s4\".\"programme_funders\" AS t2 LEFT JOIN \"s_s3\".\"funders\" AS t3 ON t2.\"funder_id\" = t3.\"id\") AS t2 ON t1.\"id\" = t2.\"k\" WHERE NOT COALESCE((t2.\"c0\" IN (?)), FALSE) AND (t2.\"c1\" IN (?)) GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000\\n  params: [Text(\"Ford\"), Text(\"Private\")]\\n  parts: [PartNote { measure: 0, note: \"A row of spending with two funders is under both. The total counts it once.\", repeats: false, overlap: true }]",
+        "SELECT t2.\"c0\" AS \"d0\", CAST(sum(t0.\"amount\") AS DOUBLE) AS \"m1\" FROM \"s_s1\".\"spending\" AS t0 LEFT JOIN \"s_s2\".\"programmes\" AS t1 ON t0.\"programme_id\" = t1.\"id\" LEFT JOIN (SELECT DISTINCT t2.\"programme_id\" AS \"k\", CAST(t3.\"name\" AS VARCHAR) AS \"c0\", COALESCE(NOT COALESCE((CAST(t3.\"name\" AS VARCHAR) IN (?)), FALSE) AND (CAST(t3.\"kind\" AS VARCHAR) IN (?)), FALSE) AS \"p\" FROM \"s_s4\".\"programme_funders\" AS t2 LEFT JOIN \"s_s3\".\"funders\" AS t3 ON t2.\"funder_id\" = t3.\"id\") AS t2 ON t1.\"id\" = t2.\"k\" WHERE COALESCE(t2.\"p\", NOT COALESCE((CAST(NULL AS VARCHAR) IN (?)), FALSE) AND (CAST(NULL AS VARCHAR) IN (?))) GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC NULLS LAST LIMIT 1000\\n  params: [Text(\"Ford\"), Text(\"Private\"), Text(\"Ford\"), Text(\"Private\")]\\n  parts: [PartNote { measure: 0, note: \"A row of spending with two funders is under both. The total counts it once.\", repeats: false, overlap: true }]",
     ),
     (
         "budget by funder starts from the programmes",
@@ -1227,6 +1227,6 @@ const LINK_PINS: &[(&str, &str)] = &[
     ),
     (
         "spending by funder, nothing marked",
-        "error: funders is not related to spending. Draw a line between them in Model.",
+        "error: funders is linked to spending, but a row of spending would need many rows of funders. Start the tile from funders, or from a table nearer to it.",
     ),
 ];

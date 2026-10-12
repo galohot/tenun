@@ -513,6 +513,96 @@ fn a_filter_on_the_field_a_chart_groups_by_leaves_only_what_it_keeps() {
 }
 
 #[test]
+fn keep_only_and_exclude_on_a_total_can_both_keep_a_row_and_the_words_say_so() {
+    let w = world("keep-exclude");
+    // Keep only Gates: A 35 and C 90. Exclude Gates: A (Ford), B, C (EU) and D. A and C are in both.
+    let keep = w.q(
+        json!({ "measures": [w.amount()], "filters": [w.filter("name", "in", json!(["Gates"]))] }),
+    );
+    let drop = w.q(json!({ "measures": [w.amount()], "filters": [w.filter("name", "not_in", json!(["Gates"]))] }));
+    near(keep.rows[0][0].as_f64().unwrap(), 125.0);
+    near(drop.rows[0][0].as_f64().unwrap(), 215.0);
+    let words = "A row of spending with two funders is kept when one of them passes the filter, so Keep only and Exclude can both keep it.";
+    for r in [&keep, &drop] {
+        assert_eq!(r.parts.len(), 1, "{:?}", r.parts);
+        assert_eq!(r.parts[0].note, words);
+        assert!(!r.parts[0].overlap && !r.parts[0].repeats);
+    }
+    // The tile says it, the picture too.
+    let t = w.tile("kpi", json!([w.amount()]), json!([]), json!({}));
+    let f = DashFilter {
+        filter: serde_json::from_value::<Filter>(w.filter("name", "in", json!(["Gates"]))).unwrap(),
+        from_tile: "bars".into(),
+    };
+    let r = run_tile_public(&w.e, &t, std::slice::from_ref(&f)).unwrap();
+    assert!(r.notes.iter().any(|n| n == words), "{:?}", r.notes);
+    // A chart by funder reads the filter on its own pairs: no row passes both, and no such words.
+    let by = w.q(json!({
+        "measures": [w.amount()], "dimensions": [w.funder("name")],
+        "filters": [w.filter("name", "in", json!(["Gates"]))]
+    }));
+    assert!(by.parts.iter().all(|p| p.note != words), "{:?}", by.parts);
+}
+
+#[test]
+fn a_filter_on_a_finer_field_than_the_group_counts_each_row_once_in_its_group() {
+    let w = world("finer");
+    // Exclude EU, by kind. A (Ford, Gates) 35, B (Ford, Wellcome) 30 and C (Gates; EU is excluded) 90 are
+    // Private once each: 155. C has no Public funder left. D has no funder, and a blank is not EU: 60.
+    same(
+        w.by("kind", json!([w.filter("name", "not_in", json!(["EU"]))])),
+        &[("Private", 155.0), (BLANK, 60.0)],
+    );
+    // Keep only Ford and Gates, by kind: the same three programmes, once each. The number tile agrees.
+    let two = json!([w.filter("name", "in", json!(["Ford", "Gates"]))]);
+    same(w.by("kind", two.clone()), &[("Private", 155.0)]);
+    near(w.total(two), 155.0);
+    // A filter on the link table itself: every share is at least 0.4, so no pair is cut. D has no pair,
+    // so its share is blank, and a blank is not at least 0.3.
+    let share = json!([{ "table": w.pairs, "column": "share", "op": "gte", "values": [0.3] }]);
+    same(w.by("kind", share), &[("Private", 155.0), ("Public", 90.0)]);
+    // A ratio of two tables by kind, EU excluded: spending over the budgets of the same programmes.
+    // Private: 155 over A 100 + B 200 + C 300. No funder: D, 60 over 400.
+    let id = add_measure(
+        &w,
+        "Spent of budget",
+        "SUM([spending].[amount]) / SUM([programmes].[budget])",
+    );
+    let r = w.q(json!({
+        "measures": [{ "named": id, "table": "", "column": null, "agg": "sum" }],
+        "dimensions": [w.funder("kind")],
+        "filters": [w.filter("name", "not_in", json!(["EU"]))]
+    }));
+    same(
+        pairs(&r),
+        &[("Private", 155.0 / 600.0), (BLANK, 60.0 / 400.0)],
+    );
+}
+
+#[test]
+fn a_pair_written_twice_with_other_values_or_a_name_of_two_funders_counts_once() {
+    // A has Ford twice, with two shares. Funder 5 is a second Ford, Public, and B has both Fords.
+    let funders = format!("{FUNDERS}5,Ford,Public\n");
+    let pairs_text = format!("{PAIRS}1,1,0.7\n2,5,0.2\n");
+    let w = world_of("twice", PROGRAMMES, &funders, &pairs_text, SPENDING);
+    w.mark(true);
+    // Ford by name, with a share filter that both of A's pairs pass: A 35 and B 30, once each.
+    let share = json!([{ "table": w.pairs, "column": "share", "op": "gte", "values": [0.3] }]);
+    let got = w.by("name", share);
+    assert!(got.contains(&("Ford".to_string(), 65.0)), "{got:?}");
+    // Both kinds kept, by name: B is under Ford once, though its two Fords differ in kind.
+    let got = w.by(
+        "name",
+        json!([w.filter("kind", "in", json!(["Private", "Public"]))]),
+    );
+    assert!(got.contains(&("Ford".to_string(), 65.0)), "{got:?}");
+    // By kind, the share of 0.2 is cut: B keeps its Private Ford and is not Public (it would make Public
+    // 120). D has no pair and a blank share.
+    let small = json!([{ "table": w.pairs, "column": "share", "op": "gte", "values": [0.3] }]);
+    same(w.by("kind", small), &[("Private", 155.0), ("Public", 90.0)]);
+}
+
+#[test]
 fn a_click_on_a_funder_filters_a_monthly_line() {
     let w = world("cross");
     let line = w.tile(
@@ -821,6 +911,68 @@ fn a_share_of_the_whole_is_refused_with_words_and_the_value_is_shown() {
         json!({ "showAs": ["change"] }),
     );
     assert!(run_tile(&w.e, &c, &[]).is_ok());
+    // A running total of a month line split by funder adds along the months of each funder, where each row is
+    // once (V4-D123). Ford: January A 10 + B 30 = 40, February A 25: 65. Gates: A 10 + C 40 = 50, then A 25 +
+    // C 50: 125. EU: 40, then 90.
+    let run = w.tile(
+        "line",
+        json!([w.amount()]),
+        json!([w.month(), w.funder("name")]),
+        json!({ "showAs": ["running"] }),
+    );
+    let r = run_tile(&w.e, &run, &[]).unwrap();
+    let at = |m: &str, f: &str| {
+        r.rows
+            .iter()
+            .find(|x| x[0] == json!(m) && x[1] == json!(f))
+            .and_then(|x| x[2].as_f64())
+    };
+    assert_eq!(
+        [at("2026-01-01", "Ford"), at("2026-02-01", "Ford")],
+        [Some(40.0), Some(65.0)],
+        "{:?}",
+        r.rows
+    );
+    assert_eq!(
+        [at("2026-01-01", "Gates"), at("2026-02-01", "Gates")],
+        [Some(50.0), Some(125.0)]
+    );
+    assert_eq!(
+        [at("2026-01-01", "EU"), at("2026-02-01", "EU")],
+        [Some(40.0), Some(90.0)]
+    );
+    assert!(
+        r.columns[2].name.ends_with("(running total)"),
+        "{:?}",
+        r.columns
+    );
+    assert!(
+        r.parts.iter().all(|p| p.overlap && p.split_only),
+        "{:?}",
+        r.parts
+    );
+    // A share of that tile is still refused: the funders of one month add up to more than the month.
+    let share = w.tile(
+        "line",
+        json!([w.amount()]),
+        json!([w.month(), w.funder("name")]),
+        json!({ "showAs": ["pct_total"] }),
+    );
+    let s = run_tile(&w.e, &share, &[]).unwrap();
+    assert!(s.columns[2].unit.is_none());
+    // With the funder first, a running total would add a row once for each of its funders: refused.
+    let first = w.tile(
+        "bar",
+        json!([w.amount()]),
+        json!([w.funder("name"), w.month()]),
+        json!({ "showAs": ["running"] }),
+    );
+    let f = run_tile(&w.e, &first, &[]).unwrap();
+    assert!(
+        f.parts.iter().any(|p| p.overlap && !p.split_only),
+        "{:?}",
+        f.parts
+    );
     // The same tile on the month, which is not behind a link table, shares as it always did.
     let by_month = w.tile(
         "bar",
@@ -852,23 +1004,85 @@ fn a_sankey_across_a_link_table_says_why_it_cannot_follow_a_row() {
 fn an_unmarked_table_is_not_crossed_and_marking_it_is_all_it_takes() {
     let w = world_of("unmarked", PROGRAMMES, FUNDERS, PAIRS, SPENDING);
     let q = json!({ "measures": [w.amount()], "dimensions": [w.funder("name")] });
-    match w.err(q.clone()) {
-        QueryError::Unreachable(a, b) => {
-            assert_eq!((a.as_str(), b.as_str()), ("spending", "funders"))
-        }
-        other => panic!("{other:?}"),
-    }
+    // A line joins them, so the words do not say "draw a line": they name the table to mark (V4-D124).
+    let e = w.err(q.clone());
+    assert_eq!(
+        e.to_string(),
+        "funders can be used with spending only through programme_funders. Mark programme_funders as a link table in Model."
+    );
     w.mark(true);
     assert_eq!(w.q(q.clone()).rows.len(), 5);
     // Unmarked again: the same words, and the filters that need the crossing are skipped and told.
     w.mark(false);
-    assert!(matches!(w.err(q), QueryError::Unreachable(..)));
+    assert!(matches!(w.err(q), QueryError::NeedsMark(..)));
     let r = w.q(json!({
         "measures": [w.amount()],
         "filters": [w.filter("name", "in", json!(["Ford"]))]
     }));
     assert_eq!(r.ignored_filters, vec![0]);
     near(r.rows[0][0].as_f64().unwrap(), 215.0);
+}
+
+#[test]
+fn a_table_a_line_leads_to_but_no_tile_can_read_says_where_to_start_not_to_draw_a_line() {
+    let w = world("no-way");
+    // A second link table behind the funders: funder_tags (funder_id, tag_id), marked, and the tags. Ford has
+    // two tags, so the funders cannot read the tags one to one.
+    for (f, text) in [
+        ("funder_tags.csv", "funder_id,tag_id\n1,1\n1,2\n2,1\n3,2\n"),
+        ("tags.csv", "id,name\n1,Health\n2,Climate\n"),
+    ] {
+        std::fs::write(w.d.join(f), text).unwrap();
+        w.e.add_source(AddSource::File {
+            path: w.d.join(f).to_string_lossy().into_owned(),
+        })
+        .unwrap();
+    }
+    let snap = w.e.snapshot();
+    let id = |n: &str| snap.tables.iter().find(|t| t.name == n).unwrap().id.clone();
+    let (ft, tags) = (id("funder_tags"), id("tags"));
+    w.e.add_relationship(field(&ft, "funder_id"), field(&w.funders, "id"))
+        .unwrap();
+    w.e.add_relationship(field(&ft, "tag_id"), field(&tags, "id"))
+        .unwrap();
+    let on = TableSetup {
+        link_table: true,
+        ..Default::default()
+    };
+    w.e.set_table_setup(&ft, Some(on)).unwrap();
+    // Two link tables in a row are refused (V4-D112), with words that fit.
+    let e = w.err(json!({
+        "measures": [w.amount()], "dimensions": [{ "table": tags, "column": "name" }]
+    }));
+    assert_eq!(
+        e.to_string(),
+        "tags is linked to spending, but a row of spending would need many rows of tags. Start the tile from tags, or from a table nearer to it."
+    );
+    // The many side, read from the one side: the programmes, by the month of the spending. The data says
+    // which table repeats, and the words say that (V4-D53).
+    let e = w.err(json!({
+        "measures": [{ "table": w.programmes, "column": "budget", "agg": "sum" }],
+        "dimensions": [w.month()]
+    }));
+    assert!(matches!(e, QueryError::OneWay(..)), "{e:?}");
+    // A table no line leads to is still "not related".
+    std::fs::write(w.d.join("alone.csv"), "x\n1\n").unwrap();
+    w.e.add_source(AddSource::File {
+        path: w.d.join("alone.csv").to_string_lossy().into_owned(),
+    })
+    .unwrap();
+    let alone =
+        w.e.snapshot()
+            .tables
+            .iter()
+            .find(|t| t.name == "alone")
+            .unwrap()
+            .id
+            .clone();
+    let e = w.err(json!({
+        "measures": [w.amount()], "dimensions": [{ "table": alone, "column": "x" }]
+    }));
+    assert!(matches!(e, QueryError::Unreachable(..)), "{e:?}");
 }
 
 #[test]
@@ -887,6 +1101,15 @@ fn a_value_cannot_be_read_from_behind_a_link_table() {
         }
         other => panic!("{other:?}"),
     }
+    // A value of the link table itself: the words do not say it sits behind itself (V4-D124).
+    let e = w.err(json!({
+        "measures": [w.amount(), { "table": w.pairs, "column": "share", "agg": "sum" }],
+        "dimensions": [w.month()]
+    }));
+    assert_eq!(
+        e.to_string(),
+        "programme_funders is a link table, so a value of it would be counted once for each of its rows. Use programme_funders as a group or a filter, not as a value."
+    );
     // The funders as the rows of the tile, with a group of the programmes behind the link table,
     // is the same crossing the other way, and is fine.
     let r = w.q(json!({
@@ -1006,6 +1229,25 @@ fn the_mark_is_in_the_file_only_when_it_is_set() {
     w.mark(false);
     w.e.save(Some(path.clone())).unwrap();
     assert_eq!(std::fs::read_to_string(&path).unwrap(), plain);
+    // "Not a link table" is kept in the file, so the suggestion stays away after a reopen. It changes no
+    // tile. A mark takes it away.
+    let not = TableSetup {
+        not_link_table: true,
+        ..Default::default()
+    };
+    assert!(!w.e.set_table_setup(&w.pairs, Some(not)).unwrap());
+    w.e.save(Some(path.clone())).unwrap();
+    let dismissed = std::fs::read_to_string(&path).unwrap();
+    assert!(dismissed.contains("\"notLinkTable\": true"), "{dismissed}");
+    let both = TableSetup {
+        link_table: true,
+        not_link_table: true,
+        ..Default::default()
+    };
+    w.e.set_table_setup(&w.pairs, Some(both)).unwrap();
+    w.e.save(Some(path.clone())).unwrap();
+    let marked = std::fs::read_to_string(&path).unwrap();
+    assert!(!marked.contains("notLinkTable"), "{marked}");
 }
 
 #[test]

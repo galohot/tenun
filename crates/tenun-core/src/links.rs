@@ -514,6 +514,8 @@ pub(crate) fn search<'a>(base: &str, links: impl Into<Links<'a>>) -> Search {
                     if r.to.table == t && links.backward_ok(r) {
                         steps.push((links.edge(r, false), &r.from.table));
                     }
+                // `forward_ok` states the rule; it never decides alone. A usable link that may not be read
+                // the stored way may be read backward, and pass 2 already reached that table.
                 } else if r.to.table == t && links.crosses(&r.from.table) && links.forward_ok(r) {
                     steps.push((links.cross_edge(r), &r.from.table));
                 }
@@ -551,6 +553,56 @@ pub(crate) fn search<'a>(base: &str, links: impl Into<Links<'a>>) -> Search {
 /// See [`search`].
 pub(crate) fn reach<'a>(base: &str, links: impl Into<Links<'a>>) -> HashMap<String, Option<Edge>> {
     search(base, links).edge
+}
+
+/// The tables joined to `base` by some line of the Model view, whatever its direction or its data.
+pub(crate) fn connected(base: &str, rels: &[Relationship]) -> HashSet<String> {
+    let mut seen: HashSet<String> = HashSet::from([base.to_string()]);
+    let mut todo = vec![base.to_string()];
+    while let Some(t) = todo.pop() {
+        for r in rels {
+            for (a, b) in [(&r.from.table, &r.to.table), (&r.to.table, &r.from.table)] {
+                if *a == t && seen.insert(b.clone()) {
+                    todo.push(b.clone());
+                }
+            }
+        }
+    }
+    seen
+}
+
+/// A table that is not marked as a link table and that, marked, would let `base` read `table`: the
+/// table of pairs a person forgot to mark (V4-D124). Only a table two or more link columns start from
+/// can be one, as for the hand switch of the Model view.
+pub(crate) fn mark_would_reach(base: &str, table: &str, links: Links<'_>) -> Option<String> {
+    let marks = links.marks?;
+    let mut candidates: Vec<&str> = Vec::new();
+    for r in links.rels {
+        let t = r.from.table.as_str();
+        if candidates.contains(&t) || marks.get(t).is_some_and(|s| s.link_table) {
+            continue;
+        }
+        let columns: HashSet<&str> = links
+            .rels
+            .iter()
+            .filter(|x| x.from.table == t)
+            .map(|x| x.from.column.as_str())
+            .collect();
+        if columns.len() >= 2 {
+            candidates.push(t);
+        }
+    }
+    candidates.into_iter().find_map(|x| {
+        let mut more = marks.clone();
+        more.entry(x.to_string()).or_default().link_table = true;
+        let marked = Links {
+            marks: Some(&more),
+            ..links
+        };
+        reach(base, marked)
+            .contains_key(table)
+            .then(|| x.to_string())
+    })
 }
 
 /// The links a path to `table` may start with: the first link of every shortest path from `base`.

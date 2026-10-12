@@ -78,6 +78,8 @@ export interface TableSetup {
   mainDate?: string;
   /** The table only holds links between other tables (programme, funder): a query may cross it from its one side, which makes many to many work. */
   linkTable?: boolean;
+  /** The person said the table is not a link table: the Model view stops suggesting the mark. A marked table never has it. */
+  notLinkTable?: boolean;
 }
 
 /** The place of a problem in a formula, in UTF-16 units: `formula.slice(at, at + len)` is the culprit. */
@@ -374,7 +376,7 @@ export interface QueryResult {
   /** Compare charts over two periods: the two periods, in the order of the two value columns. */
   pair?: { periods: Cell[] | null };
   /** Named measures: a group or a filter that one table of the formula cannot reach, so it is left out of it. The words are also in `notes`. */
-  parts?: { measure: number; note: string; repeats?: boolean; overlap?: boolean }[];
+  parts?: { measure: number; note: string; repeats?: boolean; overlap?: boolean; splitOnly?: boolean }[];
 }
 
 /**

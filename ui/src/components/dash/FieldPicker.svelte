@@ -3,7 +3,7 @@
   import { app } from '../../lib/state.svelte';
   import { typeIcon } from '../../lib/ui';
   import { blankNote, isShown } from '../../lib/prep';
-  import { behindFrom, fieldGroups, groupOf, labelOfLink } from '../../lib/links';
+  import { behindFrom, fieldGroups, groupOf, labelOfLink, valueBehind } from '../../lib/links';
   import { nameOf } from '../../lib/measures';
   import Icon from '../Icon.svelte';
 
@@ -164,7 +164,7 @@
         {/if}
         {#each groups as { g, cols } (g.key)}
           {@const far = reachable && !reachable.has(g.table.id)}
-          {@const hidden = mode === 'measure' && behind.has(g.table.id)}
+          {@const hidden = valueBehind(mode, behind, g.table.id)}
           <div class="group" class:far={far || hidden}>
             <div class="gh">
               <Icon name="table" size={12} />{g.title}

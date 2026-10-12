@@ -429,6 +429,13 @@ That date is the **main date** of the table.
   other tables point at that table, and none of its links starts from it. A group or a filter on it follows the plain
   rule: a table that cannot reach it is not split or not filtered by it, and says so. If you pick a
   main date for a table yourself, it counts, whatever the table is for.
+- **The same holds for the table of a part.** `SUM([sales].[amount]) / SUM([stores].[sqm])` by the month
+  of the sale: `stores` has only the day each store opened, so the floor space is not split by month. It
+  is the same in every month, and the tile says *stores is not split by date. Its date opened is not a
+  main date: pick it in Data if it is one.*
+- A table with no links at all counts as a table of events. When it is not a part of the formula, a
+  group on its date reads each part by the part's own date, and the tile says so: *products has no link
+  to sales, so sales is split by its own date, date.* Draw the link, and the group follows it.
 - A date filter works the same way. A filter on "last 30 days" of `sales.date` also filters `targets`
   by its main date.
 - If a table has no main date, a chart over time cannot split it. It says so (see below).

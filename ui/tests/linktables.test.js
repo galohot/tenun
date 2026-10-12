@@ -3,15 +3,15 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { andList, suggestLinkTables } from '../src/lib/linktables.ts';
-import { behindFrom, fieldGroups, firstLinks, linkTablesOf, reachableFrom, search } from '../src/lib/links.ts';
-import { addsUp, addsUpHere, overlapsAt, setKnownMeasures, tileProblem, whyNotAdded } from '../src/lib/measures.ts';
+import { andList, canMarkLinkTable, notLinkTablesOf, suggestLinkTables } from '../src/lib/linktables.ts';
+import { behindFrom, fieldGroups, firstLinks, linkTablesOf, reachableFrom, search, valueBehind } from '../src/lib/links.ts';
+import { addsUp, addsUpAlong, addsUpHere, overlapsAt, setKnownMeasures, tileProblem, whyNotAdded } from '../src/lib/measures.ts';
 import { foldable, stackMode, stackableTile } from '../src/lib/charts/math.ts';
 import { foldSeries, splitKept } from '../src/lib/charts/fold.ts';
 import { pictureKind } from '../src/lib/picture.ts';
 import { effectiveShowAs, showAsOptions } from '../src/lib/showas.ts';
 import { suggestTypes } from '../src/lib/suggest.ts';
-import { isEmptySetup, withColumn, withLinkTable } from '../src/lib/prep.ts';
+import { isEmptySetup, withColumn, withLinkTable, withNotLinkTable } from '../src/lib/prep.ts';
 
 const table = (id, label, cols) => ({ id, label, name: label, source_id: id.split('/')[0], columns: cols.map((c) => ({ name: c, dtype: 'text', raw_type: '' })) });
 const spending = table('s1/spending', 'spending', ['id', 'programme_id', 'date', 'amount']);
@@ -62,6 +62,61 @@ test('a fact table, a table two links lead to, and a table that points at one ta
   // A link nobody has read yet counts as repeating.
   assert.equal(suggestLinkTables(tables, rels, {}).length, 1);
   assert.equal(suggestLinkTables(tables, rels, undefined).length, 1);
+});
+
+test('V4-D124: a table of events with two links is not suggested; a table whose name names both sides, or that is all keys, is', () => {
+  const stores = table('s5/stores', 'stores', ['id', 'name']);
+  const products = table('s6/products', 'products', ['id', 'name']);
+  const two = (t, a, b) => [rel(`${t.id}-a`, [t.id, a[0]], [a[1], 'id']), rel(`${t.id}-b`, [t.id, b[0]], [b[1], 'id'])];
+  // sales (store_id, product_id, qty): two links, few columns, and a name that names neither table.
+  const sales = table('s7/sales', 'sales', ['store_id', 'product_id', 'qty']);
+  assert.deepEqual(suggestLinkTables([sales, stores, products], two(sales, ['store_id', 's5/stores'], ['product_id', 's6/products']), {}), []);
+  // A transaction and an order are the same: rows of events.
+  const accounts = table('s8/accounts', 'accounts', ['id']);
+  const categories = table('s9/categories', 'categories', ['id']);
+  const tx = table('s10/transactions', 'transactions', ['account_id', 'category_id', 'amount']);
+  assert.deepEqual(suggestLinkTables([tx, accounts, categories], two(tx, ['account_id', 's8/accounts'], ['category_id', 's9/categories']), {}), []);
+  // Its name names both sides, through the tables or the key columns: product_categories, store_products.
+  const pc = table('s11/product_categories', 'product_categories', ['product_id', 'category_id', 'rank']);
+  assert.equal(suggestLinkTables([pc, products, categories], two(pc, ['product_id', 's6/products'], ['category_id', 's9/categories']), {}).length, 1);
+  const sp = table('s12/StoreProduct', 'StoreProduct', ['shop', 'item', 'since']);
+  assert.equal(suggestLinkTables([sp, stores, products], two(sp, ['shop', 's5/stores'], ['item', 's6/products']), {}).length, 1);
+  // Every column is a key: enrolments (student_id, course_id).
+  const students = table('s13/students', 'students', ['id']);
+  const courses = table('s14/courses', 'courses', ['id']);
+  const en = table('s15/enrolments', 'enrolments', ['student_id', 'course_id']);
+  assert.equal(suggestLinkTables([en, students, courses], two(en, ['student_id', 's13/students'], ['course_id', 's14/courses']), {}).length, 1);
+  // A link table with a name of its own and a column more is left to the hand switch.
+  const grants = table('s16/grants', 'grants', ['programme_id', 'funder_id', 'share']);
+  const grantRels = two(grants, ['programme_id', 's2/programmes'], ['funder_id', 's3/funders']);
+  assert.deepEqual(suggestLinkTables([grants, programmes, funders], grantRels, {}), []);
+  assert.equal(canMarkLinkTable('s16/grants', grantRels), true);
+});
+
+test('V4-D119: the hand switch needs two link columns, and "not a link table" is kept in the setup until a mark', () => {
+  assert.equal(canMarkLinkTable('s4/programme_funders', rels), true);
+  assert.equal(canMarkLinkTable('s1/spending', rels), false);
+  // Two links from one column are one column.
+  const again = rel('r9', ['s1/spending', 'programme_id'], ['s3/funders', 'id']);
+  assert.equal(canMarkLinkTable('s1/spending', [...rels, again]), false);
+  const set = withNotLinkTable({ mainDate: 'date' });
+  assert.deepEqual(set, { mainDate: 'date', notLinkTable: true });
+  assert.deepEqual(notLinkTablesOf({ 's4/programme_funders': withNotLinkTable(undefined), 's2/programmes': {} }), ['s4/programme_funders']);
+  assert.deepEqual(suggestLinkTables(tables, rels, repeating, new Set(), notLinkTablesOf({ 's4/programme_funders': { notLinkTable: true } })), []);
+  // A mark takes it away, and an unmark leaves nothing.
+  assert.deepEqual(withLinkTable(withNotLinkTable(undefined), true), { linkTable: true });
+  assert.equal(isEmptySetup(withLinkTable({ linkTable: true }, false)), true);
+  assert.equal(isEmptySetup(withNotLinkTable(undefined)), false);
+});
+
+test('V4-D117: a value cannot be picked from a table behind a link table; a group or a filter can', () => {
+  const behind = behindFrom('s1/spending', rels, repeating, new Set(['s4/programme_funders']));
+  assert.equal(valueBehind('measure', behind, 's3/funders'), true);
+  assert.equal(valueBehind('measure', behind, 's4/programme_funders'), true);
+  assert.equal(valueBehind('measure', behind, 's2/programmes'), false);
+  assert.equal(valueBehind('dim', behind, 's3/funders'), false);
+  assert.equal(valueBehind('filter', behind, 's3/funders'), false);
+  assert.match(readFileSync(new URL('../src/components/dash/FieldPicker.svelte', import.meta.url), 'utf8'), /hidden = valueBehind\(mode, behind, g\.table\.id\)/);
 });
 
 test('the words list tables the way a person does', () => {
@@ -141,6 +196,23 @@ test('V4-D112: a group behind a link table makes a sum not add up on that tile, 
   const bar = tile('bar', [sum], { dims: [{ table: 's3/funders', column: 'name' }] });
   assert.ok(suggestTypes(bar, tablesList, 5).some((s) => s.type === 'share'));
   assert.ok(!suggestTypes(bar, tablesList, 5, overlap).some((s) => s.type === 'share'));
+});
+
+test('V4-D123: when only the split sits behind a link table, a running total and a year to date are offered, a share is not', () => {
+  const splitOnly = [{ ...overlap[0], splitOnly: true }];
+  const line = tile('line', [sum], { dims: [{ table: 's1/spending', column: 'date', grain: 'month' }, { table: 's3/funders', column: 'name' }] });
+  const offered = showAsOptions(line, 'date', 0, splitOnly);
+  assert.ok(offered.includes('running') && offered.includes('ytd'), offered.join());
+  assert.ok(!offered.includes('pct_total') && !offered.includes('pct_group'), offered.join());
+  assert.equal(effectiveShowAs({ ...line, showAs: ['running'] }, 0, 'date', splitOnly), 'running');
+  assert.equal(effectiveShowAs({ ...line, showAs: ['pct_total'] }, 0, 'date', splitOnly), null);
+  // The rest of the gate is the same: no stacking, no Other.
+  assert.equal(addsUpHere(line, 0, splitOnly), false);
+  assert.equal(addsUpAlong(line, 0, splitOnly), true);
+  // The first group behind the link table: refused, as is a value that does not add up at all.
+  assert.ok(!showAsOptions(line, 'date', 0, overlap).includes('running'));
+  assert.equal(addsUpAlong(line, 0, overlap), false);
+  assert.equal(addsUpAlong(tile('line', [{ ...sum, agg: 'avg' }]), 0, splitOnly), false);
 });
 
 test('V4-D112: a share chart and a waterfall by category are refused with words, and every picture asks the same', () => {

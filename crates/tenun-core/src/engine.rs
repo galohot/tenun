@@ -2782,12 +2782,13 @@ const CALC_NOTE: &str = "calc:";
 /// a link table put a row under several of them (V4-D112). The sentence names table labels only.
 const OVERLAP_NOTE: &str = "overlap:";
 
-/// Tells the tile that its groups overlap, for a question that runs as a custom SELECT and has no
-/// `parts` to say it with.
+/// Tells the tile that its groups overlap, or that a filter behind a link table can keep a row twice over
+/// (V4-D125), for a question that runs as a custom SELECT and has no `parts` to say it with.
 fn note_overlap(sc: &query::Scope<'_>) {
     let notes: Vec<String> = sc
         .overlap_notes()
         .into_iter()
+        .chain(sc.filter_notes())
         .map(|n| format!("{OVERLAP_NOTE}{n}"))
         .collect();
     if !notes.is_empty() {
