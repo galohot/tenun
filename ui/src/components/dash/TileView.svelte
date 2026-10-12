@@ -13,6 +13,7 @@
   import { downloadCsv, downloadTilePng, downloadXlsx } from '../../lib/output';
   import Menu from './Menu.svelte';
   import TileBody from './TileBody.svelte';
+  import { cardGround, drawnTile } from '../../lib/card';
 
   let {
     tile,
@@ -147,8 +148,11 @@
   // A link this tile crosses repeats a key on its one side, so the first row was used (V4-D26).
   const linkNotes = $derived(res?.notes ?? []);
   const title = $derived(tileTitle(tile, app.tables, res?.parts));
-  // A note or a picture with no title has no header, so the whole tile drags.
-  const bare = $derived((fixed || tile.type === 'filter') && !title);
+  // A number card (build 08) is drawn with its style merged in; it fills the tile with its ground and draws its own title.
+  const drawn = $derived(drawnTile(tile, app.snap?.workspace.cardStyles));
+  const ground = $derived(cardGround(drawn));
+  // A note or a picture with no title has no header, so the whole tile drags. Nor has a card.
+  const bare = $derived(((fixed || tile.type === 'filter') && !title) || !!ground);
   const canPick = $derived(tile.type === 'histogram' ? tile.measures.length > 0 : tile.type !== 'kpi' && tile.type !== 'cohort' && tile.type !== 'filter' && tile.dims.length > 0);
   // Tiles with a result to open large and rows behind them.
   const hasData = $derived(!fixed && tile.type !== 'filter' && !!q && !!res && !error);
@@ -207,7 +211,7 @@
 
 <!-- A tile is a stop for the keyboard: arrows go to the next and the previous tile, Enter opens it. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-<article class="tile" class:active class:bare class:phone bind:this={el} tabindex="0" data-tile={tile.id} aria-label={title || 'Tile'} onkeydown={onkey}>
+<article class="tile" class:active class:bare class:phone class:onaccent={ground === 'accent'} style:background={ground ? `var(--${ground})` : undefined} bind:this={el} tabindex="0" data-tile={tile.id} aria-label={title || 'Tile'} onkeydown={onkey}>
   <header role="group" aria-label={phone ? undefined : 'Drag to move'} onpointerdown={phone ? undefined : ondragstart}>
     <h3 title={title}>{title}</h3>
     {#if loading}<span class="spin" aria-label="Loading"></span>{/if}
@@ -240,7 +244,7 @@
       <!-- One tile that fails to draw says so; the other tiles stay. -->
       <svelte:boundary>
         <TileBody
-          {tile}
+          tile={drawn}
           {res}
           {colors}
           {selected}
@@ -329,6 +333,10 @@
   .bare header { position: absolute; top: 4px; right: 4px; z-index: 2; height: 24px; padding: 0; background: transparent; border-radius: 12px; }
   .bare:hover header, .bare.active header { background: var(--surface); }
   .bare h3 { display: none; }
+  /* On the accent ground the words around the card take its ink (build 08). */
+  .onaccent footer, .onaccent .resize { color: var(--on-accent); }
+  /* A phone shows the one button at all times: on the accent it sits on a pill of the surface, so it reads. */
+  .phone.onaccent header { background: var(--surface); }
   .bare .body { padding-top: 12px; cursor: grab; }
   .setup {
     width: 100%;

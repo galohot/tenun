@@ -9,6 +9,7 @@
   import Icon from '../components/Icon.svelte';
   import FocusSheet from '../components/dash/FocusSheet.svelte';
   import TileBody from '../components/dash/TileBody.svelte';
+  import { cardGround } from '../lib/card';
   import { filterText } from '../lib/filterText';
   import { partialNote } from '../lib/run';
   import { setLinkNames } from '../lib/links';
@@ -181,6 +182,8 @@
       {#each layout as l (l.t.id)}
         {@const r = resultFor(l.t)}
         {@const name = data.titles?.[l.t.id] ?? tileTitle(l.t, data.tables, r?.res.parts)}
+        <!-- A number card fills its tile with its ground and draws its own title (build 08). -->
+        {@const ground = cardGround(l.t)}
         <!-- A tile is a stop for the keyboard: arrows go to the next and the previous tile, Enter opens it large. -->
         <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
         <article
@@ -191,14 +194,15 @@
           onkeydown={(e) => onkey(e, l.t)}
           style:transform="translate({l.x}px, {l.y}px)"
           style:width="{l.w}px"
-          style:height="{l.h}px">
-          {#if name !== ''}
+          style:height="{l.h}px"
+          style:background={ground ? `var(--${ground})` : undefined}>
+          {#if name !== '' && !ground}
             <h3>{name}</h3>
           {/if}
           {#if r.res && !isStatic(l.t) && l.t.type !== 'filter'}
             <button class="expand" title="Open large" aria-label="Open large" onclick={() => (focusId = l.t.id)}><Icon name="expand" size={14} /></button>
           {/if}
-          <div class="body" class:bare={(isStatic(l.t) || l.t.type === 'filter') && !l.t.title}>
+          <div class="body" class:bare={((isStatic(l.t) || l.t.type === 'filter') && !l.t.title) || !!ground}>
             {#if r.res || isStatic(l.t)}
               <TileBody
                 tile={l.t}

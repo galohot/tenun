@@ -437,6 +437,8 @@ export interface KpiInfo {
   elapsed?: number;
   /** The last periods, oldest first, for the column chart. */
   bars: { label: string; value: number | null }[];
+  /** The tile's other values (its measures after the first) for the same period: a card shows them (build 08). */
+  extras?: (number | null)[];
 }
 
 export type TileType =
@@ -541,6 +543,50 @@ export interface CondFormat {
   better?: 'up' | 'down';
 }
 
+/** A part of a number card (build 08), drawn in order, top to bottom. `hidden` keeps a part's settings while it is not drawn. */
+export type CardPart = (
+  | { kind: 'value' }
+  | { kind: 'title' }
+  | { kind: 'period' }
+  | { kind: 'compare' }
+  | { kind: 'target' }
+  | { kind: 'spark'; style?: 'bars' | 'line' }
+  | { kind: 'divider' }
+  /** Another value of the tile: an index into `Tile.measures`, 1 or more. */
+  | { kind: 'extra'; measure: number; label?: string }
+  | { kind: 'note'; text: string }
+) & { hidden?: boolean };
+
+/** When the value meets it, the card colours the value and adds words ("Below target"). The first that matches counts. */
+export interface CardRule {
+  op: '>' | '<' | 'between';
+  value: number;
+  to?: number;
+  tone: 'good' | 'bad' | 'warn';
+}
+
+/**
+ * A number card (GRANDPLAN §4.1). With a `style`, each field the card does not set comes from the style; so `parts` is
+ * optional here, where the plan has it required.
+ */
+export interface CardSpec {
+  /** A card style's id. */
+  style?: string;
+  parts?: CardPart[];
+  align?: 'start' | 'center';
+  /** The big value's size step. */
+  size?: 's' | 'm' | 'l';
+  ground?: 'plain' | 'tint' | 'accent';
+  rules?: CardRule[];
+}
+
+/** A card look saved in the workspace and applied by its id. Editing it changes every card that uses it. */
+export interface CardStyle {
+  id: string;
+  name: string;
+  card: Omit<CardSpec, 'style'>;
+}
+
 export interface Tile {
   id: string;
   type: TileType;
@@ -589,6 +635,8 @@ export interface Tile {
   bins?: { width?: number };
   /** Number tiles: the goal for the period. */
   target?: { value: number };
+  /** Number tiles: the card's parts, size, ground and rules, or a card style it uses (build 08). Not set: the number tile as it always was. */
+  card?: CardSpec;
   /** Table: add a total row. Pivot: totals are on unless this is false. */
   totals?: boolean;
   /** Pivot: the field whose values become the columns. The rows are `dims`. */
@@ -669,6 +717,8 @@ export interface Workspace {
   tables?: Record<string, TableSetup>;
   /** Named measures, in the order they were made. */
   measures?: NamedMeasure[];
+  /** Card styles of number tiles (build 08). */
+  cardStyles?: CardStyle[];
 }
 
 export interface Snapshot {
@@ -906,6 +956,7 @@ export const api = {
   checkLinks: () => call<{ changed: boolean }>('POST', '/relationships/check'),
   suggest: () => call<Suggestion[]>('GET', '/relationships/suggest'),
   putDashboards: (d: Dashboard[]) => call<{ ok: boolean }>('PUT', '/dashboards', d),
+  putCardStyles: (list: CardStyle[]) => call<{ ok: boolean }>('PUT', '/workspace/card-styles', list),
   putLayout: (l: unknown) => call<{ ok: boolean }>('PUT', '/layout', l),
   query: (q: SemanticQuery) => call<QueryResult>('POST', '/query', q),
   fs: (path?: string) => call<FsListing>('GET', `/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`),

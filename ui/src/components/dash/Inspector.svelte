@@ -15,6 +15,8 @@
   import FieldPicker from './FieldPicker.svelte';
   import PlaceNames from '../PlaceNames.svelte';
   import Suggestions from './Suggestions.svelte';
+  import CardEditor from './CardEditor.svelte';
+  import { readColors } from '../../lib/chart';
   import { normalisePicture } from '../../lib/image';
   import { MAX_BANDS } from '../../lib/charts/bullet';
 
@@ -132,11 +134,16 @@
     const formats = (tile.formats ?? []).filter((_, j) => j !== i);
     const showAs = (tile.showAs ?? []).filter((_, j) => j !== i);
     const cond = (tile.cond ?? []).filter((_, j) => j !== i);
+    // A card's other values point at the tile's values by place: the one removed goes, the ones after move up.
+    const parts = tile.card?.parts
+      ?.filter((p) => p.kind !== 'extra' || p.measure !== i)
+      .map((p) => (p.kind === 'extra' && p.measure > i ? { ...p, measure: p.measure - 1 } : p));
     set({
       measures: tile.measures.filter((_, j) => j !== i),
       cond: cond.some(Boolean) ? cond : undefined,
       formats: formats.some(Boolean) ? formats : undefined,
       showAs: showAs.some(Boolean) ? showAs : undefined,
+      ...(parts ? { card: { ...tile.card, parts } } : {}),
     });
   }
 
@@ -309,7 +316,8 @@
 
   // A table takes any number of values; a bar, line or area takes up to four, and so does a pivot.
   const isPivot = $derived(tile.type === 'pivot');
-  const manyValues = $derived(tile.type === 'table' || isPivot || tile.type === 'bar' || tile.type === 'line' || tile.type === 'area');
+  // A number card (build 08) shows other values of the tile beside its value.
+  const manyValues = $derived(tile.type === 'table' || isPivot || tile.type === 'bar' || tile.type === 'line' || tile.type === 'area' || (tile.type === 'kpi' && !!tile.card));
   const isScatter = $derived(tile.type === 'scatter');
   const isHistogram = $derived(tile.type === 'histogram');
   // Rows by one column field: a pivot, or a heat map (which has one row field and one value).
@@ -1168,6 +1176,10 @@
         {/if}
       {/if}
     </div>
+  {/if}
+
+  {#if tile.type === 'kpi' && m}
+    <CardEditor {tile} kpi={current?.res.kpi ?? null} title={tileTitle(tile, app.tables)} colors={readColors()} {reach} base={baseTable} {set} />
   {/if}
 
   {#if canCompare}

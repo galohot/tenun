@@ -18,6 +18,8 @@
   import HeatmapView from './HeatmapView.svelte';
   import ImageView from './ImageView.svelte';
   import KpiView from './KpiView.svelte';
+  import CardView from './card/CardView.svelte';
+  import { resolveCard } from '../../lib/card';
   import MapView from './MapView.svelte';
   import PieView from './PieView.svelte';
   import PivotView from './PivotView.svelte';
@@ -255,7 +257,12 @@
 {:else if tile.type === 'filter'}
   <FilterView {tile} {res} {tables} {selected} onchange={onfilter} {onpick} />
 {:else if tile.type === 'kpi' && res.kpi}
-  <KpiView kpi={res.kpi} {tile} {colors} parts={res.parts} />
+  <!-- A card is drawn with its style already merged in (card.ts drawnTile), so no style is looked up here. -->
+  {#if tile.card}
+    <CardView kpi={res.kpi} {tile} card={resolveCard(tile.card, [], (tile.target?.value ?? 0) > 0)} {title} parts={res.parts} {tables} />
+  {:else}
+    <KpiView kpi={res.kpi} {tile} {colors} parts={res.parts} />
+  {/if}
 {:else if tile.type === 'map'}
   <MapView {tile} {res} {colors} {selected} {tables} onpick={onpick ? (c) => onpick(c) : undefined} {onretry} {onplaces} />
 {:else if unfinished}

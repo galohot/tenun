@@ -61,6 +61,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/workspace/rename", post(ws_rename))
         .route("/workspace/locale", put(ws_locale))
         .route("/workspace/measures", put(put_measures))
+        .route("/workspace/card-styles", put(put_card_styles))
         .route("/sample", post(open_sample))
         .route("/sources", post(add_source))
         .route("/sources/{id}", delete(remove_source))
@@ -708,6 +709,17 @@ async fn suggest(State(s): S) -> R<Json<Value>> {
 async fn put_dashboards(State(s): S, Json(b): Json<Vec<Value>>) -> R<Json<Value>> {
     blocking(&s, move |st| {
         st.engine.set_dashboards(b);
+        st.emit(json!({ "type": "dashboards-changed" }));
+        Ok(())
+    })
+    .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// The card styles of number tiles (build 08). Other windows reload; this one has them already.
+async fn put_card_styles(State(s): S, Json(b): Json<Vec<Value>>) -> R<Json<Value>> {
+    blocking(&s, move |st| {
+        st.engine.set_card_styles(b)?;
         st.emit(json!({ "type": "dashboards-changed" }));
         Ok(())
     })

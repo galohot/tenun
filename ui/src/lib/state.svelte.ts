@@ -4,7 +4,7 @@ import { guessLocale } from './locale';
 import { PHONE_MAX } from './layout';
 import { linkTablesOf, setLinkLabels } from './links';
 import { setKnownMeasures } from './measures';
-import { api, type CloudStatus, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
+import { api, type CardStyle, type CloudStatus, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
 
 export type Route =
   | { view: 'home' }
@@ -188,6 +188,19 @@ class App {
         this.error(e);
       }
     }, 350);
+  }
+
+  /** Card styles (build 08) are applied here at once and saved; every card that uses a style follows it. */
+  async saveCardStyles(list: CardStyle[]) {
+    if (!this.snap) return;
+    this.snap.workspace.cardStyles = list;
+    this.#lastLocalSave = Date.now();
+    try {
+      await api.putCardStyles($state.snapshot(list));
+      if (this.snap.path === null) this.snap.dirty = true;
+    } catch (e) {
+      this.error(e);
+    }
   }
 
   async refresh() {

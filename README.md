@@ -54,6 +54,9 @@ every other chart filters. Save the Excel file and the dashboard updates.
 - **Show value as:** % of total, % of group, running total, moving average, change, % change, rank,
   year to date, and the same period last year as a grey line. Also median, 90th percentile, and
   a ratio of two values (amount per order).
+- **Number cards:** choose the parts of a number tile, their order, size and background, and rules
+  that colour the value with words ("Below target"). Six presets; card styles reuse one look on many
+  tiles. See [number cards](docs/charts.md#number-cards).
 - **Targets and lines:** a target on a number tile says if you are on pace. Charts can draw target,
   average, median, minimum, maximum and trend lines. Tables can show bars and good/bad colours.
 - **Pivot tables** with row and column totals, in the way an Excel user expects.

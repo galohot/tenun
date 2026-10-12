@@ -5,6 +5,7 @@
   import type { Colors } from '../../lib/chart';
   import { compact, pctChange, pctOfTarget, tip } from '../../lib/format';
   import { targetInfo, targetWords } from '../../lib/kpi';
+  import { barBoxes, changeTone } from '../../lib/card';
   import { paceElapsed, whyNotAdded, type Parts } from '../../lib/measures';
   import Icon from '../Icon.svelte';
 
@@ -39,29 +40,13 @@
   );
 
   // Under half a percent is "about the same", not a trend.
-  const tone = $derived.by(() => {
-    if (kpi.delta === null || Math.abs(kpi.delta) < 0.005) return 'flat';
-    const up = kpi.delta > 0;
-    return up === ((tile.better ?? 'up') === 'up') ? 'good' : 'bad';
-  });
+  const tone = $derived(changeTone(kpi.delta, tile.better ?? 'up'));
   const pct = $derived(kpi.delta === null ? '' : pctChange(kpi.delta));
 
-  // Column chart geometry, in a 0..100 × 0..40 box.
-  const bars = $derived.by(() => {
-    const vals = kpi.bars.map((b) => b.value ?? 0);
-    const hi = Math.max(0, ...vals);
-    const lo = Math.min(0, ...vals);
-    const range = hi - lo || 1;
-    const n = kpi.bars.length;
-    const gap = 1.6;
-    const bw = (100 - gap * (n - 1)) / n;
-    return kpi.bars.map((b, i) => {
-      const v = b.value ?? 0;
-      const top = 40 - ((Math.max(v, 0) - lo) / range) * 40;
-      const bottom = 40 - ((Math.min(v, 0) - lo) / range) * 40;
-      return { x: i * (bw + gap), y: top, w: bw, h: Math.max(bottom - top, 0.8), label: b.label, value: b.value, last: i === n - 1, prev: i === n - 2 };
-    });
-  });
+  // Column chart geometry, in a 0..100 × 0..40 box (shared with the cards of build 08).
+  const bars = $derived(
+    barBoxes(kpi.bars.map((b) => b.value)).map((g, i, all) => ({ ...g, label: kpi.bars[i].label, value: kpi.bars[i].value, last: i === all.length - 1, prev: i === all.length - 2 })),
+  );
 </script>
 
 <div class="kpi" class:with-bars={showBars} class:mini bind:clientWidth={w} bind:clientHeight={h}>

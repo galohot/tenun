@@ -69,6 +69,37 @@ pub struct Tile {
     pub map: Option<crate::maptile::MapSpec>,
 }
 
+/// The fields a card style gives and a card may set itself (build 08), as `card.ts CARD_FIELDS`.
+const CARD_FIELDS: [&str; 5] = ["parts", "align", "size", "ground", "rules"];
+
+/// A number card that names a style carries the style's fields under its own, and no style: an exported file and a
+/// viewer need no styles (build 08, V4-D10). The same merge as `card.ts withoutStyle`. A style that is gone leaves the
+/// card's own fields.
+pub fn resolve_card(tile: &mut Value, styles: &[Value]) {
+    let Some(card) = tile.get_mut("card").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let Some(id) = card.remove("style") else {
+        return;
+    };
+    let style = id
+        .as_str()
+        .and_then(|id| {
+            styles
+                .iter()
+                .find(|s| s.get("id").and_then(Value::as_str) == Some(id))
+        })
+        .and_then(|s| s.get("card"))
+        .and_then(Value::as_object);
+    for f in CARD_FIELDS {
+        if card.get(f).is_none_or(Value::is_null)
+            && let Some(v) = style.and_then(|s| s.get(f))
+        {
+            card.insert(f.to_string(), v.clone());
+        }
+    }
+}
+
 /// Tiles that show something the user typed or picked, not a query: they have no result.
 /// (A filter tile has one: the values it offers.)
 pub fn is_static(kind: &str) -> bool {
@@ -135,6 +166,10 @@ pub struct KpiInfo {
     /// the days of the period. 1 for a finished period. Absent for "All data".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elapsed: Option<f64>,
+    /// The tile's other values (its measures after the first) for the same rows and period as `value`: a card shows
+    /// them (build 08). Empty, and not written, for a tile with one value.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extras: Vec<Option<f64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -571,11 +606,15 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
         partial: false,
         bars: vec![],
         elapsed: None,
+        extras: vec![],
     };
 
     // A number over time needs a date grouped by a grain; anything else is a plain total.
     let Some((d, g)) = dim.and_then(|d| d.grain.filter(|g| !g.is_part()).map(|g| (d, g))) else {
-        res.kpi = Some(plain(first_num(&total), "All data"));
+        res.kpi = Some(KpiInfo {
+            extras: extra_values(engine, tile, &fs)?,
+            ..plain(first_num(&total), "All data")
+        });
         return Ok(res);
     };
     let series = ask(vec![d.clone()], fs.clone(), Some(5000))?;
@@ -626,29 +665,41 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
         1.0
     };
 
+    let datetime = series.columns.first().map(|c| c.dtype) == Some(crate::catalog::DType::DateTime)
+        || max_raw.as_deref().is_some_and(|r| r.contains('T'));
+    // The rows from one day to another, both whole, on top of the tile's filters.
+    let window = |lo: NaiveDate, hi: NaiveDate| {
+        let mut wfs = fs.clone();
+        wfs.push(Filter {
+            table: d.table.clone(),
+            column: d.column.clone(),
+            grain: None,
+            op: FilterOp::Between,
+            values: vec![
+                json!(iso(lo)),
+                json!(format!(
+                    "{}{}",
+                    iso(hi),
+                    if datetime { "T23:59:59" } else { "" }
+                )),
+            ],
+            via: d.via.clone(),
+        });
+        wfs
+    };
+    // A card's other values cover the period of the value: so far, when it is not over.
+    let extras = extra_values(
+        engine,
+        tile,
+        &window(start, if partial { max_day } else { end }),
+    )?;
+
     let (prev, period, versus) = if partial {
         // Compare the same number of days: Oct 1–14 against Sep 1–14.
         let days = (max_day - start).num_days();
         let prev_last = start - Duration::days(1);
         let prev_end = (prev_start + Duration::days(days)).min(prev_last);
-        let datetime = series.columns.first().map(|c| c.dtype)
-            == Some(crate::catalog::DType::DateTime)
-            || max_raw.as_deref().is_some_and(|r| r.contains('T'));
-        let hi = format!(
-            "{}{}",
-            iso(prev_end),
-            if datetime { "T23:59:59" } else { "" }
-        );
-        let window = Filter {
-            table: d.table.clone(),
-            column: d.column.clone(),
-            grain: None,
-            op: FilterOp::Between,
-            values: vec![json!(iso(prev_start)), json!(hi)],
-            via: d.via.clone(),
-        };
-        let mut wfs = fs.clone();
-        wfs.push(window);
+        let wfs = window(prev_start, prev_end);
         let prev = first_num(&ask(vec![], wfs, None)?);
         (
             prev,
@@ -688,8 +739,30 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
         partial,
         bars,
         elapsed: Some(elapsed),
+        extras,
     });
     Ok(res)
+}
+
+/// The values of a number tile after its first, over the given rows (build 08): a card shows them beside the value.
+fn extra_values(
+    engine: &Engine,
+    tile: &Tile,
+    filters: &[Filter],
+) -> anyhow::Result<Vec<Option<f64>>> {
+    tile.measures
+        .iter()
+        .skip(1)
+        .map(|m| {
+            Ok(first_num(&engine.query(&SemanticQuery {
+                measures: vec![m.clone()],
+                dimensions: vec![],
+                filters: filters.to_vec(),
+                sort: vec![],
+                limit: None,
+            })?))
+        })
+        .collect()
 }
 
 // ---- dates -------------------------------------------------------------------
@@ -871,10 +944,12 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         .unwrap_or_default();
     let mut all_tiles = Vec::new();
     let mut all_raw = Vec::new();
+    let styles = engine.card_styles();
     for mut raw in raw_tiles {
         if let Some(g) = grain {
             filters::apply_grain(&mut raw, g);
         }
+        resolve_card(&mut raw, &styles);
         all_tiles.push(serde_json::from_value::<Tile>(raw.clone())?);
         all_raw.push(raw);
     }

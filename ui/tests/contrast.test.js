@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { GROUND_TOKEN, INKS as CARD_INKS } from '../src/lib/card.ts';
 
 const css = readFileSync(new URL('../src/lib/theme.css', import.meta.url), 'utf8');
 
@@ -82,6 +83,24 @@ for (const [name, theme] of [['light', light], ['dark', dark]]) {
       const d = name === 'light' ? l[i - 1] - l[i] : l[i] - l[i - 1];
       assert.ok(d > 0, `step ${i + 1} ${steps[i]} does not go the right way`);
       assert.ok(ratio(steps[i - 1], steps[i]) >= 1.15, `steps ${i} and ${i + 1} are too alike (${ratio(steps[i - 1], steps[i]).toFixed(2)})`);
+    }
+  });
+}
+
+// Number cards (build 08): every part on every ground, in both themes. Words 4.5:1; the trend's latest period is a mark,
+// 3:1. The other periods and the divider carry no meaning of their own. A chip (the target, a rule) has its own ground.
+for (const [name, theme] of [['light', light], ['dark', dark]]) {
+  test(`${name}: every card part clears its floor on every ground`, () => {
+    for (const [ground, token] of Object.entries(GROUND_TOKEN)) {
+      const bg = theme[token];
+      assert.ok(bg, `no ${token} in ${name}`);
+      const ink = CARD_INKS[ground];
+      for (const role of ['text', 'muted', 'good', 'bad', 'warn']) {
+        const r = ratio(theme[ink[role]], bg);
+        assert.ok(r >= 4.5, `${ground}: ${role} (${ink[role]} ${theme[ink[role]]}) on ${bg} is ${r.toFixed(2)}:1`);
+      }
+      const m = ratio(theme[ink.mark], bg);
+      assert.ok(m >= 3, `${ground}: the trend's mark (${ink.mark}) on ${bg} is ${m.toFixed(2)}:1`);
     }
   });
 }

@@ -47,6 +47,33 @@ to every good or bad colour.
 - **Blanks:** a blank value is shown as **(blank)**. It is never dropped.
 - **Missing periods:** a month with no rows is filled with zero for sums and counts.
 
+## Number cards
+
+A number tile can be laid out as a card. Select the tile and open **Card** in the Inspector.
+
+- **Presets:** Classic (the number tile as it always was), Big number, With target, Compact, Trend
+  and Split. Each shows a small live picture of your number.
+- **Parts:** the title, the value, the period, the change, the target, the trend (columns or a
+  line), another value of the tile, a note and a line. Drag a part to move it, or use the arrows.
+  The eye hides a part and keeps its settings. **Another value** asks which value to show; it can
+  add a value to the tile.
+- **Size, Alignment, Ground:** three sizes of the value, left or centred, and a plain, tinted or
+  accent background. Every colour comes from the theme and is checked for contrast in light and
+  dark.
+- **Rules:** "Below 100 000 is bad", "Above the target is good". The first rule the value meets
+  colours it and adds words, such as "Below target". The words are always there, so the colour is
+  never the only sign.
+- **A short tile:** parts that do not fit drop from the bottom. A note goes first, then the trend,
+  then other values. A "…" says that something is hidden. In a wide tile, a trend at the end sits
+  beside the value, as on a classic number tile.
+- **Card styles:** **Save as card style** keeps the look under a name. **Apply a style** gives it
+  to another card. Change the style with **Update style from this card**, and every card that uses
+  it follows. A card can still change one field for itself; a dot marks that field, and **Reset to
+  style** takes it back. **Detach** keeps the look and drops the link. **Manage card styles**
+  renames, copies and deletes styles. A card whose style is deleted keeps its look.
+
+An exported file and a published dashboard carry every card as it looks, so they need no styles.
+
 ## Advanced
 
 | Type | Use it when | Fields |

@@ -7,6 +7,7 @@
   import { tileTitle, type Named } from '../../lib/format';
   import { COLS, EMPTY_RESULT, isStatic } from '../../lib/tiles';
   import TileBody from './TileBody.svelte';
+  import { cardGround } from '../../lib/card';
 
   let {
     title,
@@ -58,9 +59,11 @@
     {#each placed as p (p.t.id)}
       {@const res = results[p.t.id] ?? EMPTY_RESULT}
       {@const name = tileTitle(p.t, tables, res.parts)}
-      <article class="tile" style:transform="translate({p.left}px, {p.top}px)" style:width="{p.w}px" style:height="{p.h}px">
-        {#if name}<h3>{name}</h3>{/if}
-        <div class="body" class:bare={!name}>
+      {@const ground = cardGround(p.t)}
+      <article class="tile" style:transform="translate({p.left}px, {p.top}px)" style:width="{p.w}px" style:height="{p.h}px" style:background={ground ? `var(--${ground})` : undefined}>
+        <!-- A number card fills its tile with its ground and draws its own title (build 08). -->
+        {#if name && !ground}<h3>{name}</h3>{/if}
+        <div class="body" class:bare={!name || !!ground}>
           <TileBody tile={p.t} {res} {colors} {tables} selected={null} title={name} />
         </div>
         {#if p.t.type !== 'kpi' && !isStatic(p.t) && partialNote(res, p.t.dims[0]?.grain)}

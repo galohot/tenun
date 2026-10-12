@@ -17,6 +17,7 @@
   import PublishSheet from './dash/PublishSheet.svelte';
   import RowsSheet from './dash/RowsSheet.svelte';
   import FocusSheet from './dash/FocusSheet.svelte';
+  import { drawnTile } from '../lib/card';
   // tenun.cloud is not live yet; build with VITE_TENUN_CLOUD=1 to show Publish.
   const CLOUD_ON = import.meta.env.VITE_TENUN_CLOUD === '1';
 
@@ -485,7 +486,8 @@
 
   /** Everything a picture of the dashboard needs: the tiles as they are drawn, with their results. */
   function picture(theme: 'light' | 'dark'): DashboardPicture {
-    const shown = (dash!.tiles ?? []).map(shownOf);
+    // A number card goes in with its style merged in, as the app draws it (build 08).
+    const shown = (dash!.tiles ?? []).map((t) => drawnTile(shownOf(t), app.snap?.workspace.cardStyles));
     const rs: DashboardPicture['results'] = {};
     for (const t of shown) rs[t.id] = results[t.id]?.res ?? null;
     return {
@@ -717,7 +719,7 @@
 
   {#if focusTile && results[focusTile.id]}
     <FocusSheet
-      tile={eff(focusTile)}
+      tile={drawnTile(eff(focusTile), app.snap?.workspace.cardStyles)}
       res={results[focusTile.id]!.res}
       colors={readColors()}
       title={tileTitle(eff(focusTile), app.tables)}

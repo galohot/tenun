@@ -78,6 +78,10 @@ pub struct Workspace {
     /// made (V3-D11), so a file made before they existed is written back as it was.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub measures: Vec<NamedMeasure>,
+    /// Card styles of number tiles (build 08, V4-D10): `{ id, name, card }`, applied to cards by id. Kept as JSON, as
+    /// the dashboards are; the app reads them, and an export merges them into its cards. Not written until one is made.
+    #[serde(default, rename = "cardStyles", skip_serializing_if = "Vec::is_empty")]
+    pub card_styles: Vec<serde_json::Value>,
 }
 
 /// A measure with a name: a formula of totals, such as `SUM([Sales].[amount]) / SUM([Targets].[target])`,
@@ -113,6 +117,7 @@ impl Default for Workspace {
             locale: None,
             tables: BTreeMap::new(),
             measures: Vec::new(),
+            card_styles: Vec::new(),
         }
     }
 }

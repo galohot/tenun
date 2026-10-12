@@ -25,7 +25,7 @@ use duckdb::types::Value;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -151,6 +151,9 @@ pub fn tiles_using(dashboards: &[serde_json::Value], id: &str) -> Vec<TileRef> {
 
 /// The most rows of a live database table that a link check reads (V4-D51).
 pub const LIVE_CHECK_ROWS: u64 = 1_000_000;
+
+/// The card styles a workspace keeps at most (build 08).
+pub const MAX_CARD_STYLES: usize = 200;
 
 pub struct Engine {
     db: Arc<Mutex<Connection>>,
@@ -2152,6 +2155,52 @@ impl Engine {
             s.ws.dashboards = dashboards;
         }
         self.persist();
+    }
+
+    /// The card styles of the workspace (build 08).
+    pub fn card_styles(&self) -> Vec<serde_json::Value> {
+        self.state.read().unwrap().ws.card_styles.clone()
+    }
+
+    /// Replaces the card styles (build 08, V4-D10). Each has an id, a name and a card; no two share an id; a name is
+    /// trimmed and its spaces folded. A refused list changes nothing.
+    pub fn set_card_styles(&self, mut list: Vec<serde_json::Value>) -> anyhow::Result<()> {
+        if list.len() > MAX_CARD_STYLES {
+            anyhow::bail!("A workspace can have up to {MAX_CARD_STYLES} card styles.");
+        }
+        let mut ids = HashSet::new();
+        for s in &mut list {
+            let id = s
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if id.is_empty() {
+                anyhow::bail!("A card style needs an id.");
+            }
+            let name = s
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            if name.is_empty() {
+                anyhow::bail!("A card style needs a name.");
+            }
+            if !ids.insert(id.clone()) {
+                anyhow::bail!("Two card styles have the id {id}.");
+            }
+            if !s.get("card").is_some_and(|c| c.is_object()) {
+                anyhow::bail!("The card style {name} has no card.");
+            }
+            s["id"] = serde_json::Value::String(id);
+            s["name"] = serde_json::Value::String(name);
+        }
+        self.state.write().unwrap().ws.card_styles = list;
+        self.persist();
+        Ok(())
     }
 
     pub fn set_layout(&self, layout: serde_json::Value) {

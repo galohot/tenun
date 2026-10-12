@@ -7,6 +7,7 @@
   import { kpiRows } from '../../lib/tabular';
   import Modal from '../Modal.svelte';
   import TileBody from './TileBody.svelte';
+  import { cardGround } from '../../lib/card';
 
   let {
     tile,
@@ -27,6 +28,8 @@
     return { tile: { ...tile, type: 'table' as const, totals: false }, res };
   });
   const canTable = $derived(!['text', 'image', 'filter', 'table'].includes(tile.type));
+  // A number card brings its ground (build 08).
+  const ground = $derived(asTable ? null : cardGround(tile));
 </script>
 
 <Modal title={title || 'Tile'} width={1000} {onclose}>
@@ -38,7 +41,7 @@
       </button>
     </div>
   {/if}
-  <div class="stage">
+  <div class="stage" class:card={!!ground} style:background={ground ? `var(--${ground})` : undefined}>
     {#if asTable && canTable}
       <TileBody tile={plain.tile} res={plain.res} {colors} selected={null} {tables} />
     {:else}
@@ -50,6 +53,7 @@
 <style>
   .bar { display: flex; justify-content: flex-end; padding-bottom: 8px; }
   .stage { height: min(62vh, 560px); position: relative; }
+  .stage.card { padding: 20px 24px; border-radius: var(--r-card); }
   .switch {
     display: inline-flex;
     align-items: center;
