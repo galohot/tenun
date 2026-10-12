@@ -58,7 +58,8 @@ provinces of Papua made in 2022 are there: Papua Selatan (`ID-PS`), Papua Tengah
 (`ID-PE`) and Papua Barat Daya (`ID-PD`).
 
 **Kabupaten and kota.** The Kemendagri code, with or without the dot (`32.04`, `3204`), or the official name
-(`Kabupaten Bandung`, `Kota Bandung`).
+(`Kabupaten Bandung`, `Kota Bandung`). A column of codes that Excel or a CSV file turns into numbers still
+works: `32.10` read as 32.1 is Kabupaten Majalengka.
 
 - Case, extra spaces, dots and dashes do not matter: `kab. bandung`, `KABUPATEN  BANDUNG` and
   `Kabupaten Bandung` are one place.

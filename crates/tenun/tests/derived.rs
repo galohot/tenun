@@ -560,7 +560,7 @@ fn a_missing_input_is_an_error_in_words_and_the_rest_loads() {
             "The table stores is not there any more. Open the new table and pick its tables again."
         )
     );
-    assert!(snap.errors.get(&a).is_none(), "{:?}", snap.errors);
+    assert!(!snap.errors.contains_key(&a), "{:?}", snap.errors);
     assert_eq!(w.rows(&format!("{a}/Months")), 4);
     assert_eq!(w.sum(&w.id("orders"), "amount"), 450.0);
     // Removing a source tells the new tables that read it.
@@ -727,7 +727,7 @@ fn a_group_value_may_read_a_related_table_and_follows_the_link() {
         },
     )
     .unwrap();
-    assert!(w.e.snapshot().errors.get(&g).is_none());
+    assert!(!w.e.snapshot().errors.contains_key(&g));
     assert_eq!(w.sum(&t, "Space"), 330.0);
 }
 

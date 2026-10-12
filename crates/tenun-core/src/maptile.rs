@@ -105,6 +105,26 @@ fn needs(what: &str) -> anyhow::Error {
     anyhow::anyhow!("{what}")
 }
 
+/// The text of a place value. A column of codes may be read as numbers: a whole number loses its `.0` (`32.0` is
+/// province 32), and a kabupaten or kota code, which always has two digits after the dot, gets its last zero back
+/// (`32.10` was read as 32.1). Tenun's own list of places, saved as CSV and read again, is read this way.
+fn place_text(raw: &Value, level: Level) -> String {
+    match raw {
+        Value::String(s) => s.clone(),
+        Value::Null => String::new(),
+        Value::Number(n) => match n.as_f64() {
+            Some(f) if f.fract() == 0.0 && f.abs() < 1e15 => format!("{}", f as i64),
+            Some(f)
+                if level == Level::Regency && ((f * 100.0).round() - f * 100.0).abs() < 1e-6 =>
+            {
+                format!("{f:.2}")
+            }
+            _ => n.to_string(),
+        },
+        other => other.to_string(),
+    }
+}
+
 /// Runs a map tile. `filters` are the filters that apply to it (its own clicks taken out).
 pub fn run(
     engine: &Engine,
@@ -159,11 +179,7 @@ pub fn run(
     let mut unmatched_count = 0;
     for row in &base.rows {
         let raw = row.first().cloned().unwrap_or(Value::Null);
-        let text = match &raw {
-            Value::String(s) => s.clone(),
-            Value::Null => String::new(),
-            other => other.to_string(),
-        };
+        let text = place_text(&raw, spec.level);
         let m = if text.trim().is_empty() {
             Matched::None
         } else {

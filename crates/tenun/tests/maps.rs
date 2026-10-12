@@ -17,6 +17,8 @@ const REGENCIES: &str =
 const COUNTRIES: &str =
     "country,visitors\nIndonesia,100\nIDN,20\nMozambique,30\nAmerika Serikat,40\nAtlantis,1\n";
 const KENYA: &str = "county,amount\nNairobi,10\nKE-30,5\nMombasa,4\n";
+// Codes that are read as numbers: `32.10` becomes 32.1 and `32.0` becomes 32.0.
+const CODES: &str = "code,prov,amount\n32.10,32.0,4\n32.04,32.0,3\n32.73,31.0,2\n";
 
 struct W {
     e: Engine,
@@ -32,6 +34,7 @@ fn world(tag: &str) -> W {
         ("regencies.csv", REGENCIES),
         ("countries.csv", COUNTRIES),
         ("kenya.csv", KENYA),
+        ("codes.csv", CODES),
     ] {
         std::fs::write(d.join(f), text).unwrap();
         e.add_source(AddSource::File {
@@ -144,6 +147,39 @@ fn a_kabupaten_and_a_kota_are_two_places_and_a_bare_name_asks_which() {
         geo.unmatched[0].hint.as_deref(),
         Some("Write Kabupaten Bandung or Kota Bandung.")
     );
+}
+
+#[test]
+fn codes_read_as_numbers_are_still_places() {
+    let w = world("numbers");
+    // Kabupaten Majalengka is 32.10: read as 32.1, it is written with two digits again.
+    let t = w.map(
+        "codes",
+        "code",
+        "amount",
+        "sum",
+        json!({ "level": "regency", "country": "ID" }),
+    );
+    let r = run_tile(&w.e, &t, &[]).unwrap();
+    assert_eq!(
+        by_code(&r),
+        [
+            ("32.10".into(), 4.0),
+            ("32.04".into(), 3.0),
+            ("32.73".into(), 2.0)
+        ]
+    );
+    assert_eq!(r.geo.as_ref().unwrap().unmatched_count, 0);
+    // 32.0 is province 32 (Jawa Barat): 4 + 3; 31.0 is DKI Jakarta: 2.
+    let t = w.map(
+        "codes",
+        "prov",
+        "amount",
+        "sum",
+        json!({ "level": "province", "country": "ID" }),
+    );
+    let r = run_tile(&w.e, &t, &[]).unwrap();
+    assert_eq!(by_code(&r), [("ID-JB".into(), 7.0), ("ID-JK".into(), 2.0)]);
 }
 
 #[test]
@@ -276,7 +312,7 @@ fn a_click_on_a_place_filters_by_every_name_of_it() {
         "table": s, "column": "place", "op": "in", "values": ["Jawa Barat", "Jabar", "32"], "fromTile": "m"
     }))
     .unwrap();
-    let r = run_tile(&w.e, &kpi, &[filter.clone()]).unwrap();
+    let r = run_tile(&w.e, &kpi, std::slice::from_ref(&filter)).unwrap();
     assert_eq!(r.rows[0][0].as_f64(), Some(170.0));
     // The map itself is not filtered by its own click: both places stay.
     assert_eq!(run_tile(&w.e, &map, &[filter]).unwrap().rows.len(), 2);
