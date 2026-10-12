@@ -1,7 +1,7 @@
 // The snapshot a dashboard is exported or published as. Built by the Rust
 // engine (`tenun-core::snapshot`); the viewer reads it.
 
-import type { Dashboard, Grain, NumFormat, QueryResult, Table } from './api';
+import type { Dashboard, Grain, NumFormat, QueryResult, SiteSettings, Table } from './api';
 import type { DashFilter } from './tiles';
 
 export interface ExportPayload {
@@ -33,4 +33,30 @@ export interface ExportPayload {
   links?: Record<string, string>;
   /** The named measures the tiles use: their name and format, the type of the value and whether the values add up. Never the formula. */
   measures?: { id: string; name: string; format?: NumFormat | null; dtype?: string | null; additive?: boolean }[];
+}
+
+/**
+ * A whole site in one file (build 13, V4-D15): every page as an exported page is, the site's navigation, and the pages
+ * each drill-through opens, kept to a clicked value, for the first 50 values (V4-D16). A site saved as a folder holds
+ * one page in each file (`page`) and names the files (`files`).
+ */
+export interface SitePayload {
+  version?: number;
+  kind: 'site';
+  title: string;
+  workspace: string;
+  locale?: 'id' | 'en';
+  generated: string;
+  site: SiteSettings;
+  /** Every page, in the order of the dashboards; hidden ones too, since links reach them. */
+  order: string[];
+  titles: Record<string, string>;
+  hidden?: string[];
+  pages: Record<string, ExportPayload>;
+  /** By `<page id>/<tile id>`: the page a click opens, that page for each clicked value's key, and whether there are more values than the file holds. */
+  drill: Record<string, { page: string; values: Record<string, ExportPayload>; more: boolean }>;
+  geo?: ExportPayload['geo'];
+  /** A folder: the file of each page, and the page this file holds. */
+  files?: Record<string, string>;
+  page?: string;
 }

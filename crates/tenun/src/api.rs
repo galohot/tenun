@@ -102,6 +102,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/cloud/unpublish", post(cloud_unpublish))
         .route("/snapshot", post(snapshot))
         .route("/export-html", post(export_html))
+        .route("/export-site", post(export_site))
         .route("/export-file", post(export_file))
         .route("/export-xlsx", post(export_xlsx))
         .route("/events", get(events))
@@ -870,6 +871,59 @@ async fn export_html(State(s): S, Json(b): Json<SnapBody>) -> R<Response> {
         return Ok(Json(json!({ "ok": true })).into_response());
     }
     Ok(([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response())
+}
+
+#[derive(Deserialize)]
+struct SiteBody {
+    /// A folder of pages in a ZIP, not one file.
+    #[serde(default)]
+    zip: bool,
+    /// Desktop app: write the file here instead of returning it.
+    #[serde(default)]
+    path: Option<String>,
+}
+
+/// The whole site (build 13, V4-D15): one HTML file, or a ZIP of a folder with a file for each page. The app hears how
+/// many pages are done (`site-progress`), and how big each page is (`x-tenun-sizes`, bytes by page title), so it can say
+/// when a file grows large.
+async fn export_site(State(s): S, Json(b): Json<SiteBody>) -> R<Response> {
+    let (bytes, sizes, path, zip) = blocking(&s, move |st| {
+        let mut site = tenun_core::site::build_site(&st.engine, |done, total| {
+            st.emit(json!({ "type": "site-progress", "done": done, "total": total }))
+        })?;
+        export::site_with_maps(&mut site, &st.engine.geo_dir());
+        let mut sizes = serde_json::Map::new();
+        if let Some(pages) = site["pages"].as_object() {
+            for (id, p) in pages {
+                let title = site["titles"][id].as_str().unwrap_or(id).to_string();
+                sizes.insert(title, json!(p.to_string().len()));
+            }
+        }
+        let bytes = if b.zip {
+            export::zip(&export::site_files(&site))
+        } else {
+            export::html(&site).into_bytes()
+        };
+        Ok((bytes, Value::Object(sizes).to_string(), b.path, b.zip))
+    })
+    .await?;
+    if let Some(p) = path {
+        tokio::task::spawn_blocking(move || std::fs::write(p, &bytes)).await??;
+        return Ok(Json(json!({ "ok": true, "sizes": serde_json::from_str::<Value>(&sizes).unwrap_or(Value::Null) })).into_response());
+    }
+    let kind = if zip {
+        "application/zip"
+    } else {
+        "text/html; charset=utf-8"
+    };
+    Ok((
+        [
+            (header::CONTENT_TYPE, kind.to_string()),
+            (header::HeaderName::from_static("x-tenun-sizes"), sizes),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 
 #[derive(Deserialize)]

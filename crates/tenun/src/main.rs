@@ -59,6 +59,12 @@ enum Command {
         /// Write the snapshot JSON here (default: standard output).
         #[arg(long)]
         json: Option<PathBuf>,
+        /// The whole site (build 13): with --html one file, with --zip a folder of pages.
+        #[arg(long)]
+        site: bool,
+        /// With --site: write a ZIP of a folder, one file for each page.
+        #[arg(long)]
+        zip: Option<PathBuf>,
     },
 }
 
@@ -77,7 +83,15 @@ async fn main() -> anyhow::Result<()> {
             dashboard,
             html,
             json,
-        }) => return snapshot_cmd(file, dashboard, html, json),
+            site,
+            zip,
+        }) => {
+            return if site {
+                site_cmd(file, html, zip)
+            } else {
+                snapshot_cmd(file, dashboard, html, json)
+            };
+        }
         Some(Command::Login) => return agent::login(),
         Some(Command::Logout) => return agent::logout(),
         Some(Command::Publish { file, dashboard }) => {
@@ -118,6 +132,33 @@ async fn main() -> anyhow::Result<()> {
         let _ = webbrowser::open(&running.url);
     }
     tokio::signal::ctrl_c().await?;
+    Ok(())
+}
+
+/// The whole site of a workspace, as one HTML file or a ZIP of a folder (build 13).
+fn site_cmd(file: PathBuf, html: Option<PathBuf>, zip: Option<PathBuf>) -> anyhow::Result<()> {
+    use tenun_core::Engine;
+    use tenun_core::secrets::Secrets;
+    if html.is_none() && zip.is_none() {
+        anyhow::bail!("--site needs --html <file> or --zip <file>");
+    }
+    let engine = Engine::new(Secrets::new(Secrets::default_path()))?;
+    engine.open(&file)?;
+    if let Some((id, e)) = engine.snapshot().errors.iter().next() {
+        anyhow::bail!("source {id} did not load: {e}");
+    }
+    let mut site = tenun_core::site::build_site(&engine, |done, total| {
+        eprintln!("page {done} of {total}");
+    })?;
+    tenun::add_site_maps(&mut site, &engine.geo_dir());
+    if let Some(p) = html {
+        std::fs::write(&p, tenun::export_html(&site))?;
+        eprintln!("wrote {}", p.display());
+    }
+    if let Some(p) = zip {
+        std::fs::write(&p, tenun::export_site_zip(&site))?;
+        eprintln!("wrote {}", p.display());
+    }
     Ok(())
 }
 

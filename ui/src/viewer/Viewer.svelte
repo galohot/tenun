@@ -11,6 +11,7 @@
   import TileBody from '../components/dash/TileBody.svelte';
   import FlowLayout from '../components/dash/FlowLayout.svelte';
   import { flowOrder } from '../lib/flow';
+  import { DRILL } from '../lib/site';
   import { cardGround } from '../lib/card';
   import { filterText } from '../lib/filterText';
   import { partialNote } from '../lib/run';
@@ -26,6 +27,9 @@
     embedded = false,
     pages,
     onpage,
+    ondrill,
+    drillFrom,
+    note,
   }: {
     data: ExportPayload;
     /** Set on tenun.cloud: when and where the snapshot was published, and how often it should update. */
@@ -35,6 +39,12 @@
     /** A site's pages: a page link in a text opens one (build 12). Not set: page links are plain text. */
     pages?: ReadonlySet<string>;
     onpage?: (id: string) => void;
+    /** An exported site (build 13): a click on a mark of a tile with an action opens its page. True when it did. */
+    ondrill?: (tile: Tile, value: Cell) => boolean;
+    /** A page a drill-through opened: where from, and the way back. */
+    drillFrom?: { title: string; back: () => void } | null;
+    /** A line under the title: why a page a click opened is not kept to the clicked value. */
+    note?: string;
   } = $props();
   const ROW = 76;
   const GAP = 12;
@@ -103,6 +113,8 @@
   }
 
   function onpick(t: Tile, v: Cell, col = false, stage?: number) {
+    // A tile with an action opens its page, kept to the clicked value (build 13).
+    if (!col && t.action && ondrill?.(t, v)) return;
     if (!data.cross[t.id]?.[crossKey(v, col, stage)]) return;
     pick = pick && pick.tile === t.id && !!pick.col === col && pick.stage === stage && key(pick.value) === key(v) ? null : { tile: t.id, value: v, col, stage };
   }
@@ -170,7 +182,13 @@
         <span class="chip static" title="Saved with the dashboard"><Icon name="pin" size={12} /> {filterText(f, data.tables)}</span>
       {/each}
       {#each data.filters as f}
-        <span class="chip static">{label(f.fromTile, f.op === 'not_in' ? OTHER_KEY : f.values[0], colFilter(f), stageFor(f))}</span>
+        {#if f.fromTile === DRILL}
+          <!-- A drill-through's filter: where it came from, and the way back (build 13). -->
+          <span class="chip static">{drillFrom ? `From ${drillFrom.title}: ` : ''}{filterText(f, data.tables)}</span>
+          {#if drillFrom}<button class="chip back" onclick={drillFrom.back}><Icon name="chevronLeft" size={12} /> Back</button>{/if}
+        {:else}
+          <span class="chip static">{label(f.fromTile, f.op === 'not_in' ? OTHER_KEY : f.values[0], colFilter(f), stageFor(f))}</span>
+        {/if}
       {/each}
       {#if pick}
         <span class="chip">
@@ -180,6 +198,8 @@
       {/if}
     </div>
   </header>
+
+  {#if note}<p class="drillnote" role="note">{note}</p>{/if}
 
   {#if late}
     <div class="late" role="status">
@@ -228,7 +248,7 @@
             selected={pick?.tile === t.id && !pick.col ? [pick.value] : null}
             selectedCol={pick?.tile === t.id && pick.col ? [pick.value] : null}
             selectedStage={pick?.tile === t.id && !pick.col ? (pick.stage ?? null) : null}
-            onpick={data.cross[t.id] ? (v, stage) => onpick(t, v, false, stage) : undefined}
+            onpick={data.cross[t.id] || (ondrill && t.action) ? (v, stage) => onpick(t, v, false, stage) : undefined}
             onpickcol={data.cross[t.id] && t.cols ? (v) => onpick(t, v, true) : undefined} />
         {/if}
       </div>
@@ -309,6 +329,8 @@
     font-weight: 500;
   }
   .chip.static { display: inline-flex; gap: 5px; padding-right: 10px; background: var(--inset); color: var(--text-2); }
+  .chip.back { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; color: var(--accent-text); cursor: pointer; font: inherit; font-size: 12px; }
+  .drillnote { margin: 0 0 12px; font-size: 12px; color: var(--text-2); }
   .chip button { border: 0; background: none; color: inherit; font-size: 15px; line-height: 1; padding: 0 6px; cursor: pointer; }
   .grid { position: relative; }
   /* A story: the tiles in a column, without a ring, on the page's ground (build 11). */

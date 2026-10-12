@@ -20,6 +20,7 @@ pub mod prep;
 pub mod query;
 pub mod secrets;
 pub mod shape;
+pub mod site;
 pub mod snapshot;
 pub mod sqlite;
 pub mod suggest;

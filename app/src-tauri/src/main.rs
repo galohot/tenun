@@ -116,6 +116,13 @@ fn pick(app: &tauri::AppHandle, req: PickRequest) -> Vec<PathBuf> {
             .and_then(to_path)
             .into_iter()
             .collect(),
+        PickRequest::SaveZip { name } => d
+            .add_filter("ZIP archive", &["zip"])
+            .set_file_name(format!("{name}.zip"))
+            .blocking_save_file()
+            .and_then(to_path)
+            .into_iter()
+            .collect(),
         PickRequest::SaveXlsx { name } => d
             .add_filter("Excel workbook", &["xlsx"])
             .set_file_name(format!("{name}.xlsx"))

@@ -997,7 +997,7 @@ export const api = {
   query: (q: SemanticQuery) => call<QueryResult>('POST', '/query', q),
   fs: (path?: string) => call<FsListing>('GET', `/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   pick: (
-    req: { kind: 'data_files' } | { kind: 'folder' } | { kind: 'image' } | { kind: 'open_workspace' } | { kind: 'save_workspace' | 'save_html' | 'save_xlsx'; name: string },
+    req: { kind: 'data_files' } | { kind: 'folder' } | { kind: 'image' } | { kind: 'open_workspace' } | { kind: 'save_workspace' | 'save_html' | 'save_xlsx' | 'save_zip'; name: string },
   ) =>
     call<{ paths: string[] }>('POST', '/pick', req),
   /** The picture the native dialog chose, for an image tile. */
@@ -1031,6 +1031,29 @@ export const api = {
     });
     if (!res.ok) throw new ApiError((await res.json().catch(() => null))?.error ?? res.statusText);
     return path ? new Uint8Array() : new Uint8Array(await res.arrayBuffer());
+  },
+  /**
+   * The whole site (build 13): one HTML file, or a ZIP of a folder. With a path (the desktop app) the file is written
+   * there. Gives the bytes (browser mode) and each page's size in bytes, by its title.
+   */
+  exportSite: async (zip: boolean, path?: string): Promise<{ bytes: Uint8Array; sizes: Record<string, number> }> => {
+    const res = await fetch('/api/export-site', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Tenun': '1' },
+      body: JSON.stringify({ zip, ...(path ? { path } : {}) }),
+    });
+    if (!res.ok) throw new ApiError((await res.json().catch(() => null))?.error ?? res.statusText);
+    if (path) {
+      const r = (await res.json()) as { sizes?: Record<string, number> };
+      return { bytes: new Uint8Array(), sizes: r.sizes ?? {} };
+    }
+    let sizes: Record<string, number> = {};
+    try {
+      sizes = JSON.parse(res.headers.get('x-tenun-sizes') ?? '{}');
+    } catch {
+      sizes = {};
+    }
+    return { bytes: new Uint8Array(await res.arrayBuffer()), sizes };
   },
   /** Returns the HTML file's text (browser mode). */
   exportHtml: async (dashboard: string, filters: unknown[]): Promise<string> => {

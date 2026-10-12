@@ -637,6 +637,47 @@
     }
   }
 
+  /** Past this size an exported site says which pages make it big (build 13). */
+  const SITE_WARN_BYTES = 25 * 1024 * 1024;
+  const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
+
+  /** The whole site, as one file or as a folder in a ZIP (build 13, V4-D15). */
+  async function exportSite(zip: boolean) {
+    if (exporting) return;
+    const name = (app.snap?.workspace.site?.title || app.snap?.workspace.name || 'site').replace(/[\\/:*?"<>|]/g, '_');
+    let target: string | null = null;
+    if (app.health?.native) {
+      const { paths } = await api.pick({ kind: zip ? 'save_zip' : 'save_html', name });
+      if (!paths[0]) return;
+      const ext = zip ? '.zip' : '.html';
+      target = paths[0].endsWith(ext) ? paths[0] : paths[0] + ext;
+    }
+    exporting = 'Preparing…';
+    app.siteProgress = null;
+    const tick = setInterval(() => app.siteProgress && (exporting = `Page ${app.siteProgress.done} of ${app.siteProgress.total}…`), 200);
+    try {
+      const { bytes, sizes } = await api.exportSite(zip, target ?? undefined);
+      if (!target) {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([bytes as BlobPart], { type: zip ? 'application/zip' : 'text/html' }));
+        a.download = `${name}${zip ? '.zip' : '.html'}`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      }
+      const total = target ? Object.values(sizes).reduce((t, n) => t + n, 0) : bytes.length;
+      if (total > SITE_WARN_BYTES) {
+        const big = Object.entries(sizes).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([t, n]) => `${t} (${mb(n)})`).join(', ');
+        app.toast(`The site is ${mb(total)}, which is slow to open. The biggest pages: ${big}.`, 'error');
+      } else app.toast(target ? `Exported ${target.split(/[\\/]/).pop()}` : 'Exported the site');
+    } catch (e) {
+      app.error(e);
+    } finally {
+      clearInterval(tick);
+      exporting = null;
+      app.siteProgress = null;
+    }
+  }
+
   // ---- copy and paste (build 09, V4-D11) ----------------------------------------------------------------------------
 
   /** Tiles picked with Shift-click: a copy takes them all. */
@@ -997,7 +1038,13 @@
       x={exportMenu.x}
       y={exportMenu.y}
       items={[
-        { label: 'Web page (HTML)', run: exportHtml },
+        ...(app.snap?.workspace.site?.on
+          ? [
+              { label: 'Whole site (one file)', run: () => exportSite(false) },
+              { label: 'Whole site (folder, ZIP)', run: () => exportSite(true) },
+            ]
+          : []),
+        { label: app.snap?.workspace.site?.on ? 'This page (HTML)' : 'Web page (HTML)', run: exportHtml },
         { label: 'Image (PNG)', run: () => exportPicture('png') },
         { label: 'PDF', run: () => exportPicture('pdf') },
       ]}

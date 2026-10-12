@@ -31,6 +31,16 @@ pub fn add_maps(payload: &mut serde_json::Value, geo_dir: &std::path::Path) {
     export::with_maps(payload, geo_dir)
 }
 
+/// The map shapes of every page of a site, once (build 13).
+pub fn add_site_maps(site: &mut serde_json::Value, geo_dir: &std::path::Path) {
+    export::site_with_maps(site, geo_dir)
+}
+
+/// A site as a ZIP of a folder: `index.html` and a file for each other page (build 13).
+pub fn export_site_zip(site: &serde_json::Value) -> Vec<u8> {
+    export::zip(&export::site_files(site))
+}
+
 pub struct Options {
     pub host: IpAddr,
     /// 0 picks a free port.
@@ -57,6 +67,10 @@ pub enum PickRequest {
         name: String,
     },
     SaveXlsx {
+        name: String,
+    },
+    /// A site saved as a folder in a ZIP (build 13).
+    SaveZip {
         name: String,
     },
 }

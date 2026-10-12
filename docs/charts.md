@@ -115,6 +115,12 @@ sidebar and switch on **Make this workspace a site**. It is off unless you switc
 - **Groups:** add a group, name it, and pick a group for each page. Pages in no group come first. A page that is not
   **In the navigation** is still reached by a link in a text, or by a click that opens it.
 - **Preview site** shows the site as an export will draw it. On a phone the navigation is a **Pages** button.
+- **Export:** **Export** › **Whole site (one file)** makes one HTML file with every page, its navigation, the links
+  between pages and the drill-throughs; it works offline and keeps its place in the address, so back and forward
+  work. **Whole site (folder, ZIP)** makes a folder for any web host: `index.html` is the home page and every other
+  page has its own file. A drill-through opens its page for the first 50 values of the clicked field; past them the
+  page opens without the filter and says so. Tenun warns when the site is over 25 MB. From a terminal:
+  `tenun snapshot <workspace.tenun> --site --html site.html` (or `--zip site.zip`).
 - **Drill-through:** a chart's **⋯** menu › **On click** › **Open** a page. A click on a bar, a slice, a point, a place
   on a map or a table row then opens that page, keeping only the clicked value. The page says where you came from
   ("From Coffee overview: Store: Senja Menteng") and has a **Back** button. The click no longer filters its own page.

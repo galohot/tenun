@@ -65,6 +65,8 @@ class App {
   preview = $state<string | null>(null);
   /** A drill-through on its way to its page: the page shows its filter as "From <page>: …" with Back (build 12). */
   drill = $state<Drill | null>(null);
+  /** Pages done while a site is exported (build 13). */
+  siteProgress = $state<{ done: number; total: number } | null>(null);
   /** A narrow screen (a phone in browser mode): one column, no editing, and the sidebar is a drawer. */
   phone = $state(matchMedia(`(max-width: ${PHONE_MAX - 1}px)`).matches);
   navOpen = $state(false);
@@ -271,6 +273,9 @@ class App {
         api.cloud().then((c) => (this.cloud = c));
         if ((ev as { ok?: boolean }).ok) this.toast('Connected to tenun.cloud');
         else this.toast('The connection was not approved in time. Try again.', 'error');
+      } else if (ev.type === 'site-progress') {
+        const p = ev as unknown as { done: number; total: number };
+        this.siteProgress = { done: p.done, total: p.total };
       } else if (ev.type === 'published') {
         this.refresh();
       } else if (ev.type === 'error' && ev.message) {

@@ -1007,6 +1007,17 @@ pub fn js_key(v: &Value) -> String {
 /// by clicking). The dashboard's own filters join them: the ones it saves, the selection of each
 /// filter tile, and its one grain for every time tile.
 pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> anyhow::Result<Value> {
+    build_with(engine, dashboard_id, filters, true)
+}
+
+/// Like [`build`]; without `cross`, no click of the page is worked out ahead: a page a drill-through opens in an
+/// exported site (build 13), which would otherwise hold every click of every opened value.
+pub fn build_with(
+    engine: &Engine,
+    dashboard_id: &str,
+    filters: &[DashFilter],
+    cross_too: bool,
+) -> anyhow::Result<Value> {
     // A database changes without a load: the links of live tables are read again, so a page that
     // is exported or published says what the data says now (V4-D51).
     engine.recheck_live_links();
@@ -1065,7 +1076,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
     // Offline cross-filtering: each clickable tile, each of its values, every other tile.
     let mut cross: BTreeMap<String, BTreeMap<String, BTreeMap<String, QueryResult>>> =
         BTreeMap::new();
-    for src in &tiles {
+    for src in tiles.iter().filter(|_| cross_too) {
         // A cohort row is not a value of any field, so a click on it has nothing to filter by.
         if matches!(src.kind.as_str(), "kpi" | "cohort") {
             continue;
@@ -1306,6 +1317,9 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
         used.extend(t.dims.iter().map(|d| d.table.clone()));
         used.extend(t.spark.iter().map(|d| d.table.clone()));
     }
+    // A filter's chip names its field, so the file carries the table of every filter too: a page a drill-through
+    // opened says "Store: Senja Menteng", not the column's bare name (build 13).
+    used.extend(filters.iter().map(|f| f.filter.table.clone()));
     let measures: Vec<Value> = engine
         .measures()
         .into_iter()
@@ -1391,7 +1405,7 @@ pub fn build(engine: &Engine, dashboard_id: &str, filters: &[DashFilter]) -> any
     Ok(payload)
 }
 
-fn chrono_now() -> String {
+pub(crate) fn chrono_now() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();

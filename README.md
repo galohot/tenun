@@ -72,7 +72,8 @@ every other chart filters. Save the Excel file and the dashboard updates.
 - **Story pages:** a dashboard that reads like a document: text, live numbers, charts and cards in one column, two
   half-width tiles side by side, printed on A4 pages that never cut a chart.
 - **Sites and drill-through:** turn a workspace into a site with a top bar or a sidebar, groups of pages and a home page;
-  a click on a bar can open another page, kept to that bar's value.
+  a click on a bar can open another page, kept to that bar's value. Export the whole site as one offline HTML file or
+  as a folder for any web host.
 - **Copy and paste:** copy tiles (Shift-click picks several, then Ctrl+C or ⌘C) or a whole dashboard, and paste
   them on any dashboard, in this workspace or another. Named measures and card styles come along. From another
   workspace, **Match fields** asks which table and column here holds the same data, with a first guess filled in.

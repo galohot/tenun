@@ -1,7 +1,8 @@
 import '../lib/theme.css';
 import { mount } from 'svelte';
 import Viewer from './Viewer.svelte';
-import type { ExportPayload } from '../lib/export';
+import SiteApp from './SiteApp.svelte';
+import type { ExportPayload, SitePayload } from '../lib/export';
 import { setLocale } from '../lib/format';
 import { useCarried } from '../lib/geoassets';
 
@@ -28,6 +29,11 @@ async function start() {
   setLocale(data.locale);
   // The maps the file carries are drawn from it, with no network (build 06).
   useCarried(data.geo);
+  // A whole site (build 13): its navigation around the page the address names.
+  if ((data as unknown as SitePayload).kind === 'site') {
+    mount(SiteApp, { target, props: { data: data as unknown as SitePayload } });
+    return;
+  }
   const every = Number(meta('tenun-every')) || null;
   mount(Viewer, {
     target,

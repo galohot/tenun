@@ -118,3 +118,181 @@ pub fn write(req: WriteFile) -> anyhow::Result<()> {
     std::fs::write(&p, req.html)?;
     Ok(())
 }
+
+// ---- a whole site (build 13, V4-D15) ----------------------------------------------------------------------------------
+
+/// The map shapes of every page of a site, once, at the top (`site.geo`): the pages and the pages a drill-through
+/// opens share them.
+pub fn site_with_maps(site: &mut serde_json::Value, geo_dir: &std::path::Path) {
+    let mut geo = serde_json::Map::new();
+    let mut take = |p: &mut serde_json::Value| {
+        with_maps(p, geo_dir);
+        if let Some(serde_json::Value::Object(g)) = p.as_object_mut().and_then(|o| o.remove("geo"))
+        {
+            for (k, v) in g {
+                geo.entry(k).or_insert(v);
+            }
+        }
+    };
+    if let Some(pages) = site["pages"].as_object_mut() {
+        for p in pages.values_mut() {
+            take(p);
+        }
+    }
+    if let Some(drill) = site["drill"].as_object_mut() {
+        for d in drill.values_mut() {
+            if let Some(values) = d["values"].as_object_mut() {
+                for p in values.values_mut() {
+                    take(p);
+                }
+            }
+        }
+    }
+    if !geo.is_empty() {
+        site["geo"] = serde_json::Value::Object(geo);
+    }
+}
+
+/// A site saved as a folder: `index.html` (the home page) and one file for each other page, each with the site's
+/// navigation, its own page, the pages its drill-throughs open, and the maps they draw, so any file works alone.
+pub fn site_files(site: &serde_json::Value) -> Vec<(String, String)> {
+    let order: Vec<String> = site["order"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let titles: Vec<(String, String)> = order
+        .iter()
+        .map(|id| {
+            (
+                id.clone(),
+                site["titles"][id].as_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect();
+    let home = site
+        .pointer("/site/home")
+        .and_then(|h| h.as_str())
+        .filter(|h| order.iter().any(|x| x == h))
+        .map(str::to_string)
+        .or_else(|| order.first().cloned())
+        .unwrap_or_default();
+    let names = tenun_core::site::file_names(&titles, &home);
+    let geo = site.get("geo").cloned();
+    order
+        .iter()
+        .map(|id| {
+            let mut one = site.clone();
+            let page = site["pages"][id].clone();
+            one["pages"] = serde_json::json!({ id: page });
+            // Only the drill-throughs of this page's tiles.
+            let prefix = format!("{id}/");
+            let drill: serde_json::Map<String, serde_json::Value> = site["drill"]
+                .as_object()
+                .map(|d| {
+                    d.iter()
+                        .filter(|(k, _)| k.starts_with(&prefix))
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            one["drill"] = serde_json::Value::Object(drill);
+            one["files"] = serde_json::json!(names);
+            one["page"] = serde_json::json!(id);
+            if let Some(g) = &geo {
+                one["geo"] = g.clone();
+            }
+            (names[id].clone(), html(&one))
+        })
+        .collect()
+}
+
+/// A ZIP archive of files, stored as they are (no compression): small code, and every unzip tool reads it.
+pub fn zip(files: &[(String, String)]) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    let mut central: Vec<u8> = Vec::new();
+    let le16 = |v: &mut Vec<u8>, x: u16| v.extend_from_slice(&x.to_le_bytes());
+    let le32 = |v: &mut Vec<u8>, x: u32| v.extend_from_slice(&x.to_le_bytes());
+    for (name, body) in files {
+        let data = body.as_bytes();
+        let crc = crc32(data);
+        let offset = out.len() as u32;
+        // Local file header: version 2.0, UTF-8 names (bit 11), stored, a fixed time (2026-01-01 00:00).
+        le32(&mut out, 0x0403_4b50);
+        for x in [20u16, 0x0800, 0, 0, 0x5C21] {
+            le16(&mut out, x);
+        }
+        le32(&mut out, crc);
+        le32(&mut out, data.len() as u32);
+        le32(&mut out, data.len() as u32);
+        le16(&mut out, name.len() as u16);
+        le16(&mut out, 0);
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(data);
+        // Its entry in the central directory.
+        le32(&mut central, 0x0201_4b50);
+        for x in [20u16, 20, 0x0800, 0, 0, 0x5C21] {
+            le16(&mut central, x);
+        }
+        le32(&mut central, crc);
+        le32(&mut central, data.len() as u32);
+        le32(&mut central, data.len() as u32);
+        for x in [name.len() as u16, 0, 0, 0, 0] {
+            le16(&mut central, x);
+        }
+        le32(&mut central, 0);
+        le32(&mut central, offset);
+        central.extend_from_slice(name.as_bytes());
+    }
+    let at = out.len() as u32;
+    out.extend_from_slice(&central);
+    le32(&mut out, 0x0605_4b50);
+    for x in [0u16, 0, files.len() as u16, files.len() as u16] {
+        le16(&mut out, x);
+    }
+    le32(&mut out, central.len() as u32);
+    le32(&mut out, at);
+    le16(&mut out, 0);
+    out
+}
+
+/// CRC-32 (IEEE), as ZIP needs it.
+pub fn crc32(data: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &b in data {
+        crc ^= u32::from(b);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crc32_and_a_stored_zip_read_back() {
+        // The check value of CRC-32/ISO-HDLC.
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+        let z = zip(&[
+            ("index.html".into(), "<p>hi</p>".into()),
+            ("a.html".into(), "x".into()),
+        ]);
+        // Two local headers, two central entries, and the end record that names 2 entries.
+        assert_eq!(&z[..4], &[0x50, 0x4b, 0x03, 0x04]);
+        let end = z.len() - 22;
+        assert_eq!(&z[end..end + 4], &[0x50, 0x4b, 0x05, 0x06]);
+        assert_eq!(u16::from_le_bytes([z[end + 10], z[end + 11]]), 2);
+        // The first file's bytes sit right after its 30-byte header and its name.
+        assert_eq!(&z[30 + 10..30 + 10 + 9], b"<p>hi</p>");
+    }
+}
