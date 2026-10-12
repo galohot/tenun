@@ -1,0 +1,17 @@
+Tenun
+Copyright (c) 2026 The Tenun contributors. Licensed under the Apache License 2.0 or the MIT License, at your option.
+
+Tenun ships map data and place names made from these sources (see scripts/geo/SOURCES.md):
+
+- Natural Earth admin-0 countries, 1:50m. Made with Natural Earth. Free vector and raster map data
+  @ naturalearthdata.com. Public domain.
+- geoBoundaries gbOpen, Indonesia ADM2 (boundaries of 2020). Runfola, D. et al. (2020) geoBoundaries: A global
+  database of political administrative boundaries. PLoS ONE 15(4): e0231866. Source: Badan Pusat Statistik (BPS),
+  World Food Programme, OCHA ROAP. Licensed under Creative Commons Attribution 3.0 IGO (CC BY 3.0 IGO).
+  The shapes were simplified, renamed to the current official names and codes, and joined into provinces.
+- Codes and official names of Indonesia's provinces and kabupaten/kota: cahyadsn/wilayah, following the
+  Keputusan Menteri Dalam Negeri No. 300.2.2-2138 and No. 300.2.2-2430 Tahun 2025. Copyright (c) 2025 cahya dsn.
+  MIT License.
+
+Maps of other countries' provinces are downloaded from geoBoundaries gbOpen when first used; each carries the
+licence geoBoundaries lists for it.

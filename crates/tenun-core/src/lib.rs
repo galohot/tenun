@@ -10,6 +10,7 @@ pub mod fetch;
 pub mod filters;
 pub mod folder;
 pub mod formula;
+pub mod geo;
 pub mod jsonrec;
 pub mod links;
 pub mod measures;

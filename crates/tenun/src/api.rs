@@ -17,6 +17,7 @@ use tenun_core::engine::{AddSource, KeyEdit, KeyIn, LinkPreview};
 use tenun_core::formula::CheckRequest;
 use tenun_core::paste;
 use tenun_core::query::{Filter, SemanticQuery};
+use tenun_core::secrets::Secrets;
 use tenun_core::snapshot::{self, DashFilter, Tile, run_tile, run_tile_public};
 use tenun_core::workspace::{DerivedSpec, Every, FieldRef, Locale, Paging, TableSetup};
 
@@ -69,6 +70,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/sources/{id}/link", put(source_link))
         .route("/sources/{id}/derived", put(source_derived))
         .route("/derived/preview", post(derived_preview))
+        .route("/geo/places", get(geo_places))
+        .route("/geo/{country}/{level}", get(geo_boundaries))
         .route("/link/preview", post(link_preview))
         .route("/paste/preview", post(paste_preview))
         .route("/paste", post(paste_add))
@@ -331,6 +334,40 @@ async fn derived_preview(State(s): S, Json(b): Json<DerivedBody>) -> R<Json<Valu
         })
         .await?,
     ))
+}
+
+#[derive(Deserialize)]
+struct PlacesQuery {
+    level: tenun_core::geo::Level,
+    #[serde(default)]
+    country: String,
+}
+
+/// The standard names and codes of one level of one country (build 05): the Place names sheet and its CSV.
+async fn geo_places(Query(q): Query<PlacesQuery>) -> Json<Value> {
+    let places = tenun_core::geo::list(q.level, &q.country);
+    Json(json!({ "level": q.level, "country": q.country.to_ascii_uppercase(), "places": places }))
+}
+
+/// The boundaries of a level of a country that does not ship with Tenun (V4-D19): downloaded from geoBoundaries
+/// once, kept in `<config dir>/tenun/geo/`, then served from there. GeoJSON.
+async fn geo_boundaries(
+    State(s): S,
+    Path((country, level)): Path<(String, String)>,
+) -> R<Response> {
+    let level = match level.as_str() {
+        "province" => tenun_core::geo::Level::Province,
+        "regency" => tenun_core::geo::Level::Regency,
+        _ => return Err(anyhow::anyhow!("A map level is province or regency.").into()),
+    };
+    let body = blocking(&s, move |_| {
+        let dir = Secrets::default_path().with_file_name("geo");
+        let file =
+            tenun_core::geo::boundaries(&country, level, &dir, tenun_core::geo::GEOBOUNDARIES)?;
+        Ok(std::fs::read(file)?)
+    })
+    .await?;
+    Ok(([(header::CONTENT_TYPE, "application/geo+json")], body).into_response())
 }
 
 #[derive(Deserialize)]

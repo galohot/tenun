@@ -815,6 +815,12 @@ export const api = {
   setDerived: (id: string, spec: DerivedSpec) => call<Snapshot>('PUT', `/sources/${encodeURIComponent(id)}/derived`, { spec }),
   /** The columns, first rows, size and notes of a new table before it is made. Saves nothing. */
   previewDerived: (spec: DerivedSpec) => call<DerivedPreview>('POST', '/derived/preview', { spec }),
+  /** The standard names and codes of one level of one country (build 05). */
+  places: (level: 'country' | 'province' | 'regency', country = '') =>
+    call<{ level: string; country: string; places: { code: string; name: string; aliases: string[]; parent?: string }[] }>(
+      'GET',
+      `/geo/places?level=${level}&country=${encodeURIComponent(country)}`,
+    ),
   removeSource: (id: string) => call<Snapshot>('DELETE', `/sources/${encodeURIComponent(id)}`),
   reloadSource: (id: string) => call<Snapshot>('POST', `/sources/${encodeURIComponent(id)}/reload`),
   preview: (id: string, limit = 200) =>

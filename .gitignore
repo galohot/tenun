@@ -7,3 +7,4 @@ app/src-tauri/gen/
 *.local
 .env*
 *.tenun.tmp
+scripts/geo/.cache/

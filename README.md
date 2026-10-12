@@ -215,7 +215,9 @@ tenun agent sales.tenun        # keep publishing on schedule
   the `.tenun` file.
 - Databases are opened read-only. Tenun never writes to your data.
 - No telemetry. The only network use: connecting to PostgreSQL or MySQL the first time downloads
-  the DuckDB connector for it.
+  the DuckDB connector for it, and a map of the provinces or second level of a country other than
+  Indonesia downloads that country's boundaries from geoBoundaries once (the tile says so first).
+  Countries, and Indonesia's provinces and kabupaten/kota, ship with Tenun.
 
 ## Build from source
 
@@ -238,4 +240,6 @@ User accounts, shared servers, row-level security, scheduled emails, a formula l
 
 ## Licence
 
-`MIT OR Apache-2.0`, at your option.
+`MIT OR Apache-2.0`, at your option. The map data comes from Natural Earth (public domain) and
+geoBoundaries (CC BY 3.0 IGO), and Indonesia's codes and names from cahyadsn/wilayah (MIT): see
+[NOTICE](NOTICE) and [scripts/geo/SOURCES.md](scripts/geo/SOURCES.md).

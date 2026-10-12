@@ -3,10 +3,16 @@
   import { app } from '../lib/state.svelte';
   import { SHOW_ADVANCED_SWITCH } from '../lib/tiers';
   import Modal from './Modal.svelte';
+  import PlaceNames from './PlaceNames.svelte';
 
   let { onclose }: { onclose: () => void } = $props();
+  /** The list of place names a map reads (build 05). */
+  let places = $state(false);
 </script>
 
+{#if places}
+  <PlaceNames onclose={() => (places = false)} />
+{:else}
 <Modal title="Settings" width={440} {onclose}>
   <div class="rows">
     {#if SHOW_ADVANCED_SWITCH}
@@ -33,9 +39,17 @@
         <option value="en">English (1,234.5 · $1.2M)</option>
       </select>
     </label>
+    <div class="row">
+      <span class="text">
+        <span class="name">Place names for maps</span>
+        <span class="muted hint">The standard names and codes of countries, provinces and kabupaten/kota that a map reads, with a CSV to start from.</span>
+      </span>
+      <button type="button" class="btn" onclick={() => (places = true)}>Show</button>
+    </div>
   </div>
   <p class="muted note">The number and date format is saved in your workspace file. The other settings belong to this computer.</p>
 </Modal>
+{/if}
 
 <style>
   .rows { display: flex; flex-direction: column; gap: 14px; }

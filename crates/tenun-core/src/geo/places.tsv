@@ -1,0 +1,790 @@
+level	country	code	name	aliases	parent
+0	AD	AD	Andorra	AND|Principality of Andorra	
+0	AE	AE	United Arab Emirates	ARE|Uni Emirat Arab	
+0	AF	AF	Afghanistan	AFG|Afganistan|Islamic State of Afghanistan	
+0	AG	AG	Antigua and Barbuda	ATG|Antigua dan Barbuda|Antigua and Barb.	
+0	AI	AI	Anguilla	AIA	
+0	AL	AL	Albania	ALB|Republic of Albania	
+0	AM	AM	Armenia	ARM|Republic of Armenia	
+0	AO	AO	Angola	AGO|People's Republic of Angola	
+0	AQ	AQ	Antarctica	ATA|Antartika	
+0	AR	AR	Argentina	ARG|Argentine Republic	
+0	AS	AS	American Samoa	ASM|Samoa Amerika	
+0	AT	AT	Austria	AUT|Republic of Austria	
+0	AU	AU	Australia	AUS|Commonwealth of Australia	
+0	AW	AW	Aruba	ABW	
+0	AX	AX	Åland	ALA|Åland Islands|Aland	
+0	AZ	AZ	Azerbaijan	AZE|Republic of Azerbaijan	
+0	BA	BA	Bosnia and Herzegovina	BIH|Bosnia dan Herzegovina|Bosnia and Herz.	
+0	BB	BB	Barbados	BRB	
+0	BD	BD	Bangladesh	BGD|People's Republic of Bangladesh	
+0	BE	BE	Belgium	BEL|Belgia|Kingdom of Belgium	
+0	BF	BF	Burkina Faso	BFA	
+0	BG	BG	Bulgaria	BGR|Republic of Bulgaria	
+0	BH	BH	Bahrain	BHR|Kingdom of Bahrain	
+0	BI	BI	Burundi	BDI|Republic of Burundi	
+0	BJ	BJ	Benin	BEN|Republic of Benin	
+0	BL	BL	Saint Barthélemy	BLM|St-Barthélemy	
+0	BM	BM	Bermuda	BMU|The Bermudas or Somers Isles	
+0	BN	BN	Brunei	BRN|Brunei Darussalam|Negara Brunei Darussalam	
+0	BO	BO	Bolivia	BOL|Plurinational State of Bolivia	
+0	BR	BR	Brazil	BRA|Brasil|Federative Republic of Brazil	
+0	BS	BS	The Bahamas	BHS|Bahama|Bahamas|Commonwealth of the Bahamas|Bahamas, The	
+0	BT	BT	Bhutan	BTN|Kingdom of Bhutan	
+0	BW	BW	Botswana	BWA|Republic of Botswana	
+0	BY	BY	Belarus	BLR|Republic of Belarus	
+0	BZ	BZ	Belize	BLZ	
+0	CA	CA	Canada	CAN|Kanada	
+0	CD	CD	Democratic Republic of the Congo	COD|Republik Demokratik Kongo|Dem. Rep. Congo|Congo, Dem. Rep.	
+0	CF	CF	Central African Republic	CAF|Republik Afrika Tengah|Central African Rep.	
+0	CG	CG	Republic of the Congo	COG|Republik Kongo|Congo|Congo, Rep.	
+0	CH	CH	Switzerland	CHE|Swiss|Swiss Confederation	
+0	CI	CI	Ivory Coast	CIV|Pantai Gading|Côte d'Ivoire|Republic of Ivory Coast	
+0	CK	CK	Cook Islands	COK|Kepulauan Cook|Cook Is.	
+0	CL	CL	Chile	CHL|Chili|Republic of Chile	
+0	CM	CM	Cameroon	CMR|Kamerun|Republic of Cameroon	
+0	CN	CN	People's Republic of China	CHN|Republik Rakyat Tiongkok|China	
+0	CO	CO	Colombia	COL|Kolombia|Republic of Colombia	
+0	CR	CR	Costa Rica	CRI|Kosta Rika|Republic of Costa Rica	
+0	CU	CU	Cuba	CUB|Kuba|Republic of Cuba	
+0	CV	CV	Cape Verde	CPV|Tanjung Verde|Cabo Verde|Republic of Cabo Verde	
+0	CW	CW	Curaçao	CUW	
+0	CY	CY	Cyprus	CYP|Siprus|Republic of Cyprus	
+0	CZ	CZ	Czech Republic	CZE|Republik Ceko|Czechia	
+0	DE	DE	Germany	DEU|Jerman|Federal Republic of Germany	
+0	DJ	DJ	Djibouti	DJI|Republic of Djibouti	
+0	DK	DK	Denmark	DNK|Kingdom of Denmark	
+0	DM	DM	Dominica	DMA|Dominika|Commonwealth of Dominica	
+0	DO	DO	Dominican Republic	DOM|Republik Dominika|Dominican Rep.	
+0	DZ	DZ	Algeria	DZA|Aljazair|People's Democratic Republic of Algeria	
+0	EC	EC	Ecuador	ECU|Ekuador|Republic of Ecuador	
+0	EE	EE	Estonia	EST|Republic of Estonia	
+0	EG	EG	Egypt	EGY|Mesir|Arab Republic of Egypt|Egypt, Arab Rep.	
+0	EH	EH	Western Sahara	ESH|Sahara Barat|W. Sahara|Sahrawi Arab Democratic Republic	
+0	ER	ER	Eritrea	ERI|State of Eritrea	
+0	ES	ES	Spain	ESP|Spanyol|Kingdom of Spain	
+0	ET	ET	Ethiopia	ETH|Federal Democratic Republic of Ethiopia	
+0	FI	FI	Finland	FIN|Finlandia|Republic of Finland	
+0	FJ	FJ	Fiji	FJI|Republic of Fiji	
+0	FK	FK	Falkland Islands	FLK|Kepulauan Falkland|Falkland Is.|Falkland Islands / Malvinas	
+0	FM	FM	Federated States of Micronesia	FSM|Mikronesia|Micronesia|Micronesia, Federated States of	
+0	FO	FO	Faroe Islands	FRO|Kepulauan Faroe|Faeroe Is.|Faeroe Islands|Føroyar Is. (Faeroe Is.)	
+0	FR	FR	France	FRA|Prancis|French Republic	
+0	GA	GA	Gabon	GAB|Gabonese Republic	
+0	GB	GB	United Kingdom	GBR|Britania Raya|United Kingdom of Great Britain and Northern Ireland	
+0	GD	GD	Grenada	GRD	
+0	GE	GE	Georgia	GEO	
+0	GG	GG	Guernsey	GGY|Bailiwick of Guernsey	
+0	GH	GH	Ghana	GHA|Republic of Ghana	
+0	GL	GL	Greenland	GRL	
+0	GM	GM	The Gambia	GMB|Gambia|Republic of the Gambia|Gambia, The	
+0	GN	GN	Guinea	GIN|Republic of Guinea	
+0	GQ	GQ	Equatorial Guinea	GNQ|Guinea Khatulistiwa|Eq. Guinea|Republic of Equatorial Guinea	
+0	GR	GR	Greece	GRC|Yunani|Hellenic Republic	
+0	GS	GS	South Georgia and the South Sandwich Islands	SGS|Georgia Selatan dan Kepulauan Sandwich Selatan|S. Geo. and the Is.|South Georgia and the Islands	
+0	GT	GT	Guatemala	GTM|Republic of Guatemala	
+0	GU	GU	Guam	GUM|Territory of Guam	
+0	GW	GW	Guinea-Bissau	GNB|Republic of Guinea-Bissau	
+0	GY	GY	Guyana	GUY|Co-operative Republic of Guyana	
+0	HK	HK	Hong Kong	HKG|Hong Kong Special Administrative Region, PRC|Hong Kong SAR, China	
+0	HM	HM	Heard Island and McDonald Islands	HMD|Pulau Heard dan Kepulauan McDonald|Heard I. and McDonald Is.|Heard I. and McDonald Islands|Territory of Heard Island and McDonald Islands	
+0	HN	HN	Honduras	HND|Republic of Honduras	
+0	HR	HR	Croatia	HRV|Kroasia|Republic of Croatia	
+0	HT	HT	Haiti	HTI|Republic of Haiti	
+0	HU	HU	Hungary	HUN|Hongaria|Republic of Hungary	
+0	ID	ID	Indonesia	IDN|Republic of Indonesia	
+0	IE	IE	Ireland	IRL|Republik Irlandia	
+0	IL	IL	Israel	ISR|State of Israel	
+0	IM	IM	Isle of Man	IMN|Pulau Man	
+0	IN	IN	India	IND|Republic of India	
+0	IO	IO	British Indian Ocean Territory	IOT|Wilayah Samudra Hindia Britania|Br. Indian Ocean Ter.	
+0	IQ	IQ	Iraq	IRQ|Irak|Republic of Iraq	
+0	IR	IR	Iran	IRN|Islamic Republic of Iran|Iran, Islamic Rep.	
+0	IS	IS	Iceland	ISL|Islandia|Republic of Iceland	
+0	IT	IT	Italy	ITA|Italia|Italian Republic	
+0	JE	JE	Jersey	JEY|Bailiwick of Jersey	
+0	JM	JM	Jamaica	JAM|Jamaika	
+0	JO	JO	Jordan	JOR|Yordania|Hashemite Kingdom of Jordan	
+0	JP	JP	Japan	JPN|Jepang	
+0	KE	KE	Kenya	KEN|Republic of Kenya	
+0	KG	KG	Kyrgyzstan	KGZ|Kirgizstan|Kyrgyz Republic	
+0	KH	KH	Cambodia	KHM|Kamboja|Kingdom of Cambodia	
+0	KI	KI	Kiribati	KIR|Republic of Kiribati	
+0	KM	KM	Comoros	COM|Komoro|Union of the Comoros	
+0	KN	KN	Saint Kitts and Nevis	KNA|Saint Kitts dan Nevis|St. Kitts and Nevis|Federation of Saint Kitts and Nevis	
+0	KP	KP	North Korea	PRK|Korea Utara|Dem. Rep. Korea|Democratic People's Republic of Korea|Korea, Dem. Rep.	
+0	KR	KR	South Korea	KOR|Korea Selatan|Republic of Korea|Korea, Rep.	
+0	KW	KW	Kuwait	KWT|State of Kuwait	
+0	KY	KY	Cayman Islands	CYM|Kepulauan Cayman|Cayman Is.	
+0	KZ	KZ	Kazakhstan	KAZ|Republic of Kazakhstan	
+0	LA	LA	Laos	LAO|Lao PDR|Lao People's Democratic Republic	
+0	LB	LB	Lebanon	LBN|Lebanese Republic	
+0	LC	LC	Saint Lucia	LCA|St. Lucia	
+0	LI	LI	Liechtenstein	LIE|Principality of Liechtenstein	
+0	LK	LK	Sri Lanka	LKA|Democratic Socialist Republic of Sri Lanka	
+0	LR	LR	Liberia	LBR|Republic of Liberia	
+0	LS	LS	Lesotho	LSO|Kingdom of Lesotho	
+0	LT	LT	Lithuania	LTU|Lituania|Republic of Lithuania	
+0	LU	LU	Luxembourg	LUX|Luksemburg|Grand Duchy of Luxembourg	
+0	LV	LV	Latvia	LVA|Republic of Latvia	
+0	LY	LY	Libya	LBY	
+0	MA	MA	Morocco	MAR|Maroko|Kingdom of Morocco	
+0	MC	MC	Monaco	MCO|Monako|Principality of Monaco	
+0	MD	MD	Moldova	MDA|Republic of Moldova	
+0	ME	ME	Montenegro	MNE	
+0	MF	MF	Saint Martin	MAF|St-Martin|Saint-Martin (French part)|St. Martin (French part)	
+0	MG	MG	Madagascar	MDG|Madagaskar|Republic of Madagascar	
+0	MH	MH	Marshall Islands	MHL|Kepulauan Marshall|Marshall Is.|Republic of the Marshall Islands	
+0	MK	MK	North Macedonia	MKD|Republik Makedonia Utara|Republic of North Macedonia	
+0	ML	ML	Mali	MLI|Republic of Mali	
+0	MM	MM	Myanmar	MMR|Republic of the Union of Myanmar	
+0	MN	MN	Mongolia	MNG	
+0	MO	MO	Macau	MAC|Makau|Macao|Macao Special Administrative Region, PRC|Macao SAR, China	
+0	MP	MP	Northern Mariana Islands	MNP|Kepulauan Mariana Utara|N. Mariana Is.|Commonwealth of the Northern Mariana Islands	
+0	MR	MR	Mauritania	MRT|Islamic Republic of Mauritania	
+0	MS	MS	Montserrat	MSR	
+0	MT	MT	Malta	MLT|Republic of Malta	
+0	MU	MU	Mauritius	MUS|Republic of Mauritius	
+0	MV	MV	Maldives	MDV|Maladewa|Republic of Maldives	
+0	MW	MW	Malawi	MWI|Republic of Malawi	
+0	MX	MX	Mexico	MEX|Meksiko|United Mexican States	
+0	MY	MY	Malaysia	MYS	
+0	MZ	MZ	Mozambique	MOZ|Mozambik|Republic of Mozambique	
+0	NA	NA	Namibia	NAM|Republic of Namibia	
+0	NC	NC	New Caledonia	NCL|Kaledonia Baru	
+0	NE	NE	Niger	NER|Republic of Niger	
+0	NF	NF	Norfolk Island	NFK|Pulau Norfolk|Territory of Norfolk Island	
+0	NG	NG	Nigeria	NGA|Federal Republic of Nigeria	
+0	NI	NI	Nicaragua	NIC|Nikaragua|Republic of Nicaragua	
+0	NL	NL	Netherlands	NLD|Belanda|Kingdom of the Netherlands	
+0	NO	NO	Norway	NOR|Norwegia|Kingdom of Norway	
+0	NP	NP	Nepal	NPL	
+0	NR	NR	Nauru	NRU|Republic of Nauru	
+0	NU	NU	Niue	NIU	
+0	NZ	NZ	New Zealand	NZL|Selandia Baru	
+0	OM	OM	Oman	OMN|Sultanate of Oman	
+0	PA	PA	Panama	PAN|Republic of Panama	
+0	PE	PE	Peru	PER|Republic of Peru	
+0	PF	PF	French Polynesia	PYF|Polinesia Prancis|Fr. Polynesia	
+0	PG	PG	Papua New Guinea	PNG|Papua Nugini|Independent State of Papua New Guinea	
+0	PH	PH	Philippines	PHL|Filipina|Republic of the Philippines	
+0	PK	PK	Pakistan	PAK|Islamic Republic of Pakistan	
+0	PL	PL	Poland	POL|Polandia|Republic of Poland	
+0	PM	PM	Saint Pierre and Miquelon	SPM|Saint Pierre dan Miquelon|St. Pierre and Miquelon	
+0	PN	PN	Pitcairn Islands	PCN|Kepulauan Pitcairn|Pitcairn Is.|Pitcairn, Henderson, Ducie and Oeno Islands	
+0	PR	PR	Puerto Rico	PRI|Puerto Riko|Commonwealth of Puerto Rico	
+0	PS	PS	Palestine	PSE|Palestina|West Bank and Gaza|Palestine (West Bank and Gaza)	
+0	PT	PT	Portugal	PRT|Portuguese Republic	
+0	PW	PW	Palau	PLW|Republic of Palau	
+0	PY	PY	Paraguay	PRY|Republic of Paraguay	
+0	QA	QA	Qatar	QAT|State of Qatar	
+0	RO	RO	Romania	ROU|Rumania	
+0	RS	RS	Serbia	SRB|Republic of Serbia	
+0	RU	RU	Russia	RUS|Rusia|Russian Federation	
+0	RW	RW	Rwanda	RWA|Republic of Rwanda	
+0	SA	SA	Saudi Arabia	SAU|Arab Saudi|Kingdom of Saudi Arabia	
+0	SB	SB	Solomon Islands	SLB|Kepulauan Solomon|Solomon Is.	
+0	SC	SC	Seychelles	SYC|Republic of Seychelles	
+0	SD	SD	Sudan	SDN|Republic of the Sudan	
+0	SE	SE	Sweden	SWE|Swedia|Kingdom of Sweden	
+0	SG	SG	Singapore	SGP|Singapura|Republic of Singapore	
+0	SH	SH	Saint Helena	SHN|St. Helena	
+0	SI	SI	Slovenia	SVN|Republic of Slovenia	
+0	SK	SK	Slovakia	SVK|Slowakia|Slovak Republic	
+0	SL	SL	Sierra Leone	SLE|Republic of Sierra Leone	
+0	SM	SM	San Marino	SMR|Republic of San Marino	
+0	SN	SN	Senegal	SEN|Republic of Senegal	
+0	SO	SO	Somalia	SOM|Federal Republic of Somalia	
+0	SR	SR	Suriname	SUR|Republic of Suriname	
+0	SS	SS	South Sudan	SSD|Sudan Selatan|S. Sudan|Republic of South Sudan	
+0	ST	ST	São Tomé and Príncipe	STP|Sao Tome dan Principe|São Tomé and Principe|Democratic Republic of São Tomé and Principe|Sao Tome and Principe	
+0	SV	SV	El Salvador	SLV|Republic of El Salvador	
+0	SX	SX	Sint Maarten	SXM|Sint Maarten (Dutch part)|St. Maarten (Dutch part)	
+0	SY	SY	Syria	SYR|Suriah|Syrian Arab Republic	
+0	SZ	SZ	Eswatini	SWZ|Kingdom of eSwatini	
+0	TC	TC	Turks and Caicos Islands	TCA|Kepulauan Turks dan Caicos|Turks and Caicos Is.	
+0	TD	TD	Chad	TCD|Republic of Chad	
+0	TF	TF	French Southern and Antarctic Lands	ATF|Daratan Selatan dan Antarktika Perancis|Fr. S. Antarctic Lands|Territory of the French Southern and Antarctic Lands	
+0	TG	TG	Togo	TGO|Togolese Republic	
+0	TH	TH	Thailand	THA|Kingdom of Thailand	
+0	TJ	TJ	Tajikistan	TJK|Republic of Tajikistan	
+0	TL	TL	East Timor	TLS|Timor Leste|Timor-Leste|Democratic Republic of Timor-Leste	
+0	TM	TM	Turkmenistan	TKM	
+0	TN	TN	Tunisia	TUN|Republic of Tunisia	
+0	TO	TO	Tonga	TON|Kingdom of Tonga	
+0	TR	TR	Turkey	TUR|Turki|Republic of Turkey	
+0	TT	TT	Trinidad and Tobago	TTO|Trinidad dan Tobago|Republic of Trinidad and Tobago	
+0	TV	TV	Tuvalu	TUV	
+0	TW	TW	Taiwan	TWN	
+0	TZ	TZ	Tanzania	TZA|United Republic of Tanzania	
+0	UA	UA	Ukraine	UKR|Ukraina	
+0	UG	UG	Uganda	UGA|Republic of Uganda	
+0	US	US	United States of America	USA|Amerika Serikat|United States	
+0	UY	UY	Uruguay	URY|Oriental Republic of Uruguay	
+0	UZ	UZ	Uzbekistan	UZB|Republic of Uzbekistan	
+0	VA	VA	Vatican City	VAT|Vatikan|Vatican|State of the Vatican City|Vatican (Holy See)	
+0	VC	VC	Saint Vincent and the Grenadines	VCT|Saint Vincent dan Grenadine|St. Vin. and Gren.|St. Vincent and the Grenadines	
+0	VE	VE	Venezuela	VEN|Bolivarian Republic of Venezuela|Venezuela, RB	
+0	VG	VG	British Virgin Islands	VGB|Kepulauan Virgin Britania Raya|British Virgin Is.	
+0	VI	VI	United States Virgin Islands	VIR|Kepulauan Virgin Amerika Serikat|U.S. Virgin Is.|Virgin Islands of the United States|Virgin Islands (U.S.)	
+0	VN	VN	Vietnam	VNM|Socialist Republic of Vietnam	
+0	VU	VU	Vanuatu	VUT|Republic of Vanuatu	
+0	WF	WF	Wallis and Futuna	WLF|Wallis dan Futuna|Wallis and Futuna Is.|Wallis and Futuna Islands	
+0	WS	WS	Samoa	WSM|Independent State of Samoa	
+0	XK	XK	Kosovo	XKX|Republic of Kosovo	
+0	YE	YE	Yemen	YEM|Yaman|Republic of Yemen|Yemen, Rep.	
+0	ZA	ZA	South Africa	ZAF|Afrika Selatan|Republic of South Africa	
+0	ZM	ZM	Zambia	ZMB|Republic of Zambia	
+0	ZW	ZW	Zimbabwe	ZWE|Republic of Zimbabwe	
+1	ID	ID-AC	Aceh	11|NAD|Nanggroe Aceh Darussalam	ID
+1	ID	ID-SU	Sumatera Utara	12|Sumut|North Sumatra|North Sumatera	ID
+1	ID	ID-SB	Sumatera Barat	13|Sumbar|West Sumatra|West Sumatera	ID
+1	ID	ID-RI	Riau	14	ID
+1	ID	ID-JA	Jambi	15	ID
+1	ID	ID-SS	Sumatera Selatan	16|Sumsel|South Sumatra|South Sumatera	ID
+1	ID	ID-BE	Bengkulu	17	ID
+1	ID	ID-LA	Lampung	18	ID
+1	ID	ID-BB	Kepulauan Bangka Belitung	19|Bangka Belitung|Babel|Bangka Belitung Islands	ID
+1	ID	ID-KR	Kepulauan Riau	21|Kepri|Riau Islands	ID
+1	ID	ID-JK	Daerah Khusus Ibukota Jakarta	31|DKI Jakarta|Jakarta|DKJ|Daerah Khusus Jakarta	ID
+1	ID	ID-JB	Jawa Barat	32|Jabar|West Java	ID
+1	ID	ID-JT	Jawa Tengah	33|Jateng|Central Java	ID
+1	ID	ID-YO	Daerah Istimewa Yogyakarta	34|DIY|DI Yogyakarta|Yogyakarta|Jogja|Jogjakarta|Special Region of Yogyakarta	ID
+1	ID	ID-JI	Jawa Timur	35|Jatim|East Java	ID
+1	ID	ID-BT	Banten	36	ID
+1	ID	ID-BA	Bali	51	ID
+1	ID	ID-NB	Nusa Tenggara Barat	52|NTB|West Nusa Tenggara	ID
+1	ID	ID-NT	Nusa Tenggara Timur	53|NTT|East Nusa Tenggara	ID
+1	ID	ID-KB	Kalimantan Barat	61|Kalbar|West Kalimantan	ID
+1	ID	ID-KT	Kalimantan Tengah	62|Kalteng|Central Kalimantan	ID
+1	ID	ID-KS	Kalimantan Selatan	63|Kalsel|South Kalimantan	ID
+1	ID	ID-KI	Kalimantan Timur	64|Kaltim|East Kalimantan	ID
+1	ID	ID-KU	Kalimantan Utara	65|Kaltara|North Kalimantan	ID
+1	ID	ID-SA	Sulawesi Utara	71|Sulut|North Sulawesi	ID
+1	ID	ID-ST	Sulawesi Tengah	72|Sulteng|Central Sulawesi	ID
+1	ID	ID-SN	Sulawesi Selatan	73|Sulsel|South Sulawesi	ID
+1	ID	ID-SG	Sulawesi Tenggara	74|Sultra|Southeast Sulawesi	ID
+1	ID	ID-GO	Gorontalo	75	ID
+1	ID	ID-SR	Sulawesi Barat	76|Sulbar|West Sulawesi	ID
+1	ID	ID-MA	Maluku	81	ID
+1	ID	ID-MU	Maluku Utara	82|Malut|North Maluku	ID
+1	ID	ID-PA	Papua	91	ID
+1	ID	ID-PB	Papua Barat	92|West Papua|Pabar	ID
+1	ID	ID-PS	Papua Selatan	93|South Papua	ID
+1	ID	ID-PT	Papua Tengah	94|Central Papua	ID
+1	ID	ID-PE	Papua Pegunungan	95|Highland Papua	ID
+1	ID	ID-PD	Papua Barat Daya	96|Southwest Papua	ID
+2	ID	11.01	Kabupaten Aceh Selatan		ID-AC
+2	ID	11.02	Kabupaten Aceh Tenggara		ID-AC
+2	ID	11.03	Kabupaten Aceh Timur		ID-AC
+2	ID	11.04	Kabupaten Aceh Tengah		ID-AC
+2	ID	11.05	Kabupaten Aceh Barat		ID-AC
+2	ID	11.06	Kabupaten Aceh Besar		ID-AC
+2	ID	11.07	Kabupaten Pidie		ID-AC
+2	ID	11.08	Kabupaten Aceh Utara		ID-AC
+2	ID	11.09	Kabupaten Simeulue		ID-AC
+2	ID	11.10	Kabupaten Aceh Singkil		ID-AC
+2	ID	11.11	Kabupaten Bireuen		ID-AC
+2	ID	11.12	Kabupaten Aceh Barat Daya		ID-AC
+2	ID	11.13	Kabupaten Gayo Lues		ID-AC
+2	ID	11.14	Kabupaten Aceh Jaya		ID-AC
+2	ID	11.15	Kabupaten Nagan Raya		ID-AC
+2	ID	11.16	Kabupaten Aceh Tamiang		ID-AC
+2	ID	11.17	Kabupaten Bener Meriah		ID-AC
+2	ID	11.18	Kabupaten Pidie Jaya		ID-AC
+2	ID	11.71	Kota Banda Aceh		ID-AC
+2	ID	11.72	Kota Sabang		ID-AC
+2	ID	11.73	Kota Lhokseumawe		ID-AC
+2	ID	11.74	Kota Langsa		ID-AC
+2	ID	11.75	Kota Subulussalam		ID-AC
+2	ID	12.01	Kabupaten Tapanuli Tengah		ID-SU
+2	ID	12.02	Kabupaten Tapanuli Utara		ID-SU
+2	ID	12.03	Kabupaten Tapanuli Selatan		ID-SU
+2	ID	12.04	Kabupaten Nias		ID-SU
+2	ID	12.05	Kabupaten Langkat		ID-SU
+2	ID	12.06	Kabupaten Karo		ID-SU
+2	ID	12.07	Kabupaten Deli Serdang		ID-SU
+2	ID	12.08	Kabupaten Simalungun		ID-SU
+2	ID	12.09	Kabupaten Asahan		ID-SU
+2	ID	12.10	Kabupaten Labuhanbatu		ID-SU
+2	ID	12.11	Kabupaten Dairi		ID-SU
+2	ID	12.12	Kabupaten Toba	Kabupaten Toba Samosir	ID-SU
+2	ID	12.13	Kabupaten Mandailing Natal		ID-SU
+2	ID	12.14	Kabupaten Nias Selatan		ID-SU
+2	ID	12.15	Kabupaten Pakpak Bharat		ID-SU
+2	ID	12.16	Kabupaten Humbang Hasundutan		ID-SU
+2	ID	12.17	Kabupaten Samosir		ID-SU
+2	ID	12.18	Kabupaten Serdang Bedagai		ID-SU
+2	ID	12.19	Kabupaten Batu Bara		ID-SU
+2	ID	12.20	Kabupaten Padang Lawas Utara		ID-SU
+2	ID	12.21	Kabupaten Padang Lawas		ID-SU
+2	ID	12.22	Kabupaten Labuhanbatu Selatan		ID-SU
+2	ID	12.23	Kabupaten Labuhanbatu Utara		ID-SU
+2	ID	12.24	Kabupaten Nias Utara		ID-SU
+2	ID	12.25	Kabupaten Nias Barat		ID-SU
+2	ID	12.71	Kota Medan		ID-SU
+2	ID	12.72	Kota Pematangsiantar		ID-SU
+2	ID	12.73	Kota Sibolga		ID-SU
+2	ID	12.74	Kota Tanjungbalai		ID-SU
+2	ID	12.75	Kota Binjai		ID-SU
+2	ID	12.76	Kota Tebing Tinggi		ID-SU
+2	ID	12.77	Kota Padangsidimpuan		ID-SU
+2	ID	12.78	Kota Gunungsitoli		ID-SU
+2	ID	13.01	Kabupaten Pesisir Selatan		ID-SB
+2	ID	13.02	Kabupaten Solok		ID-SB
+2	ID	13.03	Kabupaten Sijunjung		ID-SB
+2	ID	13.04	Kabupaten Tanah Datar		ID-SB
+2	ID	13.05	Kabupaten Padang Pariaman		ID-SB
+2	ID	13.06	Kabupaten Agam		ID-SB
+2	ID	13.07	Kabupaten Lima Puluh Kota		ID-SB
+2	ID	13.08	Kabupaten Pasaman		ID-SB
+2	ID	13.09	Kabupaten Kepulauan Mentawai		ID-SB
+2	ID	13.10	Kabupaten Dharmasraya		ID-SB
+2	ID	13.11	Kabupaten Solok Selatan		ID-SB
+2	ID	13.12	Kabupaten Pasaman Barat		ID-SB
+2	ID	13.71	Kota Padang		ID-SB
+2	ID	13.72	Kota Solok		ID-SB
+2	ID	13.73	Kota Sawahlunto		ID-SB
+2	ID	13.74	Kota Padang Panjang		ID-SB
+2	ID	13.75	Kota Bukittinggi		ID-SB
+2	ID	13.76	Kota Payakumbuh		ID-SB
+2	ID	13.77	Kota Pariaman		ID-SB
+2	ID	14.01	Kabupaten Kampar		ID-RI
+2	ID	14.02	Kabupaten Indragiri Hulu		ID-RI
+2	ID	14.03	Kabupaten Bengkalis		ID-RI
+2	ID	14.04	Kabupaten Indragiri Hilir		ID-RI
+2	ID	14.05	Kabupaten Pelalawan		ID-RI
+2	ID	14.06	Kabupaten Rokan Hulu		ID-RI
+2	ID	14.07	Kabupaten Rokan Hilir		ID-RI
+2	ID	14.08	Kabupaten Siak		ID-RI
+2	ID	14.09	Kabupaten Kuantan Singingi		ID-RI
+2	ID	14.10	Kabupaten Kepulauan Meranti		ID-RI
+2	ID	14.71	Kota Pekanbaru		ID-RI
+2	ID	14.72	Kota Dumai		ID-RI
+2	ID	15.01	Kabupaten Kerinci		ID-JA
+2	ID	15.02	Kabupaten Merangin		ID-JA
+2	ID	15.03	Kabupaten Sarolangun		ID-JA
+2	ID	15.04	Kabupaten Batanghari		ID-JA
+2	ID	15.05	Kabupaten Muaro Jambi		ID-JA
+2	ID	15.06	Kabupaten Tanjung Jabung Barat		ID-JA
+2	ID	15.07	Kabupaten Tanjung Jabung Timur		ID-JA
+2	ID	15.08	Kabupaten Bungo		ID-JA
+2	ID	15.09	Kabupaten Tebo		ID-JA
+2	ID	15.71	Kota Jambi		ID-JA
+2	ID	15.72	Kota Sungai Penuh		ID-JA
+2	ID	16.01	Kabupaten Ogan Komering Ulu		ID-SS
+2	ID	16.02	Kabupaten Ogan Komering Ilir		ID-SS
+2	ID	16.03	Kabupaten Muara Enim		ID-SS
+2	ID	16.04	Kabupaten Lahat		ID-SS
+2	ID	16.05	Kabupaten Musi Rawas		ID-SS
+2	ID	16.06	Kabupaten Musi Banyuasin		ID-SS
+2	ID	16.07	Kabupaten Banyuasin		ID-SS
+2	ID	16.08	Kabupaten Ogan Komering Ulu Timur		ID-SS
+2	ID	16.09	Kabupaten Ogan Komering Ulu Selatan		ID-SS
+2	ID	16.10	Kabupaten Ogan Ilir		ID-SS
+2	ID	16.11	Kabupaten Empat Lawang		ID-SS
+2	ID	16.12	Kabupaten Penukal Abab Lematang Ilir		ID-SS
+2	ID	16.13	Kabupaten Musi Rawas Utara		ID-SS
+2	ID	16.71	Kota Palembang		ID-SS
+2	ID	16.72	Kota Pagar Alam		ID-SS
+2	ID	16.73	Kota Lubuk Linggau		ID-SS
+2	ID	16.74	Kota Prabumulih		ID-SS
+2	ID	17.01	Kabupaten Bengkulu Selatan		ID-BE
+2	ID	17.02	Kabupaten Rejang Lebong		ID-BE
+2	ID	17.03	Kabupaten Bengkulu Utara		ID-BE
+2	ID	17.04	Kabupaten Kaur		ID-BE
+2	ID	17.05	Kabupaten Seluma		ID-BE
+2	ID	17.06	Kabupaten Mukomuko		ID-BE
+2	ID	17.07	Kabupaten Lebong		ID-BE
+2	ID	17.08	Kabupaten Kepahiang		ID-BE
+2	ID	17.09	Kabupaten Bengkulu Tengah		ID-BE
+2	ID	17.71	Kota Bengkulu		ID-BE
+2	ID	18.01	Kabupaten Lampung Selatan		ID-LA
+2	ID	18.02	Kabupaten Lampung Tengah		ID-LA
+2	ID	18.03	Kabupaten Lampung Utara		ID-LA
+2	ID	18.04	Kabupaten Lampung Barat		ID-LA
+2	ID	18.05	Kabupaten Tulang Bawang		ID-LA
+2	ID	18.06	Kabupaten Tanggamus		ID-LA
+2	ID	18.07	Kabupaten Lampung Timur		ID-LA
+2	ID	18.08	Kabupaten Way Kanan		ID-LA
+2	ID	18.09	Kabupaten Pesawaran		ID-LA
+2	ID	18.10	Kabupaten Pringsewu		ID-LA
+2	ID	18.11	Kabupaten Mesuji		ID-LA
+2	ID	18.12	Kabupaten Tulang Bawang Barat		ID-LA
+2	ID	18.13	Kabupaten Pesisir Barat		ID-LA
+2	ID	18.71	Kota Bandar Lampung		ID-LA
+2	ID	18.72	Kota Metro		ID-LA
+2	ID	19.01	Kabupaten Bangka		ID-BB
+2	ID	19.02	Kabupaten Belitung		ID-BB
+2	ID	19.03	Kabupaten Bangka Selatan		ID-BB
+2	ID	19.04	Kabupaten Bangka Tengah		ID-BB
+2	ID	19.05	Kabupaten Bangka Barat		ID-BB
+2	ID	19.06	Kabupaten Belitung Timur		ID-BB
+2	ID	19.71	Kota Pangkal Pinang	Pangkalpinang	ID-BB
+2	ID	21.01	Kabupaten Bintan		ID-KR
+2	ID	21.02	Kabupaten Karimun		ID-KR
+2	ID	21.03	Kabupaten Natuna		ID-KR
+2	ID	21.04	Kabupaten Lingga		ID-KR
+2	ID	21.05	Kabupaten Kepulauan Anambas		ID-KR
+2	ID	21.71	Kota Batam		ID-KR
+2	ID	21.72	Kota Tanjung Pinang		ID-KR
+2	ID	31.01	Kabupaten Administrasi Kepulauan Seribu	Kepulauan Seribu	ID-JK
+2	ID	31.71	Kota Administrasi Jakarta Pusat	Jakarta Pusat|Jakpus	ID-JK
+2	ID	31.72	Kota Administrasi Jakarta Utara 		ID-JK
+2	ID	31.73	Kota Administrasi Jakarta Barat	Jakarta Barat|Jakbar	ID-JK
+2	ID	31.74	Kota Administrasi Jakarta Selatan	Jakarta Selatan|Jaksel	ID-JK
+2	ID	31.75	Kota Administrasi Jakarta Timur	Jakarta Timur|Jaktim	ID-JK
+2	ID	32.01	Kabupaten Bogor		ID-JB
+2	ID	32.02	Kabupaten Sukabumi		ID-JB
+2	ID	32.03	Kabupaten Cianjur		ID-JB
+2	ID	32.04	Kabupaten Bandung		ID-JB
+2	ID	32.05	Kabupaten Garut		ID-JB
+2	ID	32.06	Kabupaten Tasikmalaya		ID-JB
+2	ID	32.07	Kabupaten Ciamis		ID-JB
+2	ID	32.08	Kabupaten Kuningan		ID-JB
+2	ID	32.09	Kabupaten Cirebon		ID-JB
+2	ID	32.10	Kabupaten Majalengka		ID-JB
+2	ID	32.11	Kabupaten Sumedang		ID-JB
+2	ID	32.12	Kabupaten Indramayu		ID-JB
+2	ID	32.13	Kabupaten Subang		ID-JB
+2	ID	32.14	Kabupaten Purwakarta		ID-JB
+2	ID	32.15	Kabupaten Karawang		ID-JB
+2	ID	32.16	Kabupaten Bekasi		ID-JB
+2	ID	32.17	Kabupaten Bandung Barat		ID-JB
+2	ID	32.18	Kabupaten Pangandaran		ID-JB
+2	ID	32.71	Kota Bogor		ID-JB
+2	ID	32.72	Kota Sukabumi		ID-JB
+2	ID	32.73	Kota Bandung		ID-JB
+2	ID	32.74	Kota Cirebon		ID-JB
+2	ID	32.75	Kota Bekasi		ID-JB
+2	ID	32.76	Kota Depok		ID-JB
+2	ID	32.77	Kota Cimahi		ID-JB
+2	ID	32.78	Kota Tasikmalaya		ID-JB
+2	ID	32.79	Kota Banjar		ID-JB
+2	ID	33.01	Kabupaten Cilacap		ID-JT
+2	ID	33.02	Kabupaten Banyumas		ID-JT
+2	ID	33.03	Kabupaten Purbalingga		ID-JT
+2	ID	33.04	Kabupaten Banjarnegara		ID-JT
+2	ID	33.05	Kabupaten Kebumen		ID-JT
+2	ID	33.06	Kabupaten Purworejo		ID-JT
+2	ID	33.07	Kabupaten Wonosobo		ID-JT
+2	ID	33.08	Kabupaten Magelang		ID-JT
+2	ID	33.09	Kabupaten Boyolali		ID-JT
+2	ID	33.10	Kabupaten Klaten		ID-JT
+2	ID	33.11	Kabupaten Sukoharjo		ID-JT
+2	ID	33.12	Kabupaten Wonogiri		ID-JT
+2	ID	33.13	Kabupaten Karanganyar		ID-JT
+2	ID	33.14	Kabupaten Sragen		ID-JT
+2	ID	33.15	Kabupaten Grobogan		ID-JT
+2	ID	33.16	Kabupaten Blora		ID-JT
+2	ID	33.17	Kabupaten Rembang		ID-JT
+2	ID	33.18	Kabupaten Pati		ID-JT
+2	ID	33.19	Kabupaten Kudus		ID-JT
+2	ID	33.20	Kabupaten Jepara		ID-JT
+2	ID	33.21	Kabupaten Demak		ID-JT
+2	ID	33.22	Kabupaten Semarang		ID-JT
+2	ID	33.23	Kabupaten Temanggung		ID-JT
+2	ID	33.24	Kabupaten Kendal		ID-JT
+2	ID	33.25	Kabupaten Batang		ID-JT
+2	ID	33.26	Kabupaten Pekalongan		ID-JT
+2	ID	33.27	Kabupaten Pemalang		ID-JT
+2	ID	33.28	Kabupaten Tegal		ID-JT
+2	ID	33.29	Kabupaten Brebes		ID-JT
+2	ID	33.71	Kota Magelang		ID-JT
+2	ID	33.72	Kota Surakarta		ID-JT
+2	ID	33.73	Kota Salatiga		ID-JT
+2	ID	33.74	Kota Semarang		ID-JT
+2	ID	33.75	Kota Pekalongan		ID-JT
+2	ID	33.76	Kota Tegal		ID-JT
+2	ID	34.01	Kabupaten Kulon Progo		ID-YO
+2	ID	34.02	Kabupaten Bantul		ID-YO
+2	ID	34.03	Kabupaten Gunungkidul		ID-YO
+2	ID	34.04	Kabupaten Sleman		ID-YO
+2	ID	34.71	Kota Yogyakarta		ID-YO
+2	ID	35.01	Kabupaten Pacitan		ID-JI
+2	ID	35.02	Kabupaten Ponorogo		ID-JI
+2	ID	35.03	Kabupaten Trenggalek		ID-JI
+2	ID	35.04	Kabupaten Tulungagung		ID-JI
+2	ID	35.05	Kabupaten Blitar		ID-JI
+2	ID	35.06	Kabupaten Kediri		ID-JI
+2	ID	35.07	Kabupaten Malang		ID-JI
+2	ID	35.08	Kabupaten Lumajang		ID-JI
+2	ID	35.09	Kabupaten Jember		ID-JI
+2	ID	35.10	Kabupaten Banyuwangi		ID-JI
+2	ID	35.11	Kabupaten Bondowoso		ID-JI
+2	ID	35.12	Kabupaten Situbondo		ID-JI
+2	ID	35.13	Kabupaten Probolinggo		ID-JI
+2	ID	35.14	Kabupaten Pasuruan		ID-JI
+2	ID	35.15	Kabupaten Sidoarjo		ID-JI
+2	ID	35.16	Kabupaten Mojokerto		ID-JI
+2	ID	35.17	Kabupaten Jombang		ID-JI
+2	ID	35.18	Kabupaten Nganjuk		ID-JI
+2	ID	35.19	Kabupaten Madiun		ID-JI
+2	ID	35.20	Kabupaten Magetan		ID-JI
+2	ID	35.21	Kabupaten Ngawi		ID-JI
+2	ID	35.22	Kabupaten Bojonegoro		ID-JI
+2	ID	35.23	Kabupaten Tuban		ID-JI
+2	ID	35.24	Kabupaten Lamongan		ID-JI
+2	ID	35.25	Kabupaten Gresik		ID-JI
+2	ID	35.26	Kabupaten Bangkalan		ID-JI
+2	ID	35.27	Kabupaten Sampang		ID-JI
+2	ID	35.28	Kabupaten Pamekasan		ID-JI
+2	ID	35.29	Kabupaten Sumenep		ID-JI
+2	ID	35.71	Kota Kediri		ID-JI
+2	ID	35.72	Kota Blitar		ID-JI
+2	ID	35.73	Kota Malang		ID-JI
+2	ID	35.74	Kota Probolinggo		ID-JI
+2	ID	35.75	Kota Pasuruan		ID-JI
+2	ID	35.76	Kota Mojokerto		ID-JI
+2	ID	35.77	Kota Madiun		ID-JI
+2	ID	35.78	Kota Surabaya		ID-JI
+2	ID	35.79	Kota Batu		ID-JI
+2	ID	36.01	Kabupaten Pandeglang		ID-BT
+2	ID	36.02	Kabupaten Lebak		ID-BT
+2	ID	36.03	Kabupaten Tangerang		ID-BT
+2	ID	36.04	Kabupaten Serang		ID-BT
+2	ID	36.71	Kota Tangerang		ID-BT
+2	ID	36.72	Kota Cilegon		ID-BT
+2	ID	36.73	Kota Serang		ID-BT
+2	ID	36.74	Kota Tangerang Selatan		ID-BT
+2	ID	51.01	Kabupaten Jembrana		ID-BA
+2	ID	51.02	Kabupaten Tabanan		ID-BA
+2	ID	51.03	Kabupaten Badung		ID-BA
+2	ID	51.04	Kabupaten Gianyar		ID-BA
+2	ID	51.05	Kabupaten Klungkung		ID-BA
+2	ID	51.06	Kabupaten Bangli		ID-BA
+2	ID	51.07	Kabupaten Karangasem		ID-BA
+2	ID	51.08	Kabupaten Buleleng		ID-BA
+2	ID	51.71	Kota Denpasar		ID-BA
+2	ID	52.01	Kabupaten Lombok Barat		ID-NB
+2	ID	52.02	Kabupaten Lombok Tengah		ID-NB
+2	ID	52.03	Kabupaten Lombok Timur		ID-NB
+2	ID	52.04	Kabupaten Sumbawa		ID-NB
+2	ID	52.05	Kabupaten Dompu		ID-NB
+2	ID	52.06	Kabupaten Bima		ID-NB
+2	ID	52.07	Kabupaten Sumbawa Barat		ID-NB
+2	ID	52.08	Kabupaten Lombok Utara		ID-NB
+2	ID	52.71	Kota Mataram		ID-NB
+2	ID	52.72	Kota Bima		ID-NB
+2	ID	53.01	Kabupaten Kupang		ID-NT
+2	ID	53.02	Kabupaten Timor Tengah Selatan		ID-NT
+2	ID	53.03	Kabupaten Timor Tengah Utara		ID-NT
+2	ID	53.04	Kabupaten Belu		ID-NT
+2	ID	53.05	Kabupaten Alor		ID-NT
+2	ID	53.06	Kabupaten Flores Timur		ID-NT
+2	ID	53.07	Kabupaten Sikka		ID-NT
+2	ID	53.08	Kabupaten Ende		ID-NT
+2	ID	53.09	Kabupaten Ngada		ID-NT
+2	ID	53.10	Kabupaten Manggarai		ID-NT
+2	ID	53.11	Kabupaten Sumba Timur		ID-NT
+2	ID	53.12	Kabupaten Sumba Barat		ID-NT
+2	ID	53.13	Kabupaten Lembata		ID-NT
+2	ID	53.14	Kabupaten Rote Ndao		ID-NT
+2	ID	53.15	Kabupaten Manggarai Barat		ID-NT
+2	ID	53.16	Kabupaten Nagekeo		ID-NT
+2	ID	53.17	Kabupaten Sumba Tengah		ID-NT
+2	ID	53.18	Kabupaten Sumba Barat Daya		ID-NT
+2	ID	53.19	Kabupaten Manggarai Timur		ID-NT
+2	ID	53.20	Kabupaten Sabu Raijua		ID-NT
+2	ID	53.21	Kabupaten Malaka		ID-NT
+2	ID	53.71	Kota Kupang		ID-NT
+2	ID	61.01	Kabupaten Sambas		ID-KB
+2	ID	61.02	Kabupaten Mempawah		ID-KB
+2	ID	61.03	Kabupaten Sanggau		ID-KB
+2	ID	61.04	Kabupaten Ketapang		ID-KB
+2	ID	61.05	Kabupaten Sintang		ID-KB
+2	ID	61.06	Kabupaten Kapuas Hulu		ID-KB
+2	ID	61.07	Kabupaten Bengkayang		ID-KB
+2	ID	61.08	Kabupaten Landak		ID-KB
+2	ID	61.09	Kabupaten Sekadau		ID-KB
+2	ID	61.10	Kabupaten Melawi		ID-KB
+2	ID	61.11	Kabupaten Kayong Utara		ID-KB
+2	ID	61.12	Kabupaten Kubu Raya		ID-KB
+2	ID	61.71	Kota Pontianak		ID-KB
+2	ID	61.72	Kota Singkawang		ID-KB
+2	ID	62.01	Kabupaten Kotawaringin Barat		ID-KT
+2	ID	62.02	Kabupaten Kotawaringin Timur		ID-KT
+2	ID	62.03	Kabupaten Kapuas		ID-KT
+2	ID	62.04	Kabupaten Barito Selatan		ID-KT
+2	ID	62.05	Kabupaten Barito Utara		ID-KT
+2	ID	62.06	Kabupaten Katingan		ID-KT
+2	ID	62.07	Kabupaten Seruyan		ID-KT
+2	ID	62.08	Kabupaten Sukamara		ID-KT
+2	ID	62.09	Kabupaten Lamandau		ID-KT
+2	ID	62.10	Kabupaten Gunung Mas		ID-KT
+2	ID	62.11	Kabupaten Pulang Pisau		ID-KT
+2	ID	62.12	Kabupaten Murung Raya		ID-KT
+2	ID	62.13	Kabupaten Barito Timur		ID-KT
+2	ID	62.71	Kota Palangkaraya	Palangka Raya	ID-KT
+2	ID	63.01	Kabupaten Tanah Laut		ID-KS
+2	ID	63.02	Kabupaten Kotabaru	Kota Baru	ID-KS
+2	ID	63.03	Kabupaten Banjar		ID-KS
+2	ID	63.04	Kabupaten Barito Kuala		ID-KS
+2	ID	63.05	Kabupaten Tapin		ID-KS
+2	ID	63.06	Kabupaten Hulu Sungai Selatan		ID-KS
+2	ID	63.07	Kabupaten Hulu Sungai Tengah		ID-KS
+2	ID	63.08	Kabupaten Hulu Sungai Utara		ID-KS
+2	ID	63.09	Kabupaten Tabalong		ID-KS
+2	ID	63.10	Kabupaten Tanah Bumbu		ID-KS
+2	ID	63.11	Kabupaten Balangan		ID-KS
+2	ID	63.71	Kota Banjarmasin		ID-KS
+2	ID	63.72	Kota Banjarbaru		ID-KS
+2	ID	64.01	Kabupaten Paser		ID-KI
+2	ID	64.02	Kabupaten Kutai Kartanegara		ID-KI
+2	ID	64.03	Kabupaten Berau		ID-KI
+2	ID	64.07	Kabupaten Kutai Barat		ID-KI
+2	ID	64.08	Kabupaten Kutai Timur		ID-KI
+2	ID	64.09	Kabupaten Penajam Paser Utara		ID-KI
+2	ID	64.11	Kabupaten Mahakam Ulu	Kabupaten Mahakam Hulu	ID-KI
+2	ID	64.71	Kota Balikpapan		ID-KI
+2	ID	64.72	Kota Samarinda		ID-KI
+2	ID	64.74	Kota Bontang		ID-KI
+2	ID	65.01	Kabupaten Bulungan		ID-KU
+2	ID	65.02	Kabupaten Malinau		ID-KU
+2	ID	65.03	Kabupaten Nunukan		ID-KU
+2	ID	65.04	Kabupaten Tana Tidung		ID-KU
+2	ID	65.71	Kota Tarakan		ID-KU
+2	ID	71.01	Kabupaten Bolaang Mongondow		ID-SA
+2	ID	71.02	Kabupaten Minahasa		ID-SA
+2	ID	71.03	Kabupaten Kepulauan Sangihe		ID-SA
+2	ID	71.04	Kabupaten Kepulauan Talaud		ID-SA
+2	ID	71.05	Kabupaten Minahasa Selatan		ID-SA
+2	ID	71.06	Kabupaten Minahasa Utara		ID-SA
+2	ID	71.07	Kabupaten Minahasa Tenggara		ID-SA
+2	ID	71.08	Kabupaten Bolaang Mongondow Utara		ID-SA
+2	ID	71.09	Kabupaten Kep. Siau Tagulandang Biaro	Kabupaten Siau Tagulandang Biaro	ID-SA
+2	ID	71.10	Kabupaten Bolaang Mongondow Timur		ID-SA
+2	ID	71.11	Kabupaten Bolaang Mongondow Selatan		ID-SA
+2	ID	71.71	Kota Manado		ID-SA
+2	ID	71.72	Kota Bitung		ID-SA
+2	ID	71.73	Kota Tomohon		ID-SA
+2	ID	71.74	Kota Kotamobagu		ID-SA
+2	ID	72.01	Kabupaten Banggai		ID-ST
+2	ID	72.02	Kabupaten Poso		ID-ST
+2	ID	72.03	Kabupaten Donggala		ID-ST
+2	ID	72.04	Kabupaten Toli-Toli		ID-ST
+2	ID	72.05	Kabupaten Buol		ID-ST
+2	ID	72.06	Kabupaten Morowali		ID-ST
+2	ID	72.07	Kabupaten Banggai Kepulauan		ID-ST
+2	ID	72.08	Kabupaten Parigi Moutong		ID-ST
+2	ID	72.09	Kabupaten Tojo Una Una		ID-ST
+2	ID	72.10	Kabupaten Sigi		ID-ST
+2	ID	72.11	Kabupaten Banggai Laut		ID-ST
+2	ID	72.12	Kabupaten Morowali Utara		ID-ST
+2	ID	72.71	Kota Palu		ID-ST
+2	ID	73.01	Kabupaten Kepulauan Selayar		ID-SN
+2	ID	73.02	Kabupaten Bulukumba		ID-SN
+2	ID	73.03	Kabupaten Bantaeng		ID-SN
+2	ID	73.04	Kabupaten Jeneponto		ID-SN
+2	ID	73.05	Kabupaten Takalar		ID-SN
+2	ID	73.06	Kabupaten Gowa		ID-SN
+2	ID	73.07	Kabupaten Sinjai		ID-SN
+2	ID	73.08	Kabupaten Bone		ID-SN
+2	ID	73.09	Kabupaten Maros		ID-SN
+2	ID	73.10	Kabupaten Pangkajene dan Kepulauan		ID-SN
+2	ID	73.11	Kabupaten Barru		ID-SN
+2	ID	73.12	Kabupaten Soppeng		ID-SN
+2	ID	73.13	Kabupaten Wajo		ID-SN
+2	ID	73.14	Kabupaten Sidenreng Rappang		ID-SN
+2	ID	73.15	Kabupaten Pinrang		ID-SN
+2	ID	73.16	Kabupaten Enrekang		ID-SN
+2	ID	73.17	Kabupaten Luwu		ID-SN
+2	ID	73.18	Kabupaten Tana Toraja		ID-SN
+2	ID	73.22	Kabupaten Luwu Utara		ID-SN
+2	ID	73.24	Kabupaten Luwu Timur		ID-SN
+2	ID	73.26	Kabupaten Toraja Utara		ID-SN
+2	ID	73.71	Kota Makassar		ID-SN
+2	ID	73.72	Kota Parepare		ID-SN
+2	ID	73.73	Kota Palopo		ID-SN
+2	ID	74.01	Kabupaten Kolaka		ID-SG
+2	ID	74.02	Kabupaten Konawe		ID-SG
+2	ID	74.03	Kabupaten Muna		ID-SG
+2	ID	74.04	Kabupaten Buton		ID-SG
+2	ID	74.05	Kabupaten Konawe Selatan		ID-SG
+2	ID	74.06	Kabupaten Bombana		ID-SG
+2	ID	74.07	Kabupaten Wakatobi		ID-SG
+2	ID	74.08	Kabupaten Kolaka Utara		ID-SG
+2	ID	74.09	Kabupaten Konawe Utara		ID-SG
+2	ID	74.10	Kabupaten Buton Utara		ID-SG
+2	ID	74.11	Kabupaten Kolaka Timur		ID-SG
+2	ID	74.12	Kabupaten Konawe Kepulauan		ID-SG
+2	ID	74.13	Kabupaten Muna Barat		ID-SG
+2	ID	74.14	Kabupaten Buton Tengah		ID-SG
+2	ID	74.15	Kabupaten Buton Selatan		ID-SG
+2	ID	74.71	Kota Kendari		ID-SG
+2	ID	74.72	Kota Bau Bau	Baubau|Bau-Bau	ID-SG
+2	ID	75.01	Kabupaten Gorontalo		ID-GO
+2	ID	75.02	Kabupaten Boalemo		ID-GO
+2	ID	75.03	Kabupaten Bone Bolango		ID-GO
+2	ID	75.04	Kabupaten Pohuwato		ID-GO
+2	ID	75.05	Kabupaten Gorontalo Utara		ID-GO
+2	ID	75.71	Kota Gorontalo		ID-GO
+2	ID	76.01	Kabupaten Pasangkayu	Kabupaten Mamuju Utara	ID-SR
+2	ID	76.02	Kabupaten Mamuju		ID-SR
+2	ID	76.03	Kabupaten Mamasa		ID-SR
+2	ID	76.04	Kabupaten Polewali Mandar		ID-SR
+2	ID	76.05	Kabupaten Majene		ID-SR
+2	ID	76.06	Kabupaten Mamuju Tengah		ID-SR
+2	ID	81.01	Kabupaten Maluku Tengah		ID-MA
+2	ID	81.02	Kabupaten Maluku Tenggara		ID-MA
+2	ID	81.03	Kabupaten Kepulauan Tanimbar	Kabupaten Maluku Tenggara Barat	ID-MA
+2	ID	81.04	Kabupaten Buru		ID-MA
+2	ID	81.05	Kabupaten Seram Bagian Timur		ID-MA
+2	ID	81.06	Kabupaten Seram Bagian Barat		ID-MA
+2	ID	81.07	Kabupaten Kepulauan Aru		ID-MA
+2	ID	81.08	Kabupaten Maluku Barat Daya		ID-MA
+2	ID	81.09	Kabupaten Buru Selatan		ID-MA
+2	ID	81.71	Kota Ambon		ID-MA
+2	ID	81.72	Kota Tual		ID-MA
+2	ID	82.01	Kabupaten Halmahera Barat		ID-MU
+2	ID	82.02	Kabupaten Halmahera Tengah		ID-MU
+2	ID	82.03	Kabupaten Halmahera Utara		ID-MU
+2	ID	82.04	Kabupaten Halmahera Selatan		ID-MU
+2	ID	82.05	Kabupaten Kepulauan Sula		ID-MU
+2	ID	82.06	Kabupaten Halmahera Timur		ID-MU
+2	ID	82.07	Kabupaten Pulau Morotai		ID-MU
+2	ID	82.08	Kabupaten Pulau Taliabu		ID-MU
+2	ID	82.71	Kota Ternate		ID-MU
+2	ID	82.72	Kota Tidore Kepulauan		ID-MU
+2	ID	91.03	Kabupaten Jayapura		ID-PA
+2	ID	91.05	Kabupaten Kepulauan Yapen		ID-PA
+2	ID	91.06	Kabupaten Biak Numfor		ID-PA
+2	ID	91.10	Kabupaten Sarmi		ID-PA
+2	ID	91.11	Kabupaten Keerom		ID-PA
+2	ID	91.15	Kabupaten Waropen		ID-PA
+2	ID	91.19	Kabupaten Supiori		ID-PA
+2	ID	91.20	Kabupaten Mamberamo Raya		ID-PA
+2	ID	91.71	Kota Jayapura		ID-PA
+2	ID	92.02	Kabupaten Manokwari		ID-PB
+2	ID	92.03	Kabupaten Fak Fak		ID-PB
+2	ID	92.06	Kabupaten Teluk Bintuni		ID-PB
+2	ID	92.07	Kabupaten Teluk Wondama		ID-PB
+2	ID	92.08	Kabupaten Kaimana		ID-PB
+2	ID	92.11	Kabupaten Manokwari Selatan		ID-PB
+2	ID	92.12	Kabupaten Pegunungan Arfak		ID-PB
+2	ID	93.01	Kabupaten Merauke		ID-PS
+2	ID	93.02	Kabupaten Boven Digoel		ID-PS
+2	ID	93.03	Kabupaten Mappi		ID-PS
+2	ID	93.04	Kabupaten Asmat		ID-PS
+2	ID	94.01	Kabupaten Nabire		ID-PT
+2	ID	94.02	Kabupaten Puncak Jaya		ID-PT
+2	ID	94.03	Kabupaten Paniai		ID-PT
+2	ID	94.04	Kabupaten Mimika		ID-PT
+2	ID	94.05	Kabupaten Puncak		ID-PT
+2	ID	94.06	Kabupaten Dogiyai		ID-PT
+2	ID	94.07	Kabupaten Intan Jaya		ID-PT
+2	ID	94.08	Kabupaten Deiyai		ID-PT
+2	ID	95.01	Kabupaten Jayawijaya		ID-PE
+2	ID	95.02	Kabupaten Pegunungan Bintang		ID-PE
+2	ID	95.03	Kabupaten Yahukimo		ID-PE
+2	ID	95.04	Kabupaten Tolikara		ID-PE
+2	ID	95.05	Kabupaten Mamberamo Tengah		ID-PE
+2	ID	95.06	Kabupaten Yalimo		ID-PE
+2	ID	95.07	Kabupaten Lanny Jaya		ID-PE
+2	ID	95.08	Kabupaten Nduga		ID-PE
+2	ID	96.01	Kabupaten Sorong		ID-PD
+2	ID	96.02	Kabupaten Sorong Selatan		ID-PD
+2	ID	96.03	Kabupaten Raja Ampat		ID-PD
+2	ID	96.04	Kabupaten Tambrauw		ID-PD
+2	ID	96.05	Kabupaten Maybrat		ID-PD
+2	ID	96.71	Kota Sorong		ID-PD
