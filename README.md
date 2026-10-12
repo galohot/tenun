@@ -73,7 +73,7 @@ every other chart filters. Save the Excel file and the dashboard updates.
   half-width tiles side by side, printed on A4 pages that never cut a chart.
 - **Sites and drill-through:** turn a workspace into a site with a top bar or a sidebar, groups of pages and a home page;
   a click on a bar can open another page, kept to that bar's value. Export the whole site as one offline HTML file or
-  as a folder for any web host.
+  as a folder for any web host, or publish it to tenun.cloud at one link.
 - **Copy and paste:** copy tiles (Shift-click picks several, then Ctrl+C or ⌘C) or a whole dashboard, and paste
   them on any dashboard, in this workspace or another. Named measures and card styles come along. From another
   workspace, **Match fields** asks which table and column here holds the same data, with a first guess filled in.
@@ -210,7 +210,12 @@ database passwords. The cloud never connects to your data.
   open; [`tenun agent`](docs/agent.md) keeps them running on a computer that stays on.
 - **Always honest about age:** every hosted dashboard says when it was updated and from which
   computer, and shows a banner when an update is late.
-- **Free:** up to 3 published dashboards, 10 MB each.
+- **A whole site:** when the workspace is a site, **Publish** offers the whole site first: every page
+  with its navigation, page links and drill-throughs, at one link (`tenun.cloud/s/…`). It has the same
+  access and update settings as a dashboard.
+- **Maps** go with the page, so a published map draws without any download.
+- **Free:** up to 3 published dashboards and sites (a site counts as one). A dashboard can be up to
+  10 MB. A site can be up to 25 MB and 10 pages.
 
 ```sh
 tenun login                    # connect this computer (approve a code in the browser)

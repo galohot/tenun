@@ -182,14 +182,24 @@ impl Client {
     }
 
     pub fn create_dashboard(&self, token: &str, title: &str) -> Result<String, CloudError> {
-        let v = self.check(self.post("/dashboards", Some(token), &json!({ "title": title }))?)?;
+        self.create(KIND_DASHBOARD, token, title)
+    }
+
+    /// A new dashboard or site (`kind` is the API's path: `dashboards`, `sites`).
+    pub fn create(&self, kind: &str, token: &str, title: &str) -> Result<String, CloudError> {
+        let v =
+            self.check(self.post(&format!("/{kind}"), Some(token), &json!({ "title": title }))?)?;
         Ok(v["id"].as_str().unwrap_or_default().to_string())
     }
 
     pub fn patch_dashboard(&self, token: &str, id: &str, body: &Value) -> Result<(), CloudError> {
+        self.patch(KIND_DASHBOARD, token, id, body)
+    }
+
+    pub fn patch(&self, kind: &str, token: &str, id: &str, body: &Value) -> Result<(), CloudError> {
         let req = self
             .agent
-            .patch(format!("{}/api/v1/dashboards/{id}", self.base))
+            .patch(format!("{}/api/v1/{kind}/{id}", self.base))
             .header("authorization", format!("Bearer {token}"))
             .header("content-type", "application/json")
             .send(body.to_string());
@@ -197,9 +207,13 @@ impl Client {
     }
 
     pub fn delete_dashboard(&self, token: &str, id: &str) -> Result<(), CloudError> {
+        self.delete(KIND_DASHBOARD, token, id)
+    }
+
+    pub fn delete(&self, kind: &str, token: &str, id: &str) -> Result<(), CloudError> {
         let req = self
             .agent
-            .delete(format!("{}/api/v1/dashboards/{id}", self.base))
+            .delete(format!("{}/api/v1/{kind}/{id}", self.base))
             .header("authorization", format!("Bearer {token}"))
             .call();
         let r = self.send(req)?;
@@ -217,9 +231,21 @@ impl Client {
         gz: Vec<u8>,
         meta: &SnapMeta,
     ) -> Result<Option<Value>, CloudError> {
+        self.put(KIND_DASHBOARD, token, id, gz, meta)
+    }
+
+    /// Uploads a gzip snapshot of a dashboard or a site. `Ok(None)` = it no longer exists there.
+    pub fn put(
+        &self,
+        kind: &str,
+        token: &str,
+        id: &str,
+        gz: Vec<u8>,
+        meta: &SnapMeta,
+    ) -> Result<Option<Value>, CloudError> {
         let mut req = self
             .agent
-            .put(format!("{}/api/v1/dashboards/{id}/snapshot", self.base))
+            .put(format!("{}/api/v1/{kind}/{id}/snapshot", self.base))
             .header("authorization", format!("Bearer {token}"))
             .header("content-type", "application/gzip")
             .header("x-tenun-generated", &meta.generated)
@@ -227,6 +253,9 @@ impl Client {
             .header("x-tenun-title", percent(&meta.title));
         if let Some(m) = meta.every_minutes {
             req = req.header("x-tenun-every", m.to_string());
+        }
+        if let Some(p) = meta.pages {
+            req = req.header("x-tenun-pages", p.to_string());
         }
         let r = self.send(req.send(&gz[..]))?;
         if r.status == 404 {
@@ -254,7 +283,17 @@ pub struct SnapMeta {
     pub source: String,
     pub title: String,
     pub every_minutes: Option<u32>,
+    /// A site's pages (build 14): tenun.cloud holds up to 10.
+    pub pages: Option<usize>,
 }
+
+/// The API paths of what can be published.
+pub const KIND_DASHBOARD: &str = "dashboards";
+pub const KIND_SITE: &str = "sites";
+/// The schedule's name for the site (build 14): no dashboard id looks like it.
+pub const SITE_ID: &str = "\u{0}site";
+/// The pages a site on tenun.cloud holds at most (the Worker's `LIMITS.sitePages`).
+pub const SITE_PAGES: usize = 10;
 
 // ---- credentials -------------------------------------------------------------
 
@@ -396,9 +435,12 @@ pub fn publish(
                     CloudError::Refused(ref m) if m == "not_found" && attempt == 0 => Ok(()),
                     other => Err(other),
                 })?;
-            let snap = tenun_core::snapshot::build(engine, dashboard_id, &[])
+            let mut snap = tenun_core::snapshot::build(engine, dashboard_id, &[])
                 .map_err(|e| CloudError::Refused(e.to_string()))?;
+            // The map shapes go with it, as in an exported file, so tenun.cloud draws its maps (build 14).
+            crate::export::with_maps(&mut snap, &engine.geo_dir());
             let meta = SnapMeta {
+                pages: None,
                 generated: snap["generated"].as_str().unwrap_or_default().to_string(),
                 source: if ps.source.is_empty() {
                     source_label()
@@ -459,6 +501,135 @@ pub fn unpublish(
     Ok(())
 }
 
+/// The site's publish settings, kept in the workspace's site settings (`site.publish`).
+pub fn site_settings(engine: &Engine) -> Option<PublishSettings> {
+    engine
+        .site()
+        .and_then(|s| s.get("publish").cloned())
+        .and_then(|p| serde_json::from_value(p).ok())
+}
+
+fn save_site_settings(engine: &Engine, ps: Option<&PublishSettings>) {
+    engine.update_site(|site| match ps {
+        Some(p) => site["publish"] = serde_json::to_value(p).unwrap_or(Value::Null),
+        None => {
+            if let Some(o) = site.as_object_mut() {
+                o.remove("publish");
+            }
+        }
+    });
+}
+
+/// Publishes the whole site now (build 14): every page, the pages its drill-throughs open and the maps, in one
+/// payload, as the one-file export holds it. Creates the cloud site on first use.
+pub fn publish_site(engine: &Engine, secrets: &Secrets, base: &str) -> Result<Value, CloudError> {
+    let (token, _) = connection(secrets, base).ok_or(CloudError::NotConnected)?;
+    let client = Client::new(base.to_string());
+    let mut ps = site_settings(engine).unwrap_or_default();
+    let result = (|| {
+        let mut site = tenun_core::site::build_site(engine, |_, _| {})
+            .map_err(|e| CloudError::Refused(e.to_string()))?;
+        let pages = site["order"].as_array().map_or(0, Vec::len);
+        if pages > SITE_PAGES {
+            return Err(CloudError::Refused(format!(
+                "A site on tenun.cloud holds up to {SITE_PAGES} pages; this one has {pages}. Leave some pages out of the workspace, or export the site instead."
+            )));
+        }
+        crate::export::site_with_maps(&mut site, &engine.geo_dir());
+        let title = site["title"].as_str().unwrap_or("Site").to_string();
+        for attempt in 0..2 {
+            if ps.id.is_empty() {
+                ps.id = client.create(KIND_SITE, &token, &title)?;
+            }
+            client
+                .patch(
+                    KIND_SITE,
+                    &token,
+                    &ps.id,
+                    &json!({ "title": title, "access": ps.access, "invites": ps.invites }),
+                )
+                .or_else(|e| match e {
+                    // Deleted on the website: start again with a new cloud site.
+                    CloudError::Refused(ref m) if m == "not_found" && attempt == 0 => Ok(()),
+                    other => Err(other),
+                })?;
+            let meta = SnapMeta {
+                generated: site["generated"].as_str().unwrap_or_default().to_string(),
+                source: if ps.source.is_empty() {
+                    source_label()
+                } else {
+                    ps.source.clone()
+                },
+                title: title.clone(),
+                every_minutes: ps.every.minutes(),
+                pages: Some(pages),
+            };
+            match client.put(
+                KIND_SITE,
+                &token,
+                &ps.id,
+                gzip(site.to_string().as_bytes()),
+                &meta,
+            )? {
+                Some(v) => return Ok(v),
+                None if attempt == 0 => ps.id.clear(),
+                None => break,
+            }
+        }
+        Err(CloudError::Refused(
+            "tenun.cloud did not accept the site".into(),
+        ))
+    })();
+    match &result {
+        Ok(v) => {
+            ps.url = v["url"].as_str().unwrap_or_default().to_string();
+            ps.last = now_rfc3339();
+            ps.error.clear();
+        }
+        Err(e) => ps.error = e.to_string(),
+    }
+    save_site_settings(engine, Some(&ps));
+    result
+}
+
+/// The site's publish settings when it goes with the timed updates and `tenun publish`: it is switched on and has been
+/// set to publish.
+pub fn site_publishes(engine: &Engine) -> Option<PublishSettings> {
+    engine.site().filter(|s| s["on"].as_bool() == Some(true))?;
+    site_settings(engine)
+}
+
+/// Publishes a dashboard, or the site for `SITE_ID`.
+pub fn publish_item(
+    engine: &Engine,
+    secrets: &Secrets,
+    base: &str,
+    id: &str,
+) -> Result<Value, CloudError> {
+    if id == SITE_ID {
+        publish_site(engine, secrets, base)
+    } else {
+        publish(engine, secrets, base, id)
+    }
+}
+
+/// How a log line names what was published.
+pub fn item_name(id: &str) -> &str {
+    if id == SITE_ID { "the site" } else { id }
+}
+
+/// Removes the site from tenun.cloud and forgets its publish settings.
+pub fn unpublish_site(engine: &Engine, secrets: &Secrets, base: &str) -> Result<(), CloudError> {
+    if let Some(ps) = site_settings(engine)
+        && !ps.id.is_empty()
+    {
+        let (token, _) = connection(secrets, base).ok_or(CloudError::NotConnected)?;
+        Client::new(base.to_string()).delete(KIND_SITE, &token, &ps.id)?;
+    }
+    save_site_settings(engine, None);
+    Ok(())
+}
+
 // ---- the schedule -------------------------------------------------------------
 
 /// Decides which dashboards are due. One per process (app server or agent).
@@ -480,15 +651,22 @@ impl Schedule {
                 self.dirty.insert(id.to_string());
             }
         }
+        if site_publishes(engine).is_some_and(|p| p.every == Every::Change) {
+            self.dirty.insert(SITE_ID.to_string());
+        }
     }
 
-    /// Dashboards to publish now.
+    /// Dashboards to publish now; the site too (`SITE_ID`) when it is published on a schedule (build 14).
     pub fn due(&self, engine: &Engine, now: chrono::DateTime<chrono::Utc>) -> Vec<String> {
         let mut out = Vec::new();
-        for d in engine.dashboards() {
-            let (Some(id), Some(ps)) = (d["id"].as_str(), settings(&d)) else {
-                continue;
-            };
+        let site = site_publishes(engine).map(|p| (SITE_ID.to_string(), p));
+        let items = engine
+            .dashboards()
+            .into_iter()
+            .filter_map(|d| Some((d["id"].as_str()?.to_string(), settings(&d)?)))
+            .chain(site);
+        for (id, ps) in items {
+            let id = id.as_str();
             if self.hold_until.get(id).is_some_and(|t| *t > now) {
                 continue;
             }
@@ -547,7 +725,7 @@ pub fn run_due(
     let mut ok = Vec::new();
     let mut failed = Vec::new();
     for id in schedule.due(engine, now) {
-        match publish(engine, secrets, base, &id) {
+        match publish_item(engine, secrets, base, &id) {
             Ok(_) => {
                 schedule.record(&id, true, None, now);
                 ok.push(id);

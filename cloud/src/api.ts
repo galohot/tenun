@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { HonoEnv } from './env';
-import { LIMITS } from './env';
+import { LIMITS, type Kind } from './env';
 import type { DashRow } from './pages';
 import { now, rid, sha256, userCode, validEmail } from './util';
 
@@ -73,43 +73,61 @@ api.get('/me', async (c) => {
   if (!who) return fail(c, 401, 'unauthorized');
   const acc = await c.env.DB.prepare('SELECT email FROM accounts WHERE id = ?1').bind(who.account).first<{ email: string }>();
   const { results } = await c.env.DB.prepare(
-    'SELECT id, title, access, source, every_minutes, version, generated_at, bytes FROM dashboards WHERE account_id = ?1 ORDER BY created_at',
+    'SELECT id, title, access, source, every_minutes, version, generated_at, bytes, kind, pages FROM dashboards WHERE account_id = ?1 ORDER BY created_at',
   )
     .bind(who.account)
     .all<DashRow>();
   const origin = new URL(c.req.url).origin;
   return json(c, 200, {
     email: acc?.email,
-    dashboards: results.map((d) => ({ ...d, url: `${origin}/d/${d.id}` })),
+    dashboards: results.map((d) => ({ ...d, url: urlOf(origin, d.kind, d.id) })),
     limits: LIMITS,
   });
 });
 
-api.post('/dashboards', async (c) => {
-  const who = await bearer(c);
-  if (!who) return fail(c, 401, 'unauthorized');
-  const body = await c.req.json<{ title?: string }>().catch(() => ({}) as { title?: string });
-  const n = await c.env.DB.prepare('SELECT count(*) AS n FROM dashboards WHERE account_id = ?1').bind(who.account).first<{ n: number }>();
-  if ((n?.n ?? 0) >= LIMITS.dashboards) {
-    return fail(c, 403, 'limit', { message: `The free plan publishes up to ${LIMITS.dashboards} dashboards. Delete one on your account page first.` });
-  }
-  const id = rid(22);
-  const t = now();
-  await c.env.DB.prepare('INSERT INTO dashboards (id, account_id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)')
-    .bind(id, who.account, String(body.title ?? 'Dashboard').slice(0, 120), t)
-    .run();
-  return json(c, 201, { id, url: `${new URL(c.req.url).origin}/d/${id}` });
-});
+/** Where a published item is seen: a dashboard at /d/, a site at /s/ (build 14). */
+export const urlOf = (origin: string, kind: Kind | undefined, id: string) => `${origin}/${kind === 'site' ? 's' : 'd'}/${id}`;
+/** The path segment of a kind in the API: /dashboards or /sites. */
+const KINDS: [string, Kind][] = [
+  ['dashboards', 'dashboard'],
+  ['sites', 'site'],
+];
 
-async function owned(c: Context<HonoEnv>, id: string, account: string) {
-  return c.env.DB.prepare('SELECT id, version FROM dashboards WHERE id = ?1 AND account_id = ?2').bind(id, account).first<{ id: string; version: number }>();
+for (const [path, kind] of KINDS) {
+  api.post(`/${path}`, async (c) => {
+    const who = await bearer(c);
+    if (!who) return fail(c, 401, 'unauthorized');
+    const body = await c.req.json<{ title?: string }>().catch(() => ({}) as { title?: string });
+    // A site counts as one item, as a dashboard does (V4-D17).
+    const n = await c.env.DB.prepare('SELECT count(*) AS n FROM dashboards WHERE account_id = ?1').bind(who.account).first<{ n: number }>();
+    if ((n?.n ?? 0) >= LIMITS.dashboards) {
+      return fail(c, 403, 'limit', {
+        message: `The free plan publishes up to ${LIMITS.dashboards} dashboards and sites. Delete one on your account page first.`,
+      });
+    }
+    const id = rid(22);
+    const t = now();
+    await c.env.DB.prepare('INSERT INTO dashboards (id, account_id, title, kind, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)')
+      .bind(id, who.account, String(body.title ?? (kind === 'site' ? 'Site' : 'Dashboard')).slice(0, 120), kind, t)
+      .run();
+    return json(c, 201, { id, url: urlOf(new URL(c.req.url).origin, kind, id) });
+  });
+  api.patch(`/${path}/:id`, (c) => patchItem(c, kind));
+  api.delete(`/${path}/:id`, (c) => deleteItem(c, kind));
+  api.put(`/${path}/:id/snapshot`, (c) => putSnapshot(c, kind));
 }
 
-api.patch('/dashboards/:id', async (c) => {
+async function owned(c: Context<HonoEnv>, id: string, account: string, kind: Kind) {
+  return c.env.DB.prepare('SELECT id, version FROM dashboards WHERE id = ?1 AND account_id = ?2 AND kind = ?3')
+    .bind(id, account, kind)
+    .first<{ id: string; version: number }>();
+}
+
+async function patchItem(c: Context<HonoEnv>, kind: Kind) {
   const who = await bearer(c);
   if (!who) return fail(c, 401, 'unauthorized');
-  const id = c.req.param('id');
-  if (!(await owned(c, id, who.account))) return fail(c, 404, 'not_found');
+  const id = c.req.param('id') ?? '';
+  if (!(await owned(c, id, who.account, kind))) return fail(c, 404, 'not_found');
   const b = await c.req.json<{ title?: string; access?: string; invites?: string[] }>().catch(() => null);
   if (!b) return fail(c, 400, 'invalid_json');
   const stmts: D1PreparedStatement[] = [];
@@ -126,7 +144,7 @@ api.patch('/dashboards/:id', async (c) => {
   }
   if (stmts.length) await c.env.DB.batch(stmts);
   return json(c, 200, { ok: true });
-});
+}
 
 /** Deletes a dashboard: every stored version first, then the rows. */
 export async function deleteDashboard(env: HonoEnv['Bindings'], id: string) {
@@ -135,26 +153,32 @@ export async function deleteDashboard(env: HonoEnv['Bindings'], id: string) {
   await env.DB.prepare('DELETE FROM dashboards WHERE id = ?1').bind(id).run();
 }
 
-api.delete('/dashboards/:id', async (c) => {
+async function deleteItem(c: Context<HonoEnv>, kind: Kind) {
   const who = await bearer(c);
   if (!who) return fail(c, 401, 'unauthorized');
-  const id = c.req.param('id');
-  if (!(await owned(c, id, who.account))) return fail(c, 404, 'not_found');
+  const id = c.req.param('id') ?? '';
+  if (!(await owned(c, id, who.account, kind))) return fail(c, 404, 'not_found');
   await deleteDashboard(c.env, id);
   return json(c, 200, { ok: true });
-});
+}
 
 // ---- publishing -------------------------------------------------------------
 
-api.put('/dashboards/:id/snapshot', async (c) => {
+async function putSnapshot(c: Context<HonoEnv>, kind: Kind) {
   const who = await bearer(c);
   if (!who) return fail(c, 401, 'unauthorized');
-  const id = c.req.param('id');
-  const dash = await owned(c, id, who.account);
+  const id = c.req.param('id') ?? '';
+  const dash = await owned(c, id, who.account, kind);
   if (!dash) return fail(c, 404, 'not_found');
 
+  // A site may be bigger, and holds up to 10 pages; the app says how many (the Worker never parses a snapshot).
+  const maxBytes = kind === 'site' ? LIMITS.siteMaxBytes : LIMITS.maxBytes;
+  const pages = kind === 'site' ? Number(c.req.header('x-tenun-pages') ?? 0) : 1;
+  if (kind === 'site' && !(pages >= 1 && pages <= LIMITS.sitePages)) {
+    return fail(c, 413, 'too_many_pages', { max_pages: LIMITS.sitePages, message: `A site on tenun.cloud holds up to ${LIMITS.sitePages} pages.` });
+  }
   const declared = Number(c.req.header('content-length') ?? 0);
-  if (declared > LIMITS.maxBytes) return fail(c, 413, 'too_large', { max_bytes: LIMITS.maxBytes });
+  if (declared > maxBytes) return fail(c, 413, 'too_large', { max_bytes: maxBytes });
   const t = now();
   // Rate limits count publishes (versions are pruned to the last few, so they cannot be counted).
   const pub = await c.env.DB.prepare('SELECT count(*) AS n FROM publishes WHERE dashboard_id = ?1 AND at > ?2')
@@ -171,7 +195,7 @@ api.put('/dashboards/:id/snapshot', async (c) => {
   // The Worker never parses a snapshot (the free plan allows ~10 ms of CPU): it checks the size
   // and the gzip signature, stores the bytes, and the viewer parses them in the browser.
   const bytes = new Uint8Array(await c.req.arrayBuffer());
-  if (bytes.byteLength > LIMITS.maxBytes) return fail(c, 413, 'too_large', { max_bytes: LIMITS.maxBytes });
+  if (bytes.byteLength > maxBytes) return fail(c, 413, 'too_large', { max_bytes: maxBytes });
   if (bytes.byteLength < 18 || bytes[0] !== 0x1f || bytes[1] !== 0x8b) return fail(c, 400, 'body must be a gzip-compressed snapshot');
 
   const generated = (c.req.header('x-tenun-generated') ?? '').slice(0, 40) || new Date(t).toISOString();
@@ -193,8 +217,8 @@ api.put('/dashboards/:id/snapshot', async (c) => {
       t,
     ),
     c.env.DB.prepare(
-      'UPDATE dashboards SET version = ?1, generated_at = ?2, source = ?3, every_minutes = ?4, bytes = ?5, updated_at = ?6, title = coalesce(?7, title) WHERE id = ?8',
-    ).bind(version, generated, source, every, bytes.byteLength, t, title ? decodeURIComponent(title).slice(0, 120) : null, id),
+      'UPDATE dashboards SET version = ?1, generated_at = ?2, source = ?3, every_minutes = ?4, bytes = ?5, updated_at = ?6, title = coalesce(?7, title), pages = ?8 WHERE id = ?9',
+    ).bind(version, generated, source, every, bytes.byteLength, t, title ? decodeURIComponent(title).slice(0, 120) : null, pages, id),
     c.env.DB.prepare('INSERT INTO publishes (dashboard_id, at) VALUES (?1, ?2)').bind(id, t),
     c.env.DB.prepare('DELETE FROM publishes WHERE at < ?1').bind(t - 86400_000),
   ];
@@ -208,17 +232,17 @@ api.put('/dashboards/:id/snapshot', async (c) => {
     await c.env.SNAPSHOTS.delete(old.map((r) => snapKey(id, r.version)));
     await c.env.DB.prepare(`DELETE FROM versions WHERE dashboard_id = ?1 AND version <= ?2`).bind(id, old[0].version).run();
   }
-  return json(c, 200, { version, url: `${new URL(c.req.url).origin}/d/${id}` });
-});
+  return json(c, 200, { version, url: urlOf(new URL(c.req.url).origin, kind, id) });
+}
 
 // ---- the hosted dashboard's data -------------------------------------------
 
 /** Can the current visitor see this dashboard? */
-export async function canView(c: Context<HonoEnv>, id: string): Promise<{ row: DashRow | null; allowed: boolean; needsSignIn: boolean }> {
+export async function canView(c: Context<HonoEnv>, id: string, kind: Kind = 'dashboard'): Promise<{ row: DashRow | null; allowed: boolean; needsSignIn: boolean }> {
   const row = await c.env.DB.prepare(
-    'SELECT id, account_id, title, access, source, every_minutes, version, generated_at, bytes FROM dashboards WHERE id = ?1',
+    'SELECT id, account_id, title, access, source, every_minutes, version, generated_at, bytes, kind, pages FROM dashboards WHERE id = ?1 AND kind = ?2',
   )
-    .bind(id)
+    .bind(id, kind)
     .first<DashRow & { account_id: string }>();
   if (!row) return { row: null, allowed: false, needsSignIn: false };
   if (row.access === 'link') return { row, allowed: true, needsSignIn: false };
@@ -229,8 +253,10 @@ export async function canView(c: Context<HonoEnv>, id: string): Promise<{ row: D
   return { row, allowed: !!inv, needsSignIn: false };
 }
 
-api.get('/d/:id/snapshot', async (c) => {
-  const { row, allowed } = await canView(c, c.req.param('id'));
+for (const [seg, kind] of [['d', 'dashboard'], ['s', 'site']] as const) api.get(`/${seg}/:id/snapshot`, (c) => snapshotOf(c, kind));
+
+async function snapshotOf(c: Context<HonoEnv>, kind: Kind) {
+  const { row, allowed } = await canView(c, c.req.param('id') ?? '', kind);
   if (!row || !allowed || !row.version) return fail(c, 404, 'not_found');
   const obj = await c.env.SNAPSHOTS.get(snapKey(row.id, row.version));
   if (!obj) return fail(c, 404, 'not_found');
@@ -243,4 +269,4 @@ api.get('/d/:id/snapshot', async (c) => {
     },
     encodeBody: 'manual',
   });
-});
+}

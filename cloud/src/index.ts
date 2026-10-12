@@ -1,9 +1,10 @@
 // tenun.cloud: the landing page (static), the publish API, account pages, and hosted dashboards.
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { api, canView, deleteDashboard } from './api';
 import { auth, loadAccount, safeReturn, sameOrigin } from './auth';
 import type { HonoEnv } from './env';
-import { LIMITS } from './env';
+import { LIMITS, type Kind } from './env';
 import { accountPage, connectPage, hostedShell, notice, page, type DashRow, type TokenRow } from './pages';
 import { now, rid, sha256 } from './util';
 
@@ -75,7 +76,7 @@ app.get('/account', async (c) => {
   const me = c.get('account');
   if (!me) return c.redirect('/auth/login?return=/account');
   const [d, t] = await c.env.DB.batch([
-    c.env.DB.prepare('SELECT id, title, access, source, every_minutes, version, generated_at, bytes FROM dashboards WHERE account_id = ?1 ORDER BY created_at').bind(me.id),
+    c.env.DB.prepare('SELECT id, title, access, source, every_minutes, version, generated_at, bytes, kind, pages FROM dashboards WHERE account_id = ?1 ORDER BY created_at').bind(me.id),
     c.env.DB.prepare('SELECT id, label, created_at, last_used_at FROM tokens WHERE account_id = ?1 ORDER BY created_at').bind(me.id),
   ]);
   return c.html(accountPage(me, d.results as DashRow[], t.results as TokenRow[], LIMITS.dashboards));
@@ -110,20 +111,27 @@ app.post('/account/delete', async (c) => {
 
 // ---- hosted dashboards ------------------------------------------------------
 
-app.get('/d/:id', async (c) => {
-  const { row, allowed, needsSignIn } = await canView(c, c.req.param('id'));
-  if (!row) return c.html(notice('Not found', 'This dashboard does not exist, or its owner deleted it.', 'warn', c.get('account')), 404);
-  if (needsSignIn) return c.redirect(`/auth/login?return=${encodeURIComponent(`/d/${row.id}`)}`);
+/** A hosted dashboard (/d/) or site (/s/, build 14): the same access rules for both. */
+async function hosted(c: Context<HonoEnv>, kind: Kind) {
+  const what = kind === 'site' ? 'site' : 'dashboard';
+  const { row, allowed, needsSignIn } = await canView(c, c.req.param('id') ?? '', kind);
+  if (!row) return c.html(notice('Not found', `This ${what} does not exist, or its owner deleted it.`, 'warn', c.get('account')), 404);
+  if (needsSignIn) return c.redirect(`/auth/login?return=${encodeURIComponent(`/${kind === 'site' ? 's' : 'd'}/${row.id}`)}`);
   if (!allowed) {
     return c.html(
-      notice('Invited people only', `This dashboard is shared with a list of people. You are signed in as ${c.get('account')?.email.replace(/[<>&"]/g, '')}. Ask its owner to invite this address.`, 'warn', c.get('account')),
+      notice('Invited people only', `This ${what} is shared with a list of people. You are signed in as ${c.get('account')?.email.replace(/[<>&"]/g, '')}. Ask its owner to invite this address.`, 'warn', c.get('account')),
       403,
     );
   }
-  if (!row.version) return c.html(notice('Not published yet', 'The owner has not published this dashboard yet.', 'warn'), 404);
+  if (!row.version) return c.html(notice('Not published yet', `The owner has not published this ${what} yet.`, 'warn'), 404);
   c.header('cache-control', 'private, no-cache');
   return c.html(hostedShell(row));
-});
+}
+
+app.get('/d/:id', (c) => hosted(c, 'dashboard'));
+app.get('/s/:id', (c) => hosted(c, 'site'));
+// A page of a site: the site routes by the address's #, which a server never sees.
+app.get('/s/:id/:page', (c) => c.redirect(`/s/${encodeURIComponent(c.req.param('id'))}#/p/${encodeURIComponent(c.req.param('page'))}`));
 
 app.notFound(async (c) => {
   // Everything else is a static file (the landing page and the viewer bundle).

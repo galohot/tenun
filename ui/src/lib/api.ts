@@ -675,7 +675,7 @@ export interface Settings {
 }
 
 export interface PublishSettings {
-  /** Set by the publisher: the cloud dashboard, its link, the last success and the last error. */
+  /** Set by the publisher: the cloud dashboard (or site), its link, the last success and the last error. */
   id?: string;
   url?: string;
   last?: string;
@@ -716,6 +716,8 @@ export interface SiteSettings {
   groups?: { name: string; pages: string[] }[];
   /** One line of plain text under every page. */
   footer?: string;
+  /** How the whole site is published to tenun.cloud (build 14), as a dashboard's are. */
+  publish?: PublishSettings;
 }
 
 /** The raw rows behind a tile or one of its marks. */
@@ -1019,6 +1021,9 @@ export const api = {
   cloudDisconnect: () => call<{ ok: boolean }>('POST', '/cloud/disconnect', {}),
   publish: (dashboard: string) => call<{ ok: boolean; url: string; version: number; snapshot: Snapshot }>('POST', '/cloud/publish', { dashboard }),
   unpublish: (dashboard: string) => call<Snapshot>('POST', '/cloud/unpublish', { dashboard }),
+  /** The whole site, every page in one upload (build 14). */
+  publishSite: () => call<{ ok: boolean; url: string; version: number; snapshot: Snapshot }>('POST', '/cloud/publish-site', {}),
+  unpublishSite: () => call<Snapshot>('POST', '/cloud/unpublish-site', {}),
   /** Writes the HTML file (desktop app) when `path` is given. */
   exportTo: (dashboard: string, filters: unknown[], path: string) =>
     call<{ ok: boolean }>('POST', '/export-html', { dashboard, filters, path }),

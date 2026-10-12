@@ -1,38 +1,61 @@
 <script lang="ts">
   // Publish a dashboard to tenun.cloud: connect once, choose who can see it and
   // how often it updates, publish. The data is built on this computer; only the
-  // results travel (V2-D1).
+  // results travel (V2-D1). When the workspace is a site, the whole site can be
+  // published instead, with the same settings, at its own link (build 14).
   import { untrack } from 'svelte';
   import { api, type Dashboard, type PublishSettings } from '../../lib/api';
   import { dateTimeMedium } from '../../lib/format';
+  import { CLOUD_SITE_PAGES, normaliseSite } from '../../lib/site';
   import { app } from '../../lib/state.svelte';
   import Icon from '../Icon.svelte';
   import Modal from '../Modal.svelte';
 
   let { dash, onclose }: { dash: Dashboard; onclose: () => void } = $props();
 
+  const site = $derived(normaliseSite(app.snap?.workspace.site, app.dashboards, app.snap?.workspace.name));
+  /** What Publish sends: the whole site (the first choice when the workspace is a site) or this page. */
+  let target = $state<'site' | 'page'>(untrack(() => (site.on ? 'site' : 'page')));
+  const forSite = $derived(target === 'site' && site.on);
+  const current = $derived(forSite ? site.publish : dash.publish);
+  /** Every page goes with the site, hidden ones too. */
+  const pageCount = $derived(app.dashboards.length);
+  const tooBig = $derived(forSite && pageCount > CLOUD_SITE_PAGES);
+
   const defaults: PublishSettings = { access: 'link', invites: [], every: 'manual', source: '' };
   // The form starts from the saved settings; edits are written back by save().
-  let ps = $state<PublishSettings>(untrack(() => ({ ...defaults, ...(dash.publish ?? {}) })));
-  let invitesText = $state(untrack(() => (dash.publish?.invites ?? []).join('\n')));
+  let ps = $state<PublishSettings>(untrack(() => ({ ...defaults, ...(current ?? {}) })));
+  let invitesText = $state(untrack(() => (current?.invites ?? []).join('\n')));
   let busy = $state<string | null>(null);
+
+  /** Shows the settings of the other choice. */
+  function choose(t: 'site' | 'page') {
+    target = t;
+    const from = t === 'site' ? site.publish : dash.publish;
+    ps = { ...defaults, ...(from ?? {}) };
+    invitesText = (from?.invites ?? []).join('\n');
+  }
 
   const cloud = $derived(app.cloud);
   // Fresh usage numbers each time the sheet opens.
   $effect(() => {
     api.cloud().then((c) => (app.cloud = c)).catch(() => {});
   });
-  const published = $derived(!!dash.publish?.url);
+  const published = $derived(!!current?.url);
 
-  /** Keeps the settings on the dashboard (saved in the .tenun file). */
+  /** Keeps the settings on the dashboard, or in the site settings (saved in the .tenun file). */
   function save() {
     const invites = invitesText
       .split(/[\s,;]+/)
       .map((e) => e.trim().toLowerCase())
       .filter((e) => e.includes('@'));
-    const next: PublishSettings = { ...(dash.publish ?? {}), access: ps.access, invites, every: ps.every, source: ps.source.trim() };
-    dash.publish = next;
-    app.saveDashboards();
+    const next: PublishSettings = { ...(current ?? {}), access: ps.access, invites, every: ps.every, source: ps.source.trim() };
+    if (forSite) {
+      app.saveSite({ ...site, publish: next });
+    } else {
+      dash.publish = next;
+      app.saveDashboards();
+    }
     return next;
   }
 
@@ -51,9 +74,9 @@
     busy = 'Publishing…';
     try {
       await new Promise((r) => setTimeout(r, 400)); // let the settings save first
-      const r = await api.publish(dash.id);
+      const r = forSite ? await api.publishSite() : await api.publish(dash.id);
       app.snap = r.snapshot;
-      app.toast('Published');
+      app.toast(forSite ? 'Site published' : 'Published');
     } catch (e) {
       app.error(e);
       app.refresh();
@@ -63,10 +86,10 @@
   }
 
   async function unpublish() {
-    if (!confirm('Remove this dashboard from tenun.cloud? Its link stops working.')) return;
+    if (!confirm(`Remove this ${forSite ? 'site' : 'dashboard'} from tenun.cloud? Its link stops working.`)) return;
     busy = 'Removing…';
     try {
-      app.snap = await api.unpublish(dash.id);
+      app.snap = forSite ? await api.unpublishSite() : await api.unpublish(dash.id);
       ps = { ...defaults };
       invitesText = '';
       app.toast('Removed from tenun.cloud');
@@ -78,8 +101,8 @@
   }
 
   async function copy() {
-    if (!dash.publish?.url) return;
-    await navigator.clipboard.writeText(dash.publish.url);
+    if (!current?.url) return;
+    await navigator.clipboard.writeText(current.url);
     app.toast('Link copied');
   }
 
@@ -115,22 +138,42 @@
           results — not your files, and never your database passwords.
         </p>
         <button class="btn primary" onclick={connect}>Connect to tenun.cloud</button>
-        <p class="muted small">Free: up to 3 published dashboards.</p>
+        <p class="muted small">Free: up to 3 published dashboards and sites.</p>
       {/if}
     </div>
   {:else}
-    {#if dash.publish?.url}
+    {#if site.on}
+      <div class="targets" role="radiogroup" aria-label="What to publish">
+        <label class="target" class:on={target === 'site'}>
+          <input type="radio" name="target" checked={target === 'site'} onchange={() => choose('site')} />
+          <span>
+            <b>Publish the whole site</b>
+            <span class="muted small">{site.title} · {pageCount === 1 ? '1 page' : `${pageCount} pages`}, with its navigation{site.publish?.url ? ' · published' : ''}</span>
+          </span>
+        </label>
+        <label class="target" class:on={target === 'page'}>
+          <input type="radio" name="target" checked={target === 'page'} onchange={() => choose('page')} />
+          <span>
+            <b>Publish this page</b>
+            <span class="muted small">{dash.title || 'Untitled'} on its own{dash.publish?.url ? ' · published' : ''}</span>
+          </span>
+        </label>
+      </div>
+    {/if}
+    {#if current?.url}
       <div class="status">
         <Icon name="globe" />
         <div>
-          <a href={dash.publish.url} target="_blank" rel="noopener">{dash.publish.url.replace(/^https?:\/\//, '')}</a>
-          <p class="muted small">Published {when(dash.publish.last)}</p>
+          <a href={current.url} target="_blank" rel="noopener">{current.url.replace(/^https?:\/\//, '')}</a>
+          <p class="muted small">Published {when(current.last)}</p>
         </div>
         <button class="btn" onclick={copy}><Icon name="link" size={14} /> Copy link</button>
       </div>
     {/if}
-    {#if dash.publish?.error}
-      <p class="err"><Icon name="warning" size={14} /> {dash.publish.error}</p>
+    {#if tooBig}
+      <p class="err"><Icon name="warning" size={14} /> A site on tenun.cloud holds up to {CLOUD_SITE_PAGES} pages; this one has {pageCount}. Leave some pages out of the workspace, or export the site instead.</p>
+    {:else if current?.error}
+      <p class="err"><Icon name="warning" size={14} /> {current.error}</p>
     {/if}
 
     <div class="sec">
@@ -156,7 +199,7 @@
     </div>
 
     <p class="muted small who">
-      Signed in as {cloud.email}{cloud.usage ? ` · ${cloud.usage.dashboards} of ${cloud.usage.limit} free dashboards used` : ''}.
+      Signed in as {cloud.email}{cloud.usage ? ` · ${cloud.usage.dashboards} of ${cloud.usage.limit} free dashboards and sites used` : ''}.
       Updates are labelled “from {ps.source || cloud.source}”.
       <button class="linkbtn" onclick={async () => { await api.cloudDisconnect(); app.cloud = await api.cloud(); }}>Disconnect</button>
     </p>
@@ -169,7 +212,7 @@
     <span class="spacer"></span>
     <button class="btn" onclick={onclose}>Close</button>
     {#if cloud?.connected}
-      <button class="btn primary" onclick={publish} disabled={!!busy}>{busy ?? (published ? 'Publish now' : 'Publish')}</button>
+      <button class="btn primary" onclick={publish} disabled={!!busy || tooBig}>{busy ?? (published ? 'Publish now' : forSite ? 'Publish site' : 'Publish')}</button>
     {/if}
   {/snippet}
 </Modal>
@@ -196,6 +239,12 @@
   .status p { margin: 2px 0 0; }
   .err { display: flex; gap: 6px; color: var(--danger); font-size: 12px; margin: 0 0 12px; }
   .sec { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+  .targets { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+  .target { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--sep); border-radius: var(--r-card); cursor: pointer; }
+  .target.on { border-color: var(--accent); background: var(--selected); }
+  .target input { margin-top: 3px; }
+  .target > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .target b { font-size: 13px; }
   .radio { display: flex; gap: 8px; align-items: center; }
   .area { height: auto; padding: 8px 10px; resize: vertical; font-family: inherit; }
   select.field { height: 30px; }

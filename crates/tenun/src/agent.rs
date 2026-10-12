@@ -78,11 +78,13 @@ pub fn publish_now(file: &Path, dashboard: Option<&str>) -> anyhow::Result<()> {
             find(&engine, want)
                 .ok_or_else(|| anyhow::anyhow!("no dashboard {want} in {}", file.display()))?,
         ],
+        // Every dashboard set to publish, and the site when it is (build 14).
         None => engine
             .dashboards()
             .iter()
             .filter(|d| cloud::settings(d).is_some())
             .filter_map(|d| d["id"].as_str().map(str::to_string))
+            .chain(cloud::site_publishes(&engine).map(|_| cloud::SITE_ID.to_string()))
             .collect(),
     };
     if ids.is_empty() {
@@ -92,11 +94,15 @@ pub fn publish_now(file: &Path, dashboard: Option<&str>) -> anyhow::Result<()> {
     }
     let mut failed = false;
     for id in ids {
-        match cloud::publish(&engine, &secrets(), &base, &id) {
-            Ok(v) => println!("published {id}: {}", v["url"].as_str().unwrap_or_default()),
+        let name = cloud::item_name(&id);
+        match cloud::publish_item(&engine, &secrets(), &base, &id) {
+            Ok(v) => println!(
+                "published {name}: {}",
+                v["url"].as_str().unwrap_or_default()
+            ),
             Err(e) => {
                 failed = true;
-                eprintln!("{id}: {e}");
+                eprintln!("{name}: {e}");
             }
         }
     }
@@ -141,6 +147,11 @@ pub fn run(file: &Path) -> anyhow::Result<()> {
                 format!("{} ({:?})", d["title"].as_str().unwrap_or("?"), ps.every).to_lowercase()
             })
         })
+        .chain(
+            cloud::site_publishes(&engine)
+                .filter(|ps| ps.every != cloud::Every::Manual)
+                .map(|ps| format!("the site ({:?})", ps.every).to_lowercase()),
+        )
         .collect();
     log(&format!(
         "tenun agent {} watching {} — {} scheduled: {}",
@@ -164,10 +175,10 @@ pub fn run(file: &Path) -> anyhow::Result<()> {
         }
         let (ok, failed) = cloud::run_due(&engine, &s, &base, &mut schedule.lock().unwrap());
         for id in ok {
-            log(&format!("published {id}"));
+            log(&format!("published {}", cloud::item_name(&id)));
         }
         for (id, e) in failed {
-            log(&format!("{id}: {e}"));
+            log(&format!("{}: {e}", cloud::item_name(&id)));
         }
         std::thread::sleep(Duration::from_secs(60));
     }

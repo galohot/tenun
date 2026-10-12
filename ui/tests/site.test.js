@@ -20,6 +20,9 @@ test('site settings are cleaned up: off by default, pages that exist, one group 
   // No visible page: no home.
   assert.equal('home' in normaliseSite({}, [dash('x', 'X', { hidden: true })]), false);
   assert.deepEqual(visiblePages(DASHES).map((d) => d.id), ['d1', 'd2', 'd4']);
+  // The publish settings of the whole site (build 14) go through as they are, so a save keeps them.
+  const publish = { id: 'S1', url: 'https://tenun.cloud/s/S1', access: 'invited', invites: ['a@example.com'], every: 'hour', source: '' };
+  assert.deepEqual(normaliseSite({ on: true, publish }, DASHES).publish, publish);
 });
 
 test('the navigation lists pages in no group first, then each group; hidden pages are left out', () => {

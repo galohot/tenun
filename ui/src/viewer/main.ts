@@ -29,19 +29,15 @@ async function start() {
   setLocale(data.locale);
   // The maps the file carries are drawn from it, with no network (build 06).
   useCarried(data.geo);
-  // A whole site (build 13): its navigation around the page the address names.
+  const every = Number(meta('tenun-every')) || null;
+  const hosted = url ? { updated: meta('tenun-updated') || data.generated, source: meta('tenun-source'), every } : null;
+  // A whole site (build 13): its navigation around the page the address names. On tenun.cloud (build 14), each page
+  // says how fresh it is, as a hosted dashboard does.
   if ((data as unknown as SitePayload).kind === 'site') {
-    mount(SiteApp, { target, props: { data: data as unknown as SitePayload } });
+    mount(SiteApp, { target, props: { data: data as unknown as SitePayload, hosted } });
     return;
   }
-  const every = Number(meta('tenun-every')) || null;
-  mount(Viewer, {
-    target,
-    props: {
-      data,
-      hosted: url ? { updated: meta('tenun-updated') || data.generated, source: meta('tenun-source'), every } : null,
-    },
-  });
+  mount(Viewer, { target, props: { data, hosted } });
 }
 
 start();

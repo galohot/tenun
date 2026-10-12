@@ -31,6 +31,10 @@ export function page(title: string, body: string, opts: { account?: { email: str
 
 export type DashRow = {
   id: string;
+  /** A dashboard, or a whole site (build 14). */
+  kind?: 'dashboard' | 'site';
+  /** A site's pages. */
+  pages?: number;
   title: string;
   access: 'link' | 'invited';
   source: string;
@@ -63,15 +67,15 @@ export function accountPage(
     ? dashboards
         .map(
           (d) => `<li class="row">
-      <div><a class="title" href="/d/${esc(d.id)}">${esc(d.title)}</a>
-      <p class="meta">${d.access === 'link' ? 'Anyone with the link' : 'Only invited people'} ·
+      <div><a class="title" href="/${d.kind === 'site' ? 's' : 'd'}/${esc(d.id)}">${esc(d.title)}</a>
+      <p class="meta">${d.kind === 'site' ? `Site of ${d.pages ?? 1} ${(d.pages ?? 1) === 1 ? 'page' : 'pages'} · ` : ''}${d.access === 'link' ? 'Anyone with the link' : 'Only invited people'} ·
       ${d.generated_at ? `updated ${esc(ago(Date.parse(d.generated_at)))}` : 'not published yet'}${d.source ? ` from ${esc(d.source)}` : ''} ·
       ${size(d.bytes)}</p></div>
       <form method="post" action="/account/dashboards/${esc(d.id)}/delete"><button class="button small danger">Delete</button></form>
     </li>`,
         )
         .join('')
-    : `<li class="empty">No published dashboards yet. In Tenun, open a dashboard and choose <b>Publish</b>.</li>`;
+    : `<li class="empty">No published dashboards or sites yet. In Tenun, open a dashboard and choose <b>Publish</b>.</li>`;
   const tokenList = tokens.length
     ? tokens
         .map(
@@ -83,14 +87,14 @@ export function accountPage(
     : `<li class="empty">No apps connected.</li>`;
   return page(
     'Account',
-    `<h1>Your dashboards</h1>
-     <p class="lede">${dashboards.length} of ${limit} published dashboards on the free plan.</p>
+    `<h1>Your dashboards and sites</h1>
+     <p class="lede">${dashboards.length} of ${limit} published dashboards and sites on the free plan. A site counts as one.</p>
      <ul class="list">${dashList}</ul>
      <h2>Connected apps</h2>
      <p class="meta">Each copy of Tenun or <code>tenun agent</code> that can publish for you.</p>
      <ul class="list">${tokenList}</ul>
      <h2>Delete account</h2>
-     <p class="meta">Deletes every published dashboard, every version and every connection. It cannot be undone.</p>
+     <p class="meta">Deletes every published dashboard and site, every version and every connection. It cannot be undone.</p>
      <form method="post" action="/account/delete" class="stack"><label class="check"><input type="checkbox" name="sure" value="yes" required> I understand</label>
      <button class="button danger">Delete my account</button></form>`,
     { account },
@@ -123,7 +127,7 @@ export function notice(title: string, text: string, status: 'ok' | 'warn' = 'ok'
   return page(title, `<h1>${esc(title)}</h1><p class="lede ${status}">${text}</p>`, { account });
 }
 
-/** The hosted dashboard: the viewer bundle reads the snapshot URL and freshness from meta tags. */
+/** The hosted dashboard or site: the viewer bundle reads the snapshot URL and freshness from meta tags. */
 export function hostedShell(d: DashRow): string {
   return `<!doctype html>
 <html lang="en">
@@ -135,7 +139,7 @@ export function hostedShell(d: DashRow): string {
 <title>${esc(d.title)} — Tenun</title>
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/viewer/viewer.css">
-<meta name="tenun-snapshot" content="/api/v1/d/${esc(d.id)}/snapshot?v=${d.version}">
+<meta name="tenun-snapshot" content="/api/v1/${d.kind === 'site' ? 's' : 'd'}/${esc(d.id)}/snapshot?v=${d.version}">
 <meta name="tenun-updated" content="${esc(d.generated_at ?? '')}">
 <meta name="tenun-source" content="${esc(d.source)}">
 <meta name="tenun-every" content="${d.every_minutes ?? ''}">

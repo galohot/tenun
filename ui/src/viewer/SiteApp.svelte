@@ -2,7 +2,8 @@
   // An exported site (build 13, V4-D15): the site's navigation (`SiteFrame`, as the preview in the app draws it) around
   // the page the address names. One file routes by the address (`#/p/<page>`), so back and forward work; a folder opens
   // another file. A click on a mark of a tile with an action opens its page kept to the clicked value, from what the
-  // file holds (the first 50 values); past them the page opens as it is, and says why (V4-D16).
+  // file holds (the first 50 values); past them the page opens as it is, and says why (V4-D16). On tenun.cloud (build 14)
+  // each page says when the site was last published.
   import { onMount } from 'svelte';
   import type { Cell, Dashboard, Tile } from '../lib/api';
   import type { ExportPayload, SitePayload } from '../lib/export';
@@ -12,7 +13,7 @@
   import SiteFrame from '../components/site/SiteFrame.svelte';
   import Viewer from './Viewer.svelte';
 
-  let { data }: { data: SitePayload } = $props();
+  let { data, hosted = null }: { data: SitePayload; hosted?: { updated: string; source: string; every: number | null } | null } = $props();
 
   // The pages as the navigation needs them: a title and whether the navigation shows it.
   const hidden = $derived(new Set(data.hidden ?? []));
@@ -87,6 +88,7 @@
     {#key `${current}|${route.drill?.tile ?? ''}|${route.drill?.key ?? ''}`}
       <Viewer
         data={shown.payload}
+        {hosted}
         pages={ids}
         onpage={go}
         ondrill={drill}

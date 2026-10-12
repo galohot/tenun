@@ -28,4 +28,10 @@ export const LIMITS = {
   minEveryMinutes: 60,
   /** Device sign-ins waiting for approval, across everyone. */
   openDevices: 500,
+  /** A site (build 14, V4-D17): its pages, and its compressed size. It counts as one item toward `dashboards`. */
+  sitePages: 10,
+  siteMaxBytes: 25 * 1024 * 1024,
 };
+
+/** What a published item is: one dashboard, or a whole site (build 14). */
+export type Kind = 'dashboard' | 'site';

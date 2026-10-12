@@ -1,5 +1,5 @@
 // End-to-end tests of tenun.cloud in Miniflare (workerd + local D1 and R2).
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { Miniflare } from 'miniflare';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -18,7 +18,10 @@ async function boot(vars: Record<string, string>) {
     serviceBindings: { ASSETS: async () => new Response('missing', { status: 404 }) },
   });
   const db = await m.getD1Database('DB');
-  const sql = readFileSync('migrations/0001_init.sql', 'utf8')
+  // Every migration, in order.
+  const sql = ['0001_init.sql', '0002_sites.sql']
+    .map((f) => readFileSync(`migrations/${f}`, 'utf8'))
+    .join('\n')
     .split('\n')
     .map((l) => l.replace(/--.*$/, ''))
     .join('\n')
@@ -101,6 +104,8 @@ describe('tenun.cloud', () => {
     const r = await req('/api/v1/health');
     expect(r.status).toBe(200);
     expect(r.headers.get('content-security-policy')).toContain("script-src 'self'");
+    // A site holds up to 10 pages (build 14).
+    expect(((await r.json()) as { limits: { sitePages: number } }).limits.sitePages).toBe(10);
   });
 
   it('publishes, serves, prunes, rate-limits and deletes', async () => {
@@ -172,6 +177,76 @@ describe('tenun.cloud', () => {
     const guest = await signIn('guest@example.com');
     expect((await req(`/d/${id}`, { cookie: guest })).status).toBe(200);
     expect((await req(`/api/v1/d/${id}/snapshot`, { cookie: guest })).status).toBe(200);
+  });
+
+  it('publishes a site: its own link, up to 10 pages, a bigger size, one item toward the limit, the same access', async () => {
+    const token = await connect('site@example.com');
+    const site = (b: Record<string, unknown>) => gzipSync(JSON.stringify({ version: 2, kind: 'site', title: 'Coffee', order: ['d1', 'd2'], pages: {}, drill: {}, ...b }));
+    const put = (id: string, pages: string, body: Uint8Array, extra: Record<string, string> = {}) =>
+      req(`/api/v1/sites/${id}/snapshot`, {
+        method: 'PUT',
+        headers: { ...auth(token), 'content-type': 'application/gzip', 'x-tenun-pages': pages, 'x-tenun-generated': new Date().toISOString(), ...extra },
+        body,
+      });
+    const created = await req('/api/v1/sites', { method: 'POST', headers: auth(token), body: JSON.stringify({ title: 'Coffee site' }) });
+    expect(created.status).toBe(201);
+    const { id, url } = (await created.json()) as { id: string; url: string };
+    expect(url).toBe(`${ORIGIN}/s/${id}`);
+    // Eleven pages, or none said, are refused; ten pass.
+    expect((await put(id, '11', site({}))).status).toBe(413);
+    expect((await put(id, '', site({}))).status).toBe(413);
+    const ok = await put(id, '10', site({ n: 1 }));
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { url: string }).url).toBe(`${ORIGIN}/s/${id}`);
+    // A site may be bigger than a dashboard (10 MB), up to 25 MB. The Worker checks the size and the gzip mark only.
+    const blob = (mb: number) => {
+      const b = new Uint8Array(mb * 1024 * 1024);
+      b[0] = 0x1f;
+      b[1] = 0x8b;
+      return b;
+    };
+    expect((await put(id, '2', blob(12))).status).toBe(200);
+    expect((await put(id, '2', blob(26))).status).toBe(413);
+    expect((await put(id, '2', site({ n: 1 }))).status).toBe(200);
+    // The page: the viewer reads the site's snapshot; a page of the site goes to the site at that page.
+    const shell = await req(`/s/${id}`);
+    expect(shell.status).toBe(200);
+    expect(await shell.text()).toContain(`/api/v1/s/${id}/snapshot?v=3`);
+    const page = await req(`/s/${id}/d2`);
+    expect(page.status).toBe(302);
+    expect(page.headers.get('location')).toBe(`/s/${id}#/p/d2`);
+    const data = await req(`/api/v1/s/${id}/snapshot?v=3`);
+    const raw = Buffer.from(await data.arrayBuffer());
+    expect(JSON.parse((raw[0] === 0x1f ? gunzipSync(raw) : raw).toString()).n).toBe(1);
+    // A site is not a dashboard: the other link and the other API do not reach it.
+    expect((await req(`/d/${id}`)).status).toBe(404);
+    expect((await req(`/api/v1/dashboards/${id}/snapshot`, { method: 'PUT', headers: { ...auth(token), 'content-type': 'application/gzip' }, body: site({}) })).status).toBe(404);
+    // The account lists it with its pages; /me gives its link.
+    const me = (await (await req('/api/v1/me', { headers: auth(token) })).json()) as { dashboards: { id: string; kind: string; pages: number; url: string }[]; limits: { sitePages: number } };
+    expect(me.dashboards[0]).toMatchObject({ id, kind: 'site', pages: 2, url: `${ORIGIN}/s/${id}` });
+    expect(me.limits.sitePages).toBe(10);
+    const cookie = await signIn('site@example.com');
+    const account = await (await req('/account', { cookie })).text();
+    expect(account).toContain(`href="/s/${id}"`);
+    expect(account).toContain('Site of 2 pages');
+    // One item toward the free plan: two dashboards more, then the next is refused.
+    for (let i = 0; i < 2; i++) expect((await req('/api/v1/dashboards', { method: 'POST', headers: auth(token), body: '{}' })).status).toBe(201);
+    expect((await req('/api/v1/sites', { method: 'POST', headers: auth(token), body: '{}' })).status).toBe(403);
+    // Invited only, as a dashboard.
+    expect((await req(`/api/v1/sites/${id}`, { method: 'PATCH', headers: auth(token), body: JSON.stringify({ access: 'invited', invites: ['friend@example.com'] }) })).status).toBe(200);
+    expect((await req(`/s/${id}`)).status).toBe(302);
+    expect((await req(`/s/${id}`, { cookie: await signIn('nobody@example.com') })).status).toBe(403);
+    expect((await req(`/s/${id}`, { cookie: await signIn('friend@example.com') })).status).toBe(200);
+    // Versions are pruned as a dashboard's, and a delete takes them all.
+    for (let n = 4; n <= 6; n++) expect((await put(id, '2', site({ n }))).status).toBe(200);
+    expect((await objects(`snap/${id}/`)).sort()).toEqual([2, 3, 4, 5, 6].map((v) => `snap/${id}/${v}.json.gz`).sort());
+    expect((await req(`/api/v1/sites/${id}`, { method: 'DELETE', headers: auth(token) })).status).toBe(200);
+    expect(await objects(`snap/${id}/`)).toEqual([]);
+    expect((await req(`/s/${id}`)).status).toBe(404);
+  });
+
+  it('applies every migration file the folder holds', () => {
+    expect(readdirSync('migrations').sort()).toEqual(['0001_init.sql', '0002_sites.sql']);
   });
 
   it('refuses page forms from other sites', async () => {

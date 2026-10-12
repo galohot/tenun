@@ -2168,13 +2168,50 @@ impl Engine {
     }
 
     /// Keeps the site settings (build 12). They must be an object; the app cleans them up (`site.ts normaliseSite`).
-    pub fn set_site(&self, site: serde_json::Value) -> anyhow::Result<()> {
+    /// As with a dashboard, what only the publisher writes (`publish`: the cloud site, its link, the last time, the last
+    /// error) is kept from the current copy, so a save from the app never rolls it back (build 14). Settings that name no
+    /// `publish` keep the current one whole: only the publisher removes it (`update_site`).
+    pub fn set_site(&self, mut site: serde_json::Value) -> anyhow::Result<()> {
         if !site.is_object() {
             anyhow::bail!("The site settings are not readable.");
         }
-        self.state.write().unwrap().ws.site = Some(site);
+        {
+            let mut s = self.state.write().unwrap();
+            let old = s.ws.site.as_ref().and_then(|o| o.get("publish")).cloned();
+            match site.get_mut("publish").and_then(|p| p.as_object_mut()) {
+                Some(p) => {
+                    for k in ["id", "url", "last", "error"] {
+                        match old.as_ref().and_then(|o| o.get(k)) {
+                            Some(v) => {
+                                p.insert(k.to_string(), v.clone());
+                            }
+                            None => {
+                                p.remove(k);
+                            }
+                        }
+                    }
+                }
+                None => {
+                    if let Some(o) = old {
+                        site["publish"] = o;
+                    }
+                }
+            }
+            s.ws.site = Some(site);
+        }
         self.persist();
         Ok(())
+    }
+
+    /// Changes the site settings as they are (the publisher, build 14): nothing is kept from the current copy.
+    pub fn update_site(&self, f: impl FnOnce(&mut serde_json::Value)) {
+        {
+            let mut s = self.state.write().unwrap();
+            let mut site = s.ws.site.take().unwrap_or_else(|| serde_json::json!({}));
+            f(&mut site);
+            s.ws.site = Some(site);
+        }
+        self.persist();
     }
 
     /// The card styles of the workspace (build 08).

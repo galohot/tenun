@@ -23,10 +23,13 @@ const titleOf = (d: Pick<Dashboard, 'title'>) => d.title.trim() || 'Untitled';
 /** The pages the navigation lists: every dashboard not marked hidden. A hidden page is still reached by a link. */
 export const visiblePages = (dashboards: readonly Dashboard[]): Dashboard[] => dashboards.filter((d) => !d.hidden);
 
+/** The pages a site on tenun.cloud holds at most (build 14): the service's own limit. */
+export const CLOUD_SITE_PAGES = 10;
+
 /**
  * The site settings as they are used: off unless switched on; a title (the workspace's name when blank); the top bar
  * unless the sidebar is picked; groups with only pages that exist, each page in one group at most (the first); the home
- * page a visible page, else the first visible one; a footer of one line.
+ * page a visible page, else the first visible one; a footer of one line; the publish settings as they are (build 14).
  */
 export function normaliseSite(site: Partial<SiteSettings> | null | undefined, dashboards: readonly Dashboard[], workspace = 'Tenun'): SiteSettings {
   const ids = new Set(dashboards.map((d) => d.id));
@@ -44,6 +47,7 @@ export function normaliseSite(site: Partial<SiteSettings> | null | undefined, da
     ...(home ? { home } : {}),
     groups,
     footer: (site?.footer ?? '').replace(/\s+/g, ' ').trim(),
+    ...(site?.publish ? { publish: site.publish } : {}),
   };
 }
 

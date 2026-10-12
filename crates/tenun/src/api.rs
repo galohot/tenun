@@ -100,6 +100,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/cloud/disconnect", post(cloud_disconnect))
         .route("/cloud/publish", post(cloud_publish))
         .route("/cloud/unpublish", post(cloud_unpublish))
+        .route("/cloud/publish-site", post(cloud_publish_site))
+        .route("/cloud/unpublish-site", post(cloud_unpublish_site))
         .route("/snapshot", post(snapshot))
         .route("/export-html", post(export_html))
         .route("/export-site", post(export_site))
@@ -1085,6 +1087,40 @@ async fn cloud_unpublish(State(s): S, Json(b): Json<DashBody>) -> R<Json<Value>>
     Ok(Json(
         blocking(&s, move |st| {
             cloud::unpublish(&st.engine, &st.secrets, &st.cloud_base, &b.dashboard)?;
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+/// The whole site to tenun.cloud (build 14): its pages in one upload, at `/s/<id>`.
+async fn cloud_publish_site(State(s): S) -> R<Json<Value>> {
+    let (result, snap) = blocking(&s, move |st| {
+        let r = cloud::publish_site(&st.engine, &st.secrets, &st.cloud_base);
+        st.schedule.lock().unwrap().record(
+            cloud::SITE_ID,
+            r.is_ok(),
+            r.as_ref().err(),
+            chrono::Utc::now(),
+        );
+        Ok((
+            r.map_err(|e| e.to_string()),
+            serde_json::to_value(st.engine.snapshot())?,
+        ))
+    })
+    .await?;
+    match result {
+        Ok(v) => Ok(Json(
+            json!({ "ok": true, "url": v["url"], "version": v["version"], "snapshot": snap }),
+        )),
+        Err(e) => Err(anyhow::anyhow!(e).into()),
+    }
+}
+
+async fn cloud_unpublish_site(State(s): S) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            cloud::unpublish_site(&st.engine, &st.secrets, &st.cloud_base)?;
             Ok(serde_json::to_value(st.engine.snapshot())?)
         })
         .await?,
