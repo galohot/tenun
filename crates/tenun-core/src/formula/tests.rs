@@ -94,6 +94,8 @@ fn world() -> &'static World {
              CREATE TABLE empty (v DOUBLE, t VARCHAR, d DATE);",
         )
         .unwrap();
+        // FISCALYEAR and FISCALQUARTER read the engine's macros (v5 build 04), here for the calendar year.
+        crate::engine::define_calendar_macros(&db, crate::calendar::Calendar::default()).unwrap();
         let mut orders = table(
             "s1/Orders",
             "Orders",
@@ -1719,6 +1721,8 @@ fn guide_columns() -> Vec<(&'static str, Value)> {
         ("WEEKDAY([date])", json!(4)),
         ("WEEKNUM([date])", json!(3)),
         ("QUARTER([date])", json!(1)),
+        ("FISCALYEAR([date])", json!(2026)),
+        ("FISCALQUARTER([date])", json!(1)),
         ("EOMONTH([date], 0)", json!("2026-01-31")),
         ("EDATE([date], 1)", json!("2026-02-15")),
         (r#"DATEDIF([date], TODAY(), "M")"#, json!(8)),

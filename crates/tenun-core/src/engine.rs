@@ -536,6 +536,7 @@ impl Engine {
         // Do not let a query wander into the network or the file system on its own.
         conn.execute_batch("SET autoinstall_known_extensions = false;")
             .ok();
+        define_calendar_macros(&conn, crate::calendar::Calendar::default())?;
         Ok(Self {
             db: Arc::new(Mutex::new(conn)),
             state: Arc::new(RwLock::new(State::default())),
@@ -655,6 +656,8 @@ impl Engine {
             for src in &s.ws.sources {
                 drop_source(&db, &src.id);
             }
+            // The new workspace's calendar, before its calculated columns are built (v5 build 04).
+            let _ = define_calendar_macros(&db, ws.calendar.unwrap_or_default().clean());
         }
         {
             let mut s = self.state.write().unwrap();
@@ -2237,6 +2240,27 @@ impl Engine {
     }
 
     /// The card styles of the workspace (build 08).
+    /// The month the workspace's year starts in and the day its week starts on (v5 build 04).
+    pub fn calendar(&self) -> crate::calendar::Calendar {
+        self.state
+            .read()
+            .unwrap()
+            .ws
+            .calendar
+            .unwrap_or_default()
+            .clean()
+    }
+
+    /// Sets the workspace's calendar. Formulas read it through two DuckDB macros, which follow at once.
+    pub fn set_calendar(&self, cal: crate::calendar::Calendar) -> anyhow::Result<()> {
+        let cal = cal.clean();
+        define_calendar_macros(&self.db.lock().unwrap(), cal)?;
+        self.state.write().unwrap().ws.calendar = Some(cal);
+        self.grain_cache.lock().unwrap().clear();
+        self.persist();
+        Ok(())
+    }
+
     pub fn hierarchies(&self) -> Vec<crate::workspace::Hierarchy> {
         self.state.read().unwrap().ws.hierarchies.clone()
     }
@@ -2377,6 +2401,11 @@ impl Engine {
     }
 
     pub fn query(&self, q: &SemanticQuery) -> anyhow::Result<QueryResult> {
+        // Grains and relative dates follow the workspace's calendar (v5 build 04).
+        crate::calendar::with(self.calendar(), || self.query_in(q))
+    }
+
+    fn query_in(&self, q: &SemanticQuery) -> anyhow::Result<QueryResult> {
         let today = self.today();
         let grains = self.grains_for(q);
         let compiled = {
@@ -3675,6 +3704,20 @@ fn rebase(kind: &mut SourceKind, old: Option<&Path>, new: Option<&Path>) {
     };
     let abs = resolve_path(p, old);
     *p = store_path(&abs, new);
+}
+
+/// `tenun_fiscal_year(d)` and `tenun_fiscal_quarter(d)`: what `FISCALYEAR` and `FISCALQUARTER` compile to (v5 build
+/// 04). A view that uses them reads the calendar of the moment it is queried.
+pub(crate) fn define_calendar_macros(
+    db: &Connection,
+    cal: crate::calendar::Calendar,
+) -> anyhow::Result<()> {
+    db.execute_batch(&format!(
+        "CREATE OR REPLACE MACRO tenun_fiscal_year(d) AS {}; CREATE OR REPLACE MACRO tenun_fiscal_quarter(d) AS {};",
+        cal.fiscal_year_sql("d"),
+        cal.fiscal_quarter_sql("d")
+    ))?;
+    Ok(())
 }
 
 /// Where UTF-8 copies of CSV files in other encodings live: `converted/` beside the secrets file.

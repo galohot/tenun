@@ -40,20 +40,26 @@ const parse = (s: string): number | null => {
 const iso = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 
 /** The row of a weekday: Monday first puts Monday at the top, Sunday first puts Sunday there. */
-export const rowOf = (ms: number, mondayFirst: boolean): number => {
-  const dow = new Date(ms).getUTCDay(); // Sunday = 0
-  return mondayFirst ? (dow + 6) % 7 : dow;
+/**
+ * The first day of the week, as an ISO weekday (1 Monday, 6 Saturday, 7 Sunday): `true` is Monday and `false` Sunday,
+ * as before; a number is the workspace's week start (v5 build 04).
+ */
+const firstDay = (first: boolean | number): number => (typeof first === 'number' ? first : first ? 1 : 7);
+
+export const rowOf = (ms: number, first: boolean | number): number => {
+  const dow = new Date(ms).getUTCDay() || 7; // ISO: Monday = 1, Sunday = 7
+  return (dow - firstDay(first) + 7) % 7;
 };
 
 /** The weekday number (Monday = 1 … Sunday = 7) shown on a row. */
-export const weekdayOfRow = (row: number, mondayFirst: boolean): number => (mondayFirst ? row + 1 : row === 0 ? 7 : row);
+export const weekdayOfRow = (row: number, first: boolean | number): number => ((firstDay(first) - 1 + row) % 7) + 1;
 
 /**
  * Lays out the days. The grid runs from the first day of the first month that has a row to the last
  * day of the last month, so every month is whole. A day with no row has no value. Monday-first for
  * Indonesian, Sunday-first for English.
  */
-export function calendarModel(rows: readonly (readonly unknown[])[], mondayFirst: boolean): Calendar {
+export function calendarModel(rows: readonly (readonly unknown[])[], mondayFirst: boolean | number): Calendar {
   const byDay = new Map<number, number | null>();
   for (const r of rows) {
     const ms = typeof r[0] === 'string' ? parse(r[0]) : null;

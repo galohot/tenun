@@ -63,6 +63,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/workspace/measures", put(put_measures))
         .route("/workspace/card-styles", put(put_card_styles))
         .route("/workspace/hierarchies", put(put_hierarchies))
+        .route("/workspace/calendar", put(put_calendar))
         .route("/workspace/site", put(put_site))
         .route("/sample", post(open_sample))
         .route("/sources", post(add_source))
@@ -741,6 +742,22 @@ async fn put_card_styles(State(s): S, Json(b): Json<Vec<Value>>) -> R<Json<Value
     })
     .await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// Sets the month the workspace's year starts in and the day its week starts on (v5 build 04), and answers with the
+/// workspace. Every tile asks again: its periods may have moved.
+async fn put_calendar(
+    State(s): S,
+    Json(b): Json<tenun_core::calendar::Calendar>,
+) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            st.engine.set_calendar(b)?;
+            st.emit(json!({ "type": "data-changed" }));
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
 }
 
 /// Replaces the hierarchies (v5 build 01) and answers with the workspace. A field that does not reach the one above it

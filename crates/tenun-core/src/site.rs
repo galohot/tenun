@@ -102,6 +102,7 @@ pub fn build_site(
         "pages": pages,
         "drill": drill,
         "every": every,
+        "calendar": engine.calendar(),
     }))
 }
 

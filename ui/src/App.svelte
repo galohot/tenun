@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { app } from './lib/state.svelte';
   import { setLocale } from './lib/format';
+  import { setCalendar } from './lib/locale';
   import Sidebar from './components/Sidebar.svelte';
   import Welcome from './components/Welcome.svelte';
   import DataView from './components/DataView.svelte';
@@ -22,9 +23,10 @@
     document.documentElement.dataset.theme = app.theme;
   });
 
-  // Numbers and dates follow the open workspace.
+  // Numbers and dates follow the open workspace, and so does the calendar of its periods (v5 build 04).
   $effect(() => {
     setLocale(app.locale);
+    setCalendar(app.snap?.workspace.calendar);
   });
 
   // The drawer closes when a page is picked.

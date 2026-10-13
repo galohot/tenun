@@ -4,6 +4,7 @@ import Viewer from './Viewer.svelte';
 import SiteApp from './SiteApp.svelte';
 import type { ExportPayload, SitePayload } from '../lib/export';
 import { setLocale } from '../lib/format';
+import { setCalendar, type Calendar } from '../lib/locale';
 import { useCarried } from '../lib/geoassets';
 
 // An exported file carries its data inline (window.TENUN). A dashboard hosted on
@@ -27,6 +28,8 @@ async function start() {
   if (!data) return;
   // The numbers and dates read the way the author saw them.
   setLocale(data.locale);
+  // Periods are named in the calendar of the workspace the file came from (v5 build 04).
+  setCalendar((data as unknown as { calendar?: Calendar }).calendar);
   // The maps the file carries are drawn from it, with no network (build 06).
   useCarried(data.geo);
   const every = Number(meta('tenun-every')) || null;

@@ -150,6 +150,9 @@ export interface Profile {
   mixed: boolean;
 }
 
+import type { Calendar } from './locale';
+export type { Calendar };
+
 export interface FieldRef {
   table: string;
   column: string;
@@ -809,6 +812,8 @@ export interface Workspace {
   site?: SiteSettings;
   /** Hierarchies for drill-down (v5 build 01). */
   hierarchies?: Hierarchy[];
+  /** The month the year starts in and the day the week starts on (v5 build 04). Not set: January and Monday. */
+  calendar?: Calendar;
 }
 
 export interface Snapshot {
@@ -943,6 +948,7 @@ export const api = {
   workspace: () => call<Snapshot>('GET', '/workspace'),
   newWorkspace: () => call<Snapshot>('POST', '/workspace/new', { lang: navigator.language }),
   setLocale: (locale: 'id' | 'en') => call<Snapshot>('PUT', '/workspace/locale', { locale }),
+  setCalendar: (calendar: Calendar) => call<Snapshot>('PUT', '/workspace/calendar', calendar),
   open: (path: string) => call<Snapshot>('POST', '/workspace/open', { path }),
   save: (path?: string) => call<Snapshot>('POST', '/workspace/save', { path: path ?? null }),
   rename: (name: string) => call<Snapshot>('POST', '/workspace/rename', { name }),

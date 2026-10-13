@@ -207,6 +207,12 @@ Where a function wants text, a number or a date is turned into text the same way
   Example: `WEEKNUM([date])`
 - `QUARTER(date)`: 1 to 4.
   Example: `QUARTER([date])`
+- `FISCALYEAR(date)`: the year by the workspace's calendar (Settings › Year and week). A year that starts in
+  April 2026 is 2027, the year it ends. With a year that starts in January it is `YEAR`.
+  Example: `FISCALYEAR([date])`
+- `FISCALQUARTER(date)`: 1 to 4, counted from the month the workspace's year starts in. With an April start,
+  April to June is 1.
+  Example: `FISCALQUARTER([date])`
 - `EOMONTH(date, months)`: the last day of the month, `months` months after the date.
   Example: `EOMONTH([date], 0)`
 - `EDATE(date, months)`: the same day, `months` months later. The day is cut to the end of a short month.

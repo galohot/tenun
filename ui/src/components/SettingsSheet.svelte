@@ -8,6 +8,9 @@
   let { onclose }: { onclose: () => void } = $props();
   /** The list of place names a map reads (build 05). */
   let places = $state(false);
+  /** The workspace's calendar (v5 build 04). */
+  const cal = $derived(app.snap?.workspace.calendar ?? {});
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 </script>
 
 {#if places}
@@ -39,6 +42,30 @@
         <option value="en">English (1,234.5 · $1.2M)</option>
       </select>
     </label>
+    {#if app.settings?.advanced || (cal.yearStart ?? 1) !== 1 || (cal.weekStart ?? 1) !== 1}
+      <div class="row stack">
+        <span class="text">
+          <span class="name">Year and week</span>
+          <span class="muted hint">The month this workspace's year starts in, and the day its week starts on. Years, quarters, weeks, year to date and "this year" follow them. A year that starts in April 2026 is FY 2027.</span>
+        </span>
+        <div class="pair">
+          <label class="sub">
+            <span class="muted">Year starts in</span>
+            <select class="field" value={String(cal.yearStart ?? 1)} disabled={!app.settings?.advanced} onchange={(e) => app.setCalendar({ ...cal, yearStart: Number(e.currentTarget.value) })}>
+              {#each MONTHS as m, i (m)}<option value={String(i + 1)}>{m}</option>{/each}
+            </select>
+          </label>
+          <label class="sub">
+            <span class="muted">Week starts on</span>
+            <select class="field" value={String(cal.weekStart ?? 1)} disabled={!app.settings?.advanced} onchange={(e) => app.setCalendar({ ...cal, weekStart: Number(e.currentTarget.value) })}>
+              <option value="1">Monday</option>
+              <option value="6">Saturday</option>
+              <option value="7">Sunday</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    {/if}
     <div class="row">
       <span class="text">
         <span class="name">Place names for maps</span>
@@ -47,7 +74,7 @@
       <button type="button" class="btn" onclick={() => (places = true)}>Show</button>
     </div>
   </div>
-  <p class="muted note">The number and date format is saved in your workspace file. The other settings belong to this computer.</p>
+  <p class="muted note">The number and date format, and the year and week, are saved in your workspace file. The other settings belong to this computer.</p>
 </Modal>
 {/if}
 
@@ -58,6 +85,8 @@
   .name { font-weight: 600; }
   .hint { font-size: 12px; line-height: 1.4; }
   .row.stack { flex-direction: column; gap: 8px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+  .sub { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
   .format { width: 100%; height: 30px; }
   .note { margin: 14px 0 0; font-size: 12px; }
   .switch {

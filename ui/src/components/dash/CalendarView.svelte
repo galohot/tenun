@@ -6,6 +6,7 @@
   import type { Cell, QueryResult, Tile } from '../../lib/api';
   import type { Colors } from '../../lib/chart';
   import { calendarModel, weekdayOfRow } from '../../lib/charts/calendar';
+  import { weekStartSet } from '../../lib/locale';
   import { heatRange, heatStep, inkFor } from '../../lib/charts/heat';
   import { cell, getLocale, numberFormatter, partName } from '../../lib/format';
 
@@ -24,8 +25,8 @@
   } = $props();
 
   const loc = $derived(getLocale());
-  // Sunday first for English; Monday first for Indonesian.
-  const mondayFirst = $derived(loc !== 'en');
+  // The workspace's week start when one is set (v5 build 04); otherwise Sunday first for English, Monday for Indonesian.
+  const mondayFirst = $derived(weekStartSet() ?? loc !== 'en');
   const cal = $derived(calendarModel(res.rows, mondayFirst));
   const unit = $derived(res.columns[1]?.unit);
   const fmt = $derived(numberFormatter(tile.formats?.[0], loc, unit));

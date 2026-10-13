@@ -317,3 +317,16 @@ test('a ratio with no per.column is read as a count of rows', () => {
   normalizeSnapshot(snap);
   assert.equal(tiles[0].measures[0].per.column, null);
 });
+
+test('a calendar heat map can start its week on Saturday (v5 build 04)', () => {
+  // Monday March 2 and Sunday March 8, 2026; Saturday March 7.
+  assert.equal(rowOf(Date.UTC(2026, 2, 7), 6), 0);
+  assert.equal(rowOf(Date.UTC(2026, 2, 8), 6), 1);
+  assert.equal(rowOf(Date.UTC(2026, 2, 2), 6), 2);
+  assert.equal(weekdayOfRow(0, 6), 6);
+  assert.equal(weekdayOfRow(1, 6), 7);
+  assert.equal(weekdayOfRow(2, 6), 1);
+  // A number gives the same rows as the old switch.
+  assert.equal(rowOf(Date.UTC(2026, 2, 8), 7), rowOf(Date.UTC(2026, 2, 8), false));
+  assert.equal(rowOf(Date.UTC(2026, 2, 8), 1), rowOf(Date.UTC(2026, 2, 8), true));
+});

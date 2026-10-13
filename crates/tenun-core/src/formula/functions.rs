@@ -111,6 +111,8 @@ pub const DEFS: &[Def] = &[
     row("WEEKDAY", 1, 1),
     row("WEEKNUM", 1, 1),
     row("QUARTER", 1, 1),
+    row("FISCALYEAR", 1, 1),
+    row("FISCALQUARTER", 1, 1),
     row("EOMONTH", 2, 2),
     row("EDATE", 2, 2),
     row("DATEDIF", 3, 3),
@@ -425,7 +427,8 @@ pub fn type_of(def: &Def, args: &[TExpr], src: &Src) -> Result<Ty, FormulaError>
             c.all_num()?;
             Ty::Date
         }
-        "YEAR" | "MONTH" | "DAY" | "WEEKDAY" | "WEEKNUM" | "QUARTER" => {
+        "YEAR" | "MONTH" | "DAY" | "WEEKDAY" | "WEEKNUM" | "QUARTER" | "FISCALYEAR"
+        | "FISCALQUARTER" => {
             c.date(0)?;
             Ty::Num
         }
@@ -765,6 +768,9 @@ pub(crate) fn emit(g: &mut Gen<'_>, name: &str, args: &[TExpr], ty: Ty) -> Strin
             };
             format!("CAST({f}({}) AS DOUBLE)", g.date(&args[0]))
         }
+        // By the workspace's calendar (v5 build 04): macros the engine defines, so a change of calendar follows at once.
+        "FISCALYEAR" => format!("CAST(tenun_fiscal_year({}) AS DOUBLE)", g.date(&args[0])),
+        "FISCALQUARTER" => format!("CAST(tenun_fiscal_quarter({}) AS DOUBLE)", g.date(&args[0])),
         "EOMONTH" | "EDATE" => {
             let (d, m) = (g.date(&args[0]), g.num(&args[1]));
             let moved = format!("CAST({d} AS DATE) + to_months(CAST(trunc({m}) AS INTEGER))");

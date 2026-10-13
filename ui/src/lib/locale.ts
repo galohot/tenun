@@ -165,6 +165,9 @@ export function parseDate(s: string): Date | null {
 export function formatDate(v: string, loc: Locale, grain?: Grain | null, dtype?: string): string {
   const d = parseDate(v);
   if (!d) return v;
+  // A year or quarter of a year that starts after January: "FY 2027", "Q1 FY 2027" (v5 build 04).
+  const fiscal = fiscalName(d, grain);
+  if (fiscal) return fiscal;
   const f = TIMES[loc];
   switch (grain) {
     case 'year':
@@ -212,4 +215,37 @@ export function pctShareIn(x: number, loc: Locale): string {
   if (x >= 0.995) return '100%';
   if (x < 0.001) return `<${fixedNumber(0.1, 1, loc)}%`;
   return `${fixedNumber(x * 100, x < 0.1 ? 1 : 0, loc)}%`;
+}
+
+/** The month the year starts in (1–12) and the day the week starts on (1 Monday, 6 Saturday, 7 Sunday). */
+export interface Calendar {
+  yearStart?: number;
+  weekStart?: number;
+}
+
+let calendar: Required<Calendar> = { yearStart: 1, weekStart: 1 };
+
+/** Sets the calendar the period names follow (the app: the workspace's; an exported file: the one it carries). */
+export function setCalendar(c: Calendar | null | undefined): void {
+  const y = c?.yearStart ?? 1;
+  const w = c?.weekStart ?? 1;
+  calendar = { yearStart: y >= 1 && y <= 12 ? Math.round(y) : 1, weekStart: w === 6 || w === 7 ? w : 1 };
+  weekSet = c?.weekStart !== undefined;
+}
+
+export const getCalendar = (): Required<Calendar> => calendar;
+
+let weekSet = false;
+/** The week start the workspace sets, or null when it sets none (a view may then follow the language). */
+export const weekStartSet = (): number | null => (weekSet ? calendar.weekStart : null);
+
+/** "FY 2027" or "Q1 FY 2027" for a period of a year that starts after January; null otherwise. `d` is its first day. */
+export function fiscalName(d: Date, grain: Grain | null | undefined): string | null {
+  const { yearStart } = calendar;
+  if (yearStart === 1 || (grain !== 'year' && grain !== 'quarter')) return null;
+  const m = d.getUTCMonth() + 1;
+  const fy = m >= yearStart ? d.getUTCFullYear() + 1 : d.getUTCFullYear();
+  if (grain === 'year') return `FY ${fy}`;
+  const q = Math.floor(((m + 12 - yearStart) % 12) / 3) + 1;
+  return `Q${q} FY ${fy}`;
 }

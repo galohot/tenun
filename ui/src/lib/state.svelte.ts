@@ -5,7 +5,7 @@ import { PHONE_MAX } from './layout';
 import { linkTablesOf, setLinkLabels } from './links';
 import { setKnownMeasures } from './measures';
 import type { Drill } from './site';
-import { api, type CardStyle, type CloudStatus, type SiteSettings, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
+import { api, type Calendar, type CardStyle, type CloudStatus, type SiteSettings, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
 
 export type Route =
   | { view: 'home' }
@@ -153,6 +153,11 @@ class App {
   async setLocale(locale: 'id' | 'en') {
     if (locale === this.locale) return;
     await this.run(null, () => api.setLocale(locale));
+  }
+
+  /** The month the workspace's year starts in and the day its week starts on (v5 build 04). */
+  async setCalendar(calendar: Calendar) {
+    await this.run(null, () => api.setCalendar(calendar));
   }
 
   table(id: string): Table | undefined {

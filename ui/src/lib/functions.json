@@ -270,6 +270,18 @@
   "hint": "The quarter, 1 to 4."
  },
  {
+  "name": "FISCALYEAR",
+  "args": "date",
+  "class": "row",
+  "hint": "The year by the workspace's calendar: a year that starts in April 2026 is 2027."
+ },
+ {
+  "name": "FISCALQUARTER",
+  "args": "date",
+  "class": "row",
+  "hint": "The quarter, 1 to 4, counted from the month the workspace's year starts in."
+ },
+ {
   "name": "EOMONTH",
   "args": "date, months",
   "class": "row",

@@ -519,7 +519,10 @@ pub fn run_tile(
     tile: &Tile,
     filters: &[DashFilter],
 ) -> anyhow::Result<QueryResult> {
-    let (res, crossed) = engine.collecting(|| run_tile_inner(engine, tile, filters));
+    // Period names, year to date and the number tile's periods follow the workspace's calendar (v5 build 04).
+    let (res, crossed) = crate::calendar::with(engine.calendar(), || {
+        engine.collecting(|| run_tile_inner(engine, tile, filters))
+    });
     let mut res = res?;
     res.notes = engine.link_notes(&crossed);
     res.public_notes = engine.public_link_notes(&crossed);
@@ -1695,6 +1698,11 @@ fn build_dash(
         "every": every,
         "grain": grain,
     });
+    // The viewer names periods in the workspace's calendar ("FY 2027"), as the app does (v5 build 04).
+    let cal = engine.calendar();
+    if cal != crate::calendar::Calendar::default() {
+        payload["calendar"] = json!(cal);
+    }
     if !down.is_empty() {
         payload["down"] = json!(down);
         // The hierarchies the drilled tiles use: the viewer names the field of the level it shows.

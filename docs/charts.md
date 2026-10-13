@@ -154,6 +154,7 @@ sidebar and switch on **Make this workspace a site**. It is off unless you switc
 - **Drill down:** see below.
 - **Which tiles a click filters:** see below.
 - **Saved views:** see below.
+- **Your year and your week:** see below.
 
 ## Which tiles a click filters
 
@@ -170,6 +171,18 @@ clears the choice where it was made.
 
 In an exported site and on tenun.cloud, a list or dropdown filter tile marked this way works the same for its first
 50 values. Past them, a page says that the file does not hold that value.
+
+## Your year and your week
+
+A business year can start in another month than January, and a week can start on Saturday or Sunday. With Advanced
+on, set both in **Settings › Year and week**. They are saved in the workspace file.
+
+- **A year that starts in April** runs from April 2026 to March 2027 and is called **FY 2027**, by the year it ends.
+  Its first quarter is April to June: **Q1 FY 2027**. Charts by year and by quarter, "This quarter", "Year to date",
+  a number tile's period and the formulas `FISCALYEAR` and `FISCALQUARTER` all follow it.
+- **The week start** moves the weeks of a chart by week and the rows of a calendar heat map.
+- Months, days and the parts of a date (a month of the year, a weekday) do not change. `YEAR` and `QUARTER` keep
+  their Excel meaning.
 
 ## Saved views
 
