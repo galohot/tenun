@@ -201,12 +201,14 @@ dashboard and **Add tile**.
 ## How it works
 
 ```
- Desktop window ─┐                       ┌─ Excel / SQLite  → copied into memory, reloaded on save
- or your browser ─┼─► local server (Rust) ┼─ CSV / Parquet   → read on every query
-                  │   + DuckDB in memory  └─ PostgreSQL / MySQL → attached read-only, queried live
+ Desktop window ─┐                       ┌─ Excel / SQLite / CSV → copied into memory, reloaded on save
+ or your browser ─┼─► local server (Rust) ┼─ Parquet              → read on every query
+                  │   + DuckDB in memory  └─ PostgreSQL / MySQL   → attached read-only, queried live
 ```
 
 - The engine is [DuckDB](https://duckdb.org), embedded. Nothing is uploaded anywhere.
+- A CSV file over 1 GB is read from the file on every query instead of being copied. How fast it
+  all is, at 100 thousand to 10 million rows: [the benchmark](docs/benchmark.md).
 - A tile asks for "this value, grouped by that column". Tenun finds the path through your
   relationships and writes one SQL query with the joins. Values are always query parameters.
 - A relationship needs one side with unique values, like an ID. If neither side is unique, Tenun
@@ -290,8 +292,16 @@ pnpm -C app install && pnpm -C app tauri build   # desktop app
 
 The first build compiles DuckDB from C++ source and takes 10 to 20 minutes.
 
-Checks: `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`,
-`pnpm -C ui check`, `pnpm -C ui build`, `pnpm -C ui test`.
+Checks: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace`, `pnpm -C ui check`, `pnpm -C ui build`, `pnpm -C ui test`, `pnpm -C cloud test`.
+
+**Real-file test set.** `tests/corpus/manifest.json` lists 50 public files (open government and
+open data, each with its licence) that Tenun is checked against. The files are not in the repository.
+
+```sh
+python3 scripts/corpus-fetch.py ~/tenun-corpus           # download them (checks each SHA-256)
+cargo run --release --example corpus -- ~/tenun-corpus    # load every file and check what a person checked by hand
+```
 
 ## Not in this version
 

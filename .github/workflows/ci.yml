@@ -44,6 +44,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - name: Benchmark smoke run (100 thousand rows; it fails on an error, never on a time)
+        run: cargo run --example bench -- "$RUNNER_TEMP/bench" --quick
 
   cloud:
     runs-on: ubuntu-24.04

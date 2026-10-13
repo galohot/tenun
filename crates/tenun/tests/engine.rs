@@ -200,9 +200,16 @@ fn saved_file_has_relative_paths_and_no_secrets() {
 #[test]
 fn edited_csv_and_excel_show_up() {
     let (e, dir) = engine("refresh");
-    // CSV is a view: the next query reads the new file.
+    // A CSV is held in memory (V5-D34): the watcher reloads it when the file is saved.
     let csv = std::fs::read_to_string(dir.join("stores.csv")).unwrap();
     std::fs::write(dir.join("stores.csv"), csv.replace(",Java,", ",Jawa,")).unwrap();
+    assert!(
+        !total_by(&e, "s2/stores", "region")
+            .iter()
+            .any(|r| r.0 == json!("Jawa")),
+        "not before the reload"
+    );
+    e.load("s2");
     let by_region = total_by(&e, "s2/stores", "region");
     assert!(by_region.iter().any(|r| r.0 == json!("Jawa")));
 

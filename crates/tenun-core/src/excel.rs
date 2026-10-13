@@ -3,9 +3,11 @@
 //! We do not use DuckDB's excel extension: it needs a download on first use,
 //! reads only .xlsx, and guesses types from the first data row alone.
 
-use calamine::{Data, Reader, open_workbook_auto};
+use calamine::{Data, Ods, Reader, Sheets, Xls, Xlsx, open_workbook, open_workbook_auto};
 use chrono::{NaiveDateTime, Timelike};
 use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::{BufReader, Read};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,8 +61,7 @@ pub fn read_workbook(
     path: &Path,
     header_rows: &BTreeMap<String, u32>,
 ) -> anyhow::Result<Vec<Sheet>> {
-    let mut wb = open_workbook_auto(path)
-        .map_err(|e| anyhow::anyhow!("cannot open {}: {e}", path.display()))?;
+    let mut wb = open_book(path)?;
     let mut out = Vec::new();
     for name in wb.sheet_names() {
         let range = match wb.worksheet_range(&name) {
@@ -80,6 +81,70 @@ pub fn read_workbook(
         }
     }
     Ok(out)
+}
+
+/// Opens a workbook by what the file holds, not only by its name: a `.xls` that is really a
+/// `.xlsx` (a common export) opens, and a locked workbook or a web page with a spreadsheet name is
+/// refused in words.
+fn open_book(path: &Path) -> anyhow::Result<Sheets<BufReader<File>>> {
+    let mut head = [0u8; 512];
+    let n = File::open(path)
+        .and_then(|mut f| f.read(&mut head))
+        .unwrap_or(0);
+    let head = &head[..n];
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let zip = head.starts_with(b"PK\x03\x04");
+    let ole = head.starts_with(&[0xD0, 0xCF, 0x11, 0xE0]);
+    let opened = if zip && matches!(ext.as_str(), "xls" | "xla") {
+        open_workbook::<Xlsx<_>, _>(path)
+            .map(Sheets::Xlsx)
+            .map_err(calamine::Error::Xlsx)
+            .or_else(|_| {
+                open_workbook::<Ods<_>, _>(path)
+                    .map(Sheets::Ods)
+                    .map_err(calamine::Error::Ods)
+            })
+    } else if ole && ext != "xls" {
+        open_workbook::<Xls<_>, _>(path)
+            .map(Sheets::Xls)
+            .map_err(calamine::Error::Xls)
+    } else {
+        open_workbook_auto(path)
+    };
+    opened.map_err(|e| {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if e.to_string().to_lowercase().contains("password") {
+            anyhow::anyhow!(
+                "{name} is locked with a password. Open it in Excel, save a copy without the password, and add the copy."
+            )
+        } else if let Some(kind) = text_kind(head) {
+            anyhow::anyhow!(
+                "{name} is {kind} saved with a spreadsheet name. Open it in Excel, save it as .xlsx, and add that file."
+            )
+        } else {
+            anyhow::anyhow!("cannot open {}: {e}", path.display())
+        }
+    })
+}
+
+/// What a text file under a spreadsheet name is: some systems export a web page table, or Excel
+/// 2003's XML, as `.xls`.
+fn text_kind(head: &[u8]) -> Option<&'static str> {
+    let text = String::from_utf8_lossy(head).to_lowercase();
+    let t = text.trim_start_matches('\u{feff}').trim_start();
+    if t.starts_with("<!doctype") || t.starts_with("<html") || t.starts_with("<table") {
+        Some("a web page")
+    } else if t.starts_with("<?xml") {
+        Some("an Excel 2003 XML file")
+    } else {
+        None
+    }
 }
 
 fn to_cell(d: &Data) -> Cell {
@@ -170,6 +235,39 @@ fn is_total_word(t: &str) -> bool {
 /// below are never asked for typed data: a blank or a year-like amount in the first data row
 /// must not move the header.
 fn detect_header(grid: &[Vec<Cell>], first: usize) -> usize {
+    header_candidate(grid, first)
+        .or_else(|| most_named(grid, first))
+        .unwrap_or(first)
+}
+
+/// No row names half of the columns (a header split over several rows, under notes): the row with
+/// the most names, at least two and no plain number. The first such row wins a tie.
+fn most_named(grid: &[Vec<Cell>], first: usize) -> Option<usize> {
+    (first..grid.len())
+        .filter(|&i| !has_number(&grid[i]))
+        .map(|i| (i, label_count(&grid[i])))
+        .filter(|&(_, n)| n >= 2)
+        .max_by_key(|&(i, n)| (n, std::cmp::Reverse(i)))
+        .map(|(i, _)| i)
+}
+
+/// The cells of a row that read as names: text, dates, and years.
+fn label_count(r: &[Cell]) -> usize {
+    r.iter()
+        .filter(|c| matches!(c, Cell::Text(_) | Cell::Time(_)) || is_year(c))
+        .count()
+}
+
+/// A number in a row that is not a year: a header holds names, and years at most, so such a row is
+/// data even when most of its cells are text ("Enfants sans vie", 7, "0.41 %").
+fn has_number(r: &[Cell]) -> bool {
+    r.iter()
+        .any(|c| matches!(c, Cell::Int(_) | Cell::Float(_)) && !is_year(c))
+}
+
+/// The header row of [`detect_header`], or `None` when no row has labels in at least half of the
+/// used columns. A CSV file asks this of its first lines (see `csvread`).
+pub(crate) fn header_candidate(grid: &[Vec<Cell>], first: usize) -> Option<usize> {
     let mut used = std::collections::BTreeSet::new();
     for r in &grid[first..] {
         for (i, c) in r.iter().enumerate() {
@@ -179,13 +277,9 @@ fn detect_header(grid: &[Vec<Cell>], first: usize) -> usize {
         }
     }
     let need = used.len().div_ceil(2).max(1);
-    let labels = |r: &[Cell]| {
-        r.iter()
-            .filter(|c| matches!(c, Cell::Text(_) | Cell::Time(_)) || is_year(c))
-            .count()
-    };
+    let labels = |r: &[Cell]| label_count(r);
     let candidates: Vec<usize> = (first..grid.len())
-        .filter(|&i| has_value(&grid[i]) && labels(&grid[i]) >= need)
+        .filter(|&i| has_value(&grid[i]) && labels(&grid[i]) >= need && !has_number(&grid[i]))
         .collect();
     let is_title = |i: usize| {
         let mine = labels(&grid[i]);
@@ -199,7 +293,6 @@ fn detect_header(grid: &[Vec<Cell>], first: usize) -> usize {
         .copied()
         .find(|&i| !is_title(i))
         .or_else(|| candidates.first().copied())
-        .unwrap_or(first)
 }
 
 /// The row right above the header when it is a group heading ("2025" over "Jan", "Feb").
@@ -663,6 +756,85 @@ mod tests {
                 .and_hms_opt(0, 0, 0)
                 .unwrap(),
         )
+    }
+
+    #[test]
+    fn a_row_with_a_plain_number_is_never_the_header() {
+        // A sheet without a header: a title, then label, count and share. The last rows have two
+        // text cells, but their number makes them data.
+        let grid = vec![
+            vec![Cell::Null, t("Statistiques 2011")],
+            vec![
+                Cell::Null,
+                t("Naissances"),
+                Cell::Int(1017),
+                Cell::Float(0.5979),
+            ],
+            vec![
+                Cell::Null,
+                t("Mariages"),
+                Cell::Int(60),
+                Cell::Float(0.0353),
+            ],
+            vec![Cell::Null, t("Enfants sans vie"), Cell::Int(7), t("0.41 %")],
+            vec![
+                Cell::Null,
+                t("Changement de nom"),
+                Cell::Int(6),
+                t("0.35 %"),
+            ],
+        ];
+        let s = build_sheet("s", grid).unwrap();
+        assert_eq!(s.header_row, Some(1));
+        assert_eq!(s.rows.len(), 4);
+    }
+
+    #[test]
+    fn a_header_split_over_rows_under_notes_is_the_row_with_the_most_names() {
+        let grid = vec![
+            vec![t("Earthquake: population exposure")],
+            vec![t("Analysis by a team, preliminary")],
+            vec![
+                Cell::Null,
+                Cell::Null,
+                Cell::Null,
+                Cell::Null,
+                t("POPULATION"),
+                Cell::Null,
+                t("TOTAL"),
+            ],
+            vec![
+                Cell::Null,
+                Cell::Null,
+                Cell::Null,
+                t("INTENSITY"),
+                Cell::Int(3),
+                Cell::Int(4),
+            ],
+            vec![Cell::Null, t("ADM0_NAME"), t("ADM1_NAME"), t("ADM2_NAME")],
+            vec![
+                Cell::Null,
+                t("Indonesia"),
+                t("Maluku"),
+                t("Maluku Tengah"),
+                Cell::Int(0),
+                Cell::Int(0),
+                Cell::Int(0),
+            ],
+            vec![
+                Cell::Null,
+                Cell::Null,
+                Cell::Null,
+                t("Tual"),
+                Cell::Int(5),
+                Cell::Int(1),
+                Cell::Int(6),
+            ],
+        ];
+        let s = build_sheet("s", grid).unwrap();
+        assert_eq!(s.header_row, Some(5));
+        assert_eq!(s.columns[0].0, "ADM0_NAME");
+        assert_eq!(s.rows.len(), 2);
     }
 
     #[test]

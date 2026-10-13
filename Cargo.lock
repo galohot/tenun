@@ -4722,6 +4722,7 @@ dependencies = [
  "calamine",
  "chrono",
  "clap",
+ "duckdb",
  "flate2",
  "futures-util",
  "gethostname",

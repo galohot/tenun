@@ -1,0 +1,561 @@
+{
+ "about": "Real public files for the test set (v5 build 00a). Fetch: python3 scripts/corpus-fetch.py <folder>. Run: cargo run --release --example corpus -- <folder>. `expect` holds what a person checked by hand in the file (header row as numbered in the sheet, rows below it, the first column names, column types); `error` means it must be refused in words. Files marked `updated_by_publisher` change over time: the fetch reports them as changed, and they are checked with `min_rows`.",
+ "files": [
+  {
+   "file": "frgouv-01-statistiques-action-sociale.csv",
+   "url": "https://static.data.gouv.fr/resources/statistiques-action-sociale/20160809-164505/Recapitulatif_annuel_aides.csv",
+   "publisher": "Communauté d'Agglomération Bar-le-Duc Sud Meuse",
+   "licence": "fr-lo",
+   "title": "Statistiques Action Sociale",
+   "sha256": "7f1780d4154e3ca685799402c1c58b4b87b04e081768a249c8324c4b590f3b3d",
+   "expect": {
+    "rows": 3,
+    "columns": [
+     "Date",
+     "RSA"
+    ],
+    "types": {
+     "Montant Total": "number"
+    }
+   }
+  },
+  {
+   "file": "frgouv-01-statistiques-tat-civil-2011.xlsx",
+   "url": "https://static.data.gouv.fr/resources/statistiques-etat-civil-2011/20150728-181638/Statistiques_etat_civil_2011.xlsx",
+   "publisher": "Coulommiers",
+   "licence": "notspecified",
+   "title": "Statistiques état civil 2011",
+   "sha256": "791fc9dd18127c6569652d2ee0879ddebfdd0697cae92be79be193bbbeeeb8e2",
+   "expect": {
+    "table": "Feuil1",
+    "header_row": 8,
+    "rows": 13
+   }
+  },
+  {
+   "file": "frgouv-02-l-acc-s-la-nationalit-fran-aise-statisti.xlsx",
+   "url": "https://static.data.gouv.fr/resources/lacces-a-la-nationalite-francaise-3/20191022-160842/acquisitions-de-la-nationalite-francaise.xlsx",
+   "publisher": "Ministère de l'intérieur",
+   "licence": "notspecified",
+   "title": "L'accès à la nationalité française (statistiques - juillet 2017)",
+   "sha256": "5bd4b29b48cc88f80c613e17492694f19ce4fb6d705c8abe512727ad6cbe0ef3",
+   "expect": {
+    "table": "fiche",
+    "header_row": 4,
+    "rows": 62,
+    "columns": [
+     "column_1",
+     "1998",
+     "1999"
+    ]
+   }
+  },
+  {
+   "file": "frgouv-02-statistiques-de-ponctualit-des-transport.csv",
+   "url": "http://data.cquest.org/aqst_ponctualite_transports/avion_par_compagnie.csv",
+   "publisher": "",
+   "licence": "lov2",
+   "title": "Statistiques de ponctualité des transports",
+   "sha256": "13f0217751c36e886f78dc225709d8a94a7a9ce8408d6944ecc5de81a57523c9"
+  },
+  {
+   "file": "frgouv-03-ecodef-statistiques-n-256.xlsx",
+   "url": "https://static.data.gouv.fr/resources/ecodef-statistiques-ndeg-256/20241220-101922/donnes-ecodef-256-corrige.xlsx",
+   "publisher": "S2E - Statistique publique de la défense",
+   "licence": "notspecified",
+   "title": "EcoDef Statistiques n° 256",
+   "sha256": "9312ef8f35f6cfb8421e0c3ce343b607537da630d9ce452be5fb699a3c0fd77b"
+  },
+  {
+   "file": "frgouv-03-statistiques-de-fr-quentation-du-site-de.csv",
+   "url": "https://data.rennesmetropole.fr/api/explore/v2.1/catalog/datasets/statistiques-de-frequentation-du-site-de-rennes-ville-et-metropole/exports/csv?use_labels=true",
+   "publisher": "Rennes Métropole en accès libre",
+   "licence": "odc-odbl",
+   "title": "Statistiques de fréquentation du site de Rennes Ville et Métropole",
+   "sha256": "428403ace6c15847e0b340e8f816e121a5a7f943420e58b7d1b84f75a7988b45"
+  },
+  {
+   "file": "frgouv-04-bases-statistiques-communale-d-partement.csv",
+   "url": "https://static.data.gouv.fr/resources/bases-statistiques-communale-departementale-et-regionale-de-la-delinquance-enregistree-par-la-police-et-la-gendarmerie-nationales/20260709-120055/donnee-reg-data.gouv-2025-geographie2026-produit-le2026-06-25.csv",
+   "publisher": "Ministère de l'intérieur",
+   "licence": "lov2",
+   "title": "Bases statistiques communale, départementale et régionale de la délinquance enregistrée par la police et la gendarmerie nationales ",
+   "sha256": "c4eb0da46ca1e1a955ea8a8bcd1fb03e7ad956fdb0105508f58106db48150328",
+   "expect": {
+    "rows": 3240,
+    "columns": [
+     "Code_region",
+     "annee"
+    ]
+   }
+  },
+  {
+   "file": "frgouv-05-statistiques-nationales-du-commerce-ext.csv",
+   "url": "https://data.economie.gouv.fr/api/v2/catalog/datasets/statistiques-nationales-du-commerce-exterieur/attachments/libelle_a129_csv",
+   "publisher": "Ministères économiques et financiers",
+   "licence": "lov2",
+   "title": "Statistiques nationales du commerce extérieur",
+   "sha256": "af07a8f7384356d62bbd648805e9539979cbc1f9ea7aae2f0a28679f3303a908",
+   "expect": {
+    "rows": 76,
+    "columns": [
+     "column0",
+     "column1"
+    ]
+   }
+  },
+  {
+   "file": "frgouv-06-statistiques-de-consultation-des-support.csv",
+   "url": "https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/dgddi-statistiques-de-consultation-des-supports-numeriques-de-la-douane/exports/csv?use_labels=true",
+   "publisher": "Ministères économiques et financiers",
+   "licence": "lov2",
+   "title": "Statistiques de consultation des supports numériques de la douane",
+   "sha256": "3e8e17b1d068f42a8bc7778670c5b0c2f58af390564d28f3654954827c520179"
+  },
+  {
+   "file": "frgouv-07-statistiques-du-r-seau-des-m-diath-ques.csv",
+   "url": "https://data.cannes.fr/api/explore/v2.1/catalog/datasets/statistiques-mediatheques/exports/csv?use_labels=true",
+   "publisher": "Mairie de Cannes",
+   "licence": "lov2",
+   "title": "Statistiques du réseau des médiathèques",
+   "sha256": "b3eaa465c677b1394c35b3b9488d248359e3c0ee97b94a9276f466083d9034bd"
+  },
+  {
+   "file": "frgouv-08-statistiques-d-utilisation-du-wifi-publi.csv",
+   "url": "https://data.nantesmetropole.fr/api/explore/v2.1/catalog/datasets/244400404_statistiques-utilisation-wifi-public-exterieur-nantes-metropole/exports/csv?use_labels=true",
+   "publisher": "Nantes Métropole",
+   "licence": "lov2",
+   "title": "Statistiques d'utilisation du wifi public extérieur de Nantes Métropole",
+   "sha256": "32bf9b91e0f0cd9a63538b6f61a37f9675544ce142d28d878e72a6f3fe5adb87",
+   "expect": {
+    "columns": [
+     "Date",
+     "Site"
+    ],
+    "min_rows": 19100
+   },
+   "updated_by_publisher": true
+  },
+  {
+   "file": "govuk-01-benefit-statistics.xlsx",
+   "url": "https://ws-data.nisra.gov.uk/public/api.restful/PxStat.Data.Cube_API.ReadDataset/BSHSCT/XLSX/2007/en",
+   "publisher": "OpenDataNI",
+   "licence": "UK Open Government Licence (OGL)",
+   "title": "Benefit Statistics",
+   "sha256": "387766337f7c62afbfa2f178a130d7c0e33cd407e6316bc11307082f00f2a91e"
+  },
+  {
+   "file": "govuk-01-insolvency-statistics.csv",
+   "url": "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/1174465/Long-Run_Series_in_CSV_Format_-_Company_Insolvency_Statistics_April_to_June_2023.csv",
+   "publisher": "Department for Business, Energy and Industrial Strategy",
+   "licence": "UK Open Government Licence (OGL)",
+   "title": "Insolvency Statistics",
+   "sha256": "c77086a476d7c3a2f9471283da22f4c1f47693f677602ac7b8b559e999589b69"
+  },
+  {
+   "file": "govuk-01-legal-aid-statistics.ods",
+   "url": "http://www.gov.uk/government/uploads/system/uploads/attachment_data/file/667485/Legal-aid-statistics-in-England-and-Wales-more-detailed-data-Jul-_to-Sep-2017.ods",
+   "publisher": "Ministry of Justice",
+   "licence": "UK Open Government Licence (OGL)",
+   "title": "Legal Aid Statistics",
+   "sha256": "cb0976004e0573e0902e8220ba816ad31eb558dc58f07f858a165dc39a498748"
+  },
+  {
+   "file": "govuk-01-offender-management-statistics.xls",
+   "url": "http://www.gov.uk/government/uploads/system/uploads/attachment_data/file/541530/adjudication-q1-2016.xlsx",
+   "publisher": "Ministry of Justice",
+   "licence": "UK Open Government Licence (OGL)",
+   "title": "Offender Management Statistics",
+   "sha256": "5673d6917eec0dd80ee6986f836d5fcd4617f7ccffc84ca275ac77f805791fbf",
+   "expect": {}
+  },
+  {
+   "file": "govuk-02-criminal-justice-statistics.xls",
+   "url": "http://www.gov.uk/government/uploads/system/uploads/attachment_data/file/614416/offending-history-tables-dec-2016.xls",
+   "publisher": "Ministry of Justice",
+   "licence": "UK Open Government Licence (OGL)",
+   "title": "Criminal Justice Statistics",
+   "sha256": "e1b780de941a6bd55fb0125e2273a11debba932a0b629d4f29dc741b68dd5853"
+  },
+  {
+   "file": "govuk-02-forestry-statistics-2019-social.xlsx",
+   "url": "https://s3-eu-west-1.amazonaws.com/data.defra.gov.uk/Forestry/FC_OpenData/Stats/Ch6_Social_FS2019.xlsx",
+   "publisher": "Forestry Commission",
+   "licence": "",
+   "title": "Forestry Statistics 2019: Social",
+   "sha256": "49038d510ded3ca76e28e2638977796e56ba17e0b4ba96e606f01eac5ce264c4"
+  },
+  {
+   "file": "govuk-02-slaughter-statistics.csv",
+   "url": "https://s3.eu-west-1.amazonaws.com/data.defra.gov.uk/statistics_2015/food/slaughter_ann_17sep15.csv",
+   "publisher": "Department for Environment, Food and Rural Affairs",
+   "licence": "UK Open Government Licence (OGL)",
+   "title": "Slaughter Statistics",
+   "sha256": "9763847441e2cbe25b38bd6bffadda36a31b36ff0ea90b77a6a46f597796b01e",
+   "expect": {
+    "rows": 45,
+    "columns": [
+     "UK annual numbers of livestock slaughtered"
+    ]
+   }
+  },
+  {
+   "file": "govuk-03-forestry-statistics-2015-trade.xls",
+   "url": "http://data.defra.gov.uk/Forestry/FC_OpenData/Stats/Ch3_Trade_FS2015.xls",
+   "publisher": "Forestry Commission",
+   "licence": "",
+   "title": "Forestry Statistics 2015: Trade",
+   "sha256": "6bd07f0bcc9f97cf577f46ef9e1b74cc626f82bfeea9f496de89eb010dd2757a"
+  },
+  {
+   "file": "govuk-03-forestry-statistics-2019-trade.xlsx",
+   "url": "https://s3-eu-west-1.amazonaws.com/data.defra.gov.uk/Forestry/FC_OpenData/Stats/Ch3_Trade_FS2019.xlsx",
+   "publisher": "Forestry Commission",
+   "licence": "",
+   "title": "Forestry Statistics 2019: Trade",
+   "sha256": "b909256b29b8ef3cf21844b3cc5d11a45fc7f49bfa46a567302989c0c19beff7"
+  },
+  {
+   "file": "govuk-04-civil-justice-statistics.xls",
+   "url": "http://www.gov.uk/government/uploads/system/uploads/attachment_data/file/665074/civil-justice-stats-main-tables-july-sept-2017.xlsx",
+   "publisher": "Ministry of Justice",
+   "licence": "UK Open Government Licence (OGL)",
+   "title": "Civil Justice Statistics",
+   "sha256": "b33cdbfae98ef6679bddd8b5c2fcc8fd56f73c63d28c09efc8122360687871f2"
+  },
+  {
+   "file": "govuk-05-criminal-court-statistics.xls",
+   "url": "http://www.gov.uk/government/uploads/system/uploads/attachment_data/file/512102/main-tables.xlsx",
+   "publisher": "Ministry of Justice",
+   "licence": "UK Open Government Licence (OGL)",
+   "title": "Criminal Court Statistics",
+   "sha256": "4ee9da632bc1cfddecbc23bb3b8a103e4eeac527af96d1ad78059b9294e08b85"
+  },
+  {
+   "file": "govuk-06-family-court-statistics.xls",
+   "url": "http://www.gov.uk/government/uploads/system/uploads/attachment_data/file/486170/tables-family-court-statistics-quarter-3-2015.xls",
+   "publisher": "Ministry of Justice",
+   "licence": "UK Open Government Licence (OGL)",
+   "title": "Family Court Statistics",
+   "sha256": "ad3d62d7ae351758bac6c729406a76b9a2a6d983b559dda5f834797d0c35189f"
+  },
+  {
+   "file": "govuk-07-coroners-statistics.xls",
+   "url": "http://www.gov.uk/government/uploads/system/uploads/attachment_data/file/427677/coroners-statistical-tool-2014.xls",
+   "publisher": "Ministry of Justice",
+   "licence": "UK Open Government Licence (OGL)",
+   "title": "Coroners Statistics",
+   "sha256": "7326f4b424ceba5750cf9c84e987ebbbbf09e799ebf44ad315af5929d28706c5",
+   "expect": {
+    "error": "locked with a password"
+   }
+  },
+  {
+   "file": "govuk-08-forestry-statistics-2018-trade.xls",
+   "url": "https://s3-eu-west-1.amazonaws.com/data.defra.gov.uk/Forestry/FC_OpenData/Stats/Ch3_Trade_FS2018.xls",
+   "publisher": "Forestry Commission",
+   "licence": "",
+   "title": "Forestry Statistics 2018: Trade",
+   "sha256": "b572d12945ce6c8ad841d94296cc680a8398018f7bccf4f9c3dd7a00d149c2fc"
+  },
+  {
+   "file": "govuk-09-forestry-statistics-2015-recreation.xls",
+   "url": "http://data.defra.gov.uk/Forestry/FC_OpenData/Stats/Ch6_Recreation_FS2015.xls",
+   "publisher": "Forestry Commission",
+   "licence": "",
+   "title": "Forestry Statistics 2015: Recreation",
+   "sha256": "68ecb980804ce6e4945d06371b51dd0fd0d2f26b100dc905810425c0559f30f6"
+  },
+  {
+   "file": "hdx-01-education-in-danger-data.xlsx",
+   "url": "https://data.humdata.org/dataset/c7db52ae-13c2-4bf5-ae71-a9243a68194e/resource/2c826b35-0ee5-45f4-bddb-646cb6a02ab8/download/2020-2023-arson-attacks-on-schools-in-the-sahel-incident-data.xlsx",
+   "publisher": "Insecurity Insight",
+   "licence": "Creative Commons Attribution Share-Alike (CC BY-SA)",
+   "title": "Education in Danger Data",
+   "sha256": "d6497775d222b4194165ca1e1c3637d2efe95da980b249c53ebc48f7e1225661"
+  },
+  {
+   "file": "hdx-01-indonesia-subnational-demographic-and-he.csv",
+   "url": "https://data.humdata.org/dataset/5287cf2e-4a89-48dc-ae9e-7c095947fc31/resource/2dce9054-e9ed-412e-b0c4-0a4d807dec77/download/iycf_subnational_idn.csv",
+   "publisher": "The DHS Program",
+   "licence": "Other",
+   "title": "Indonesia - Subnational Demographic and Health Data",
+   "sha256": "c82348edb522443b4d6dc1b7423e3bb9e73ea5e3cbb2e4d0d1b2993aff72634f"
+  },
+  {
+   "file": "hdx-02-hdx-hapi-data-for-indonesia.csv",
+   "url": "https://data.humdata.org/dataset/5d5bd550-a1b6-4aea-9fbb-8450a5a666c3/resource/a2965781-ffe0-405c-8d96-6227a441f5b6/download/hdx_hapi_refugees_idn.csv",
+   "publisher": "HDX Humanitarian API Data",
+   "licence": "Other",
+   "title": "HDX HAPI Data for Indonesia",
+   "sha256": "b5f8a909ca25367757c38877d97f611c24c86ad2b01f572d6653997f849adce0",
+   "expect": {
+    "min_rows": 19474
+   },
+   "updated_by_publisher": true
+  },
+  {
+   "file": "hdx-02-health-facilities-in-sub-saharan-africa.xlsx",
+   "url": "https://data.humdata.org/dataset/eb1ba830-9464-43c8-9370-28cee0c99f5d/resource/758d5c17-88f4-42b2-9d4b-4bfe32d4acf7/download/sub-saharan_health_facilities.xlsx",
+   "publisher": "HDX",
+   "licence": "Creative Commons Attribution International (CC BY)",
+   "title": "Health Facilities in Sub-Saharan Africa",
+   "sha256": "f249bf37480d367f621268b025a8792477db431c2443212835ffd7dcd068a51f"
+  },
+  {
+   "file": "hdx-03-afghanistan-health-facilities.xlsx",
+   "url": "https://data.humdata.org/dataset/64d3eb89-e0e5-4f93-84f5-cd3deefd6770/resource/39dfb14d-b4c2-4c6d-9e9c-26265ed159ba/download/afg-hfs-functionality-status-20_09_2021.xlsx",
+   "publisher": "OCHA Afghanistan",
+   "licence": "Creative Commons Attribution International (CC BY)",
+   "title": "Afghanistan - Health Facilities",
+   "sha256": "52692aec70a6d309313535805e25e40d799a2582971cb7b465786fcee3315c82",
+   "expect": {
+    "header_row": 2,
+    "rows": 34,
+    "columns": [
+     "SN",
+     "Regions",
+     "Province"
+    ]
+   }
+  },
+  {
+   "file": "hdx-03-indonesia-risk-assessment-indicators.csv",
+   "url": "https://hot.storage.heigit.org/heigit-hdx-public/risk_assessment_inputs/idn/IDN_ADM2_access.csv",
+   "publisher": "HeiGIT (Heidelberg Institute for Geoinformation Technology)",
+   "licence": "Creative Commons Attribution Share-Alike (CC BY-SA)",
+   "title": "Indonesia - Risk Assessment Indicators",
+   "sha256": "d22f67b5f19236f4eefd93d07a0caaa0c76545f454a39f4ee92adcba7e5809fd"
+  },
+  {
+   "file": "hdx-04-indonesia-earthquake-on-sep-11-2026.xlsx",
+   "url": "https://data.humdata.org/dataset/51a2d6a6-82d9-4b2d-a175-16ffd1a8f300/resource/2bf80046-af14-4b5c-bb8e-c68e65b1cae4/download/idn_wfpadam_earthquake_20260911.xlsx",
+   "publisher": "WFP Automated Disaster Analysis & Mapping",
+   "licence": "Creative Commons Attribution Share-Alike (CC BY-SA)",
+   "title": "Indonesia - Earthquake on Sep 11 2026",
+   "sha256": "9466dd541acfab328d1ef2f4b7d42f274167a3b25fd5986af19674fd2199169f",
+   "expect": {
+    "header_row": 17,
+    "rows": 4,
+    "columns": [
+     "ADM0_NAME",
+     "ADM1_NAME",
+     "ADM2_NAME"
+    ]
+   }
+  },
+  {
+   "file": "hdx-04-indonesia-key-indicators.csv",
+   "url": "https://data.humdata.org/dataset/2b0c2524-aa29-4e3e-9c77-60313fef9a4d/resource/a8864013-771f-484f-b7e7-84afe11540a8/download/idn_adb_key_indicators.csv",
+   "publisher": "Asian Development Bank",
+   "licence": "Creative Commons Attribution International (CC BY)",
+   "title": "Indonesia - Key Indicators",
+   "sha256": "1432a72ba397cfa95f453a3abe344a2bb1264a962d4426597a4a0e068f6b5677"
+  },
+  {
+   "file": "hdx-05-indonesia-earthquake-on-aug-17-2026.xlsx",
+   "url": "https://data.humdata.org/dataset/f30e2b4e-659c-4283-8b29-218a85831c85/resource/270412fe-ee74-40fe-86ba-07ab3577b74f/download/idn_wfpadam_earthquake_20260817.xlsx",
+   "publisher": "WFP Automated Disaster Analysis & Mapping",
+   "licence": "Creative Commons Attribution Share-Alike (CC BY-SA)",
+   "title": "Indonesia - Earthquake on Aug 17 2026",
+   "sha256": "fa3f911d62fab83c04574a6c72395328d082656770420c072cdb4ac15a5a8fe1"
+  },
+  {
+   "file": "hdx-05-indonesia-education.csv",
+   "url": "https://data.humdata.org/dataset/1c976ebc-2f71-48f8-9fea-b2f137a862e0/resource/eaccfde8-b5de-45fa-8ac6-76c1b93d9dcc/download/education_idn.csv",
+   "publisher": "World Bank Group",
+   "licence": "Creative Commons Attribution International (CC BY)",
+   "title": "Indonesia - Education",
+   "sha256": "ae333adb2c3cc5507a6e7ac607637b37d822509f8da8616145934844bd4678af",
+   "expect": {
+    "columns": [
+     "Country Name",
+     "Country ISO3",
+     "Year"
+    ],
+    "types": {
+     "Value": "number"
+    },
+    "min_rows": 17377
+   },
+   "updated_by_publisher": true
+  },
+  {
+   "file": "hdx-06-indonesia-health-indicators.csv",
+   "url": "https://data.humdata.org/dataset/5b770544-f592-42bf-bb31-ca8a66919c36/resource/c48b5aa9-08b5-436d-849c-86cffee2617b/download/health_systems_indicators_idn.csv",
+   "publisher": "World Health Organization",
+   "licence": "Other",
+   "title": "Indonesia - Health Indicators",
+   "sha256": "a37bf90e450aa95782b56c1e21fadece810f0c56d7a445f55540d2f543d83059"
+  },
+  {
+   "file": "hdx-06-survey-on-gender-equality-at-home.xlsx",
+   "url": "https://data.humdata.org/dataset/504fce69-12c2-4c56-ada2-3173c663107a/resource/7522a95b-b417-492a-ab51-b1eb53d08b64/download/sogeh_aggcountrydata_2021.xlsx",
+   "publisher": "AI for Good at Meta",
+   "licence": "Public Domain / No restrictions (CC0)",
+   "title": "Survey on Gender Equality At Home",
+   "sha256": "42308afa58bb88ca34c928158fb31ea4325dd994b95d983190ead4235faac3e0"
+  },
+  {
+   "file": "hdx-07-indonesia-national-demographic-and-healt.csv",
+   "url": "https://data.humdata.org/dataset/82079023-fa47-431f-b78b-37a15de00241/resource/c778107b-6aac-4b5b-bcd1-9ea9186e06ac/download/mics-indicators_national_idn.csv",
+   "publisher": "The DHS Program",
+   "licence": "Other",
+   "title": "Indonesia - National Demographic and Health Data",
+   "sha256": "394ce28e19f709301a37ae9ed97a8c3401cc055266625538cd645ffb30136341"
+  },
+  {
+   "file": "hdx-08-covid-19-high-frequency-indicators.xlsx",
+   "url": "https://data.humdata.org/dataset/0d94e0ba-2fe1-403f-a25a-9efb03b50594/resource/f7389016-00fb-48d6-b4be-ab0db2c17b77/download/covid19dashboarddatalatest.xlsx",
+   "publisher": "World Bank Group",
+   "licence": "Creative Commons Attribution International (CC BY)",
+   "title": "COVID-19 High-Frequency indicators",
+   "sha256": "3a9987e76bcc7bc64123789565b9cf193d5511576f5fe05bd6284e42306a8168",
+   "expect": {
+    "table": "1. Countries Included",
+    "header_row": 6,
+    "rows": 56,
+    "columns": [
+     "Total # of countries",
+     "Region",
+     "List of Code"
+    ]
+   }
+  },
+  {
+   "file": "hdx-08-indonesia-accessibility-indicators.csv",
+   "url": "https://hot.storage.heigit.org/heigit-hdx-public/access/idn/IDN_education_access_wide.csv",
+   "publisher": "HeiGIT (Heidelberg Institute for Geoinformation Technology)",
+   "licence": "Creative Commons Attribution Share-Alike (CC BY-SA)",
+   "title": "Indonesia - Accessibility Indicators",
+   "sha256": "5fdafe06f410bf68a2280444d302a1f327f95d5f1035f1564011f3f5c48a1b68"
+  },
+  {
+   "file": "hdx-09-indonesia-internal-displacements-updates.csv",
+   "url": "https://data.humdata.org/dataset/95dcda1d-eebd-4da2-9552-dcb5100161ee/resource/fcbbb479-9cb8-4547-ba6a-63c484e86992/download/idn_idmc_idu_events.csv",
+   "publisher": "Internal Displacement Monitoring Centre (IDMC)",
+   "licence": "Creative Commons Attribution for Intergovernmental Organisations (CC BY-IGO)",
+   "title": "Indonesia - Internal Displacements Updates (IDU)",
+   "sha256": "ac5258a656a2465b7cd45ff797c00deaabc9e344e2ca9d815ae6eb052c71db8d"
+  },
+  {
+   "file": "hdx-10-indonesia-gender.csv",
+   "url": "https://data.humdata.org/dataset/233932a2-d4e1-40af-b01b-f9e4b160d846/resource/d6afef00-a216-4135-b9bf-68346ba8c88b/download/gender_idn.csv",
+   "publisher": "World Bank Group",
+   "licence": "Creative Commons Attribution International (CC BY)",
+   "title": "Indonesia - Gender",
+   "sha256": "1708326cca96bf761447e6994f54ed07db1c4ae91aedf31edd390cce5b6e6b02"
+  },
+  {
+   "file": "hdx-11-indonesia-subnational-administrative-bou.xlsx",
+   "url": "https://data.humdata.org/dataset/84a1d98a-790b-4d66-9d14-bbfa48500802/resource/ba60b4d3-fd55-4fcf-b1bd-adf7e4bdba90/download/idn_admin_boundaries.xlsx",
+   "publisher": "OCHA Field Information Services Section (FISS)",
+   "licence": "Creative Commons Attribution for Intergovernmental Organisations (CC BY-IGO)",
+   "title": "Indonesia - Subnational Administrative Boundaries",
+   "sha256": "feeab40d43e3c2541e6e484ecd6f003a28d712d07a0bc720d421301258934ad9",
+   "expect": {
+    "table": "idn_admin0",
+    "rows": 1,
+    "columns": [
+     "iso2",
+     "iso3",
+     "adm0_name"
+    ]
+   }
+  },
+  {
+   "file": "hdx-12-conflict-related-crsv-or-political-relat.xlsx",
+   "url": "https://data.humdata.org/dataset/4fd39213-b871-40cd-bb6c-32cf900a1158/resource/510cbf07-afef-4765-b91d-00f830c321f1/download/2020-2026-political-related-sexual-violence-incident-data.xlsx",
+   "publisher": "Insecurity Insight",
+   "licence": "Creative Commons Attribution International (CC BY)",
+   "title": "Conflict-Related (CRSV) or Political-Related Sexual Violence Data",
+   "sha256": "38a84af97830f1bb2d207f6876cdce226c1067ac4fe70bc3675d54e48e7c7160"
+  },
+  {
+   "file": "owid-01-life-expectancy.csv",
+   "url": "https://ourworldindata.org/grapher/life-expectancy.csv?v=1&csvType=full&useColumnShortNames=false",
+   "publisher": "Our World in Data",
+   "licence": "CC BY 4.0",
+   "title": "Life expectancy",
+   "sha256": "c304603fb8a7da263619a8ae43b7097f35b648c458855e23f1c4ef8f2ae75c01"
+  },
+  {
+   "file": "owid-02-co2-data.csv",
+   "url": "https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv",
+   "publisher": "Our World in Data",
+   "licence": "CC BY 4.0",
+   "title": "CO2 and greenhouse gas emissions",
+   "sha256": "7f78e2b218ce4bb8c538bbec04fdc9a7982e8d40bff972e650df603899edd5f6",
+   "expect": {
+    "columns": [
+     "country",
+     "year"
+    ],
+    "min_rows": 50411
+   },
+   "updated_by_publisher": true
+  },
+  {
+   "file": "owid-03-extreme-poverty.csv",
+   "url": "https://ourworldindata.org/grapher/share-of-population-in-extreme-poverty.csv?v=1&csvType=full&useColumnShortNames=false",
+   "publisher": "Our World in Data",
+   "licence": "CC BY 4.0",
+   "title": "Share of population in extreme poverty",
+   "sha256": "a737e26efb6d0933cccc756427664439e7c071718d3e2467c5a502046d36ecdb",
+   "expect": {
+    "columns": [
+     "Entity",
+     "Code",
+     "Year"
+    ],
+    "types": {
+     "Year": "number",
+     "Population": "number"
+    },
+    "min_rows": 59372
+   },
+   "updated_by_publisher": true
+  },
+  {
+   "file": "worldbank-01-gdp.csv",
+   "url": "https://api.worldbank.org/v2/en/indicator/NY.GDP.MKTP.CD?downloadformat=csv",
+   "publisher": "World Bank",
+   "licence": "CC BY 4.0",
+   "title": "GDP (current US$)",
+   "sha256": "34a2a6cc0e286469a0c3635693499981abe6efaa8bf964711201a3be3f138ad0",
+   "zip": "API_NY.GDP.MKTP.CD",
+   "expect": {
+    "columns": [
+     "Country Name",
+     "Country Code",
+     "Indicator Name",
+     "Indicator Code",
+     "1960"
+    ],
+    "types": {
+     "1960": "number"
+    },
+    "min_rows": 266
+   },
+   "updated_by_publisher": true
+  },
+  {
+   "file": "worldbank-02-population.xls",
+   "url": "https://api.worldbank.org/v2/en/indicator/SP.POP.TOTL?downloadformat=excel",
+   "publisher": "World Bank",
+   "licence": "CC BY 4.0",
+   "title": "Population, total",
+   "sha256": "201aac94e4de7d913b621047922bc66f6689f618ab3f2fd55232aaafd902d958",
+   "expect": {
+    "table": "Data",
+    "header_row": 4,
+    "columns": [
+     "Country Name",
+     "Country Code"
+    ],
+    "min_rows": 266
+   },
+   "updated_by_publisher": true
+  }
+ ]
+}

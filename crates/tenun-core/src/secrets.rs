@@ -9,6 +9,7 @@ use crate::workspace::{DbConn, KeyPlace};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+#[derive(Clone)]
 pub struct Secrets {
     path: PathBuf,
 }

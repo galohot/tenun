@@ -545,6 +545,24 @@ impl Engine {
         })
     }
 
+    /// An engine for another thread: the same workspace, data and settings, with its own connection
+    /// to the same database. Work that only reads (the offline results of an export) runs on forks
+    /// in parallel; one connection answers one query at a time.
+    pub fn fork(&self) -> anyhow::Result<Engine> {
+        let conn = self.db.lock().unwrap().try_clone()?;
+        Ok(Engine {
+            db: Arc::new(Mutex::new(conn)),
+            state: self.state.clone(),
+            secrets: self.secrets.clone(),
+            today: Mutex::new(*self.today.lock().unwrap()),
+            pending: self.pending.clone(),
+            listener: self.listener.clone(),
+            live_rows: self.live_rows.clone(),
+            check_delay: self.check_delay.clone(),
+            grain_cache: Mutex::new(self.grain_cache.lock().unwrap().clone()),
+        })
+    }
+
     pub fn duckdb_version(&self) -> String {
         self.db
             .lock()
@@ -3588,6 +3606,11 @@ fn rebase(kind: &mut SourceKind, old: Option<&Path>, new: Option<&Path>) {
     *p = store_path(&abs, new);
 }
 
+/// Where UTF-8 copies of CSV files in other encodings live: `converted/` beside the secrets file.
+fn copies_dir(secrets: &Secrets) -> PathBuf {
+    secrets.path().with_file_name("converted")
+}
+
 /// `<workspace name> data/`, next to the workspace file. Pasted tables and downloaded links go here.
 fn data_dir(workspace_file: &Path) -> PathBuf {
     let stem = workspace_file
@@ -3927,20 +3950,27 @@ fn load_source(
             if !abs.is_file() {
                 anyhow::bail!("{} is missing", abs.display());
             }
-            let reader = if matches!(src.kind, SourceKind::Csv { .. }) {
-                "read_csv_auto"
-            } else {
-                "read_parquet"
-            };
             let stem = abs
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "data".into());
-            let select = format!("SELECT * FROM {reader}({})", lit(&abs.to_string_lossy()));
             db.execute_batch(&format!("CREATE SCHEMA IF NOT EXISTS {qs};"))?;
+            let (select, notes) = if matches!(src.kind, SourceKind::Csv { .. }) {
+                let plan = crate::csvread::plan(db, &abs, &copies_dir(secrets))?;
+                hold_csv(db, &qs, &stem, &abs, plan)?
+            } else {
+                let parquet = format!(
+                    "SELECT * FROM read_parquet({})",
+                    lit(&abs.to_string_lossy())
+                );
+                (parquet, Vec::new())
+            };
             let outcome = make_table(db, &schema, &stem, &select, setups)?;
             let mut tables = catalog_local(db, src, &schema)?;
             stamp_table_outcome(&mut tables, &stem, outcome);
+            if let Some(t) = tables.iter_mut().find(|t| t.name == stem) {
+                t.notes.splice(0..0, notes);
+            }
             Ok(tables)
         }
         SourceKind::Url { .. } => {
@@ -3948,23 +3978,22 @@ fn load_source(
                 anyhow::bail!("Nothing has been downloaded from this link yet.");
             }
             let name = crate::paste::file_stem(&src.name);
-            let select = format!(
-                "SELECT * FROM read_csv_auto({}, null_padding = true)",
-                lit(&cache.to_string_lossy())
-            );
+            let plan = crate::csvread::plan(db, cache, &copies_dir(secrets))?;
             db.execute_batch(&format!("CREATE SCHEMA IF NOT EXISTS {qs};"))?;
+            let (select, notes) = hold_csv(db, &qs, &name, cache, plan)?;
             let outcome = make_table(db, &schema, &name, &select, setups)?;
             let mut tables = catalog_local(db, src, &schema)?;
             stamp_table_outcome(&mut tables, &name, outcome);
             // What the fetch had to say: more pages than were read, columns left out.
             if let Some(t) = tables.iter_mut().find(|t| t.name == name) {
+                t.notes.extend(notes);
                 t.notes.extend(read_notes(cache));
             }
             Ok(tables)
         }
         SourceKind::Folder { path, pattern } => {
             let abs = resolve_path(path, base);
-            load_folder(db, src, &abs, pattern, setups)
+            load_folder(db, src, &abs, pattern, setups, &copies_dir(secrets))
         }
         SourceKind::Duckdb { path } => {
             let abs = resolve_path(path, base);
@@ -4109,6 +4138,35 @@ fn make_table(
     }
 }
 
+/// A CSV file up to this size is copied into memory when it loads; a bigger one is read from the
+/// file on every query (V5-D34).
+const CSV_IN_MEMORY: u64 = 1 << 30;
+
+/// Copies a CSV file into a table of the schema `qs` (named `__file_<name>`, kept out of the
+/// catalog), and returns the `SELECT` that reads it, with the plan's notes. Reading a file on every
+/// query took 100 ms at 100 thousand rows, and an export runs hundreds of queries. A file over 1 GB
+/// is read from the file, and a note says so.
+fn hold_csv(
+    db: &Connection,
+    qs: &str,
+    name: &str,
+    file: &Path,
+    plan: crate::csvread::CsvPlan,
+) -> anyhow::Result<(String, Vec<String>)> {
+    let mut notes = plan.notes;
+    let size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+    if size > CSV_IN_MEMORY {
+        notes.push("Read from the file on every query: the file is over 1 GB".to_string());
+        return Ok((plan.select, notes));
+    }
+    let held = ident(&format!("__file_{name}"));
+    db.execute_batch(&format!(
+        "CREATE OR REPLACE TABLE {qs}.{held} AS {};",
+        plan.select
+    ))?;
+    Ok((format!("SELECT * FROM {qs}.{held}"), notes))
+}
+
 fn stamp_table_outcome(tables: &mut [Table], name: &str, outcome: Option<ViewOutcome>) {
     if let Some(o) = outcome
         && let Some(t) = tables.iter_mut().find(|t| t.name == name)
@@ -4133,6 +4191,7 @@ fn load_folder(
     dir: &Path,
     pattern: &str,
     setups: &BTreeMap<String, TableSetup>,
+    copies: &Path,
 ) -> anyhow::Result<Vec<Table>> {
     if !dir.is_dir() {
         anyhow::bail!("{} is missing", dir.display());
@@ -4188,35 +4247,41 @@ fn load_folder(
             .to_string_lossy()
             .into_owned();
         let rel = format!("__raw_#{}", parts.len());
-        let read: anyhow::Result<()> = if let Some((_, sheets)) =
-            books.iter().find(|(n, _)| *n == name)
-        {
-            let sheet = sheets
-                .iter()
-                .filter(|s| !s.columns.is_empty())
-                .find(|s| Some(&s.name) == target.as_ref())
-                .or_else(|| sheets.iter().find(|s| !s.columns.is_empty()));
-            match sheet {
-                Some(sh) => {
-                    for n in sh.notes.iter().take(3) {
+        let read: anyhow::Result<()> =
+            if let Some((_, sheets)) = books.iter().find(|(n, _)| *n == name) {
+                let sheet = sheets
+                    .iter()
+                    .filter(|s| !s.columns.is_empty())
+                    .find(|s| Some(&s.name) == target.as_ref())
+                    .or_else(|| sheets.iter().find(|s| !s.columns.is_empty()));
+                match sheet {
+                    Some(sh) => {
+                        for n in sh.notes.iter().take(3) {
+                            notes.push(format!("{name}: {n}"));
+                        }
+                        write_sheet(db, &schema, sh, &rel)
+                    }
+                    None => Err(anyhow::anyhow!("it has no data")),
+                }
+            } else if is_book(f) {
+                continue; // a workbook that could not be opened is already in the notes
+            } else if folder::is_readable(f) {
+                crate::csvread::plan(db, f, copies).and_then(|plan| {
+                    for n in plan.notes.iter().take(2) {
                         notes.push(format!("{name}: {n}"));
                     }
-                    write_sheet(db, &schema, sh, &rel)
-                }
-                None => Err(anyhow::anyhow!("it has no data")),
-            }
-        } else if is_book(f) {
-            continue; // a workbook that could not be opened is already in the notes
-        } else if folder::is_readable(f) {
-            db.execute_batch(&format!(
-                    "CREATE OR REPLACE VIEW {qs}.{} AS SELECT * FROM read_csv_auto({}, null_padding = true);",
-                    ident(&rel),
-                    lit(&f.to_string_lossy())
-                ))
-                .map_err(Into::into)
-        } else {
-            Err(anyhow::anyhow!("Tenun cannot read this kind of file"))
-        };
+                    // Each file is held in memory, so the stacked table does not read every file again
+                    // on every query.
+                    db.execute_batch(&format!(
+                        "CREATE OR REPLACE TABLE {qs}.{} AS {};",
+                        ident(&rel),
+                        plan.select
+                    ))
+                    .map_err(Into::into)
+                })
+            } else {
+                Err(anyhow::anyhow!("Tenun cannot read this kind of file"))
+            };
         match read {
             Ok(()) => {
                 let columns = columns_where(
@@ -4469,7 +4534,10 @@ fn catalog_local(db: &Connection, src: &Source, schema: &str) -> anyhow::Result<
     )?;
     let mut tables = Vec::new();
     for (s, name, mut columns) in group(rows) {
-        if name.starts_with("__stage_") || name.starts_with("__raw_") || name.starts_with("__calc_")
+        if name.starts_with("__stage_")
+            || name.starts_with("__raw_")
+            || name.starts_with("__calc_")
+            || name.starts_with("__file_")
         {
             continue;
         }

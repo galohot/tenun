@@ -460,8 +460,9 @@ fn a_pasted_table_becomes_a_csv_source_in_the_data_folder() {
         json!({ "measures": [{ "table": t, "column": "Amount", "agg": "sum" }] }),
     );
     assert_eq!(rows[0][0].as_f64(), Some(30.0));
-    // It is live: a change to the file shows on the next load.
+    // It is live: a change to the file shows on the next load (the watcher reloads it on save).
     std::fs::write(&file, "Region,Amount\nNorth,100\n").unwrap();
+    e.load(&id);
     let rows = ask(
         &e,
         json!({ "measures": [{ "table": t, "column": "Amount", "agg": "sum" }] }),

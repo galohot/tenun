@@ -6,7 +6,9 @@ that you can undo it. Your original files are never changed.
 ## Excel sheets with notes and headers
 
 Tenun looks for the header row. It is the first row with text in at least half of the columns,
-followed by a row of data.
+followed by a row of data. A row with a number in it is data, not a header (a year is fine). When
+no row names half of the columns, for example when the header is split over three rows, the header
+is the row with the most names.
 
 - **Title rows above the header** are skipped. A note says, for example, "Skipped 3 title rows".
 - **Footer rows** such as "Total" or "Jumlah" are dropped when they follow a blank row.
@@ -16,6 +18,23 @@ followed by a row of data.
 - **Header row override:** if the guess is wrong, open the **Data** view and type the right row number.
 
 The notes show under the table name in the **Data** view.
+
+A workbook that is locked with a password cannot be read. Save a copy without the password and add
+the copy. A file that is really a `.xlsx` but is named `.xls` opens as it is.
+
+## CSV files
+
+Tenun reads the whole file once, when it loads, to learn its delimiter, its quotes and the type of
+every column. A quoted value or a word far down in a big file does not break it.
+
+- **Title lines above the header** are skipped, as in Excel sheets. A World Bank download, for
+  example, starts with "Data Source" and "Last Updated Date". The note says how many lines.
+- **Text that is not UTF-8** is read as Windows text (Windows-1252). Excel on Windows saves CSV
+  files this way. Tenun reads a UTF-8 copy that it keeps in its own folder; your file is not
+  changed. UTF-16 files (Excel's "Unicode text") work too.
+- **A decimal comma** (`1.234,5`, `22838,52`) reads as a number when the delimiter is `;` or a tab,
+  as in Indonesian and European exports.
+- **A CSV without a header** keeps its first row. The columns are named `column0`, `column1` and so on.
 
 ## Rename, retype, hide and describe columns
 

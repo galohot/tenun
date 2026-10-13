@@ -227,6 +227,63 @@ pub struct Partial {
 }
 
 const MAX_CROSS_VALUES: usize = 30;
+
+/// The most forks of the engine that run at once. DuckDB also runs each query on several threads.
+const FORKS: usize = 4;
+
+/// Runs `job` for each item on forks of the engine, in parallel, and gives the answers in the order of
+/// the items. With fewer than two items, or when a fork cannot be made, it runs on `engine` itself.
+/// The first error stops the rest.
+pub fn in_parallel<J: Sync, R: Send>(
+    engine: &Engine,
+    items: &[J],
+    job: impl Fn(&Engine, &J) -> anyhow::Result<R> + Sync,
+) -> anyhow::Result<Vec<R>> {
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(FORKS)
+        .min(items.len());
+    let forks: Vec<Engine> = if threads >= 2 {
+        (0..threads).map_while(|_| engine.fork().ok()).collect()
+    } else {
+        Vec::new()
+    };
+    if forks.len() < 2 {
+        return items.iter().map(|i| job(engine, i)).collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let failed = std::sync::atomic::AtomicBool::new(false);
+    let mut answers: Vec<(usize, anyhow::Result<R>)> = std::thread::scope(|s| {
+        let workers: Vec<_> = forks
+            .iter()
+            .map(|e| {
+                let (next, failed, job) = (&next, &failed, &job);
+                s.spawn(move || {
+                    let mut out = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if i >= items.len() || failed.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
+                        let r = job(e, &items[i]);
+                        if r.is_err() {
+                            failed.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        out.push((i, r));
+                    }
+                    out
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().expect("a fork of the engine panicked"))
+            .collect()
+    });
+    answers.sort_by_key(|(i, _)| *i);
+    answers.into_iter().map(|(_, r)| r).collect()
+}
+
 /// A pivot reads up to this many rows, and its row and column totals up to the same.
 pub(crate) const PIVOT_LIMIT: u32 = 5000;
 /// A pivot draws at most this many columns. Its cells are read for these columns only.
@@ -1076,6 +1133,8 @@ pub fn build_with(
     // Offline cross-filtering: each clickable tile, each of its values, every other tile.
     let mut cross: BTreeMap<String, BTreeMap<String, BTreeMap<String, QueryResult>>> =
         BTreeMap::new();
+    // (clicked tile, value key, the filters with the click), in the order they were found.
+    let mut clicks: Vec<(String, String, Vec<DashFilter>)> = Vec::new();
     for src in tiles.iter().filter(|_| cross_too) {
         // A cohort row is not a value of any field, so a click on it has nothing to filter by.
         if matches!(src.kind.as_str(), "kpi" | "cohort") {
@@ -1261,7 +1320,6 @@ pub fn build_with(
             if choices.is_empty() || choices.len() > cap {
                 continue;
             }
-            let per_value = cross.entry(src.id.clone()).or_default();
             for (v, filter) in choices {
                 let mut fs: Vec<DashFilter> = filters
                     .iter()
@@ -1272,16 +1330,24 @@ pub fn build_with(
                     filter,
                     from_tile: src.id.clone(),
                 });
-                let mut per_tile = BTreeMap::new();
-                for t in tiles
-                    .iter()
-                    .filter(|t| t.id != src.id && !is_static_tile(t) && t.kind != "filter")
-                {
-                    per_tile.insert(t.id.clone(), run_tile_public(engine, t, &fs)?);
-                }
-                per_value.insert(js_key(&v), per_tile);
+                clicks.push((src.id.clone(), js_key(&v), fs));
             }
         }
+    }
+    // Every click runs every other tile: hundreds of small queries, run on forks of the engine in
+    // parallel (V5-D35). The order of the results does not depend on the threads.
+    let answers = in_parallel(engine, &clicks, |e, (src, _, fs)| {
+        let mut per_tile = BTreeMap::new();
+        for t in tiles
+            .iter()
+            .filter(|t| t.id != *src && !is_static_tile(t) && t.kind != "filter")
+        {
+            per_tile.insert(t.id.clone(), run_tile_public(e, t, fs)?);
+        }
+        Ok(per_tile)
+    })?;
+    for ((src, key, _), per_tile) in clicks.into_iter().zip(answers) {
+        cross.entry(src).or_default().insert(key, per_tile);
     }
 
     // The measures the tiles name: what the viewer needs to write their names and to know whether
