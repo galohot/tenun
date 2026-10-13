@@ -7,7 +7,7 @@
 
 use crate::catalog::{Catalog, DType, Table, ident};
 use crate::links::{Edge, Links, PathError, Paths, join_on, reach};
-use chrono::{Datelike, Duration, Months, NaiveDate};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -118,20 +118,9 @@ impl Grain {
         matches!(self, Grain::MonthOfYear | Grain::Weekday | Grain::Hour)
     }
 
-    /// The SQL for this grain applied to a date or time expression.
+    /// The SQL for this grain applied to a date or time expression, in the calendar of the call (v5 build 04).
     fn sql(self, r: &str) -> String {
-        let part = |f: &str| format!("CAST({f}({r}) AS DOUBLE)");
-        let trunc = |u: &str| format!("strftime(date_trunc('{u}', {r}), '%Y-%m-%d')");
-        match self {
-            Grain::Year => trunc("year"),
-            Grain::Quarter => trunc("quarter"),
-            Grain::Month => trunc("month"),
-            Grain::Week => trunc("week"),
-            Grain::Day => trunc("day"),
-            Grain::MonthOfYear => part("month"),
-            Grain::Weekday => part("isodow"),
-            Grain::Hour => part("hour"),
-        }
+        crate::calendar::current().grain_sql(self, r)
     }
 }
 
@@ -196,20 +185,8 @@ pub fn local_today() -> NaiveDate {
 /// "year to date" run from their start to today. A date-time column keeps its whole last day,
 /// because the range ends at the start of the next one.
 pub fn relative_range(preset: &str, today: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
-    let tomorrow = today + Duration::days(1);
-    let month = today.with_day(1)?;
-    let quarter = month.with_month0(today.month0() / 3 * 3)?;
-    Some(match preset {
-        "last_7_days" => (today - Duration::days(6), tomorrow),
-        "last_30_days" => (today - Duration::days(29), tomorrow),
-        "this_month" => (month, tomorrow),
-        "last_month" => (month.checked_sub_months(Months::new(1))?, month),
-        "this_quarter" => (quarter, tomorrow),
-        "last_quarter" => (quarter.checked_sub_months(Months::new(3))?, quarter),
-        "ytd" => (today.with_month(1)?.with_day(1)?, tomorrow),
-        "last_12_months" => (tomorrow.checked_sub_months(Months::new(12))?, tomorrow),
-        _ => return None,
-    })
+    // Quarters and the year follow the calendar of the call (v5 build 04).
+    crate::calendar::current().relative_range(preset, today)
 }
 
 /// A `Relative` filter written as the `Range` it stands for today. Other filters are unchanged.

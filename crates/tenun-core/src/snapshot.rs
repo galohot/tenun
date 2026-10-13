@@ -1039,6 +1039,10 @@ fn day_month(m: u32, day: u32, loc: Locale) -> String {
 /// English: "September 2026", "Q3 2026", "2026", "Week of Sep 7, 2026", "Sep 7, 2026".
 /// Indonesian: "September 2026", "Q3 2026", "2026", "Minggu 7 Sep 2026", "7 Sep 2026".
 pub fn period_name(d: NaiveDate, g: Grain, short_form: bool, loc: Locale) -> String {
+    // A fiscal year or quarter has its own name: "FY 2027", "Q1 FY 2027" (v5 build 04).
+    if let Some(name) = crate::calendar::current().fiscal_name(d, g, loc) {
+        return name;
+    }
     let (y, m, day) = (d.year(), d.month(), d.day());
     let full_date = match loc {
         Locale::En => format!("{} {day}, {y}", short(m, loc)),

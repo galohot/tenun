@@ -946,16 +946,9 @@ pub fn spark_key(groups: &[Value]) -> String {
     groups.iter().map(js_key).collect::<Vec<_>>().join("\u{1f}")
 }
 
-/// The first day of the period of grain `g` that holds `d`. Weeks start on Monday.
+/// The first day of the period of grain `g` that holds `d`, in the calendar of the call (v5 build 04).
 pub fn period_start(d: NaiveDate, g: Grain) -> NaiveDate {
-    match g {
-        Grain::Year => NaiveDate::from_ymd_opt(d.year(), 1, 1),
-        Grain::Quarter => NaiveDate::from_ymd_opt(d.year(), d.month0() / 3 * 3 + 1, 1),
-        Grain::Month => NaiveDate::from_ymd_opt(d.year(), d.month(), 1),
-        Grain::Week => Some(d - Duration::days(i64::from(d.weekday().num_days_from_monday()))),
-        _ => Some(d),
-    }
-    .unwrap_or(d)
+    crate::calendar::current().period_start(d, g)
 }
 
 /// The latest day of a date field under the filters, or None when there is no date.

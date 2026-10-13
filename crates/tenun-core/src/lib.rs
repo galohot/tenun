@@ -2,6 +2,7 @@
 
 pub mod advanced;
 pub mod calc;
+pub mod calendar;
 pub mod catalog;
 pub mod csvread;
 pub mod derived;

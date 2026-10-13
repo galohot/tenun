@@ -16,7 +16,7 @@ use crate::query::{
 };
 use crate::snapshot::{SortBy, Tile, TopN, add_grain, iso, js_key, parse_day};
 use crate::workspace::Locale;
-use chrono::{Datelike, Duration, NaiveDate};
+use chrono::{Duration, NaiveDate};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
@@ -591,9 +591,9 @@ impl ShowAs {
     }
 }
 
-/// The year of a period start, for year to date.
+/// The year of a period start, for year to date: a fiscal year by the year it ends (v5 build 04).
 fn year_of(v: &Value) -> Option<i32> {
-    parse_day(v.as_str()?).map(|d| d.year())
+    parse_day(v.as_str()?).map(|d| crate::calendar::current().year_of(d))
 }
 
 /// Shows each value the way `tile.showAs` asks. It runs on the rows the tile shows (after the gaps
