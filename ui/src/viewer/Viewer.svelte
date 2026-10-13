@@ -25,7 +25,7 @@
   import { phoneLayout, PHONE_MAX, readingOrder } from '../lib/layout';
 
   let {
-    data,
+    data: root,
     hosted = null,
     embedded = false,
     pages,
@@ -36,6 +36,7 @@
     everyAt = null,
     onpickchange,
     startPick = null,
+    useHash = true,
   }: {
     data: ExportPayload;
     /** Set on tenun.cloud: when and where the snapshot was published, and how often it should update. */
@@ -60,7 +61,26 @@
     onpickchange?: (tile: string, value: Cell | null) => void;
     /** The pick this page starts with (a site: the every-page value picked here before). */
     startPick?: { tile: string; value: Cell } | null;
+    /** The address holds the saved view (`#v=<id>`). A site's address holds its page instead. */
+    useHash?: boolean;
   } = $props();
+
+  // Saved views (v5 build 03): the file holds each one in full; the reader picks one. A file opens on the view its
+  // address names, else on the dashboard's default view.
+  const viewFromHash = () => {
+    const m = /^#v=(.+)$/.exec(location.hash);
+    return m ? decodeURIComponent(m[1]) : null;
+  };
+  // svelte-ignore state_referenced_locally
+  let viewId = $state<string | null>((useHash && viewFromHash()) || root.defaultView || null);
+  const data = $derived(viewId ? (root.views?.find((v) => v.id === viewId)?.payload ?? root) : root);
+  function pickView(id: string | null) {
+    viewId = id;
+    pick = null;
+    drilled = {};
+    deeper = {};
+    if (useHash) history.replaceState(null, '', id ? `#v=${encodeURIComponent(id)}` : location.pathname + location.search);
+  }
   const ROW = 76;
   const GAP = 12;
 
@@ -236,6 +256,15 @@
       {/if}
     </div>
     <div class="chips">
+      {#if root.views?.length}
+        <label class="viewpick">
+          <span class="sr">View</span>
+          <select value={viewId ?? ''} onchange={(e) => pickView(e.currentTarget.value || null)} aria-label="Saved view">
+            <option value="">As saved</option>
+            {#each root.views as v (v.id)}<option value={v.id}>{v.name}</option>{/each}
+          </select>
+        </label>
+      {/if}
       {#each data.every ?? [] as f}
         <span class="chip static" title="Chosen on another page; it filters every page">Every page: {filterText(f, data.tables)}</span>
       {/each}
@@ -407,7 +436,9 @@
   header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
   h1 { font-size: 22px; }
   header p { margin: 4px 0 0; color: var(--text-2); font-size: 12px; }
-  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .viewpick select { height: 26px; padding: 0 8px; border: 1px solid var(--sep); border-radius: 13px; background: var(--surface); color: var(--text); font: inherit; font-size: 12px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .chip {
     display: inline-flex;
     align-items: center;

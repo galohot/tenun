@@ -741,6 +741,22 @@ export interface Dashboard {
   order?: string[];
   /** Left out of a site's navigation (build 12). A link still reaches it. */
   hidden?: boolean;
+  /** Saved views (v5 build 03): how the dashboard was read, by name. At most 10. */
+  views?: SavedView[];
+  /** The view the dashboard opens on. Not set: as it is saved. */
+  defaultView?: string;
+}
+
+/** A saved view (v5 build 03): the clicks, the filter tiles' selections, the grain, the drill paths, the parameters. */
+export interface SavedView {
+  /** `v<n>`. */
+  id: string;
+  name: string;
+  filters: DashFilter[];
+  selections?: Record<string, Pick<TileFilter, 'values' | 'range' | 'preset'>>;
+  grain?: Grain | null;
+  drill?: Record<string, DrillStep[]>;
+  params?: Record<string, Cell>;
 }
 
 /** The workspace as a site (build 12, GRANDPLAN §4.1). Off by default (V4-D14). */

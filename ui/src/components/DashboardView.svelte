@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick as nextTick, untrack } from 'svelte';
-  import { api, MeasureRefused, type Bins, type Cell, type Dashboard, type DashFilter, type Filter, type Grain, type NamedMeasure, type QueryResult, type RowsBehind, type Tile, type TileFilter, type TileType } from '../lib/api';
+  import { api, MeasureRefused, type Bins, type Cell, type Dashboard, type DashFilter, type DrillState, type Filter, type Grain, type SavedView, type NamedMeasure, type QueryResult, type RowsBehind, type Tile, type TileFilter, type TileType } from '../lib/api';
   import { app, go } from '../lib/state.svelte';
   import { cell, dateTimeMedium, stampLabel, tileTitle } from '../lib/format';
   import { filterText } from '../lib/filterText';
@@ -19,7 +19,9 @@
   import RowsSheet from './dash/RowsSheet.svelte';
   import FocusSheet from './dash/FocusSheet.svelte';
   import { drawnTile } from '../lib/card';
-  import { shownTile } from '../lib/drilldown';
+  import { shownTile, TOP } from '../lib/drilldown';
+  import { currentState, newViewId, sameState, tilesWithView, viewClicks, viewDrills, viewOf } from '../lib/views';
+  import ViewsMenu from './dash/ViewsMenu.svelte';
   import { flowOrder, insertInOrder, isFlow, moveInOrder } from '../lib/flow';
   import FlowLayout from './dash/FlowLayout.svelte';
   import { DRILL, drillOf } from '../lib/site';
@@ -45,6 +47,10 @@
     drillFrom = app.drill.from;
     app.drill = null;
   }
+  /** Where each tile is drilled to (v5 build 01), kept here so a saved view can hold it (build 03). */
+  let drills = $state<Record<string, DrillState>>({});
+  /** The saved view the dashboard was last set to (build 03). */
+  let openView = $state<string | null>(null);
   let selectedTile = $state<string | null>(null);
   let gridEl = $state<HTMLDivElement>();
   let width = $state(1000);
@@ -120,6 +126,9 @@
 
   onMount(() => {
     if (!dash) go({ view: 'home' });
+    // A page opens on its default view, unless a drill-through opened it (build 03).
+    const first = dash?.defaultView ? dash.views?.find((v) => v.id === dash.defaultView) : undefined;
+    if (first && !drillFrom) applyView(first, false);
     const ro = new ResizeObserver(() => gridEl && (width = gridEl.clientWidth));
     if (gridEl) ro.observe(gridEl);
     return () => ro.disconnect();
@@ -452,6 +461,53 @@
     const rest = (dash.filters ?? []).filter((x) => x.fromTile !== f.fromTile);
     dash.filters = rest.length ? rest : undefined;
     app.saveDashboards();
+  }
+
+  // ---- saved views (build 03) ----
+  const views = $derived(dash?.views ?? []);
+  const stateNow = $derived(dash ? currentState(dash, filters, drills) : null);
+  const viewChanged = $derived.by(() => {
+    const v = views.find((x) => x.id === openView);
+    return !!v && !!stateNow && !sameState(stateNow, { filters: v.filters, selections: v.selections ?? {}, grain: v.grain ?? null, drill: v.drill ?? {}, params: v.params });
+  });
+  /** Sets the dashboard as the view reads it: the filter tiles' selections, the grain, the clicks and the drill paths. */
+  function applyView(v: SavedView, step = true) {
+    if (!dash) return;
+    const tiles = tilesWithView(dash.tiles, v);
+    const grain = v.grain ?? null;
+    if (JSON.stringify(tiles) !== JSON.stringify(dash.tiles) || (dash.grain ?? null) !== grain) {
+      if (step) record();
+      dash.tiles = tiles;
+      dash.grain = grain;
+      app.saveDashboards();
+    }
+    filters = viewClicks(dash.tiles, v);
+    drills = viewDrills(dash.tiles, v);
+    openView = v.id;
+  }
+  function saveViews(list: SavedView[], extra: Partial<Dashboard> = {}) {
+    if (!dash) return;
+    record();
+    dash.views = list.length ? list : undefined;
+    Object.assign(dash, extra);
+    app.saveDashboards();
+  }
+  function saveView(name: string) {
+    if (!dash || !stateNow) return;
+    const id = newViewId(views);
+    saveViews([...views, viewOf(id, name, $state.snapshot(stateNow) as typeof stateNow)]);
+    openView = id;
+  }
+  function updateView(id: string) {
+    if (!stateNow) return;
+    saveViews(views.map((v) => (v.id === id ? viewOf(id, v.name, $state.snapshot(stateNow) as typeof stateNow) : v)));
+  }
+  function deleteView(id: string) {
+    saveViews(
+      views.filter((v) => v.id !== id),
+      dash?.defaultView === id ? { defaultView: undefined } : {},
+    );
+    if (openView === id) openView = null;
   }
 
   function setGrain(g: Grain | null) {
@@ -906,6 +962,21 @@
     {:else}
       <button class="title" title={phone ? undefined : 'Rename'} disabled={phone} onclick={() => (editingTitle = true)}>{dash.title}</button>
     {/if}
+    <ViewsMenu
+      {views}
+      open={openView}
+      changed={viewChanged}
+      defaultView={dash.defaultView}
+      editing={advancedOn() && !phone}
+      onopen={(id) => {
+        const v = views.find((x) => x.id === id);
+        if (v) applyView(v);
+      }}
+      onsave={saveView}
+      onupdate={updateView}
+      onrename={(id, name) => saveViews(views.map((v) => (v.id === id ? { ...v, name } : v)))}
+      ondelete={deleteView}
+      ondefault={(id) => saveViews(views, { defaultView: id ?? undefined })} />
     <div class="chips">
       {#each pins as f (f.fromTile)}
         <span class="chip pinned" title="Saved with the dashboard">
@@ -1159,6 +1230,8 @@
           oncopy={(to) => copyTo(t.id, to)}
           onaction={(page) => setAction(t.id, page)}
           onreach={advancedOn() ? () => (reachFor = t.id) : undefined}
+          drillState={drills[t.id] ?? TOP}
+          ondrill={(st) => (drills = { ...drills, [t.id]: st })}
       onclip={() => {
             const tiles = picked.includes(t.id) ? copyTargets() : dash.tiles.filter((x) => x.id === t.id);
             copyToClipboard(clipOf(tiles), copiedWords(tiles.length));

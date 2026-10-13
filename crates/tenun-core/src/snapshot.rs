@@ -1140,6 +1140,119 @@ pub fn build_quiet(
     let dash = engine
         .dashboard(dashboard_id)
         .ok_or_else(|| anyhow::anyhow!("no dashboard {dashboard_id}"))?;
+    let mut payload = build_dash(engine, &dash, filters, cross_too, &BTreeMap::new())?;
+    // Saved views (v5 build 03, V5-D5): each one in full, at most `MAX_VIEWS`, and the one the dashboard opens on.
+    let views: Vec<Value> = dash
+        .get("views")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if cross_too && !views.is_empty() {
+        let mut out = Vec::new();
+        for v in views.iter().take(MAX_VIEWS) {
+            let (Some(id), Some(name)) = (
+                v.get("id").and_then(Value::as_str),
+                v.get("name").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
+            let (view_dash, clicks, drills) = with_view(&dash, v);
+            let mut fs: Vec<DashFilter> = filters.to_vec();
+            fs.extend(clicks);
+            let p = build_dash(engine, &view_dash, &fs, true, &drills)?;
+            out.push(json!({ "id": id, "name": name, "payload": p }));
+        }
+        let default = dash.get("defaultView").and_then(Value::as_str);
+        if let Some(d) = default.filter(|d| out.iter().any(|v| v["id"] == *d)) {
+            payload["defaultView"] = json!(d);
+        }
+        payload["views"] = json!(out);
+    }
+    Ok(payload)
+}
+
+/// A dashboard keeps at most this many views; an export holds each one in full (V5-D5).
+pub const MAX_VIEWS: usize = 10;
+
+/// A dashboard as a saved view reads it (v5 build 03): each filter tile with the view's selection (none when the view
+/// has none for it), the view's grain, its clicks that still name a tile, and the drill path of each tile that drills.
+pub fn with_view(
+    dash: &Value,
+    view: &Value,
+) -> (
+    Value,
+    Vec<DashFilter>,
+    BTreeMap<String, crate::drill::DrillState>,
+) {
+    let mut d = dash.clone();
+    let ids: HashSet<String> = dash
+        .get("tiles")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|t| t.get("id").and_then(Value::as_str).map(str::to_string))
+        .collect();
+    if let Some(tiles) = d.get_mut("tiles").and_then(Value::as_array_mut) {
+        for t in tiles {
+            if t.get("type").and_then(Value::as_str) != Some("filter") {
+                continue;
+            }
+            let id = t
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let sel = view.pointer(&format!(
+                "/selections/{}",
+                id.replace('~', "~0").replace('/', "~1")
+            ));
+            if let Some(f) = t.get_mut("filter").and_then(Value::as_object_mut) {
+                for k in ["values", "range", "preset"] {
+                    f.remove(k);
+                }
+                if let Some(sel) = sel.and_then(Value::as_object) {
+                    for k in ["values", "range", "preset"] {
+                        if let Some(v) = sel.get(k) {
+                            f.insert(k.to_string(), v.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    d["grain"] = view.get("grain").cloned().unwrap_or(Value::Null);
+    let clicks: Vec<DashFilter> = view
+        .get("filters")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|f| serde_json::from_value::<DashFilter>(f.clone()).ok())
+        .filter(|f| ids.contains(&f.from_tile))
+        .collect();
+    let drills = view
+        .get("drill")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(id, _)| ids.contains(*id))
+        .filter_map(|(id, path)| {
+            let path = serde_json::from_value(path.clone()).ok()?;
+            Some((id.clone(), crate::drill::DrillState { path }))
+        })
+        .collect();
+    (d, clicks, drills)
+}
+
+/// One page from its dashboard's JSON: the tiles at their drill states (none: the top level).
+fn build_dash(
+    engine: &Engine,
+    dash: &Value,
+    filters: &[DashFilter],
+    cross_too: bool,
+    drills: &BTreeMap<String, crate::drill::DrillState>,
+) -> anyhow::Result<Value> {
+    let dashboard_id = dash.get("id").and_then(Value::as_str).unwrap_or_default();
+    let dash = dash.clone();
     let grain = filters::dashboard_grain(&dash);
     let raw_tiles: Vec<Value> = dash
         .get("tiles")
@@ -1191,10 +1304,12 @@ pub fn build_quiet(
 
     let mut base: BTreeMap<String, QueryResult> = BTreeMap::new();
     for t in tiles.iter().filter(|t| !is_static_tile(t)) {
-        // A tile that drills says so in its result: the viewer offers the drill switch (v5 build 01).
+        // A tile that drills says so in its result: the viewer offers the drill switch (v5 build 01). A saved view
+        // holds the level its reader drilled to (build 03).
+        let state = drills.get(&t.id).cloned().unwrap_or_default();
         base.insert(
             t.id.clone(),
-            crate::drill::run_public(engine, t, filters, &crate::drill::DrillState::default())?,
+            crate::drill::run_public(engine, t, filters, &state)?,
         );
     }
 
@@ -1425,15 +1540,14 @@ pub fn build_quiet(
 
     // Offline drill-down (V5-D5): the level below the top for the first values of each tile that drills, and
     // "Next level" for all of them. Deeper clicks say that the file holds one level.
-    let mut drills: Vec<(String, String, crate::drill::DrillState)> = Vec::new();
+    let mut downs: Vec<(String, String, crate::drill::DrillState)> = Vec::new();
     for t in tiles.iter().filter(|_| cross_too) {
-        let Some(info) = base
+        let Some((res, info)) = base
             .get(&t.id)
             .and_then(|r| r.drill.as_ref().map(|d| (r, d)))
         else {
             continue;
         };
-        let (res, info) = info;
         if !info.can_down {
             continue;
         }
@@ -1446,21 +1560,20 @@ pub fn build_quiet(
             .take(MAX_DRILL_VALUES)
         {
             let key = js_key(&v);
-            let step = crate::drill::Step { value: Some(v) };
-            drills.push((
-                t.id.clone(),
-                key,
-                crate::drill::DrillState { path: vec![step] },
-            ));
+            // One level below the level shown: a saved view may have drilled already (build 03).
+            let mut path = info.path.clone();
+            path.push(crate::drill::Step { value: Some(v) });
+            downs.push((t.id.clone(), key, crate::drill::DrillState { path }));
         }
-        let every = crate::drill::Step { value: None };
-        drills.push((
+        let mut path = info.path.clone();
+        path.push(crate::drill::Step { value: None });
+        downs.push((
             t.id.clone(),
             DRILL_ALL_KEY.to_string(),
-            crate::drill::DrillState { path: vec![every] },
+            crate::drill::DrillState { path },
         ));
     }
-    let drilled = in_parallel(engine, &drills, |e, (id, _, state)| {
+    let drilled = in_parallel(engine, &downs, |e, (id, _, state)| {
         let t = tiles
             .iter()
             .find(|t| &t.id == id)
@@ -1468,7 +1581,7 @@ pub fn build_quiet(
         crate::drill::run_public(e, t, filters, state)
     })?;
     let mut down: BTreeMap<String, BTreeMap<String, QueryResult>> = BTreeMap::new();
-    for ((id, key, _), res) in drills.into_iter().zip(drilled) {
+    for ((id, key, _), res) in downs.into_iter().zip(drilled) {
         down.entry(id).or_default().insert(key, res);
     }
 

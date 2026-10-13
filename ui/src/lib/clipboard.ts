@@ -4,7 +4,7 @@
 // same workspace keeps every field; a paste into another workspace matches each table and column first (MatchFields).
 // Pure, with type-only imports, so the node tests load it.
 
-import type { CardStyle, Dashboard, DType, Grain, NamedMeasure, Table, Tile } from './api';
+import type { CardStyle, Dashboard, DType, Grain, NamedMeasure, SavedView, Table, Tile } from './api';
 
 /** The first line of a copy, so a paste knows it is one. */
 export const MARKER = 'tenun/tiles';
@@ -427,5 +427,22 @@ export function dashboardCopy(d: Dashboard, title: string, newId: (prefix: strin
     // A published dashboard's link stays with the original.
     publish: undefined,
     ...(c.filters ? { filters: c.filters.map((f) => ({ ...f, fromTile: ids.get(f.fromTile) ?? f.fromTile })) } : {}),
+    // Saved views name tiles: their clicks, selections and drill paths follow the copies (v5 build 03).
+    ...(c.views ? { views: c.views.map((v) => viewForCopy(v, ids)) } : {}),
+  };
+}
+
+/** A saved view of a copied dashboard, pointed at the copies of its tiles. */
+export function viewForCopy(v: SavedView, ids: ReadonlyMap<string, string>): SavedView {
+  const keyed = <T>(r: Record<string, T> | undefined) => (r ? Object.fromEntries(Object.entries(r).map(([k, x]) => [ids.get(k) ?? k, x])) : undefined);
+  return {
+    ...v,
+    filters: v.filters.map((f) => ({
+      ...f,
+      fromTile: ids.get(f.fromTile) ?? f.fromTile,
+      ...(f.to ? { to: f.to.map((t) => ids.get(t) ?? t) } : {}),
+    })),
+    ...(v.selections ? { selections: keyed(v.selections) } : {}),
+    ...(v.drill ? { drill: keyed(v.drill) } : {}),
   };
 }

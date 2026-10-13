@@ -118,6 +118,7 @@
         note={shown.note ?? (everyAt && !everyAt.results ? 'This page is not kept to the value picked for every page: the file holds the first 50 values.' : undefined)}
         {everyAt}
         {startPick}
+        useHash={false}
         onpickchange={pickChange} />
     {/key}
   {:else}

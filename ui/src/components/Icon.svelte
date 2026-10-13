@@ -3,6 +3,7 @@
   const paths: Record<string, string> = {
     plus: 'M10 4v12M4 10h12',
     drill: 'M3.5 4.5h6M7 9.5h6M10.5 14.5h6M5.5 4.5v5H7M9 9.5v5h1.5',
+    bookmark: 'M6 3.5h8v13l-4-3-4 3z',
     x: 'M5 5l10 10M15 5L5 15',
     check: 'M4.5 10.5l3.5 3.5 7.5-8',
     table: 'M3.5 4.5h13v11h-13zM3.5 8.5h13M3.5 12h13M8 8.5v7',

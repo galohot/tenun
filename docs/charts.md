@@ -153,6 +153,7 @@ sidebar and switch on **Make this workspace a site**. It is off unless you switc
 - **Reference bands:** a shaded range on the axis.
 - **Drill down:** see below.
 - **Which tiles a click filters:** see below.
+- **Saved views:** see below.
 
 ## Which tiles a click filters
 
@@ -169,6 +170,19 @@ clears the choice where it was made.
 
 In an exported site and on tenun.cloud, a list or dropdown filter tile marked this way works the same for its first
 50 values. Past them, a page says that the file does not hold that value.
+
+## Saved views
+
+A view remembers how a dashboard reads: the clicks, what the filter tiles have chosen, the time grain for every
+chart, and how far each chart is drilled down. Use one for the Monday meeting, one for each region, and so on.
+
+- **Make one** (Advanced): set the dashboard the way you want it, open **Views** next to its title, and choose
+  **Save as a new view**. Give it a name, such as "Java, this quarter". A dashboard keeps up to 10 views.
+- **Open one:** pick it in **Views**. Anyone who reads the dashboard can do this, with or without Advanced.
+- **After a change,** the button says **changed**. **Update** saves the change into the view.
+- **Open on this view first** makes it the first thing a reader sees.
+- **Exported files and tenun.cloud** hold every view in full; a reader picks one at the top of the page. In an
+  exported file the address keeps the view, so a link can open on it (`#v=v2`).
 
 ## Drill down
 

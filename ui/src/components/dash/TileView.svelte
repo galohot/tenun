@@ -42,6 +42,8 @@
     onflow,
     onaction,
     onreach,
+    drillState,
+    ondrill,
     onremove,
     onnav,
     onopen,
@@ -85,6 +87,9 @@
     onaction?: (page: string | null) => void;
     /** Opens "Filters other tiles" (v5 build 02, Advanced). */
     onreach?: () => void;
+    /** The drill state the dashboard keeps (build 03), and how to change it. Not set: the tile keeps its own. */
+    drillState?: DrillState;
+    ondrill?: (s: DrillState) => void;
     onremove: () => void;
     /** An arrow key on the tile: 1 for the next tile in reading order, -1 for the one before. */
     onnav: (step: 1 | -1) => void;
@@ -97,16 +102,28 @@
   let loading = $state(false);
   let colors = $state<Colors>(readColors());
 
-  /** Where the reader drilled to, and whether a click drills (on) or filters (off, as always). Not saved (V5-D3). */
-  let drill = $state<DrillState>(TOP);
+  /**
+   * Where the reader drilled to, and whether a click drills (on) or filters (off, as always). Not saved in the tile
+   * (V5-D3); the dashboard keeps it when it passes `drillState`, so a saved view can hold it (build 03).
+   */
+  let localDrill = $state<DrillState>(TOP);
+  const drill = $derived(drillState ?? localDrill);
+  function setDrill(s: DrillState) {
+    if (ondrill) ondrill(s);
+    else localDrill = s;
+  }
   let drillMode = $state(false);
   // A new drill setting or a new first field starts again at the top.
   const drillKey = $derived(JSON.stringify([tile.drill ?? null, tile.dims[0] ?? null]));
+  let lastDrillKey = '';
   $effect(() => {
-    void drillKey;
+    const k = drillKey;
     untrack(() => {
-      drill = TOP;
-      drillMode = false;
+      if (lastDrillKey && lastDrillKey !== k) {
+        setDrill(TOP);
+        drillMode = false;
+      }
+      lastDrillKey = k;
     });
   });
 
@@ -187,7 +204,7 @@
   /** A click drills when the switch is on and there is a level below; "Other" stands for many values and stays. */
   function clickMark(v: Cell, stage?: number) {
     if (drillMode && res?.drill?.canDown && v !== OTHER_KEY) {
-      drill = down(drill, v);
+      setDrill(down(drill, v));
       return;
     }
     onpick(v, res?.otherOf, res?.bins, stage, view);
@@ -266,7 +283,7 @@
     if (e.target !== e.currentTarget) return;
     if (e.key === 'Escape' && !isTop(drill)) {
       e.preventDefault();
-      drill = up(drill);
+      setDrill(up(drill));
     } else if (e.key === 'Enter') {
       e.preventDefault();
       onopen();
@@ -314,7 +331,7 @@
     {/if}
   </header>
   {#if res?.drill && (drillMode || !isTop(drill))}
-    <DrillBar info={res.drill} onto={(d) => (drill = toDepth(drill, d))} onup={() => (drill = up(drill))} onnext={() => (drill = nextLevel(drill))} />
+    <DrillBar info={res.drill} onto={(d) => setDrill(toDepth(drill, d))} onup={() => setDrill(up(drill))} onnext={() => setDrill(nextLevel(drill))} />
   {/if}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="body" onpointerdown={bare && !phone ? (e) => !(e.target as HTMLElement).closest('a, button') && ondragstart(e) : undefined}>

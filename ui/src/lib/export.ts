@@ -42,6 +42,9 @@ export interface ExportPayload {
   hierarchies?: Hierarchy[];
   /** Filters from other pages' filter tiles that apply to every page (v5 build 02). The numbers already have them. */
   every?: DashFilter[];
+  /** Saved views (v5 build 03): each one as the dashboard reads in it, and the one it opens on. */
+  views?: { id: string; name: string; payload: ExportPayload }[];
+  defaultView?: string;
 }
 
 /**
