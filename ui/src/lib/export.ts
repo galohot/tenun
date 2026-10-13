@@ -40,6 +40,8 @@ export interface ExportPayload {
   down?: Record<string, Record<string, QueryResult>>;
   /** The hierarchies the drilled tiles use. */
   hierarchies?: Hierarchy[];
+  /** Filters from other pages' filter tiles that apply to every page (v5 build 02). The numbers already have them. */
+  every?: DashFilter[];
 }
 
 /**
@@ -62,6 +64,11 @@ export interface SitePayload {
   pages: Record<string, ExportPayload>;
   /** By `<page id>/<tile id>`: the page a click opens, that page for each clicked value's key, and whether there are more values than the file holds. */
   drill: Record<string, { page: string; values: Record<string, ExportPayload>; more: boolean }>;
+  /**
+   * Every-page filters offline (v5 build 02): by `<page id>/<filter tile id>`, for each value's key the results of every
+   * other page's tiles with that value; `more` when the field has more values than the file holds (50).
+   */
+  every?: Record<string, { page: string; tile: string; more: boolean; values: Record<string, Record<string, Record<string, QueryResult>>> }>;
   geo?: ExportPayload['geo'];
   /** A folder: the file of each page, and the page this file holds. */
   files?: Record<string, string>;

@@ -369,6 +369,8 @@ export interface Filter {
 export interface DashFilter extends Filter {
   fromTile: string;
   label?: string;
+  /** The tiles it filters (v5 build 02): the reach of the tile it came from. `[]`: none. Not set: every tile. */
+  to?: string[];
 }
 
 export interface SemanticQuery {
@@ -546,6 +548,8 @@ export interface TileFilter {
   range?: [Cell, Cell];
   /** A relative date preset, or `custom` while the two days are being picked. */
   preset?: string;
+  /** The selection filters every page of the workspace (v5 build 02, Advanced). */
+  everyPage?: boolean;
 }
 
 /** A picture on a dashboard. */
@@ -697,6 +701,8 @@ export interface Tile {
   map?: MapSpec;
   /** Drill-down (v5 build 01, Advanced): a hierarchy, or `{}` for the date of the first field (year › quarter › month › day). */
   drill?: { hierarchy?: string };
+  /** The tiles its clicks and selections filter (v5 build 02, Advanced): none, or a list. Not set: every tile. */
+  reach?: 'none' | string[];
 }
 
 /** Settings of this computer (not of the workspace). */

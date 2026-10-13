@@ -353,7 +353,14 @@
   function setFilterStyle(style: NonNullable<Tile['filter']>['style']) {
     // The selection of one style means nothing in another. A dropdown is one row high; a list needs more.
     const height = style === 'dropdown' ? 1 : tile.h === 1 ? 3 : tile.h;
-    set({ h: height, filter: { style, ...(style === 'list' || style === 'dropdown' ? { single: tile.filter?.single } : {}) } });
+    set({
+      h: height,
+      filter: {
+        style,
+        ...(style === 'list' || style === 'dropdown' ? { single: tile.filter?.single } : {}),
+        ...(tile.filter?.everyPage ? { everyPage: true } : {}),
+      },
+    });
   }
   const maxValues = $derived(tile.type === 'table' ? Infinity : isPivot ? PIVOT_MAX_MEASURES : MAX_CHART_MEASURES);
   const chartKind = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area');
@@ -958,9 +965,30 @@
           </label>
         {/if}
         {#if !isCleared(tile.filter)}
-          <button class="btn plain flush" onclick={() => set({ filter: { style: tile.filter?.style ?? 'list', ...(tile.filter?.single ? { single: true } : {}) } })}>Clear the selection</button>
+          <button
+            class="btn plain flush"
+            onclick={() =>
+              set({
+                filter: {
+                  style: tile.filter?.style ?? 'list',
+                  ...(tile.filter?.single ? { single: true } : {}),
+                  ...(tile.filter?.everyPage ? { everyPage: true } : {}),
+                },
+              })}>Clear the selection</button>
         {/if}
-        <p class="hint tight">The selection is saved with the dashboard. It filters every other tile, in exported and published files too.</p>
+        {#if advanced || tile.filter?.everyPage}
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={!!tile.filter?.everyPage}
+              disabled={!advanced}
+              onchange={(e) => set({ filter: { ...tile.filter!, style: tile.filter?.style ?? 'list', everyPage: e.currentTarget.checked || undefined } })} />
+            Apply to every page
+          </label>
+        {/if}
+        <p class="hint tight">
+          The selection is saved with the dashboard. It filters every other tile{tile.filter?.everyPage ? ', on every page of the workspace' : ''}, in exported and published files too.
+        </p>
       {/if}
     </div>
   {/if}

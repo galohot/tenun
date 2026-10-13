@@ -240,6 +240,7 @@ fn box_follows_filters_and_orders_by_median() {
         }))
         .unwrap(),
         from_tile: "other".into(),
+        to: None,
     };
     let res = run_tile(&e, &t, &[only_a]).unwrap();
     assert_eq!(res.rows.len(), 1);

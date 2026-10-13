@@ -240,6 +240,7 @@ fn pivot_with_several_values_and_a_filter() {
         }))
         .unwrap(),
         from_tile: "other".into(),
+        to: None,
     };
     let r = run_tile(&e, &t, &[f]).unwrap();
     let totals = r.totals.unwrap();

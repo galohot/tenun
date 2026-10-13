@@ -76,6 +76,26 @@ pub struct Tile {
     /// The tile drills down (v5 build 01): a hierarchy, or (none named) the date chain of its first field.
     #[serde(default)]
     pub drill: Option<TileDrill>,
+    /// The tiles its clicks and selections filter (v5 build 02): `"none"`, or a list. Not set: every tile.
+    #[serde(default)]
+    pub reach: Option<Reach>,
+}
+
+/// Which tiles a tile's clicks and selections filter (V5-D4, V5-D37).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Reach {
+    Tiles(Vec<String>),
+    /// `"none"`: no tile.
+    Word(String),
+}
+
+/// The tiles a filter made by `tile` reaches: `Some([])` for none, `Some(list)`, or `None` for every tile.
+pub fn reach_of(tile: &Tile) -> Option<Vec<String>> {
+    match tile.reach.as_ref()? {
+        Reach::Tiles(list) => Some(list.clone()),
+        Reach::Word(_) => Some(Vec::new()),
+    }
 }
 
 /// How a tile drills (V5-D3).
@@ -204,6 +224,16 @@ pub struct DashFilter {
     /// ("Keep only", "Exclude") names no tile, so it filters them all.
     #[serde(rename = "fromTile")]
     pub from_tile: String,
+    /// The tiles it filters (v5 build 02, V5-D37): the reach of the tile it came from. `[]`: none. Not set: every tile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Vec<String>>,
+}
+
+impl DashFilter {
+    /// Whether this filter applies to the tile `id`: not one of its own, and in its reach.
+    pub fn reaches(&self, id: &str) -> bool {
+        self.from_tile != id && self.to.as_ref().is_none_or(|to| to.iter().any(|t| t == id))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -314,7 +344,7 @@ pub const STAGE_PREFIX: &str = "\u{2}stage:";
 fn own_excluded(tile: &Tile, filters: &[DashFilter]) -> Vec<Filter> {
     filters
         .iter()
-        .filter(|f| f.from_tile != tile.id)
+        .filter(|f| f.reaches(&tile.id))
         .map(|f| f.filter.clone())
         .collect()
 }
@@ -1096,6 +1126,17 @@ pub fn build_with(
     engine.recheck_live_links();
     // A calculated column with `TODAY()` is as of today in what leaves the computer (V4-D34).
     engine.refresh_dates();
+    build_quiet(engine, dashboard_id, filters, cross_too)
+}
+
+/// [`build_with`] without reading live links and dates again: for pages built many times in one export, on forks of
+/// the engine, after one [`build_with`] did that (an exported site's every-page values, v5 build 02).
+pub fn build_quiet(
+    engine: &Engine,
+    dashboard_id: &str,
+    filters: &[DashFilter],
+    cross_too: bool,
+) -> anyhow::Result<Value> {
     let dash = engine
         .dashboard(dashboard_id)
         .ok_or_else(|| anyhow::anyhow!("no dashboard {dashboard_id}"))?;
@@ -1118,7 +1159,14 @@ pub fn build_with(
     }
     // The dashboard's own filters come from its saved JSON, so a cross-filter the caller sends for
     // the same source is dropped: it would count twice.
-    let own = filters::dashboard_filters(engine, &dash, &all_tiles);
+    let mut own = filters::dashboard_filters(engine, &dash, &all_tiles);
+    // The filters of other pages' filter tiles marked "Apply to every page" (v5 build 02). One the caller sends for
+    // the same source (another value, in an exported site) takes its place.
+    let every: Vec<DashFilter> = filters::every_page(engine, dashboard_id)
+        .into_iter()
+        .filter(|e| !filters.iter().any(|f| f.from_tile == e.from_tile))
+        .collect();
+    own.extend(every.iter().cloned());
     let own_sources: HashSet<&str> = own.iter().map(|f| f.from_tile.as_str()).collect();
     let clicked: Vec<DashFilter> = filters
         .iter()
@@ -1349,6 +1397,7 @@ pub fn build_with(
                 fs.push(DashFilter {
                     filter,
                     from_tile: src.id.clone(),
+                    to: reach_of(src),
                 });
                 clicks.push((src.id.clone(), js_key(&v), fs));
             }
@@ -1358,10 +1407,14 @@ pub fn build_with(
     // parallel (V5-D35). The order of the results does not depend on the threads.
     let answers = in_parallel(engine, &clicks, |e, (src, _, fs)| {
         let mut per_tile = BTreeMap::new();
-        for t in tiles
-            .iter()
-            .filter(|t| t.id != *src && !is_static_tile(t) && t.kind != "filter")
-        {
+        // A tile the click does not reach keeps its own result; the viewer knows the reach (v5 build 02).
+        let reach = fs.last().and_then(|f| f.to.clone());
+        for t in tiles.iter().filter(|t| {
+            t.id != *src
+                && !is_static_tile(t)
+                && t.kind != "filter"
+                && reach.as_ref().is_none_or(|r| r.contains(&t.id))
+        }) {
             per_tile.insert(t.id.clone(), run_tile_public(e, t, fs)?);
         }
         Ok(per_tile)
@@ -1522,6 +1575,7 @@ pub fn build_with(
         "cross": cross,
         "filters": clicked,
         "saved": saved,
+        "every": every,
         "grain": grain,
     });
     if !down.is_empty() {

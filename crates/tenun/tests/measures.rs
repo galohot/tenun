@@ -1112,6 +1112,7 @@ fn a_tile_filter_dashboard_filter_and_group_work_together_with_a_click() {
         }))
         .unwrap(),
         from_tile: "other".into(),
+        to: None,
     };
     let r = run_tile(&w.e, &t, &[click]).unwrap();
     assert_eq!(r.rows.len(), 2);

@@ -152,6 +152,23 @@ sidebar and switch on **Make this workspace a site**. It is off unless you switc
 - **Manual sort order** for the groups.
 - **Reference bands:** a shaded range on the axis.
 - **Drill down:** see below.
+- **Which tiles a click filters:** see below.
+
+## Which tiles a click filters
+
+A click on a bar filters every other tile of the page, and so does a filter tile. With Advanced on, a tile's **⋯**
+menu has **Filters other tiles**: every tile (as always), no tile, or the tiles you tick. A filter tile's choice
+follows the same setting. **Keep only** and **Exclude** still filter every tile. Exported and published files do
+the same.
+
+## A filter for every page
+
+A filter tile can filter every page of the workspace (Advanced): select it and tick **Apply to every page**. Pick
+Java on one page, and every other page shows Java too, with a chip "Every page: Region is Java". The chip's **×**
+clears the choice where it was made.
+
+In an exported site and on tenun.cloud, a list or dropdown filter tile marked this way works the same for its first
+50 values. Past them, a page says that the file does not hold that value.
 
 ## Drill down
 

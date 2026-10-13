@@ -395,12 +395,24 @@ export function landTiles(
   links: ReadonlySet<string>,
   newId: () => string,
 ): Tile[] {
+  const tileIds = new Map(clip.tiles.map((t) => [t.id, newId()]));
   return clip.tiles.map((t) => {
     const x: Tile = m ? remapTile(t, m, links) : JSON.parse(JSON.stringify(t));
     x.measures = x.measures.map((mm) => (mm.named ? { ...mm, named: ids.measures[mm.named] ?? mm.named } : mm));
     if (x.card?.style) x.card = { ...x.card, style: ids.styles[x.card.style] ?? x.card.style };
-    return { ...x, id: newId() };
+    return withReach({ ...x, id: tileIds.get(t.id)! }, tileIds);
   });
+}
+
+/**
+ * A copied tile's reach (v5 build 02) names the copies of the tiles that came along; tiles that did not come along are
+ * on another page, so they leave the list. A list left empty filters every tile again; "none" stays none.
+ */
+export function withReach(t: Tile, ids: ReadonlyMap<string, string>): Tile {
+  if (!Array.isArray(t.reach)) return t;
+  const reach = t.reach.flatMap((id) => (ids.has(id) ? [ids.get(id)!] : []));
+  const { reach: _old, ...rest } = t;
+  return reach.length ? { ...rest, reach } : rest;
 }
 
 /** A dashboard as a copy: its tiles and their places, new ids, and the filters it keeps pointed at the new tiles. */
@@ -411,7 +423,7 @@ export function dashboardCopy(d: Dashboard, title: string, newId: (prefix: strin
     ...c,
     id: newId('d'),
     title,
-    tiles: c.tiles.map((t) => ({ ...t, id: ids.get(t.id)! })),
+    tiles: c.tiles.map((t) => withReach({ ...t, id: ids.get(t.id)! }, ids)),
     // A published dashboard's link stays with the original.
     publish: undefined,
     ...(c.filters ? { filters: c.filters.map((f) => ({ ...f, fromTile: ids.get(f.fromTile) ?? f.fromTile })) } : {}),

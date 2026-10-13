@@ -175,6 +175,7 @@ fn histogram_follows_filters_and_total_matches_the_rows() {
         }))
         .unwrap(),
         from_tile: "other".into(),
+        to: None,
     };
     // Values 0 to 49: 2 · 24.5 · 50^(−1/3) = 13.3, limited to 49 / 5 = 9.8, then rounded up to 10.
     let r = run_tile(&e, &t, &[f]).unwrap();
@@ -187,6 +188,7 @@ fn histogram_follows_filters_and_total_matches_the_rows() {
         }))
         .unwrap(),
         from_tile: "t".into(),
+        to: None,
     };
     assert_eq!(run_tile(&e, &t, &[own]).unwrap().rows.len(), 5);
 }

@@ -8,6 +8,7 @@
   import type { Cell, Dashboard, Tile } from '../lib/api';
   import type { ExportPayload, SitePayload } from '../lib/export';
   import { key } from '../lib/chart';
+  import { filterText } from '../lib/filterText';
   import { navOf, normaliseSite } from '../lib/site';
   import { hashOf, parseHash, type Route } from '../lib/siteview';
   import SiteFrame from '../components/site/SiteFrame.svelte';
@@ -81,6 +82,27 @@
     return true;
   }
   const back = () => history.back();
+
+  // Every-page filters offline (v5 build 02): a value picked in such a filter tile follows the reader to every page.
+  let everyPick = $state<{ source: string; key: string; value: Cell } | null>(null);
+  function pickChange(tile: string, value: Cell | null) {
+    const source = `${current}/${tile}`;
+    if (!data.every?.[source]) return;
+    everyPick = value === null ? null : { source, key: key(value), value };
+  }
+  const everyAt = $derived.by(() => {
+    if (!everyPick) return null;
+    const e = data.every?.[everyPick.source];
+    if (!e || e.page === current) return null;
+    const d = data.pages[e.page]?.tiles.find((t) => t.id === e.tile)?.dims[0];
+    // The words of the app's chip: "Region: Java".
+    const label = d
+      ? filterText({ table: d.table, column: d.column, grain: null, op: 'in', values: [everyPick.value], fromTile: '', ...(d.via ? { via: d.via } : {}) }, data.pages[e.page]?.tables ?? [])
+      : String(everyPick.value ?? '(blank)');
+    return { label, results: e.values[everyPick.key]?.[current], onclear: () => (everyPick = null) };
+  });
+  /** The page the every-page value was picked on starts with it picked. */
+  const startPick = $derived(everyPick && data.every?.[everyPick.source]?.page === current ? { tile: data.every[everyPick.source].tile, value: everyPick.value } : null);
 </script>
 
 <SiteFrame {site} {nav} {current} onnavigate={go}>
@@ -93,7 +115,10 @@
         onpage={go}
         ondrill={drill}
         drillFrom={shown.from ? { title: data.titles[shown.from] || 'the page before', back } : null}
-        note={shown.note} />
+        note={shown.note ?? (everyAt && !everyAt.results ? 'This page is not kept to the value picked for every page: the file holds the first 50 values.' : undefined)}
+        {everyAt}
+        {startPick}
+        onpickchange={pickChange} />
     {/key}
   {:else}
     <p class="missing">This page is not in the file.</p>

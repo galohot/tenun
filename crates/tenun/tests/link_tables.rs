@@ -533,6 +533,7 @@ fn keep_only_and_exclude_on_a_total_can_both_keep_a_row_and_the_words_say_so() {
     let f = DashFilter {
         filter: serde_json::from_value::<Filter>(w.filter("name", "in", json!(["Gates"]))).unwrap(),
         from_tile: "bars".into(),
+        to: None,
     };
     let r = run_tile_public(&w.e, &t, std::slice::from_ref(&f)).unwrap();
     assert!(r.notes.iter().any(|n| n == words), "{:?}", r.notes);
@@ -614,6 +615,7 @@ fn a_click_on_a_funder_filters_a_monthly_line() {
     let click = |name: &str| DashFilter {
         filter: serde_json::from_value::<Filter>(w.filter("name", "in", json!([name]))).unwrap(),
         from_tile: "bars".into(),
+        to: None,
     };
     // Gates funds A and C: January 10 + 40, February 20 + 5 + 50.
     let r = run_tile(&w.e, &line, &[click("Gates")]).unwrap();
@@ -737,6 +739,7 @@ fn other_is_the_rows_with_a_funder_outside_the_top_n_each_counted_once() {
         )
         .unwrap(),
         from_tile: "bars".into(),
+        to: None,
     };
     let line = w.tile("line", json!([w.amount()]), json!([w.month()]), json!({}));
     let l = run_tile(&w.e, &line, &[filter]).unwrap();

@@ -176,6 +176,7 @@ pub fn apply(
                     via: l.dim.via.clone(),
                 },
                 from_tile: DRILL_SOURCE.to_string(),
+                to: None,
             })
         })
         .collect();

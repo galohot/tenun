@@ -2,8 +2,9 @@
   // The exported dashboard. Everything it shows was computed when the file was
   // made; clicking a bar or a slice switches to the stored filtered results.
   import { onMount } from 'svelte';
-  import type { Cell, Tile } from '../lib/api';
+  import type { Cell, QueryResult, Tile } from '../lib/api';
   import { shownTile } from '../lib/drilldown';
+  import { reachOf } from '../lib/filters';
   import DrillBar from '../components/dash/DrillBar.svelte';
   import type { ExportPayload } from '../lib/export';
   import { key, readColors, type Colors } from '../lib/chart';
@@ -32,6 +33,9 @@
     ondrill,
     drillFrom,
     note,
+    everyAt = null,
+    onpickchange,
+    startPick = null,
   }: {
     data: ExportPayload;
     /** Set on tenun.cloud: when and where the snapshot was published, and how often it should update. */
@@ -47,6 +51,15 @@
     drillFrom?: { title: string; back: () => void } | null;
     /** A line under the title: why a page a click opened is not kept to the clicked value. */
     note?: string;
+    /**
+     * An exported site (v5 build 02): a value picked in another page's filter tile that applies to every page. `results`
+     * are this page's tiles with it (not set: the file does not hold that value).
+     */
+    everyAt?: { label: string; results?: Record<string, QueryResult>; onclear: () => void } | null;
+    /** A site hears what is picked here, for its every-page filters. */
+    onpickchange?: (tile: string, value: Cell | null) => void;
+    /** The pick this page starts with (a site: the every-page value picked here before). */
+    startPick?: { tile: string; value: Cell } | null;
   } = $props();
   const ROW = 76;
   const GAP = 12;
@@ -57,7 +70,8 @@
   /** The window's width: below 700 px the dashboard is one column. */
   let screen = $state(innerWidth);
   /** `col` is a click on a pivot column header. */
-  let pick = $state<{ tile: string; value: Cell; col?: boolean; stage?: number } | null>(null);
+  // svelte-ignore state_referenced_locally
+  let pick = $state<{ tile: string; value: Cell; col?: boolean; stage?: number } | null>(startPick ?? null);
   /** The tile shown large. */
   let focusId = $state<string | null>(null);
   /** How the engine names the export's stored result for a click on a pivot column header, or on a Sankey node of a stage. */
@@ -132,6 +146,17 @@
   }
 
   function resultFor(t: Tile) {
+    // A value picked on another page for every page: this page's results with it, as the file holds them.
+    if (everyAt) {
+      const r = everyAt.results?.[t.id];
+      return { res: r ?? data.base[t.id], offline: !!pick || !r };
+    }
+    // A click does not reach a tile outside its tile's reach: that tile is as it is (v5 build 02).
+    if (pick && pick.tile !== t.id) {
+      const source = data.tiles.find((x) => x.id === pick!.tile);
+      const reach = source ? reachOf(source) : undefined;
+      if (reach && !reach.includes(t.id)) return { res: data.base[t.id], offline: false };
+    }
     const d = drilled[t.id];
     // A drilled tile shows its stored level; a click on another tile cannot filter it in the file.
     if (d) return { res: data.down?.[t.id]?.[d.key] ?? data.base[t.id], offline: !!pick && pick.tile !== t.id };
@@ -149,6 +174,7 @@
     if (drilled[t.id]) return;
     if (!data.cross[t.id]?.[crossKey(v, col, stage)]) return;
     pick = pick && pick.tile === t.id && !!pick.col === col && pick.stage === stage && key(pick.value) === key(v) ? null : { tile: t.id, value: v, col, stage };
+    if (!col) onpickchange?.(t.id, pick ? v : null);
   }
 
   function label(tileId: string, v: Cell, col = false, stage = 0): string {
@@ -210,6 +236,15 @@
       {/if}
     </div>
     <div class="chips">
+      {#each data.every ?? [] as f}
+        <span class="chip static" title="Chosen on another page; it filters every page">Every page: {filterText(f, data.tables)}</span>
+      {/each}
+      {#if everyAt}
+        <span class="chip">
+          Every page: {everyAt.label}
+          <button aria-label="Clear" onclick={everyAt.onclear}>×</button>
+        </span>
+      {/if}
       {#each data.saved ?? [] as f}
         <span class="chip static" title="Saved with the dashboard"><Icon name="pin" size={12} /> {filterText(f, data.tables)}</span>
       {/each}
@@ -225,7 +260,13 @@
       {#if pick}
         <span class="chip">
           {label(pick.tile, pick.value, pick.col, pick.stage)}
-          <button aria-label="Clear" onclick={() => (pick = null)}>×</button>
+          <button
+            aria-label="Clear"
+            onclick={() => {
+              const was = pick;
+              pick = null;
+              if (was && !was.col) onpickchange?.(was.tile, null);
+            }}>×</button>
         </span>
       {/if}
     </div>

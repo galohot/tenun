@@ -4,7 +4,8 @@
   import { app, go } from '../lib/state.svelte';
   import { cell, dateTimeMedium, stampLabel, tileTitle } from '../lib/format';
   import { filterText } from '../lib/filterText';
-  import { canExclude, colFilter, hasPeriod, markFilter, newPinId, PERIODS, pinFilter, sameFilter, tileFilters, withGrain } from '../lib/filters';
+  import { canExclude, colFilter, everyPageFilters, everySource, hasPeriod, markFilter, newPinId, PERIODS, pinFilter, reachOf, sameFilter, tileFilters, withGrain } from '../lib/filters';
+  import ReachSheet from './dash/ReachSheet.svelte';
   import { COLS, compact, defaultSize, minHeight, newDashboard, newId, place } from '../lib/tiles';
   import { phoneLayout, readingOrder } from '../lib/layout';
   import { downloadDashboardPdf, downloadDashboardPng, type DashboardPicture } from '../lib/output';
@@ -22,7 +23,7 @@
   import { flowOrder, insertInOrder, isFlow, moveInOrder } from '../lib/flow';
   import FlowLayout from './dash/FlowLayout.svelte';
   import { DRILL, drillOf } from '../lib/site';
-  import { buildClip, clipText, dashboardCopy, freeName, joinMeasures, joinStyles, landTiles, measureIds, placeBelow, readClip, renamesFor, rewriteFormula, sameWorkspace, type Clip, type Matches } from '../lib/clipboard';
+  import { buildClip, clipText, dashboardCopy, freeName, withReach, joinMeasures, joinStyles, landTiles, measureIds, placeBelow, readClip, renamesFor, rewriteFormula, sameWorkspace, type Clip, type Matches } from '../lib/clipboard';
   import MatchFields from './dash/MatchFields.svelte';
   import CardStyles from './dash/CardStyles.svelte';
   // tenun.cloud is not live yet; build with VITE_TENUN_CLOUD=1 to show Publish.
@@ -81,7 +82,24 @@
   const selections = $derived(
     tileFilters(dash?.tiles ?? [], (t, c) => app.table(t)?.columns.find((x) => x.name === c)?.dtype),
   );
-  const allFilters = $derived<DashFilter[]>([...pins, ...selections, ...filters]);
+  // The selections of filter tiles on other pages that apply to every page (v5 build 02, V5-D37).
+  const everyPage = $derived(
+    dash ? everyPageFilters(app.dashboards, dash.id, (t, c) => app.table(t)?.columns.find((x) => x.name === c)?.dtype) : [],
+  );
+  const allFilters = $derived<DashFilter[]>([...pins, ...everyPage, ...selections, ...filters]);
+  /** The page an every-page filter comes from, for its chip. */
+  const pageTitle = (fromTile: string) => app.dashboards.find((d) => d.id === everySource(fromTile)?.dashboard)?.title || 'another page';
+  /** Clears an every-page filter where it comes from: the filter tile on its page. */
+  function clearEvery(fromTile: string) {
+    const src = everySource(fromTile);
+    const d = app.snap?.workspace.dashboards.find((x) => x.id === src?.dashboard);
+    const t = d?.tiles.find((x) => x.id === src?.tile);
+    if (!t?.filter) return;
+    t.filter = { ...t.filter, values: [], range: undefined, preset: undefined };
+    app.saveDashboards();
+  }
+  /** The tile whose "Filters other tiles" sheet is open (v5 build 02). */
+  let reachFor = $state<string | null>(null);
 
   // The tile as it is drawn: with the dashboard's grain. The same object is returned while nothing
   // changed, so a tile only asks again when its question is different.
@@ -399,7 +417,10 @@
       filters = others;
       return;
     }
-    filters = [...others, { ...f, fromTile: from }];
+    // The click filters the tiles the source tile reaches (v5 build 02); not set, every tile.
+    const source = dash?.tiles.find((x) => x.id === from);
+    const reach = source ? reachOf(source) : undefined;
+    filters = [...others, { ...f, fromTile: from, ...(reach ? { to: reach } : {}) }];
     openChipMenu(from);
   }
 
@@ -509,7 +530,8 @@
       app.snap!.workspace.dashboards.push(target);
       target = app.dashboards.find((d) => d.id === target!.id)!;
     }
-    target.tiles = [...target.tiles, copyOf(t, target.tiles, t.title)];
+    // On another page, the tiles its reach names are not there (v5 build 02).
+    target.tiles = [...target.tiles, withReach(copyOf(t, target.tiles, t.title), new Map())];
     app.saveDashboards();
     app.toast(`Copied to ${target.title}`);
   }
@@ -892,6 +914,13 @@
           <button aria-label="Remove saved filter" onclick={() => unpin(f)}><Icon name="x" size={11} /></button>
         </span>
       {/each}
+      {#each everyPage as f (f.fromTile)}
+        <span class="chip pinned" title="Chosen on {pageTitle(f.fromTile)}; it filters every page">
+          <Icon name="filter" size={12} />
+          Every page: {filterText(f, app.tables)}
+          <button aria-label="Clear the filter on every page" onclick={() => clearEvery(f.fromTile)}><Icon name="x" size={11} /></button>
+        </span>
+      {/each}
       {#each filters as f (f.fromTile)}
         <span class="chip" data-chip={f.fromTile}>
           <Icon name="filter" size={12} />
@@ -1076,6 +1105,15 @@
       tables={app.tables}
       onclose={() => (focusId = null)} />
   {/if}
+  {#if reachFor && dash.tiles.find((x) => x.id === reachFor)}
+    {@const rt = dash.tiles.find((x) => x.id === reachFor)!}
+    <ReachSheet
+      tile={rt}
+      tiles={dash.tiles}
+      titleOf={(x) => tileTitle(eff(x), app.tables)}
+      onsave={(reach) => change({ ...rt, reach })}
+      onclose={() => (reachFor = null)} />
+  {/if}
   {#if rowsReq}
     <RowsSheet title={rowsReq.title} data={rowsReq.data} error={rowsReq.error} onclose={() => (rowsSeq++, (rowsReq = null))} />
   {/if}
@@ -1120,6 +1158,7 @@
           onduplicate={() => duplicate(t.id)}
           oncopy={(to) => copyTo(t.id, to)}
           onaction={(page) => setAction(t.id, page)}
+          onreach={advancedOn() ? () => (reachFor = t.id) : undefined}
       onclip={() => {
             const tiles = picked.includes(t.id) ? copyTargets() : dash.tiles.filter((x) => x.id === t.id);
             copyToClipboard(clipOf(tiles), copiedWords(tiles.length));

@@ -58,6 +58,7 @@ pub fn build_site(
                 let f = DashFilter {
                     filter,
                     from_tile: DRILL.into(),
+                    to: None,
                 };
                 values.insert(key, snapshot::build_with(engine, target, &[f], false)?);
             }
@@ -69,6 +70,7 @@ pub fn build_site(
         pages.insert(id, page);
         progress(n + 1, total);
     }
+    let every = every_page_values(engine, &ids, &pages)?;
     // Each page's name, for the navigation and for "From <page>" on a page a drill-through opened.
     let titles: serde_json::Map<String, Value> = dashboards
         .iter()
@@ -99,7 +101,87 @@ pub fn build_site(
         "hidden": dashboards.iter().filter(|d| d.get("hidden").and_then(Value::as_bool) == Some(true)).filter_map(|d| d.get("id").cloned()).collect::<Vec<_>>(),
         "pages": pages,
         "drill": drill,
+        "every": every,
     }))
+}
+
+/// How many values of an every-page filter an exported site holds the other pages for (V5-D5).
+pub const EVERY_MAX: usize = 50;
+
+/// Every-page filters offline (v5 build 02, V5-D37): for each list or dropdown filter tile marked "Apply to every
+/// page", and each of its first [`EVERY_MAX`] values, the results of every other page's tiles with that value. By
+/// `<page>/<tile>`: `{ page, tile, more, values: { <value key>: { <other page>: { <tile>: result } } } }`.
+fn every_page_values(
+    engine: &Engine,
+    ids: &[String],
+    pages: &serde_json::Map<String, Value>,
+) -> anyhow::Result<Value> {
+    let mut every = serde_json::Map::new();
+    // (source, value key, other page, the filter with that value)
+    let mut jobs: Vec<(String, String, String, DashFilter)> = Vec::new();
+    for (pid, page) in pages {
+        for tile in page["tiles"].as_array().into_iter().flatten() {
+            let style = tile
+                .pointer("/filter/style")
+                .and_then(Value::as_str)
+                .unwrap_or("list");
+            if tile.pointer("/filter/everyPage").and_then(Value::as_bool) != Some(true)
+                || !matches!(style, "list" | "dropdown")
+            {
+                continue;
+            }
+            let (Some(tid), Some(table), Some(column)) = (
+                tile.get("id").and_then(Value::as_str),
+                tile.pointer("/dims/0/table").and_then(Value::as_str),
+                tile.pointer("/dims/0/column").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
+            let via = tile
+                .pointer("/dims/0/via")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let values: Vec<Value> = page["base"][tid]["rows"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r.get(0).cloned())
+                .collect();
+            let source = format!("{pid}/{tid}");
+            for v in values.iter().take(EVERY_MAX) {
+                let f = DashFilter {
+                    filter: Filter {
+                        table: table.to_string(),
+                        column: column.to_string(),
+                        grain: None,
+                        op: FilterOp::In,
+                        values: filters::with_empty_text(engine, table, column, vec![v.clone()]),
+                        via: via.clone(),
+                    },
+                    from_tile: filters::every_id(pid, tid),
+                    to: None,
+                };
+                for other in ids.iter().filter(|o| *o != pid) {
+                    jobs.push((source.clone(), js_key(v), other.clone(), f.clone()));
+                }
+            }
+            every.insert(
+                source,
+                json!({ "page": pid, "tile": tid, "more": values.len() > EVERY_MAX, "values": {} }),
+            );
+        }
+    }
+    let built = snapshot::in_parallel(engine, &jobs, |e, (_, _, page, f)| {
+        snapshot::build_quiet(e, page, std::slice::from_ref(f), false).map(|p| p["base"].clone())
+    })?;
+    for ((source, key, page, _), base) in jobs.into_iter().zip(built) {
+        let values = &mut every[&source]["values"];
+        if values.get(&key).is_none() {
+            values[&key] = json!({});
+        }
+        values[&key][&page] = base;
+    }
+    Ok(Value::Object(every))
 }
 
 /// What a click on each mark of a tile keeps only: a place of a map by every name it has, any other tile by its first

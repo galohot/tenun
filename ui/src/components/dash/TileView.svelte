@@ -41,6 +41,7 @@
     flow,
     onflow,
     onaction,
+    onreach,
     onremove,
     onnav,
     onopen,
@@ -82,6 +83,8 @@
     onflow?: (f: NonNullable<Tile['flow']>) => void;
     /** What a click on a mark does: filter this page (null), or open another page (drill-through, build 12). */
     onaction?: (page: string | null) => void;
+    /** Opens "Filters other tiles" (v5 build 02, Advanced). */
+    onreach?: () => void;
     onremove: () => void;
     /** An arrow key on the tile: 1 for the next tile in reading order, -1 for the one before. */
     onnav: (step: 1 | -1) => void;
@@ -240,6 +243,9 @@
               ],
             },
           ]
+        : []),
+      ...(onreach && (canPick || tile.type === 'filter')
+        ? [{ label: tile.reach === undefined ? 'Filters other tiles: all' : tile.reach === 'none' ? 'Filters other tiles: none' : `Filters other tiles: ${tile.reach.length}`, run: onreach }]
         : []),
       { label: 'Duplicate', run: onduplicate },
       { label: 'Copy to dashboard', sub: [...dashboards.map((d) => ({ label: d.title || 'Untitled', run: () => oncopy(d.id) })), { label: 'New dashboard', run: () => oncopy(null) }] },

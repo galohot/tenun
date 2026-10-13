@@ -463,6 +463,7 @@ fn a_cross_filter_on_a_date_part_uses_the_same_number() {
         }))
         .unwrap(),
         from_tile: "other".into(),
+        to: None,
     };
     let r = run_tile(&e, &t, &[f]).unwrap();
     assert_eq!(

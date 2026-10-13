@@ -468,6 +468,7 @@ fn cohort_leaves_out_a_period_that_is_not_over() {
         }))
         .unwrap(),
         from_tile: "other".into(),
+        to: None,
     };
     let r = run_tile(&e, &t, &[upto]).unwrap();
     let cohorts: Vec<&str> = r.rows.iter().map(|x| text(&x[0])).collect();

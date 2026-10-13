@@ -2,7 +2,7 @@
 // and "Exclude", and the one grain for every time tile. Pure code with no imports at run time, so the
 // node tests can load it. The engine does the same on its side (`filters.rs`); keep the two in step.
 
-import type { Bins, Cell, DashFilter, Dim, DType, Filter, GeoInfo, Grain, Tile, TileFilter } from './api';
+import type { Bins, Cell, Dashboard, DashFilter, Dim, DType, Filter, GeoInfo, Grain, Tile, TileFilter } from './api';
 
 export const isPeriod = (g: Grain | null | undefined): boolean => !!g && !['month_of_year', 'weekday', 'hour'].includes(g);
 
@@ -56,7 +56,17 @@ export function tileFilter(tile: Tile, dtype: DType | undefined): DashFilter | n
   const f = tile.filter;
   const d = tile.dims[0];
   if (tile.type !== 'filter' || !f || !d) return null;
-  const make = (op: Filter['op'], values: Cell[]): DashFilter => ({ table: d.table, column: d.column, grain: null, op, values, ...via(d), fromTile: tile.id });
+  const reach = reachOf(tile);
+  const make = (op: Filter['op'], values: Cell[]): DashFilter => ({
+    table: d.table,
+    column: d.column,
+    grain: null,
+    op,
+    values,
+    ...via(d),
+    fromTile: tile.id,
+    ...(reach ? { to: reach } : {}),
+  });
   if (f.style === 'range') {
     const [lo, hi] = f.range ?? [null, null];
     if (lo === null && hi === null) return null;
@@ -177,3 +187,41 @@ export const canExclude = (f: Filter): boolean => f.op === 'in' || f.op === 'not
 /** Ids of saved filters start with this, so they never match a tile. */
 export const PIN_PREFIX = 'pin_';
 export const newPinId = (): string => PIN_PREFIX + Math.random().toString(36).slice(2, 8);
+
+/** The tiles a filter from this tile reaches: none (`[]`), those listed, or every tile (undefined). */
+export function reachOf(tile: Pick<Tile, 'reach'>): string[] | undefined {
+  if (tile.reach === undefined) return undefined;
+  return tile.reach === 'none' ? [] : [...tile.reach];
+}
+
+/** Whether a filter applies to a tile: not its own, and the tile is in the filter's reach. */
+export const reaches = (f: Pick<DashFilter, 'fromTile' | 'to'>, tileId: string): boolean => f.fromTile !== tileId && (!f.to || f.to.includes(tileId));
+
+/** The source id of an every-page filter: the page and the filter tile it comes from. */
+export const everyId = (dashboard: string, tile: string): string => `\u0000every:${dashboard}:${tile}`;
+export const isEvery = (fromTile: string): boolean => fromTile.startsWith('\u0000every:');
+/** The page and the filter tile of an every-page filter's source id. */
+export function everySource(fromTile: string): { dashboard: string; tile: string } | null {
+  const m = /^\u0000every:([^:]*):(.*)$/.exec(fromTile);
+  return m ? { dashboard: m[1], tile: m[2] } : null;
+}
+
+/** The selections of filter tiles marked "Apply to every page" on the other pages, as filters of this page. */
+export function everyPageFilters(
+  dashboards: readonly Pick<Dashboard, 'id' | 'tiles'>[],
+  current: string,
+  dtypeOf: (table: string, column: string) => DType | undefined,
+): DashFilter[] {
+  return dashboards
+    .filter((d) => d.id !== current)
+    .flatMap((d) =>
+      d.tiles
+        .filter((t) => t.type === 'filter' && t.filter?.everyPage)
+        .flatMap((t) => {
+          const f = tileFilter(t, t.dims[0] ? dtypeOf(t.dims[0].table, t.dims[0].column) : undefined);
+          if (!f) return [];
+          const { to: _to, ...rest } = f;
+          return [{ ...rest, fromTile: everyId(d.id, t.id) }];
+        }),
+    );
+}

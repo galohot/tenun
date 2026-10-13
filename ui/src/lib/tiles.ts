@@ -142,7 +142,8 @@ export function resultKey(tile: Tile, filters: DashFilter[]): string {
 
 /** The filter list a tile actually received (its own selection excluded). */
 export function appliedFilters(tile: Tile, filters: DashFilter[]): DashFilter[] {
-  return filters.filter((f) => f.fromTile !== tile.id);
+  // Not its own, and only the ones whose reach names it (v5 build 02). The engine leaves out the same ones.
+  return filters.filter((f) => f.fromTile !== tile.id && (!f.to || f.to.includes(tile.id)));
 }
 
 export function dtypeOf(tables: Table[], table: string, column: string | null): DType | undefined {

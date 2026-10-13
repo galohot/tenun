@@ -584,6 +584,7 @@ fn saved_filters_apply_to_every_tile_including_the_source() {
     let click = DashFilter {
         filter: filter("region", FilterOp::In, json!(["South"])),
         from_tile: "other".into(),
+        to: None,
     };
     let p = snapshot::build(&e, "d1", &[click]).unwrap();
     assert_eq!(p["base"]["bp"]["rows"].as_array().unwrap().len(), 0);
@@ -697,10 +698,12 @@ fn list_options_are_biggest_first_with_counts() {
     let own = DashFilter {
         filter: filter("region", FilterOp::In, json!(["South"])),
         from_tile: "fr".into(),
+        to: None,
     };
     let other = DashFilter {
         filter: filter("date", FilterOp::Gte, json!(["2026-03-01"])),
         from_tile: "k".into(),
+        to: None,
     };
     let r = run_tile(&e, &t, &[own, other]).unwrap();
     let total: f64 = r.rows.iter().map(|r| r[1].as_f64().unwrap()).sum();
@@ -732,6 +735,7 @@ fn rows_behind_a_mark() {
     let f = |from: &str| DashFilter {
         filter: filter("region", FilterOp::In, json!(["North"])),
         from_tile: from.into(),
+        to: None,
     };
     assert_eq!(rows_behind(&e, &bar, &[f("x")], None).unwrap().total, 3);
     assert_eq!(rows_behind(&e, &bar, &[f("bp")], None).unwrap().total, 7);

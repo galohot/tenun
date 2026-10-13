@@ -38,6 +38,47 @@ pub struct TileFilter {
     /// `dates`: one of the relative presets. It wins over `range`.
     #[serde(default)]
     pub preset: Option<String>,
+    /// The selection filters every page of the workspace (v5 build 02, V5-D37).
+    #[serde(default, rename = "everyPage")]
+    pub every_page: Option<bool>,
+}
+
+/// The source id of an every-page filter: the page and the filter tile it comes from (`filters.ts everyId`).
+pub fn every_id(dashboard: &str, tile: &str) -> String {
+    format!("\u{0}every:{dashboard}:{tile}")
+}
+
+/// The selections of the filter tiles marked "Apply to every page" on the other pages of the workspace, as filters
+/// of the page `dashboard` (V5-D37). They reach every tile of it.
+pub fn every_page(engine: &Engine, dashboard: &str) -> Vec<DashFilter> {
+    let mut out = Vec::new();
+    for d in engine.dashboards() {
+        let Some(id) = d.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if id == dashboard {
+            continue;
+        }
+        for raw in d
+            .get("tiles")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if raw.pointer("/filter/everyPage").and_then(Value::as_bool) != Some(true) {
+                continue;
+            }
+            let Ok(tile) = serde_json::from_value::<Tile>(raw.clone()) else {
+                continue;
+            };
+            if let Some(mut f) = tile_filter(engine, &tile) {
+                f.from_tile = every_id(id, &tile.id);
+                f.to = None;
+                out.push(f);
+            }
+        }
+    }
+    out
 }
 
 /// The filter a filter tile stands for, or `None` while it keeps everything.
@@ -57,6 +98,7 @@ pub fn tile_filter(engine: &Engine, tile: &Tile) -> Option<DashFilter> {
             via: d.via.clone(),
         },
         from_tile: tile.id.clone(),
+        to: crate::snapshot::reach_of(tile),
     };
     match f.style.as_str() {
         "range" => {
