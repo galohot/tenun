@@ -151,6 +151,24 @@ sidebar and switch on **Make this workspace a site**. It is off unless you switc
 - **Standard deviation and variance** as values.
 - **Manual sort order** for the groups.
 - **Reference bands:** a shaded range on the axis.
+- **Drill down:** see below.
+
+## Drill down
+
+A chart over time can go from years to quarters, to months, to days. A chart by region can go to the stores of a
+region. You set it up once (Advanced); anyone who reads the dashboard can use it.
+
+- **Set it up:** select a bar, line, area, pie, donut, table or pivot. Under **Drill down**, choose **By date** (when
+  its first field is a date by year, quarter, month or week) or a hierarchy.
+- **A hierarchy** lists fields from the top down, such as Region › Store › Product. Make one in the **Model** view with
+  **Hierarchies**. Each field must reach the one above it through your relationships; Tenun says which pair does not.
+- **Use it:** the tile shows a drill button in its corner. With it on, a click on a bar opens the level below for that
+  bar. The bar above the chart shows the path ("All years › 2026 › by quarter"). Click a part of it to go back there,
+  or press **Up** or Esc. **Next level** shows the level below for every value at once (every quarter of every year).
+- **With the drill button off,** a click filters the other tiles, as always. On a drilled chart it filters by the
+  level shown, such as the month.
+- **Exported files and tenun.cloud** hold one level of drill-down for the first 50 values of each chart, and Next level.
+  A click past that says so. Maps do not drill, because a place can be written several ways in the data.
 
 ## What Tenun does not draw
 

@@ -73,6 +73,17 @@ pub struct Tile {
     /// Text tile: the period its live numbers cover (the dashboard's grain). Not set: by month.
     #[serde(default)]
     pub grain: Option<Grain>,
+    /// The tile drills down (v5 build 01): a hierarchy, or (none named) the date chain of its first field.
+    #[serde(default)]
+    pub drill: Option<TileDrill>,
+}
+
+/// How a tile drills (V5-D3).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TileDrill {
+    /// A `Hierarchy` id. Not set: the date of the first field goes year › quarter › month › day.
+    #[serde(default)]
+    pub hierarchy: Option<String>,
 }
 
 /// The fields a card style gives and a card may set itself (build 08), as `card.ts CARD_FIELDS`.
@@ -227,6 +238,11 @@ pub struct Partial {
 }
 
 const MAX_CROSS_VALUES: usize = 30;
+
+/// Offline drill-down holds the level below the top for this many values of a tile (V5-D5, as V4-D16).
+pub const MAX_DRILL_VALUES: usize = 50;
+/// The key of "Next level" (every value one level down) in an export's `down`.
+pub const DRILL_ALL_KEY: &str = "\u{0}all";
 
 /// The most forks of the engine that run at once. DuckDB also runs each query on several threads.
 const FORKS: usize = 4;
@@ -1127,7 +1143,11 @@ pub fn build_with(
 
     let mut base: BTreeMap<String, QueryResult> = BTreeMap::new();
     for t in tiles.iter().filter(|t| !is_static_tile(t)) {
-        base.insert(t.id.clone(), run_tile_public(engine, t, filters)?);
+        // A tile that drills says so in its result: the viewer offers the drill switch (v5 build 01).
+        base.insert(
+            t.id.clone(),
+            crate::drill::run_public(engine, t, filters, &crate::drill::DrillState::default())?,
+        );
     }
 
     // Offline cross-filtering: each clickable tile, each of its values, every other tile.
@@ -1350,6 +1370,55 @@ pub fn build_with(
         cross.entry(src).or_default().insert(key, per_tile);
     }
 
+    // Offline drill-down (V5-D5): the level below the top for the first values of each tile that drills, and
+    // "Next level" for all of them. Deeper clicks say that the file holds one level.
+    let mut drills: Vec<(String, String, crate::drill::DrillState)> = Vec::new();
+    for t in tiles.iter().filter(|_| cross_too) {
+        let Some(info) = base
+            .get(&t.id)
+            .and_then(|r| r.drill.as_ref().map(|d| (r, d)))
+        else {
+            continue;
+        };
+        let (res, info) = info;
+        if !info.can_down {
+            continue;
+        }
+        let mut seen = HashSet::new();
+        for v in res
+            .rows
+            .iter()
+            .filter_map(|r| r.first().cloned())
+            .filter(|v| js_key(v) != shape::OTHER_KEY && seen.insert(js_key(v)))
+            .take(MAX_DRILL_VALUES)
+        {
+            let key = js_key(&v);
+            let step = crate::drill::Step { value: Some(v) };
+            drills.push((
+                t.id.clone(),
+                key,
+                crate::drill::DrillState { path: vec![step] },
+            ));
+        }
+        let every = crate::drill::Step { value: None };
+        drills.push((
+            t.id.clone(),
+            DRILL_ALL_KEY.to_string(),
+            crate::drill::DrillState { path: vec![every] },
+        ));
+    }
+    let drilled = in_parallel(engine, &drills, |e, (id, _, state)| {
+        let t = tiles
+            .iter()
+            .find(|t| &t.id == id)
+            .expect("a tile of this page");
+        crate::drill::run_public(e, t, filters, state)
+    })?;
+    let mut down: BTreeMap<String, BTreeMap<String, QueryResult>> = BTreeMap::new();
+    for ((id, key, _), res) in drills.into_iter().zip(drilled) {
+        down.entry(id).or_default().insert(key, res);
+    }
+
     // The measures the tiles name: what the viewer needs to write their names and to know whether
     // their values add up (V4-D85d). The formula stays at home.
     let mut named: Vec<String> = Vec::new();
@@ -1455,6 +1524,22 @@ pub fn build_with(
         "saved": saved,
         "grain": grain,
     });
+    if !down.is_empty() {
+        payload["down"] = json!(down);
+        // The hierarchies the drilled tiles use: the viewer names the field of the level it shows.
+        let used: HashSet<&str> = tiles
+            .iter()
+            .filter_map(|t| t.drill.as_ref()?.hierarchy.as_deref())
+            .collect();
+        let hierarchies: Vec<crate::workspace::Hierarchy> = engine
+            .hierarchies()
+            .into_iter()
+            .filter(|h| used.contains(h.id.as_str()))
+            .collect();
+        if !hierarchies.is_empty() {
+            payload["hierarchies"] = json!(hierarchies);
+        }
+    }
     if !links.is_empty() {
         payload["links"] = json!(links);
     }

@@ -3,6 +3,8 @@
   // made; clicking a bar or a slice switches to the stored filtered results.
   import { onMount } from 'svelte';
   import type { Cell, Tile } from '../lib/api';
+  import { shownTile } from '../lib/drilldown';
+  import DrillBar from '../components/dash/DrillBar.svelte';
   import type { ExportPayload } from '../lib/export';
   import { key, readColors, type Colors } from '../lib/chart';
   import { cell, dateMedium, dateTimeMedium, dimLabel, OTHER_KEY, tileTitle, timeShort } from '../lib/format';
@@ -106,15 +108,45 @@
     if (next) document.querySelector<HTMLElement>(`[data-tile="${CSS.escape(next.id)}"]`)?.focus();
   }
 
+  /** The key of "Next level" in `down` (`DRILL_ALL_KEY` in the engine). */
+  const ALL = '\u0000all';
+  /** Drill-down offline (v5 build 01): the tiles a click drills, and the level-1 result each one shows. One level only. */
+  let drillMode = $state<Record<string, boolean>>({});
+  let drilled = $state<Record<string, { key: string; value?: Cell }>>({});
+  /** A tile whose reader asked for a level the file does not hold. */
+  let deeper = $state<Record<string, boolean>>({});
+  const canDrill = (t: Tile) => !!data.down?.[t.id] && !!data.base[t.id]?.drill?.canDown;
+
+  function drillClick(t: Tile, v: Cell): boolean {
+    if (!drillMode[t.id] || !canDrill(t) || v === OTHER_KEY) return false;
+    const r = data.down?.[t.id]?.[key(v)];
+    if (drilled[t.id] || !r) deeper = { ...deeper, [t.id]: true };
+    else drilled = { ...drilled, [t.id]: { key: key(v), value: v } };
+    return true;
+  }
+  function drillTo(t: Tile, depth: number) {
+    if (depth > 0) return;
+    const { [t.id]: _gone, ...rest } = drilled;
+    drilled = rest;
+    deeper = { ...deeper, [t.id]: false };
+  }
+
   function resultFor(t: Tile) {
+    const d = drilled[t.id];
+    // A drilled tile shows its stored level; a click on another tile cannot filter it in the file.
+    if (d) return { res: data.down?.[t.id]?.[d.key] ?? data.base[t.id], offline: !!pick && pick.tile !== t.id };
     if (!pick || pick.tile === t.id) return { res: data.base[t.id], offline: false };
     const r = data.cross[pick.tile]?.[crossKey(pick.value, pick.col, pick.stage)]?.[t.id];
     return r ? { res: r, offline: false } : { res: data.base[t.id], offline: true };
   }
 
   function onpick(t: Tile, v: Cell, col = false, stage?: number) {
+    // With drill-down on, a click opens the level below (v5 build 01).
+    if (!col && drillClick(t, v)) return;
     // A tile with an action opens its page, kept to the clicked value (build 13).
     if (!col && t.action && ondrill?.(t, v)) return;
+    // A drilled tile's marks are of its level below: the file holds no filters for them.
+    if (drilled[t.id]) return;
     if (!data.cross[t.id]?.[crossKey(v, col, stage)]) return;
     pick = pick && pick.tile === t.id && !!pick.col === col && pick.stage === stage && key(pick.value) === key(v) ? null : { tile: t.id, value: v, col, stage };
   }
@@ -212,6 +244,8 @@
   <!-- One tile's frame: on the grid at its place, or in a story's column (build 11). -->
   {#snippet frame(t: Tile, box: { x: number; y: number; w: number; h: number } | null)}
     {@const r = resultFor(t)}
+    <!-- A drilled tile is drawn with the field of its level (v5 build 01). -->
+    {@const shown = shownTile(t, r.res?.drill, data.hierarchies ?? [])}
     {@const name = data.titles?.[t.id] ?? tileTitle(t, data.tables, r?.res?.parts)}
     <!-- A number card fills its tile with its ground and draws its own title (build 08). -->
     {@const ground = cardGround(t)}
@@ -235,10 +269,27 @@
       {#if r.res && !isStatic(t.type) && t.type !== 'filter'}
         <button class="expand" title="Open large" aria-label="Open large" onclick={() => (focusId = t.id)}><Icon name="expand" size={14} /></button>
       {/if}
+      {#if canDrill(t)}
+        <button
+          class="expand drillsw"
+          class:on={drillMode[t.id]}
+          aria-pressed={!!drillMode[t.id]}
+          title={drillMode[t.id] ? 'A click drills down. Click to make a click filter again.' : 'Drill down: make a click open the level below.'}
+          aria-label="Drill down"
+          onclick={() => (drillMode = { ...drillMode, [t.id]: !drillMode[t.id] })}><Icon name="drill" size={14} /></button>
+      {/if}
+      {#if r.res?.drill && (drillMode[t.id] || drilled[t.id])}
+        <DrillBar
+          info={r.res.drill}
+          onto={(d) => drillTo(t, d)}
+          onup={() => drillTo(t, 0)}
+          onnext={!drilled[t.id] && data.down?.[t.id]?.[ALL] ? () => (drilled = { ...drilled, [t.id]: { key: ALL } }) : undefined}
+          note={deeper[t.id] ? 'This file holds one level of drill-down. Open the workspace in Tenun to go further.' : ''} />
+      {/if}
       <div class="body" class:bare={((isStatic(t.type) || t.type === 'filter') && !t.title) || !!ground}>
         {#if r.res || isStatic(t)}
           <TileBody
-            tile={t}
+            tile={shown}
             res={r.res ?? EMPTY_RESULT}
             colors={colors!}
             tables={data.tables}
@@ -248,12 +299,12 @@
             selected={pick?.tile === t.id && !pick.col ? [pick.value] : null}
             selectedCol={pick?.tile === t.id && pick.col ? [pick.value] : null}
             selectedStage={pick?.tile === t.id && !pick.col ? (pick.stage ?? null) : null}
-            onpick={data.cross[t.id] || (ondrill && t.action) ? (v, stage) => onpick(t, v, false, stage) : undefined}
+            onpick={data.cross[t.id] || (ondrill && t.action) || canDrill(t) ? (v, stage) => onpick(t, v, false, stage) : undefined}
             onpickcol={data.cross[t.id] && t.cols ? (v) => onpick(t, v, true) : undefined} />
         {/if}
       </div>
-      {#if r.res && t.type !== 'kpi' && partialNote(r.res, t.dims[0]?.grain)}
-        <p class="note">{partialNote(r.res, t.dims[0]?.grain)}</p>
+      {#if r.res && t.type !== 'kpi' && partialNote(r.res, shown.dims[0]?.grain)}
+        <p class="note">{partialNote(r.res, shown.dims[0]?.grain)}</p>
       {/if}
       {#each r.res?.notes ?? [] as n (n)}
         <p class="note link-note"><Icon name="warning" size={12} /> {n}</p>
@@ -370,6 +421,9 @@
   .tile:hover .expand, .tile:focus-within .expand, .expand:focus-visible { opacity: 1; }
   .tile:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
   .expand:hover { color: var(--text); background: var(--hover); }
+  /* The drill switch sits left of the expand button and stays in view once it is on. */
+  .expand.drillsw { right: 34px; }
+  .expand.drillsw.on { opacity: 1; color: var(--accent-text); background: var(--inset); }
   .body { flex: 1; min-height: 0; padding: 6px 14px 10px; }
   .body.bare { padding-top: 12px; }
   .note { margin: 0; padding: 0 14px 8px; font-size: 11px; color: var(--text-2); }

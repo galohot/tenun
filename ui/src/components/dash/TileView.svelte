@@ -1,6 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import type { Bins, Cell, QueryResult, Tile, TileFilter } from '../../lib/api';
+  import type { Bins, Cell, DrillState, QueryResult, Tile, TileFilter } from '../../lib/api';
+  import { down, isTop, nextLevel, shownTile, toDepth, TOP, up } from '../../lib/drilldown';
+  import DrillBar from './DrillBar.svelte';
   import { partialNote, runTile } from '../../lib/run';
   import { app, go } from '../../lib/state.svelte';
   import { readColors, type Colors } from '../../lib/chart';
@@ -47,7 +49,8 @@
     filters: DashFilter[];
     tick: number;
     active: boolean;
-    onpick: (value: Cell, otherOf?: Cell[], bins?: Bins, stage?: number) => void;
+    /** `shown`: the tile as drawn at the level a drill is at (v5 build 01); the click filters by its field. */
+    onpick: (value: Cell, otherOf?: Cell[], bins?: Bins, stage?: number, shown?: Tile) => void;
     /** A click on a pivot column header. */
     onpickcol: (value: Cell) => void;
     /** Tells the dashboard what this tile shows now (the Inspector's suggestions reuse it). */
@@ -55,7 +58,7 @@
     /** Filter tile: the selection changed. */
     onfilter: (f: TileFilter) => void;
     /** "Show rows" for the whole tile, or for the mark with this value. */
-    onrows: (value?: Cell, otherOf?: Cell[], bins?: Bins) => void;
+    onrows: (value?: Cell, otherOf?: Cell[], bins?: Bins, shown?: Tile) => void;
     /** Open the tile large. */
     onfocus: () => void;
     onselect: () => void;
@@ -91,8 +94,21 @@
   let loading = $state(false);
   let colors = $state<Colors>(readColors());
 
+  /** Where the reader drilled to, and whether a click drills (on) or filters (off, as always). Not saved (V5-D3). */
+  let drill = $state<DrillState>(TOP);
+  let drillMode = $state(false);
+  // A new drill setting or a new first field starts again at the top.
+  const drillKey = $derived(JSON.stringify([tile.drill ?? null, tile.dims[0] ?? null]));
+  $effect(() => {
+    void drillKey;
+    untrack(() => {
+      drill = TOP;
+      drillMode = false;
+    });
+  });
+
   const q = $derived(tileQuery(tile, filters));
-  const qKey = $derived(resultKey(tile, filters));
+  const qKey = $derived(resultKey(tile, filters) + (tile.drill ? `|${JSON.stringify(drill.path)}` : ''));
   const fixed = $derived(isStatic(tile));
 
   /** A map that downloaded another country's boundaries asks again (build 06). */
@@ -117,7 +133,7 @@
     loading = true;
     // A filter tile saves its selection in the tile. That must not make it ask for its values again.
     const asked = tile.type === 'filter' ? untrack(() => $state.snapshot(tile)) : $state.snapshot(tile);
-    runTile(asked as Tile, $state.snapshot(filters) as DashFilter[])
+    runTile(asked as Tile, $state.snapshot(filters) as DashFilter[], tile.drill ? ($state.snapshot(drill) as DrillState) : undefined)
       .then((r) => {
         if (key === qKey) {
           res = r;
@@ -155,13 +171,24 @@
     const i = tile.dims.findIndex((d) => sameField(d, mine));
     return i < 0 ? null : i;
   });
-  const note = $derived(res && tile.type !== 'kpi' ? partialNote(res, tile.dims[0]?.grain) : null);
   // A link this tile crosses repeats a key on its one side, so the first row was used (V4-D26).
   const linkNotes = $derived(res?.notes ?? []);
   const title = $derived(tileTitle(tile, app.tables, res?.parts));
   // A number card (build 08) is drawn with its style merged in; it fills the tile with its ground and draws its own title.
   const drawn = $derived(drawnTile(tile, app.snap?.workspace.cardStyles));
   const ground = $derived(cardGround(drawn));
+  /** The tile as it is drawn at the drilled level: its first field is that level's field. */
+  const view = $derived(shownTile(drawn, res?.drill, app.snap?.workspace.hierarchies ?? []));
+  // The unfinished period is named at the grain shown: "Q3 2026", not "2026", on a drilled chart.
+  const note = $derived(res && tile.type !== 'kpi' ? partialNote(res, view.dims[0]?.grain) : null);
+  /** A click drills when the switch is on and there is a level below; "Other" stands for many values and stays. */
+  function clickMark(v: Cell, stage?: number) {
+    if (drillMode && res?.drill?.canDown && v !== OTHER_KEY) {
+      drill = down(drill, v);
+      return;
+    }
+    onpick(v, res?.otherOf, res?.bins, stage, view);
+  }
   // A note or a picture with no title has no header, so the whole tile drags. Nor has a card. A text with live numbers
   // asks the engine, but it is still a note (build 10).
   const bare = $derived(((isStatic(tile.type) || tile.type === 'filter') && !title) || !!ground);
@@ -181,16 +208,17 @@
       app.error(e);
     }
   }
-  const png = () => guarded(() => downloadTilePng(el!, tile, res, app.tables, title));
-  const csv = () => guarded(() => downloadCsv(tile, res!, app.tables, title));
-  const xlsx = () => guarded(() => downloadXlsx(tile, res!, filters, app.tables, title, !!app.health?.native));
+  const png = () => guarded(() => downloadTilePng(el!, view, res, app.tables, title));
+  const csv = () => guarded(() => downloadCsv(view, res!, app.tables, title));
+  const xlsx = () =>
+    guarded(() => downloadXlsx(tile, res!, filters, app.tables, title, !!app.health?.native, res?.drill ? { state: $state.snapshot(drill) as DrillState, shown: view } : undefined));
 
   // A small menu: from the "more" button (the whole tile) or a right-click (one mark).
   let menu = $state<{ x: number; y: number; mark?: { value: Cell } } | null>(null);
   const menuItems = $derived.by(() => {
     if (menu?.mark) {
       const value = menu.mark.value;
-      return [{ label: 'Show rows', run: () => onrows(value, res?.otherOf, res?.bins) }];
+      return [{ label: 'Show rows', run: () => onrows(value, res?.otherOf, res?.bins, view) }];
     }
     return [
       ...(onclip ? [{ label: 'Copy', run: onclip }] : []),
@@ -230,7 +258,10 @@
   function onkey(e: KeyboardEvent) {
     // Keys typed inside a control of the tile belong to that control.
     if (e.target !== e.currentTarget) return;
-    if (e.key === 'Enter') {
+    if (e.key === 'Escape' && !isTop(drill)) {
+      e.preventDefault();
+      drill = up(drill);
+    } else if (e.key === 'Enter') {
       e.preventDefault();
       onopen();
     } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
@@ -250,6 +281,18 @@
   <header role="group" aria-label={phone ? undefined : 'Drag to move'} onpointerdown={phone ? undefined : ondragstart}>
     <h3 title={title}>{title}</h3>
     {#if loading}<span class="spin" aria-label="Loading"></span>{/if}
+    {#if res?.drill}
+      <button
+        class="btn plain icon keep drillsw"
+        class:on={drillMode}
+        aria-pressed={drillMode}
+        title={drillMode ? 'A click drills down. Click to make a click filter again.' : 'Drill down: make a click open the level below.'}
+        aria-label="Drill down"
+        onpointerdown={(e) => e.stopPropagation()}
+        onclick={() => (drillMode = !drillMode)}>
+        <Icon name="drill" size={14} />
+      </button>
+    {/if}
     {#if hasData}
       <button class="btn plain icon edit keep" title="Open large" aria-label="Open large" onpointerdown={(e) => e.stopPropagation()} onclick={onfocus}>
         <Icon name="expand" size={14} />
@@ -264,6 +307,9 @@
       </button>
     {/if}
   </header>
+  {#if res?.drill && (drillMode || !isTop(drill))}
+    <DrillBar info={res.drill} onto={(d) => (drill = toDepth(drill, d))} onup={() => (drill = up(drill))} onnext={() => (drill = nextLevel(drill))} />
+  {/if}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="body" onpointerdown={bare && !phone ? (e) => !(e.target as HTMLElement).closest('a, button') && ondragstart(e) : undefined}>
     {#if fixed || (tile.type === 'text' && !res)}
@@ -280,7 +326,7 @@
       <!-- One tile that fails to draw says so; the other tiles stay. -->
       <svelte:boundary>
         <TileBody
-          tile={drawn}
+          tile={view}
           {res}
           {colors}
           {selected}
@@ -289,7 +335,7 @@
           tables={app.tables}
           {pages}
           onpage={openPage}
-          onpick={canPick ? (v, stage) => onpick(v, res?.otherOf, res?.bins, stage) : undefined}
+          onpick={canPick ? clickMark : undefined}
           onpickcol={isPivotLike(tile.type) && tile.cols ? onpickcol : undefined}
           oncontext={canPick ? (v, e) => (menu = { x: e.clientX, y: e.clientY, mark: { value: v } }) : undefined}
           {title}
@@ -445,4 +491,5 @@
     animation: spin 700ms linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .drillsw.on { color: var(--accent-text); background: var(--inset); }
 </style>

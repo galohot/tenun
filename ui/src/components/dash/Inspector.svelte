@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { drillOptions, drillSetting, drillSettingValue } from '../../lib/drilldown';
   import { api, DATE_PARTS, isPart, type Agg, type Cell, type CondFormat, type Dim, type DType, type Grain, type MapLevel, type MapSpec, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileLine, type TileType } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { aggNames, cell, measureLabel, OTHER_KEY, tileTitle } from '../../lib/format';
@@ -191,6 +192,8 @@
 
   // Advanced is on for this computer (V3-D1). It decides what the Inspector offers, never how a tile draws.
   const advanced = $derived(advancedOn());
+  /** Off, the date chain of the first field, or a hierarchy that holds it (v5 build 01). */
+  const drillChoices = $derived(drillOptions(tile, app.snap?.workspace.hierarchies ?? []));
   // A tile of an Advanced type, while the switch is off: it still draws, but its fields wait for the switch.
   const lockedType = $derived(!advanced && ADVANCED_TYPES.includes(tile.type));
   const isHeat = $derived(tile.type === 'heatmap');
@@ -1596,6 +1599,18 @@
       {/if}
 
       {@render bandsUi()}
+    </div>
+  {/if}
+
+  {#if advanced && drillChoices.length}
+    <div class="sec adv">
+      <span class="label">Drill down</span>
+      <select class="field" aria-label="Drill down" value={drillSettingValue(tile.drill)} onchange={(e) => set({ drill: drillSetting(e.currentTarget.value) })}>
+        {#each drillChoices as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
+      </select>
+      <p class="hint tight">
+        A reader switches on drill-down in the tile's corner; a click then opens the level below. Make a hierarchy, such as Region › Store, in the Model view.
+      </p>
     </div>
   {/if}
 

@@ -428,6 +428,9 @@ pub struct QueryResult {
     /// period before (0.063 for +6.3 %), `"<id>|period"` the name of the period. A measure that is gone has none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub values: Option<BTreeMap<String, serde_json::Value>>,
+    /// A tile that drills (v5 build 01): its levels, the one shown and the path to it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drill: Option<crate::drill::DrillInfo>,
 }
 
 /// A compare chart with one value reads two periods of a field. `periods` are those two values, in
@@ -463,6 +466,7 @@ impl QueryResult {
             parts: Vec::new(),
             geo: None,
             values: None,
+            drill: None,
         }
     }
 }
@@ -2233,6 +2237,73 @@ impl Engine {
     }
 
     /// The card styles of the workspace (build 08).
+    pub fn hierarchies(&self) -> Vec<crate::workspace::Hierarchy> {
+        self.state.read().unwrap().ws.hierarchies.clone()
+    }
+
+    /// Replaces the hierarchies (v5 build 01). Each has a name and 2 to 6 fields that exist, and each field reaches
+    /// the one above it through the model: a query grouped by both must work. A new one gets the next `h<n>` id.
+    pub fn set_hierarchies(
+        &self,
+        mut list: Vec<crate::workspace::Hierarchy>,
+    ) -> anyhow::Result<()> {
+        let catalog = self.catalog();
+        let mut next = list
+            .iter()
+            .filter_map(|h| h.id.strip_prefix('h')?.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0);
+        for h in &mut list {
+            h.name = h.name.trim().to_string();
+            if h.name.is_empty() {
+                anyhow::bail!("A hierarchy needs a name.");
+            }
+            if !(2..=6).contains(&h.levels.len()) {
+                anyhow::bail!("{} needs 2 to 6 fields, from the top down.", h.name);
+            }
+            for l in &h.levels {
+                if catalog
+                    .table(&l.table)
+                    .is_none_or(|t| !t.columns.iter().any(|c| c.name == l.column))
+                {
+                    anyhow::bail!("{}: the field {} is not in the data.", h.name, l.column);
+                }
+            }
+            for pair in h.levels.windows(2) {
+                let q = SemanticQuery {
+                    measures: vec![crate::snapshot::count_rows(&pair[1].table)],
+                    dimensions: [&pair[0], &pair[1]]
+                        .iter()
+                        .map(|l| query::Dimension {
+                            table: l.table.clone(),
+                            column: l.column.clone(),
+                            grain: None,
+                            via: None,
+                        })
+                        .collect(),
+                    filters: vec![],
+                    sort: vec![],
+                    limit: Some(1),
+                };
+                if self.query(&q).is_err() {
+                    anyhow::bail!(
+                        "{}: {} does not reach {} through the model. Link their tables first.",
+                        h.name,
+                        pair[1].column,
+                        pair[0].column
+                    );
+                }
+            }
+            if h.id.is_empty() {
+                next += 1;
+                h.id = format!("h{next}");
+            }
+        }
+        self.state.write().unwrap().ws.hierarchies = list;
+        self.persist();
+        Ok(())
+    }
+
     pub fn card_styles(&self) -> Vec<serde_json::Value> {
         self.state.read().unwrap().ws.card_styles.clone()
     }

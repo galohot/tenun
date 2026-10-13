@@ -5,6 +5,7 @@ pub mod calc;
 pub mod catalog;
 pub mod csvread;
 pub mod derived;
+pub mod drill;
 pub mod engine;
 pub mod excel;
 pub mod fetch;

@@ -155,6 +155,33 @@ export interface FieldRef {
   column: string;
 }
 
+/** Fields from the top down (Region › Store), 2 to 6 of them, for drill-down in a chart (v5 build 01). */
+export interface Hierarchy {
+  /** `h<n>`; empty for a new one. */
+  id: string;
+  name: string;
+  levels: FieldRef[];
+}
+
+/** One step down a drill: `value` keeps only that value of its level; no `value` ("Next level") shows every one. */
+export interface DrillStep {
+  value?: Cell;
+}
+
+/** Where the reader drilled to: one step for each level they went down. */
+export interface DrillState {
+  path: DrillStep[];
+}
+
+/** What a tile that drills says about it: the names of its levels, their date grains, the level shown and the path. */
+export interface DrillInfo {
+  levels: string[];
+  grains: (Grain | null)[];
+  at: number;
+  path: DrillStep[];
+  canDown: boolean;
+}
+
 export interface Relationship {
   id: string;
   /** The many side. */
@@ -404,6 +431,8 @@ export interface QueryResult {
   parts?: { measure: number; note: string; repeats?: boolean; overlap?: boolean; splitOnly?: boolean }[];
   /** Map tiles: the place of each row and the names not on the map (build 06). */
   geo?: GeoInfo;
+  /** A tile that drills (v5 build 01): its levels, the one shown, the path to it. */
+  drill?: DrillInfo;
   /** Text tiles: live numbers by `<measure id>`, `<id>|compare` and `<id>|period` (build 10). */
   values?: Record<string, Cell>;
 }
@@ -666,6 +695,8 @@ export interface Tile {
   image?: TileImage;
   /** Map tile: the level, the country, filled or points (build 06). */
   map?: MapSpec;
+  /** Drill-down (v5 build 01, Advanced): a hierarchy, or `{}` for the date of the first field (year › quarter › month › day). */
+  drill?: { hierarchy?: string };
 }
 
 /** Settings of this computer (not of the workspace). */
@@ -754,6 +785,8 @@ export interface Workspace {
   cardStyles?: CardStyle[];
   /** The workspace as a site (build 12). Not set: not a site. */
   site?: SiteSettings;
+  /** Hierarchies for drill-down (v5 build 01). */
+  hierarchies?: Hierarchy[];
 }
 
 export interface Snapshot {
@@ -992,6 +1025,7 @@ export const api = {
   suggest: () => call<Suggestion[]>('GET', '/relationships/suggest'),
   putDashboards: (d: Dashboard[]) => call<{ ok: boolean }>('PUT', '/dashboards', d),
   putCardStyles: (list: CardStyle[]) => call<{ ok: boolean }>('PUT', '/workspace/card-styles', list),
+  putHierarchies: (list: Hierarchy[]) => call<Snapshot>('PUT', '/workspace/hierarchies', list),
   putSite: (site: SiteSettings) => call<{ ok: boolean }>('PUT', '/workspace/site', site),
   /** What an exported page holds (the site preview draws it, build 12). */
   snapshot: (dashboard: string, filters: DashFilter[] = []) => call<ExportPayload>('POST', '/snapshot', { dashboard, filters }),
@@ -1013,7 +1047,7 @@ export const api = {
     return res.blob();
   },
   openBrowser: () => call<{ ok: boolean }>('POST', '/open-browser'),
-  tile: (tile: Tile, filters: unknown[]) => call<QueryResult>('POST', '/tile', { tile, filters }),
+  tile: (tile: Tile, filters: unknown[], drill?: DrillState) => call<QueryResult>('POST', '/tile', { tile, filters, ...(drill ? { drill } : {}) }),
   /** The raw rows behind a tile; `click` is the filter a click on the mark makes. */
   rows: (tile: Tile, filters: unknown[], click: Filter | null) => call<RowsBehind>('POST', '/rows', { tile, filters, click }),
   cloud: () => call<CloudStatus>('GET', '/cloud'),
@@ -1028,7 +1062,7 @@ export const api = {
   exportTo: (dashboard: string, filters: unknown[], path: string) =>
     call<{ ok: boolean }>('POST', '/export-html', { dashboard, filters, path }),
   /** The Excel file of one tile. With `path` (desktop app) the server writes it there and nothing comes back. */
-  exportXlsx: async (body: { tile: Tile; filters: unknown[]; headers: string[]; title: string }, path?: string): Promise<Uint8Array> => {
+  exportXlsx: async (body: { tile: Tile; filters: unknown[]; headers: string[]; title: string; drill?: DrillState }, path?: string): Promise<Uint8Array> => {
     const res = await fetch('/api/export-xlsx', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Tenun': '1' },

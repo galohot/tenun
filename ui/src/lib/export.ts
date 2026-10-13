@@ -1,7 +1,7 @@
 // The snapshot a dashboard is exported or published as. Built by the Rust
 // engine (`tenun-core::snapshot`); the viewer reads it.
 
-import type { Dashboard, Grain, NumFormat, QueryResult, SiteSettings, Table } from './api';
+import type { Dashboard, Grain, Hierarchy, NumFormat, QueryResult, SiteSettings, Table } from './api';
 import type { DashFilter } from './tiles';
 
 export interface ExportPayload {
@@ -33,6 +33,13 @@ export interface ExportPayload {
   links?: Record<string, string>;
   /** The named measures the tiles use: their name and format, the type of the value and whether the values add up. Never the formula. */
   measures?: { id: string; name: string; format?: NumFormat | null; dtype?: string | null; additive?: boolean }[];
+  /**
+   * Drill-down offline (v5 build 01, V5-D5): `down[tile][valueKey]` is the level below the top for that value, and
+   * `down[tile]["\u0000all"]` the level below for every value. One level only.
+   */
+  down?: Record<string, Record<string, QueryResult>>;
+  /** The hierarchies the drilled tiles use. */
+  hierarchies?: Hierarchy[];
 }
 
 /**

@@ -4,12 +4,14 @@
   import { untrack } from 'svelte';
   import { api, type FieldRef, type Relationship, type Suggestion } from '../lib/api';
   import { app } from '../lib/state.svelte';
+  import { advancedOn } from '../lib/tiers';
   import { firstLinks, kindWords, linkLabel, siblings, unnamedPairs } from '../lib/links';
   import { canMarkLinkTable, notLinkTablesOf, suggestLinkTables } from '../lib/linktables';
   import { isEmptySetup, withLinkTable, withNotLinkTable } from '../lib/prep';
   import TableNode from './model/TableNode.svelte';
   import RelEdge from './model/RelEdge.svelte';
   import LinkSheet from './model/LinkSheet.svelte';
+  import HierarchySheet from './model/HierarchySheet.svelte';
   import Icon from './Icon.svelte';
 
   const nodeTypes = { table: TableNode };
@@ -249,16 +251,27 @@
       if (!ws.relationships.length || app.tables.length > ws.relationships.length + 1) findSuggestions();
     }
   });
+  /** The hierarchies sheet (v5 build 01, Advanced). */
+  let hierarchies = $state(false);
 </script>
 
 <header class="toolbar">
   <h2>Model</h2>
   <span class="hint muted">Drag from a column to a column in another table to relate them. Click the label of a line to open it.</span>
   <span class="spacer"></span>
+  {#if advancedOn() || (app.snap?.workspace.hierarchies ?? []).length}
+    <button class="btn" onclick={() => (hierarchies = true)} disabled={!app.tables.length}>
+      <Icon name="drill" /> Hierarchies
+    </button>
+  {/if}
   <button class="btn" onclick={findSuggestions} disabled={looking || app.tables.length < 2}>
     <Icon name="sparkles" /> {looking ? 'Looking…' : 'Suggest relationships'}
   </button>
 </header>
+
+{#if hierarchies}
+  <HierarchySheet onclose={() => (hierarchies = false)} />
+{/if}
 
 {#if app.tables.length === 0}
   <div class="empty">

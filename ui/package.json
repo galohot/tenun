@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build && vite build --mode viewer",
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
-    "test": "node --experimental-strip-types --test tests/contrast.test.js tests/locale.test.js tests/charts.test.js tests/markdown.test.js tests/tiles.test.js tests/showas.test.js tests/lines.test.js tests/advanced.test.js tests/advanced2.test.js tests/filters.test.js tests/output.test.js tests/prep.test.js tests/sources.test.js tests/links.test.js tests/formula.test.js tests/measures.test.js tests/linktables.test.js tests/derived.test.js tests/places.test.js tests/maps.test.js tests/pie.test.js tests/card.test.js tests/clipboard.test.js tests/texteditor.test.js tests/flow.test.js tests/site.test.js tests/siteview.test.js",
+    "test": "node --experimental-strip-types --test tests/contrast.test.js tests/locale.test.js tests/charts.test.js tests/markdown.test.js tests/tiles.test.js tests/showas.test.js tests/lines.test.js tests/advanced.test.js tests/advanced2.test.js tests/filters.test.js tests/output.test.js tests/prep.test.js tests/sources.test.js tests/links.test.js tests/formula.test.js tests/measures.test.js tests/linktables.test.js tests/derived.test.js tests/places.test.js tests/maps.test.js tests/pie.test.js tests/card.test.js tests/clipboard.test.js tests/texteditor.test.js tests/flow.test.js tests/site.test.js tests/siteview.test.js tests/drilldown.test.js",
     "build:viewer": "vite build --mode viewer"
   },
   "devDependencies": {

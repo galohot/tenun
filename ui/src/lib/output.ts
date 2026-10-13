@@ -3,7 +3,7 @@
 
 import { mount, unmount } from 'svelte';
 import { toCanvas } from 'html-to-image';
-import { api, type QueryResult, type Tile } from './api';
+import { api, type DrillState, type QueryResult, type Tile } from './api';
 import { buildOption, CHART_TYPES, readColors, type Colors } from './chart';
 import { echarts } from './echarts';
 import { columnHeads, measureLabel, type Named } from './format';
@@ -51,9 +51,22 @@ export function downloadCsv(tile: Tile, res: QueryResult, tables: Named[], title
 }
 
 /** Excel: the server runs the tile again with the same filters and writes the file. */
-export async function downloadXlsx(tile: Tile, res: QueryResult, filters: DashFilter[], tables: Named[], title: string, native: boolean): Promise<void> {
+/**
+ * The numbers of one tile as an Excel file. A drilled tile (v5 build 01) sends its drill so the engine computes the
+ * level shown, and takes its headers from the tile as it is drawn there.
+ */
+export async function downloadXlsx(
+  tile: Tile,
+  res: QueryResult,
+  filters: DashFilter[],
+  tables: Named[],
+  title: string,
+  native: boolean,
+  drill?: { state: DrillState; shown: Tile },
+): Promise<void> {
   // A value with no format of its own is written the way its named measure is.
-  const body = { tile: withNamedFormats(tile), filters, headers: plainOf(tile, res, tables).heads, title };
+  const heads = plainOf(drill?.shown ?? tile, res, tables).heads;
+  const body = { tile: withNamedFormats(tile), filters, headers: heads, title, ...(drill ? { drill: drill.state } : {}) };
   if (native) {
     const { paths } = await api.pick({ kind: 'save_xlsx', name: title || 'tenun' });
     if (!paths[0]) return;

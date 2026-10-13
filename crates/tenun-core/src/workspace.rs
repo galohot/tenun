@@ -86,6 +86,23 @@ pub struct Workspace {
     /// dashboards are; the app owns it. Not written until it is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub site: Option<serde_json::Value>,
+    /// Hierarchies (v5 build 01): fields from the top down, such as Region › Store, that a chart can drill
+    /// down. Not written until one is made.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hierarchies: Vec<Hierarchy>,
+}
+
+/// Fields from the top down (Region › Store › Product), 2 to 6 of them. Each lower field reaches the
+/// one above it through the model (V5-D3).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Hierarchy {
+    /// `h<n>`. A tile keeps this id. One sent with no id is new, and gets the next one.
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub levels: Vec<FieldRef>,
 }
 
 /// A measure with a name: a formula of totals, such as `SUM([Sales].[amount]) / SUM([Targets].[target])`,
@@ -123,6 +140,7 @@ impl Default for Workspace {
             measures: Vec::new(),
             card_styles: Vec::new(),
             site: None,
+            hierarchies: Vec::new(),
         }
     }
 }

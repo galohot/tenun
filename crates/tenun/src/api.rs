@@ -17,7 +17,7 @@ use tenun_core::engine::{AddSource, KeyEdit, KeyIn, LinkPreview};
 use tenun_core::formula::CheckRequest;
 use tenun_core::paste;
 use tenun_core::query::{Filter, SemanticQuery};
-use tenun_core::snapshot::{self, DashFilter, Tile, run_tile, run_tile_public};
+use tenun_core::snapshot::{self, DashFilter, Tile};
 use tenun_core::workspace::{DerivedSpec, Every, FieldRef, Locale, Paging, TableSetup};
 
 type S = State<Arc<AppState>>;
@@ -62,6 +62,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/workspace/locale", put(ws_locale))
         .route("/workspace/measures", put(put_measures))
         .route("/workspace/card-styles", put(put_card_styles))
+        .route("/workspace/hierarchies", put(put_hierarchies))
         .route("/workspace/site", put(put_site))
         .route("/sample", post(open_sample))
         .route("/sources", post(add_source))
@@ -742,6 +743,23 @@ async fn put_card_styles(State(s): S, Json(b): Json<Vec<Value>>) -> R<Json<Value
     Ok(Json(json!({ "ok": true })))
 }
 
+/// Replaces the hierarchies (v5 build 01) and answers with the workspace. A field that does not reach the one above it
+/// is refused in words.
+async fn put_hierarchies(
+    State(s): S,
+    Json(b): Json<Vec<tenun_core::workspace::Hierarchy>>,
+) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            st.engine.set_hierarchies(b)?;
+            // Tiles that drill through a hierarchy ask again.
+            st.emit(json!({ "type": "dashboards-changed" }));
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
 async fn put_layout(State(s): S, Json(b): Json<Value>) -> R<Json<Value>> {
     blocking(&s, move |st| {
         st.engine.set_layout(b);
@@ -805,6 +823,9 @@ struct TileBody {
     tile: Value,
     #[serde(default)]
     filters: Vec<DashFilter>,
+    /// Where the reader drilled to (v5 build 01). Not set: the top level.
+    #[serde(default)]
+    drill: tenun_core::drill::DrillState,
 }
 
 /// One live tile, computed by the same engine as snapshots.
@@ -812,7 +833,8 @@ async fn tile(State(s): S, Json(b): Json<TileBody>) -> R<Json<Value>> {
     Ok(Json(
         blocking(&s, move |st| {
             let t: Tile = serde_json::from_value(b.tile)?;
-            Ok(serde_json::to_value(run_tile(&st.engine, &t, &b.filters)?)?)
+            let res = tenun_core::drill::run(&st.engine, &t, &b.filters, &b.drill)?;
+            Ok(serde_json::to_value(res)?)
         })
         .await?,
     ))
@@ -941,6 +963,9 @@ struct XlsxBody {
     /// Desktop app: write the file here instead of returning it.
     #[serde(default)]
     path: Option<String>,
+    /// The level the reader drilled to: the file holds what the tile shows (v5 build 01).
+    #[serde(default)]
+    drill: tenun_core::drill::DrillState,
 }
 
 /// The numbers one tile shows, as an Excel file (header row, number formats, dates, total row).
@@ -951,7 +976,7 @@ async fn export_xlsx(State(s): S, Json(b): Json<XlsxBody>) -> R<Response> {
             anyhow::bail!("This tile has no numbers to download.");
         }
         // A file that leaves the computer carries the notes with no key value and no file name.
-        let res = run_tile_public(&st.engine, &t, &b.filters)?;
+        let res = tenun_core::drill::run_public(&st.engine, &t, &b.filters, &b.drill)?;
         Ok((xlsx::build(&b.tile, &res, &b.headers, &b.title)?, b.path))
     })
     .await?;

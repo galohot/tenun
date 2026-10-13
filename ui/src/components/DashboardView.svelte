@@ -18,6 +18,7 @@
   import RowsSheet from './dash/RowsSheet.svelte';
   import FocusSheet from './dash/FocusSheet.svelte';
   import { drawnTile } from '../lib/card';
+  import { shownTile } from '../lib/drilldown';
   import { flowOrder, insertInOrder, isFlow, moveInOrder } from '../lib/flow';
   import FlowLayout from './dash/FlowLayout.svelte';
   import { DRILL, drillOf } from '../lib/site';
@@ -451,10 +452,11 @@
   }
 
   /** "Show rows" for a tile, or for the mark with this value. */
-  async function showRows(id: string, value?: Cell, otherOf?: Cell[], bins?: Bins) {
+  /** `shown`: a drilled tile as drawn at its level (v5 build 01); its marks are values of that level's field. */
+  async function showRows(id: string, value?: Cell, otherOf?: Cell[], bins?: Bins, shown?: Tile) {
     const real = dash?.tiles.find((x) => x.id === id);
     if (!real) return;
-    const t = eff(real);
+    const t = shown ?? eff(real);
     let click: Filter | null = null;
     let mark = '';
     if (value !== undefined) {
@@ -578,7 +580,9 @@
   /** Everything a picture of the dashboard needs: the tiles as they are drawn, with their results. */
   function picture(theme: 'light' | 'dark'): DashboardPicture {
     // A number card goes in with its style merged in, as the app draws it (build 08).
-    const shown = (dash!.tiles ?? []).map((t) => drawnTile(shownOf(t), app.snap?.workspace.cardStyles));
+    // A drilled tile goes in as it is drawn at its level (v5 build 01).
+    const hierarchies = app.snap?.workspace.hierarchies ?? [];
+    const shown = (dash!.tiles ?? []).map((t) => shownTile(drawnTile(shownOf(t), app.snap?.workspace.cardStyles), results[t.id]?.res?.drill, hierarchies));
     const rs: DashboardPicture['results'] = {};
     for (const t of shown) rs[t.id] = results[t.id]?.res ?? null;
     return {
@@ -1065,7 +1069,7 @@
 
   {#if focusTile && results[focusTile.id]}
     <FocusSheet
-      tile={drawnTile(eff(focusTile), app.snap?.workspace.cardStyles)}
+      tile={shownTile(drawnTile(eff(focusTile), app.snap?.workspace.cardStyles), results[focusTile.id]!.res?.drill, app.snap?.workspace.hierarchies ?? [])}
       res={results[focusTile.id]!.res}
       colors={readColors()}
       title={tileTitle(eff(focusTile), app.tables)}
@@ -1102,11 +1106,11 @@
           filters={allFilters}
           {tick}
           active={selectedTile === t.id}
-          onpick={(v, otherOf, bins, stage) => pick(shownOf(t), v, otherOf, bins, stage)}
+          onpick={(v, otherOf, bins, stage, shown) => pick(shown ?? shownOf(t), v, otherOf, bins, stage)}
           onpickcol={(v) => pickCol(shownOf(t), v)}
           onresult={(r, k) => setResult(t.id, r, k)}
           onfilter={(f) => setFilter(t.id, f)}
-          onrows={(v, otherOf, bins) => showRows(t.id, v, otherOf, bins)}
+          onrows={(v, otherOf, bins, shown) => showRows(t.id, v, otherOf, bins, shown)}
           onfocus={() => (focusId = t.id)}
           onselect={() => (selectedTile = t.id)}
           onwidths={(w) => change({ ...(dash.tiles.find((x) => x.id === t.id) ?? t), widths: w })}

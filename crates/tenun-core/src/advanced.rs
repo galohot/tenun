@@ -451,28 +451,10 @@ pub fn boxplot(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Resu
         unit: None,
     }));
     Ok(QueryResult {
-        columns,
-        rows: out_rows,
         ignored_filters: ignored,
         ms: start.elapsed().as_millis(),
-        kpi: None,
-        partial: None,
-        other: None,
-        other_of: None,
-        bins: None,
-        totals: None,
-        compare: None,
-        total_rows: None,
-        repeat: None,
-        real: None,
         outliers: Some(outliers),
-        sparks: None,
-        pair: None,
-        notes: Vec::new(),
-        public_notes: Vec::new(),
-        parts: Vec::new(),
-        geo: None,
-        values: None,
+        ..QueryResult::new(columns, out_rows)
     })
 }
 

@@ -1,12 +1,13 @@
 // Tiles are computed by the Rust engine — the same code that builds exported
 // files, published dashboards and the headless agent's snapshots.
 
-import { api, type Grain, type QueryResult, type Tile } from './api';
+import { api, type DrillState, type Grain, type QueryResult, type Tile } from './api';
 import { dayMonth, periodName } from './format';
 import type { DashFilter } from './tiles';
 
-export async function runTile(tile: Tile, filters: DashFilter[]): Promise<QueryResult> {
-  return api.tile(tile, filters);
+/** One tile; `drill` is where the reader drilled to (v5 build 01). */
+export async function runTile(tile: Tile, filters: DashFilter[], drill?: DrillState): Promise<QueryResult> {
+  return api.tile(tile, filters, drill);
 }
 
 function parse(s: string): Date {

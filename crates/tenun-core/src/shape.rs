@@ -1132,28 +1132,8 @@ pub fn histogram(engine: &Engine, tile: &Tile, filters: &[Filter]) -> anyhow::Re
         },
     ];
     let mut res = QueryResult {
-        columns,
-        rows: vec![],
         ignored_filters: ignored,
-        ms: 0,
-        kpi: None,
-        partial: None,
-        other: None,
-        other_of: None,
-        bins: None,
-        totals: None,
-        compare: None,
-        total_rows: None,
-        repeat: None,
-        real: None,
-        outliers: None,
-        sparks: None,
-        pair: None,
-        notes: Vec::new(),
-        public_notes: Vec::new(),
-        parts: Vec::new(),
-        geo: None,
-        values: None,
+        ..QueryResult::new(columns, vec![])
     };
     let (Some(n), Some(min), Some(max), Some(q1), Some(q3)) =
         (num(0), num(1), num(2), num(3), num(4))
