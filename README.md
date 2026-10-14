@@ -43,7 +43,7 @@ every other chart filters. Save the Excel file and the dashboard updates.
   many to many works: a chart can group by funder, a row is under each of its funders, and the total
   counts it once. See [the relationships guide](docs/relationships.md).
 - **Calculated columns (Advanced):** write `[amount] * 1.11` or `IF([region] = "Java", "West", "East")`
-  once, and the new column works in charts, filters, maps and exports. 69 functions with Excel names; a
+  once, and the new column works in charts, filters, maps and exports. 71 functions with Excel names; a
   formula can read a column of a related table. See [the formula guide](docs/formulas.md).
 - **Measures (Advanced):** write `SUM([sales].[amount]) / SUM([targets].[target])` once, name it
   "Achievement", and use it in any tile, though the two tables come from different files. Tenun adds

@@ -370,6 +370,42 @@ pub fn resolve(env: &Env<'_>, catalog: &Catalog, id: &str) -> Result<Resolved, Q
             ),
         ));
     }
+    resolve_formula(env, catalog, nm)
+}
+
+/// A plain closing or opening value (v5 build 07) as the measure `CLOSING(SUM([table].[column]))` (`COUNTROWS` with
+/// no column), named after its column.
+fn resolve_plain(env: &Env<'_>, catalog: &Catalog, m: &Measure) -> Result<Resolved, QueryError> {
+    let t = lookup(catalog, &m.table)?;
+    let f = if m.agg == Agg::Opening {
+        "OPENING"
+    } else {
+        "CLOSING"
+    };
+    let table = t.id.replace(']', "]]");
+    let (name, inner) = match &m.column {
+        Some(c) => (
+            c.clone(),
+            format!("SUM([{table}].[{}])", c.replace(']', "]]")),
+        ),
+        None => ("Rows".to_string(), format!("COUNTROWS([{table}])")),
+    };
+    resolve_formula(
+        env,
+        catalog,
+        &NamedMeasure {
+            name,
+            formula: format!("{f}({inner})"),
+            ..NamedMeasure::default()
+        },
+    )
+}
+
+fn resolve_formula(
+    env: &Env<'_>,
+    catalog: &Catalog,
+    nm: &NamedMeasure,
+) -> Result<Resolved, QueryError> {
     if nm.formula.chars().count() > MAX_FORMULA {
         return Err(QueryError::MeasureLimit(
             nm.name.clone(),
@@ -384,6 +420,7 @@ pub fn resolve(env: &Env<'_>, catalog: &Catalog, id: &str) -> Result<Resolved, Q
         now: env.now,
         view: false,
         params: env.params,
+        setups: Some(env.tables),
     };
     let c = formula::compile(&nm.formula, Kind::Measure, None, &cx)
         .map_err(|e| QueryError::MeasureBroken(nm.name.clone(), e.message))?;
@@ -429,22 +466,35 @@ pub struct Facts {
     pub name: String,
     pub homes: Vec<String>,
     pub additive: bool,
+    /// A closing or an opening value (v5 build 07): `Some(true)` for closing, `Some(false)` for opening.
+    pub stock: Option<bool>,
 }
 
 pub fn facts(env: &Env<'_>, catalog: &Catalog, m: &Measure) -> Result<Facts, QueryError> {
     match &m.named {
         Some(id) => {
             let r = resolve(env, catalog, id)?;
+            let stock = r.agg.parts.iter().find_map(|p| match p.scope {
+                Some(PartScope::Closing) => Some(true),
+                Some(PartScope::Opening) => Some(false),
+                _ => None,
+            });
             Ok(Facts {
                 homes: r.homes(),
                 additive: r.is_additive(),
                 name: r.name,
+                stock,
             })
         }
         None => Ok(Facts {
             name: m.column.clone().unwrap_or_else(|| "Rows".into()),
             homes: vec![m.table.clone()],
             additive: m.per.is_none() && matches!(m.agg, Agg::Sum | Agg::Count),
+            stock: match m.agg {
+                Agg::Closing => Some(true),
+                Agg::Opening => Some(false),
+                _ => None,
+            },
         }),
     }
 }
@@ -824,7 +874,8 @@ pub fn compile(
     env: &Env<'_>,
 ) -> Result<Compiled, QueryError> {
     let links = env.links();
-    if q.measures.iter().all(|m| m.named.is_none()) {
+    let closing = |m: &Measure| m.named.is_none() && matches!(m.agg, Agg::Closing | Agg::Opening);
+    if q.measures.iter().all(|m| m.named.is_none() && !closing(m)) {
         return query::compile_on(q, catalog, links, today);
     }
     // 1. The measures, and the totals they are made of, grouped by the table they read.
@@ -832,6 +883,7 @@ pub fn compile(
     for m in &q.measures {
         items.push(match &m.named {
             Some(id) => Item::Named(resolve(env, catalog, id)?),
+            None if closing(m) => Item::Named(resolve_plain(env, catalog, m)?),
             None => {
                 lookup(catalog, &m.table)?;
                 Item::Plain(m.clone())
@@ -1028,7 +1080,28 @@ pub fn compile(
                     }
                 }
             }
-            None => {}
+            // CLOSING and OPENING (v5 build 07) read the groups and the filters of the tile; they need a date.
+            Some(PartScope::Closing | PartScope::Opening)
+                if main_date(catalog, env.tables, &g.home).is_none() =>
+            {
+                let measure = slots
+                    .iter()
+                    .zip(&items)
+                    .find(|(s, _)| s.iter().any(|s| s.group == gi))
+                    .and_then(|(_, i)| match i {
+                        Item::Named(r) => Some(r.name.clone()),
+                        Item::Plain(_) => None,
+                    })
+                    .unwrap_or_default();
+                return Err(QueryError::MeasureBroken(
+                    measure,
+                    format!(
+                        "A closing or opening value reads the rows on the last or first date of each period, and {} has no date. Add a date column to it, or pick its main date in Data.",
+                        label(catalog, &g.home)
+                    ),
+                ));
+            }
+            _ => {}
         }
     }
     // A group that no table can reach is an error, in the words a plain question gives.
@@ -1390,6 +1463,42 @@ pub fn compile(
         sql.push_str(&sc.from_joins);
         for j in &g.joins {
             sql.push_str(&j.to_sql());
+        }
+        // CLOSING and OPENING (v5 build 07, V5-D9): only the rows on the last (first) day of each period that has any
+        // row under the filters. The period is the tile's time group; with none, all the days the filters keep. The
+        // day is the table's, not each store's, so a store with no row that day counts as nothing.
+        if let Some(scope @ (PartScope::Closing | PartScope::Opening)) = &g.scope
+            && let Some(main) = main_date(catalog, env.tables, &g.home)
+        {
+            let (day, _) = sc.expr_via(&g.home, None, &main.name, Some(Grain::Day))?;
+            let period = q
+                .dimensions
+                .iter()
+                .enumerate()
+                .find_map(|(i, _)| {
+                    let d = read[gi].dims[i].as_ref()?;
+                    (d.grain.is_some() && d.table == g.home && d.column == main.name)
+                        .then(|| dim_exprs[gi][i].clone())
+                        .flatten()
+                })
+                .unwrap_or_else(|| "0".into());
+            let pick = if matches!(scope, PartScope::Closing) {
+                "max"
+            } else {
+                "min"
+            };
+            let mut inner = format!("SELECT {period} AS p, {pick}({day}) AS d");
+            inner.push_str(&sc.from_joins);
+            for j in &g.joins {
+                inner.push_str(&j.to_sql());
+            }
+            inner.push_str(&sc.where_clause);
+            inner.push_str(" GROUP BY 1");
+            sql.push_str(&format!(
+                " JOIN ({inner}) AS cl{gi} ON cl{gi}.p IS NOT DISTINCT FROM {period} AND {day} = cl{gi}.d"
+            ));
+            // The filters of the inner query come first in the text.
+            params.extend(sc.params.iter().cloned());
         }
         sql.push_str(&sc.where_clause);
         if kept > 0 {

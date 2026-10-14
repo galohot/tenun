@@ -136,6 +136,9 @@ pub const DEFS: &[Def] = &[
     // A total over fewer groups or fewer filters (v5 build 06): the checker reads them itself.
     row("TOTAL", 1, MANY),
     row("UNFILTERED", 1, MANY),
+    // Stock and balances (v5 build 07): the rows on the last or the first date of each period.
+    row("CLOSING", 1, 1),
+    row("OPENING", 1, 1),
     // Parameters (v5 build 05): the checker reads the name and writes the SQL itself.
     row("PARAM", 1, 1),
 ];

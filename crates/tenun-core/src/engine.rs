@@ -1950,7 +1950,7 @@ impl Engine {
                 m.format = None;
             }
         }
-        let (old, catalog, rels, health, dashboards, params) = {
+        let (old, catalog, rels, health, dashboards, params, setups) = {
             let s = self.state.read().unwrap();
             (
                 s.ws.measures.clone(),
@@ -1959,6 +1959,7 @@ impl Engine {
                 s.health.clone(),
                 s.ws.dashboards.clone(),
                 s.ws.params.clone(),
+                s.ws.tables.clone(),
             )
         };
         // Ids: a new measure takes the next number; a repeated id is a mistake of the caller.
@@ -2039,6 +2040,7 @@ impl Engine {
             now: today.and_time(chrono::Local::now().time()),
             view: false,
             params: &params,
+            setups: Some(&setups),
         };
         for (i, m) in list.iter().enumerate() {
             if old.iter().any(|o| o.id == m.id && o.formula == m.formula) {
@@ -3157,13 +3159,14 @@ impl Engine {
         before: Option<&str>,
         sql: bool,
     ) -> anyhow::Result<formula::CheckReply> {
-        let (mut catalog, rels, health, params) = {
+        let (mut catalog, rels, health, params, setups) = {
             let s = self.state.read().unwrap();
             (
                 s.catalog.clone(),
                 s.ws.relationships.clone(),
                 s.health.clone(),
                 s.ws.params.clone(),
+                s.ws.tables.clone(),
             )
         };
         let table_id = req
@@ -3192,6 +3195,7 @@ impl Engine {
             // A column formula is read the way a view reads it: one row per key (V4-D63).
             view: req.kind == formula::Kind::Column,
             params: &params,
+            setups: Some(&setups),
         };
         let conn = self.conn()?;
         if sql {

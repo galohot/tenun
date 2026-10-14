@@ -60,6 +60,8 @@ struct World {
     health: crate::links::Health,
     /// One parameter (v5 build 05): "Price rise", a percent from 0 to 20, now 10 %.
     params: Vec<crate::params::Param>,
+    /// Orders' main date is `date` (it has `ts` too), for closing values (v5 build 07).
+    setups: std::collections::BTreeMap<String, crate::workspace::TableSetup>,
 }
 
 fn world() -> &'static World {
@@ -174,6 +176,10 @@ fn world() -> &'static World {
                     "min": 0.0, "max": 0.2, "step": 0.01, "value": 0.1 }))
                 .unwrap(),
             ],
+            setups: std::collections::BTreeMap::from([(
+                "s1/Orders".to_string(),
+                serde_json::from_value(json!({ "mainDate": "date" })).unwrap(),
+            )]),
         }
     })
 }
@@ -189,6 +195,7 @@ fn cx() -> Context<'static> {
         now: today.and_hms_opt(14, 3, 22).unwrap(),
         view: false,
         params: &w.params,
+        setups: Some(&w.setups),
     }
 }
 
@@ -261,7 +268,11 @@ fn total(formula: &str, table: Option<&str>) -> Value {
         panic!("{formula}: not a measure")
     };
     let sql = agg
-        .grand_total(&world().catalog, Ty::from_dtype(c.dtype))
+        .grand_total(
+            &world().catalog,
+            Some(&world().setups),
+            Ty::from_dtype(c.dtype),
+        )
         .unwrap();
     query(&sql).swap_remove(0)
 }
@@ -829,7 +840,7 @@ fn a_group_value_reads_a_related_table_through_its_own() {
     let c = compiled("SUM([Stores].[rent])", Kind::Group, Some("Orders")).unwrap();
     let Body::Aggregate(a) = c.body else { panic!() };
     assert_eq!(a.parts[0].home_table, "s1/Orders");
-    let sql = a.grand_total(&world().catalog, Ty::Num).unwrap();
+    let sql = a.grand_total(&world().catalog, None, Ty::Num).unwrap();
     assert!(same(&query(&sql)[0], &json!(1800.0)));
 }
 
@@ -1790,6 +1801,9 @@ fn guide_totals() -> Vec<(&'static str, Value)> {
             json!(1.0),
         ),
         ("UNFILTERED(SUM([Orders].[amount]))", json!(475.5)),
+        // The rows of the last day (Mar 31: 75.5) and of the first day (Jan 15: 100), by Orders' main date (build 07).
+        ("CLOSING(SUM([Orders].[amount]))", json!(75.5)),
+        ("OPENING(SUM([Orders].[amount]))", json!(100.0)),
         // "Price rise" is 10 % in the test world (v5 build 05).
         (
             r#"SUM([Orders].[amount]) * (1 + PARAM("Price rise"))"#,

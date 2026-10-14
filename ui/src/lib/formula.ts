@@ -19,7 +19,7 @@ export interface FnInfo {
 /** Every function of the engine, with a one-line hint. The engine's own list is tested against this one. */
 export const FUNCTIONS: readonly FnInfo[] = functions as FnInfo[];
 /** Functions a calculated column cannot use: they read a tile's groups, filters or controls (v5 builds 05 and 06). */
-export const MEASURE_ONLY: readonly string[] = ['TOTAL', 'UNFILTERED', 'PARAM'];
+export const MEASURE_ONLY: readonly string[] = ['TOTAL', 'UNFILTERED', 'CLOSING', 'OPENING', 'PARAM'];
 
 export const signature = (f: FnInfo): string => `${f.name}(${f.args})`;
 

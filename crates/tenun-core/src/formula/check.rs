@@ -824,7 +824,7 @@ impl<'a> Checker<'a> {
         if def.name == "PARAM" {
             return self.param(e, &args[0], name_len);
         }
-        if matches!(def.name, "TOTAL" | "UNFILTERED") {
+        if matches!(def.name, "TOTAL" | "UNFILTERED" | "CLOSING" | "OPENING") {
             return self.scoped_total(e, def, args, name_len);
         }
         if functions::is_aggregate(def, n) {
@@ -928,7 +928,7 @@ impl<'a> Checker<'a> {
         }
         if self.scoped {
             return Err(FormulaError::new(
-                "TOTAL and UNFILTERED do not go inside each other.",
+                "TOTAL, UNFILTERED, CLOSING and OPENING do not go inside each other.",
                 e.at,
                 name_len,
             ));
@@ -974,10 +974,11 @@ impl<'a> Checker<'a> {
         else {
             unreachable!("one total was checked above");
         };
-        let scope = if def.name == "TOTAL" {
-            PartScope::Total(cols)
-        } else {
-            PartScope::Unfiltered(cols)
+        let scope = match def.name {
+            "TOTAL" => PartScope::Total(cols),
+            "UNFILTERED" => PartScope::Unfiltered(cols),
+            "CLOSING" => PartScope::Closing,
+            _ => PartScope::Opening,
         };
         Ok(TExpr {
             node: TNode::Agg {

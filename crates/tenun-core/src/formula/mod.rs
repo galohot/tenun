@@ -63,7 +63,7 @@ mod tests;
 
 use crate::catalog::{Catalog, DType};
 use crate::links::{Health, Links};
-use crate::workspace::Relationship;
+use crate::workspace::{Relationship, TableSetup};
 use chrono::{NaiveDate, NaiveDateTime};
 use duckdb::Connection;
 use serde::{Deserialize, Serialize};
@@ -133,6 +133,8 @@ pub struct Context<'a> {
     pub view: bool,
     /// The parameters a measure can read with `PARAM("…")` (v5 build 05). Their values are bound when a query runs.
     pub params: &'a [crate::params::Param],
+    /// The setup of each table, for the main date a closing value reads (v5 build 07). Not set: a table's only date.
+    pub setups: Option<&'a std::collections::BTreeMap<String, TableSetup>>,
 }
 
 impl<'a> Context<'a> {
@@ -147,6 +149,7 @@ impl<'a> Context<'a> {
             now,
             view: false,
             params: &[],
+            setups: None,
         }
     }
 
@@ -252,6 +255,11 @@ pub enum PartScope {
     Total(Vec<(String, String)>),
     /// `UNFILTERED(t, [col]…)`: the tile's filters on these columns are dropped; none named, every filter.
     Unfiltered(Vec<(String, String)>),
+    /// `CLOSING(t)` (v5 build 07, V5-D9): only the rows on the last date of each period that has any row, by the
+    /// table's main date.
+    Closing,
+    /// `OPENING(t)`: only the rows on the first date of each period that has any row.
+    Opening,
 }
 
 impl AggregateSql {
@@ -272,14 +280,43 @@ impl AggregateSql {
     /// A whole SELECT for the answer with no groups and no filters: one cell, shown as `ty`
     /// shows it. Each part is a scalar subquery over its own table, so nothing is counted
     /// twice, and the combining expression reads the results as plain columns.
-    pub fn grand_total(&self, catalog: &Catalog, ty: check::Ty) -> Option<String> {
+    pub fn grand_total(
+        &self,
+        catalog: &Catalog,
+        setups: Option<&std::collections::BTreeMap<String, TableSetup>>,
+        ty: check::Ty,
+    ) -> Option<String> {
         let mut parts = Vec::new();
         let mut names = Vec::new();
+        let none = std::collections::BTreeMap::new();
         for (i, p) in self.parts.iter().enumerate() {
             let home = catalog.table(&p.home_table)?;
             let joins: String = p.joins.iter().map(Join::to_sql).collect();
+            // A closing (opening) value of all the data: the rows on its last (first) day (v5 build 07). A table with
+            // no main date has none.
+            let only = match &p.scope {
+                Some(s @ (PartScope::Closing | PartScope::Opening)) => {
+                    let main = crate::measures::main_date(
+                        catalog,
+                        setups.unwrap_or(&none),
+                        &p.home_table,
+                    )?;
+                    let day = format!("CAST(t0.{} AS DATE)", crate::catalog::ident(&main.name));
+                    let pick = if matches!(s, PartScope::Closing) {
+                        "max"
+                    } else {
+                        "min"
+                    };
+                    format!(
+                        " WHERE {day} = (SELECT {pick}(CAST({} AS DATE)) FROM {})",
+                        crate::catalog::ident(&main.name),
+                        home.sql_ref
+                    )
+                }
+                _ => String::new(),
+            };
             parts.push(format!(
-                "(SELECT {} FROM {} AS t0{joins}) AS p{i}",
+                "(SELECT {} FROM {} AS t0{joins}{only}) AS p{i}",
                 p.sql, home.sql_ref
             ));
             names.push(format!("g.p{i}"));
@@ -547,6 +584,6 @@ fn preview_sql(c: &Compiled, table: Option<&str>, cx: &Context<'_>) -> Option<St
                 t.sql_ref
             ))
         }
-        Body::Aggregate(agg) => agg.grand_total(cx.catalog, ty),
+        Body::Aggregate(agg) => agg.grand_total(cx.catalog, cx.setups, ty),
     }
 }

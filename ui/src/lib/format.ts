@@ -160,6 +160,8 @@ const aggWords: Record<Agg, string> = {
   p90: '90th percentile of',
   stdev: 'Spread of',
   variance: 'Variance of',
+  closing: 'Closing',
+  opening: 'Opening',
 };
 
 export const aggNames: Record<Agg, string> = {
@@ -173,6 +175,8 @@ export const aggNames: Record<Agg, string> = {
   p90: '90th percentile',
   stdev: 'Standard deviation',
   variance: 'Variance',
+  closing: 'Closing value',
+  opening: 'Opening value',
 };
 
 const singular = (s: string) => s.replace(/ies$/i, 'y').replace(/(ss)$/i, '$1').replace(/s$/i, '');

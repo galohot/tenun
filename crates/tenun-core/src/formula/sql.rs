@@ -286,10 +286,11 @@ impl<'a> Gen<'a> {
             reads: sub.reads,
             dtype: ty.dtype(),
             // A sum or a count of no rows is 0 (V4-D22). The rest stay blank.
+            // A group with no row on a period's last (first) day has no stock that day, not a stock of 0 (v5 build 07).
             zero_when_empty: matches!(
                 name,
                 "SUM" | "SUMIF" | "COUNT" | "COUNTA" | "COUNTD" | "COUNTIF" | "COUNTROWS"
-            ),
+            ) && !matches!(scope, Some(PartScope::Closing | PartScope::Opening)),
             // A total over fewer groups or filters is the same for many groups: they do not add up to it.
             additive: scope.is_none()
                 && matches!(

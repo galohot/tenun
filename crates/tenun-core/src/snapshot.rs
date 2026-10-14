@@ -536,10 +536,10 @@ pub fn run_tile(
     });
     let mut res = res?;
     res.params = used.into_iter().collect();
-    if let Some((_, id)) = top
-        && !res.params.contains(&id)
+    if let Some((_, id)) = &top
+        && !res.params.contains(id)
     {
-        res.params.push(id);
+        res.params.push(id.clone());
     }
     res.notes = engine.link_notes(&crossed);
     res.public_notes = engine.public_link_notes(&crossed);
@@ -551,7 +551,12 @@ pub fn run_tile(
             words.push(&p.note);
         }
     }
-    let words: Vec<String> = words.into_iter().map(str::to_string).collect();
+    let mut words: Vec<String> = words.into_iter().map(str::to_string).collect();
+    // A stock with a group that has no row on its period's last day: it counts as nothing, and the tile says how
+    // often (v5 build 07, V5-D9).
+    if let Some(note) = stock_gaps(engine, tile, &res) {
+        words.push(note);
+    }
     for w in &words {
         if !res.notes.contains(w) {
             res.notes.push(w.clone());
@@ -577,6 +582,70 @@ fn top_param(engine: &Engine, tile: &Tile) -> Option<(Tile, String)> {
         top.n = n.round().clamp(1.0, 1000.0) as u32;
     }
     Some((t, id.clone()))
+}
+
+/// The note of a tile with a closing (opening) value grouped by a time and by something else, such as a store: for each
+/// period, how many of the groups that have rows in it have none on its last (first) day. `None` when every group has.
+fn stock_gaps(engine: &Engine, tile: &Tile, res: &QueryResult) -> Option<String> {
+    let time = tile
+        .dims
+        .iter()
+        .position(|d| d.grain.is_some_and(|g| !g.is_part()))?;
+    let grain = tile.dims[time].grain?;
+    // The lowest group that is not the time: the entity whose rows may be missing.
+    let entity = (0..tile.dims.len()).rev().find(|&i| i != time)?;
+    let nd = res
+        .columns
+        .iter()
+        .take_while(|c| c.role == "dimension")
+        .count();
+    let (at, closing) = tile.measures.iter().enumerate().find_map(|(j, m)| {
+        let f = engine.measure_facts(m).ok()?;
+        f.stock.map(|c| (nd + j, c))
+    })?;
+    let mut periods: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    for r in &res.rows {
+        let (Some(k), Some(v)) = (r.get(time).and_then(Value::as_str), r.get(at)) else {
+            continue;
+        };
+        let e = periods.entry(k.to_string()).or_default();
+        e.0 += 1;
+        if v.is_null() {
+            e.1 += 1;
+        }
+    }
+    let loc = engine.locale();
+    let gaps: Vec<String> = periods
+        .iter()
+        .filter(|(_, (_, missing))| *missing > 0)
+        .map(|(k, (all, missing))| {
+            let name =
+                parse_day(k).map_or_else(|| k.clone(), |d| period_name(d, grain, false, loc));
+            format!("{name}: {missing} of {all}")
+        })
+        .collect();
+    if gaps.is_empty() {
+        return None;
+    }
+    let d = &tile.dims[entity];
+    let field = engine
+        .catalog()
+        .table(&d.table)
+        .and_then(|t| t.columns.iter().find(|c| c.name == d.column))
+        .map_or_else(
+            || d.column.clone(),
+            |c| c.label.clone().unwrap_or_else(|| c.name.clone()),
+        );
+    let shown = gaps.len().min(6);
+    let more = match gaps.len() - shown {
+        0 => String::new(),
+        n => format!(", and {n} more"),
+    };
+    Some(format!(
+        "Some values of {field} have no row on the {} day with data of a period, so they count as nothing there: {}{more}.",
+        if closing { "last" } else { "first" },
+        gaps[..shown].join(", ")
+    ))
 }
 
 /// Like [`run_tile`], for what leaves the computer: a snapshot, an exported page, a published
@@ -912,6 +981,8 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
         &window(start, if partial { max_day } else { end }),
     )?;
 
+    // A stock (v5 build 07) is a value on a day, not over days: "On Oct 14" against "On Sep 14".
+    let stock = engine.measure_facts(&m).is_ok_and(|f| f.stock.is_some());
     let (prev, period, versus) = if partial {
         // Compare the same number of days: Oct 1–14 against Sep 1–14.
         let days = (max_day - start).num_days();
@@ -919,21 +990,55 @@ fn run_kpi(engine: &Engine, tile: &Tile, filters: &[DashFilter]) -> anyhow::Resu
         let prev_end = (prev_start + Duration::days(days)).min(prev_last);
         let wfs = window(prev_start, prev_end);
         let prev = first_num(&ask(vec![], wfs, None)?);
-        (
-            prev,
-            span(start, max_day, true, loc),
-            span(prev_start, prev_end, false, loc),
-        )
+        if stock {
+            (prev, on_day(max_day, loc), one_day(prev_end, loc))
+        } else {
+            (
+                prev,
+                span(start, max_day, true, loc),
+                span(prev_start, prev_end, false, loc),
+            )
+        }
     } else {
         let prev = rows
             .iter()
             .find(|(k, _)| k.get(..10) == Some(iso(prev_start).as_str()))
             .and_then(|(_, v)| *v);
-        (
-            prev,
-            period_name(start, g, false, loc),
-            period_name(prev_start, g, false, loc),
-        )
+        if stock {
+            // A finished period's stock is read on its last day with data: that day, and the one of the period before.
+            let prev_day = engine
+                .query(&SemanticQuery {
+                    measures: vec![Measure {
+                        table: d.table.clone(),
+                        column: Some(d.column.clone()),
+                        agg: Agg::Max,
+                        per: None,
+                        via: d.via.clone(),
+                        named: None,
+                    }],
+                    dimensions: vec![],
+                    filters: window(prev_start, start - Duration::days(1)),
+                    sort: vec![],
+                    limit: None,
+                })
+                .ok()
+                .and_then(|r| first_str(&r))
+                .and_then(|s| parse_day(&s));
+            (
+                prev,
+                on_day(max_day.min(end), loc),
+                prev_day.map_or_else(
+                    || period_name(prev_start, g, false, loc),
+                    |p| one_day(p, loc),
+                ),
+            )
+        } else {
+            (
+                prev,
+                period_name(start, g, false, loc),
+                period_name(prev_start, g, false, loc),
+            )
+        }
     };
     let bars = rows[rows.len().saturating_sub(12)..]
         .iter()
@@ -1100,6 +1205,22 @@ pub fn period_name(d: NaiveDate, g: Grain, short_form: bool, loc: Locale) -> Str
 }
 
 /// English "Oct 1–14" (same month) or "Sep 28 – Oct 4"; Indonesian "1–14 Okt" or "28 Sep – 4 Okt".
+/// "On Oct 14, 2026" (Indonesian "Per 14 Okt 2026"): the day a stock is read on (v5 build 07).
+fn on_day(d: NaiveDate, loc: Locale) -> String {
+    match loc {
+        Locale::En => format!("On {}", one_day(d, loc)),
+        Locale::Id => format!("Per {}", one_day(d, loc)),
+    }
+}
+
+/// "Oct 14, 2026", "14 Okt 2026": the day the number before it was read on, after "vs".
+fn one_day(d: NaiveDate, loc: Locale) -> String {
+    match loc {
+        Locale::En => format!("{}, {}", day_month(d.month(), d.day(), loc), d.year()),
+        Locale::Id => format!("{} {}", day_month(d.month(), d.day(), loc), d.year()),
+    }
+}
+
 fn span(a: NaiveDate, b: NaiveDate, with_year: bool, loc: Locale) -> String {
     let same = a.month() == b.month();
     let sep = if same { "–" } else { " – " };

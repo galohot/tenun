@@ -77,6 +77,11 @@ pub enum Agg {
     Stdev,
     /// Sample variance. Numbers only. The UI offers it in Advanced.
     Variance,
+    /// The sum of the rows on the last date of each period, by the table's main date (v5 build 07): a stock. The
+    /// measure compiler reads it as `CLOSING(SUM(column))`. Advanced.
+    Closing,
+    /// The sum of the rows on the first date of each period. Advanced.
+    Opening,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1576,6 +1581,10 @@ fn agg_expr(
                 _ => format!("var_samp({r})"),
             };
             Ok((format!("CAST({call} AS DOUBLE)"), DType::Number, name))
+        }
+        // The measure compiler writes these (v5 build 07); a question that reads the rows itself cannot.
+        Agg::Closing | Agg::Opening => {
+            Err(QueryError::BadAgg(name, "read as a closing value here"))
         }
         Agg::Min | Agg::Max => {
             let f = if agg == Agg::Min { "min" } else { "max" };

@@ -34,7 +34,7 @@ export function usesAdvanced(tile: Tile): boolean {
     tile.layout === 'indexed' ||
     !!tile.mix?.length ||
     tile.sort?.by === 'manual' ||
-    tile.measures.some((m) => m.agg === 'stdev' || m.agg === 'variance') ||
+    tile.measures.some((m) => m.agg === 'stdev' || m.agg === 'variance' || m.agg === 'closing' || m.agg === 'opening') ||
     !!tile.lines?.some((l) => l.kind === 'band') ||
     // A third measure on a scatter sets the dot size.
     (tile.type === 'scatter' && tile.measures.length > 2) ||

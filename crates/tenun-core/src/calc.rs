@@ -785,6 +785,7 @@ fn build_table(
                 view: true,
                 // A calculated column is built once, at load: `PARAM` is refused in it (v5 build 05).
                 params: &[],
+                setups: Some(w.setups),
             };
             let compiled = formula::compile(&c.formula, Kind::Column, Some(&t.id), &cx)?;
             let Body::Column(col) = compiled.body else {

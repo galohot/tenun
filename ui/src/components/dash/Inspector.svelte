@@ -242,6 +242,7 @@
   });
   /** The measures of the workspace a value can be (Advanced makes them; a dashboard that uses one works without the switch). */
   const namedList = $derived(app.snap!.workspace.measures ?? []);
+  const hasDate = (table: string) => !!app.table(table)?.columns.some((c) => c.dtype === 'date' || c.dtype === 'datetime');
   /** The ways a value can be added up: a number column can be summed, any other column only counted. */
   const aggsOf = (x: Measure | undefined): Agg[] =>
     !x || x.column === null
@@ -251,6 +252,8 @@
             'sum', 'avg', 'min', 'max', 'median', 'p90',
             // Spread is Advanced; a value that already has it keeps it in the list.
             ...(advanced || x.agg === 'stdev' || x.agg === 'variance' ? (['stdev', 'variance'] as Agg[]) : []),
+            // A stock (v5 build 07, Advanced): the table needs a date to know each period's last day.
+            ...((advanced && hasDate(x.table)) || x.agg === 'closing' || x.agg === 'opening' ? (['closing', 'opening'] as Agg[]) : []),
             'count', 'count_distinct',
           ]
         : ['count', 'count_distinct', 'min', 'max'];

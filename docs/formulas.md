@@ -279,6 +279,16 @@ one total, like `SUM(…)`, and does not go inside the other. See
   `UNFILTERED(t, [col], …)` leaves out only the filters on the columns named.
   Measure example: `UNFILTERED(SUM([Orders].[amount]))`
 
+### Stock and balances (measures only)
+
+A stock is read on a day, not added up over days. See [Stock and balances](#stock-and-balances).
+
+- `CLOSING(t)`: the total `t` over the rows on the last day of each period that has any row, by the table's main
+  date. With no time group, the last day of all the data the filters keep.
+  Measure example: `CLOSING(SUM([Orders].[amount]))`
+- `OPENING(t)`: the same on the first day of each period.
+  Measure example: `OPENING(SUM([Orders].[amount]))`
+
 ### Parameters (measures only)
 
 A parameter is a number or a choice that a reader moves on a dashboard (Advanced). Make one in **Data**, under
@@ -574,6 +584,25 @@ In a calculated column, a total adds up the rows of a table that points to the c
 - The new column works like any other: group by it, bin it in a histogram, filter by it.
 - Only a table that points straight to this one, with one link. A table two links away, or behind a link table, is
   refused in words: add the column to the table in between first.
+
+## Stock and balances
+
+Some numbers are a level on a day, not an amount over days: the stock of beans, a bank balance, the number of staff.
+Adding up 30 days of stock gives a number that means nothing. The value of a month is its stock on its last day.
+
+- **Closing value:** `CLOSING(SUM([stock].[kg]))`, or pick **Closing value** for a number column in a tile's value
+  (Advanced). For each period, Tenun finds the last day that has any row in the table, under the page's filters, and
+  adds up the rows of that day. With no time group, it is the last day of all the data the filters keep.
+- **Opening value:** `OPENING(…)`, or **Opening value**: the first day of each period.
+- **The day is the table's.** When the stock of one store is missing on the last day, that store counts as nothing
+  for that period. The tile says how many: "Some values of store have no row on the last day with data of a period,
+  so they count as nothing there: January 2026: 1 of 9." This is the rule people use by hand, and the note keeps the gap
+  in sight.
+- **Groups add up on the same day.** The stores of a region add up to the region, because they are all read on that
+  region's period's last day. Periods do not add up: the closing value of a year is its last month's, so a running
+  total over time is not offered.
+- **A number tile** says the day: "On Oct 14, 2026", against the same day of the period before ("vs Sep 14, 2026").
+- The table needs a date. With more than one, pick its main date in **Data**.
 
 ## Parameters and what-if
 

@@ -302,8 +302,11 @@ export interface DerivedPreview {
   notes?: string[];
 }
 
-/** `median` and `p90` (the 90th percentile) take numbers only. `stdev` and `variance` are Advanced (see tiers.ts). */
-export type Agg = 'sum' | 'avg' | 'min' | 'max' | 'count' | 'count_distinct' | 'median' | 'p90' | 'stdev' | 'variance';
+/**
+ * `median` and `p90` (the 90th percentile) take numbers only. `stdev` and `variance` are Advanced (see tiers.ts).
+ * `closing` and `opening` (v5 build 07, Advanced) sum the rows on the last or first day of each period: a stock.
+ */
+export type Agg = 'sum' | 'avg' | 'min' | 'max' | 'count' | 'count_distinct' | 'median' | 'p90' | 'stdev' | 'variance' | 'closing' | 'opening';
 export type Grain = 'year' | 'quarter' | 'month' | 'week' | 'day' | 'month_of_year' | 'weekday' | 'hour';
 /** Date parts come back as numbers: months 1–12, weekdays 1–7 (Monday = 1), hours 0–23. */
 export const DATE_PARTS: readonly Grain[] = ['month_of_year', 'weekday', 'hour'];

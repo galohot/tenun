@@ -408,6 +408,18 @@
   "hint": "The total without the tile's filters, or without those on the columns named."
  },
  {
+  "name": "CLOSING",
+  "args": "total",
+  "class": "row",
+  "hint": "The total of the rows on the last date of each period, like a stock."
+ },
+ {
+  "name": "OPENING",
+  "args": "total",
+  "class": "row",
+  "hint": "The total of the rows on the first date of each period."
+ },
+ {
   "name": "PARAM",
   "args": "name",
   "class": "row",
