@@ -50,6 +50,13 @@ enum Command {
         #[command(subcommand)]
         action: AlertsAction,
     },
+    /// Let your own AI app (Claude Desktop, Claude Code, any MCP client) read this workspace and build dashboards
+    /// in it, over standard input and output. Tenun sends nothing anywhere; the AI app sends what it reads to its
+    /// own company.
+    Mcp {
+        /// The .tenun workspace.
+        file: PathBuf,
+    },
     /// Keep published dashboards updated, without the app (for an always-on computer).
     Agent {
         /// The .tenun workspace.
@@ -120,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
             return agent::publish_now(&file, dashboard.as_deref(), password_from_env.as_deref());
         }
         Some(Command::Agent { file }) => return agent::run(&file),
+        Some(Command::Mcp { file }) => return tenun::mcp::serve(&file),
         Some(Command::Alerts {
             action: AlertsAction::Check { file },
         }) => return agent::alerts_once(&file),

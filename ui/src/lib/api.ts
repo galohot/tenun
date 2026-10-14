@@ -1052,6 +1052,9 @@ export const api = {
   setCalendar: (calendar: Calendar) => call<Snapshot>('PUT', '/workspace/calendar', calendar),
   setParams: (list: Param[]) => call<Snapshot>('PUT', '/workspace/params', list),
   setAlerts: (list: AlertRule[]) => call<Snapshot>('PUT', '/workspace/alerts', list),
+  /** A tool of `tenun mcp`, run in this app (v5 build 14): the app uses it for Undo of an AI app's change. */
+  mcpCall: (name: string, args: Record<string, unknown> = {}) =>
+    call<{ ok: boolean; value?: unknown; error?: string }>('POST', '/mcp/call', { name, arguments: args }),
   alertStates: () => call<Record<string, AlertState>>('GET', '/alerts'),
   alertAddress: (b: { id: string; kind: ChannelKind; url?: string; token?: string; chat?: string }) => call<{ ok: boolean }>('PUT', '/alerts/address', b),
   alertTest: (id: string) => call<{ ok: boolean; text: string }>('POST', '/alerts/test', { id }),

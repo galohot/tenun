@@ -1,7 +1,7 @@
 //! JSON routes under `/api`, the event socket, and the embedded UI files.
 
 use crate::settings::Settings;
-use crate::{AppState, VERSION, alerts, cloud, export, fsbrowse, sample, xlsx};
+use crate::{AppState, VERSION, alerts, cloud, export, fsbrowse, mcp, sample, xlsx};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, Uri, header};
@@ -67,6 +67,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/workspace/params", put(put_params))
         .route("/workspace/params/values", put(put_param_values))
         .route("/workspace/alerts", put(put_alerts))
+        .route("/mcp/call", post(mcp_call))
         .route("/alerts", get(alert_states))
         .route("/alerts/address", put(put_alert_address))
         .route("/alerts/test", post(alert_test))
@@ -776,6 +777,36 @@ async fn put_params(State(s): S, Json(b): Json<Vec<tenun_core::params::Param>>) 
             st.engine.set_params(b)?;
             st.emit(json!({ "type": "data-changed" }));
             Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct McpCall {
+    name: String,
+    #[serde(default)]
+    arguments: Value,
+}
+
+/// One tool of `tenun mcp` (v5 build 14), when this server has the workspace open: the AI app's change is made here,
+/// so one process writes the file, and every window shows it with a notice and Undo.
+async fn mcp_call(State(s): S, Json(b): Json<McpCall>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            Ok(
+                match mcp::call(&st.engine, &st.ai_journal, &b.name, &b.arguments) {
+                    Ok(r) => {
+                        if let Some(what) = r.changed {
+                            st.emit(
+                                json!({ "type": "dashboards-changed", "by": "ai", "what": what }),
+                            );
+                        }
+                        json!({ "ok": true, "value": r.value })
+                    }
+                    Err(e) => json!({ "ok": false, "error": e }),
+                },
+            )
         })
         .await?,
     ))

@@ -262,6 +262,20 @@ TENUN_PASSWORD='…' tenun publish sales.tenun --password-from-env TENUN_PASSWOR
 tenun agent sales.tenun        # keep publishing on schedule
 ```
 
+## Use your own AI app
+
+`tenun mcp` lets an AI app you already use (Claude Desktop, Claude Code, or any app that speaks the
+Model Context Protocol) read a workspace and build dashboards in it: "make a dashboard of revenue by
+store". The AI app calls Tenun's tools; each change shows in the Tenun app at once, with **Undo**.
+
+**Tenun calls no AI and sends nothing anywhere.** The AI app sends what it reads (table names, sample
+rows, the numbers it asks for) to its own company. It cannot run SQL, read files, see passwords or
+keys, or publish. Set-up and the list of tools: [docs/ai.md](docs/ai.md).
+
+```sh
+claude mcp add tenun -- tenun mcp /path/to/sales.tenun
+```
+
 ## Sites
 
 A workspace can become a small website. Choose **Site…** under the dashboards and switch on **Make this
@@ -293,7 +307,10 @@ workspace a site**. It is off by default, and with it off nothing about export o
 - No telemetry. The only network use: connecting to PostgreSQL or MySQL the first time downloads
   the DuckDB connector for it, and a map of the provinces or second level of a country other than
   Indonesia downloads that country's boundaries from geoBoundaries once (the tile says so first).
-  Countries, and Indonesia's provinces and kabupaten/kota, ship with Tenun.
+  Countries, and Indonesia's provinces and kabupaten/kota, ship with Tenun. What you set up yourself
+  uses the network too, and only that: a web link you add as a source, publishing to tenun.cloud, and
+  an alert (one message to the Slack, Teams, Discord, Telegram or web address you give it, holding the
+  value and the tile's name). `tenun mcp` talks only to the Tenun app on this computer.
 
 ## Build from source
 

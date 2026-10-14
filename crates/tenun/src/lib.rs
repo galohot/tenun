@@ -7,6 +7,7 @@ pub mod cloud;
 mod export;
 mod fsbrowse;
 mod guard;
+pub mod mcp;
 pub mod sample;
 pub mod settings;
 pub mod xlsx;
@@ -95,6 +96,8 @@ pub struct AppState {
     pub schedule: Mutex<cloud::Schedule>,
     /// One alert check at a time (v5 build 12): a reload and the minute could otherwise send one message twice.
     pub alerts_lock: Mutex<()>,
+    /// What AI apps changed through `tenun mcp` (v5 build 14), so Undo can take it back.
+    pub ai_journal: mcp::Journal,
 }
 
 pub struct Running {
@@ -102,6 +105,8 @@ pub struct Running {
     /// The URL to open, including the access token in LAN mode.
     pub url: String,
     pub state: Arc<AppState>,
+    /// This server in the list `tenun mcp` reads (v5 build 14); it leaves the list when the server stops.
+    pub registration: Option<mcp::Registration>,
 }
 
 impl AppState {
@@ -172,6 +177,7 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
         cloud_base: cloud::base_url(),
         schedule: Mutex::new(cloud::Schedule::default()),
         alerts_lock: Mutex::new(()),
+        ai_journal: mcp::Journal::default(),
     });
 
     // A check of live database links finishes after the load that began it: tell the windows.
@@ -268,7 +274,18 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
         url.push_str(&format!("?token={t}"));
     }
     *state.url.lock().unwrap() = url.clone();
-    Ok(Running { addr, url, state })
+    // `tenun mcp` sends its calls here when this server has its workspace open (v5 build 14).
+    let registration = mcp::Registration::register(
+        &state.secrets,
+        &format!("http://{shown_host}:{}", addr.port()),
+        token.as_deref(),
+    );
+    Ok(Running {
+        addr,
+        url,
+        state,
+        registration,
+    })
 }
 
 /// The biggest request body any route takes. Image tiles hold up to 1 MB each as a data URL.

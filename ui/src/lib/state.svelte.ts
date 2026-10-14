@@ -39,6 +39,8 @@ interface Toast {
   id: number;
   kind: 'info' | 'error';
   text: string;
+  /** A button in the notice (an AI app's change: Undo). */
+  action?: { label: string; run: () => void };
 }
 
 class App {
@@ -172,10 +174,21 @@ class App {
     return this.tables.find((t) => t.id === id);
   }
 
-  toast(text: string, kind: 'info' | 'error' = 'info') {
+  toast(text: string, kind: 'info' | 'error' = 'info', action?: Toast['action']) {
     const id = ++this.#toastId;
-    this.toasts.push({ id, kind, text });
-    setTimeout(() => (this.toasts = this.toasts.filter((t) => t.id !== id)), kind === 'error' ? 7000 : 3500);
+    this.toasts.push({ id, kind, text, action });
+    // A notice with a button stays long enough to reach it.
+    setTimeout(() => (this.toasts = this.toasts.filter((t) => t.id !== id)), action ? 12000 : kind === 'error' ? 7000 : 3500);
+  }
+
+  /** Takes back the last change an AI app made through `tenun mcp` (v5 build 14). */
+  async undoAi() {
+    try {
+      const r = await api.mcpCall('undo');
+      if (!r.ok) this.toast(r.error ?? 'That change could not be taken back.', 'error');
+    } catch (e) {
+      this.error(e);
+    }
   }
 
   error(e: unknown) {
@@ -264,7 +277,7 @@ class App {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/api/events`);
     ws.onmessage = (m) => {
-      let ev: { type: string; message?: string; sent?: number; failed?: number };
+      let ev: { type: string; message?: string; sent?: number; failed?: number; by?: string; what?: string };
       try {
         ev = JSON.parse(m.data);
       } catch {
@@ -275,6 +288,16 @@ class App {
         this.refresh();
       } else if (ev.type === 'workspace-changed') {
         this.refresh();
+      } else if (ev.type === 'dashboards-changed' && ev.by === 'ai') {
+        // An AI app changed the workspace through `tenun mcp` (v5 build 14): show it at once, say so, offer Undo.
+        this.outsideEdits++;
+        this.refresh();
+        const what = ev.what ?? 'changed the workspace';
+        // Undo takes back the newest change only, so only the newest notice offers it.
+        this.toasts = this.toasts.map((t) => (t.action ? { ...t, action: undefined } : t));
+        // Undo in this app goes through the same record: then the notice says what was taken back.
+        if (what.startsWith('took back: ')) this.toast(`Taken back: ${what.slice(11)}.`);
+        else this.toast(`An AI app ${what}.`, 'info', { label: 'Undo', run: () => this.undoAi() });
       } else if (ev.type === 'dashboards-changed') {
         // Our own save echoes back; only other windows need to reload.
         if (Date.now() - this.#lastLocalSave > 1500) {

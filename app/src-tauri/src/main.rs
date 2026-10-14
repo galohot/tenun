@@ -29,6 +29,10 @@ fn main() {
             }))?;
             let url = running.url.parse()?;
             app.manage(running.state.clone());
+            // Keep this server in the list `tenun mcp` reads for as long as the app runs (v5 build 14).
+            if let Some(r) = running.registration {
+                app.manage(r);
+            }
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Tenun")
                 .inner_size(1360.0, 860.0)
