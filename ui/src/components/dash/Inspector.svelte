@@ -3,6 +3,7 @@
   import { api, DATE_PARTS, isPart, type Agg, type Cell, type CondFormat, type Dim, type DType, type Grain, type MapLevel, type MapSpec, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileLine, type TileType } from '../../lib/api';
   import { app, go } from '../../lib/state.svelte';
   import { controlOf, MAX_BUTTONS } from '../../lib/params';
+  import { MAX_TIP_VALUES } from '../../lib/tips';
   import { aggNames, cell, measureLabel, OTHER_KEY, tileTitle } from '../../lib/format';
   import { isChange } from '../../lib/cells';
   import { MAX_LINES } from '../../lib/charts/lines';
@@ -667,6 +668,34 @@
   // A forecast (v5 build 08): a line or an area over a date with a grain, one value.
   const canForecast = $derived((tile.type === 'line' || tile.type === 'area') && dim0 === 'date' && !!tile.dims[0]?.grain && !isPart(tile.dims[0].grain) && tile.measures.length === 1);
   const FORECAST_AHEAD: Record<string, number> = { month: 3, quarter: 2, week: 8, day: 14, year: 2 };
+  // More in the tooltip (v5 build 10): charts whose marks are groups.
+  const canTip = $derived(['bar', 'line', 'area', 'pie', 'donut', 'scatter'].includes(tile.type) && !!tile.dims[0] && !!m);
+  const tipExtra = $derived(tile.tooltip?.extra ?? []);
+  function setTip(i: number, x: Measure | null) {
+    const list = [...tipExtra];
+    if (x) list[i] = x;
+    else list.splice(i, 1);
+    const next = { ...tile.tooltip, extra: list.slice(0, MAX_TIP_VALUES) };
+    if (!next.extra.length) delete (next as { extra?: Measure[] }).extra;
+    set({ tooltip: next.extra || next.trend ? next : undefined });
+  }
+  /** The date columns a trend can run over: those of the tables the tile's value reaches. */
+  const tipDates = $derived(
+    app.tables
+      .filter((t) => !reach || reach.has(t.id) || t.id === baseTable)
+      .flatMap((t) =>
+        t.columns
+          .filter((c) => !c.hidden && (c.dtype === 'date' || c.dtype === 'datetime'))
+          .map((c) => ({ value: `${t.id}\u0000${c.name}`, label: `${t.label} · ${c.label ?? c.name}` })),
+      ),
+  );
+  function setTipTrend(value: string) {
+    const [table, column] = value.split('\u0000');
+    const trend = value ? { table, column, grain: tile.tooltip?.trend?.grain ?? ('month' as Grain) } : undefined;
+    const next = { ...tile.tooltip, trend };
+    if (!trend) delete (next as { trend?: Dim }).trend;
+    set({ tooltip: next.extra?.length || next.trend ? next : undefined });
+  }
   // Unusual values (v5 build 09): a line, an area or bars over a date with a grain.
   const canMarkUnusual = $derived((tile.type === 'line' || tile.type === 'area' || tile.type === 'bar') && dim0 === 'date' && !!tile.dims[0]?.grain && !isPart(tile.dims[0].grain));
 
@@ -1295,6 +1324,63 @@
     <p class="hint">Comparing needs one value, a date with a grain and no split.</p>
   {/if}
 
+  {#if (advanced || tile.tooltip) && canTip}
+    <!-- More in the tooltip (v5 build 10, Advanced): up to 3 more values, and a trend of the first value. -->
+    <div class="sec">
+      <span class="label">Tooltip</span>
+      {#each tipExtra as x, i (i)}
+        <div class="tiprow">
+          <FieldPicker
+            mode="measure"
+            table={x.table || null}
+            column={x.column} via={x.via}
+            placeholder="A value"
+            reachable={reach} base={baseTable}
+            measures={namedList}
+            kinds={['number']}
+            named={x.named ?? null}
+            onnamed={(id) => setTip(i, namedMeasure(id))}
+            onchange={(t, c, v) => setTip(i, defaultMeasure(app.tables, t, c, v))}
+            onclear={() => setTip(i, null)} />
+          {#if !x.named && x.column}
+            <select class="field" aria-label="How the tooltip value adds up" value={x.agg} onchange={(e) => setTip(i, { ...x, agg: e.currentTarget.value as Agg })}>
+              {#each aggsOf(x).filter((a) => a !== 'closing' && a !== 'opening') as a (a)}<option value={a}>{aggNames[a]}</option>{/each}
+            </select>
+          {/if}
+        </div>
+      {/each}
+      {#if tipExtra.length < MAX_TIP_VALUES}
+        <FieldPicker
+          mode="measure"
+          table={null}
+          column={null}
+          placeholder={tipExtra.length ? 'Add another value' : 'Add a value to the tooltip'}
+          reachable={reach} base={baseTable}
+          measures={namedList}
+          kinds={['number']}
+          named={null}
+          onnamed={(id) => setTip(tipExtra.length, namedMeasure(id))}
+          onchange={(t, c, v) => setTip(tipExtra.length, defaultMeasure(app.tables, t, c, v))} />
+      {/if}
+      <span class="label up">Trend in the tooltip</span>
+      <div class="tiprow">
+        <select class="field" aria-label="The date the tooltip's trend runs over" value={tile.tooltip?.trend ? `${tile.tooltip.trend.table}\u0000${tile.tooltip.trend.column}` : ''} onchange={(e) => setTipTrend(e.currentTarget.value)}>
+          <option value="">No trend</option>
+          {#each tipDates as d (d.value)}<option value={d.value}>{d.label}</option>{/each}
+        </select>
+        {#if tile.tooltip?.trend}
+          <select class="field" aria-label="The periods of the trend" value={tile.tooltip.trend.grain ?? 'month'} onchange={(e) => set({ tooltip: { ...tile.tooltip, trend: { ...tile.tooltip!.trend!, grain: e.currentTarget.value as Grain } } })}>
+            <option value="day">Days</option>
+            <option value="week">Weeks</option>
+            <option value="month">Months</option>
+            <option value="quarter">Quarters</option>
+          </select>
+        {/if}
+      </div>
+      <p class="hint tight">The tooltip of each {tile.type === 'pie' || tile.type === 'donut' ? 'slice' : 'group'} shows these values too, and the last 12 periods of the first value.</p>
+    </div>
+  {/if}
+
   {#if (advanced || tile.unusual) && canMarkUnusual}
     <!-- Unusual values (v5 build 09, Advanced): a ring on a value far from the periods around it. -->
     <div class="sec">
@@ -1919,4 +2005,6 @@
   .error :global(svg) { flex: none; margin-top: 1px; }
   .ahead { display: flex; align-items: center; gap: 8px; font-size: 13px; }
   .ahead .field { width: 80px; }
+  .tiprow { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+  .tiprow > :global(*) { flex: 1; min-width: 0; }
 </style>

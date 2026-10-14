@@ -159,6 +159,8 @@ export interface PieOptionArgs {
   size?: number;
   /** Escapes a value for the tooltip. */
   esc: (s: string) => string;
+  /** More in the tooltip of a slice (v5 build 10): the lines after its value, as HTML. */
+  tipFor?: (raw: Cell, color: string) => string;
 }
 
 export function pieOption(a: PieOptionArgs): EChartsCoreOption {
@@ -198,7 +200,8 @@ export function pieOption(a: PieOptionArgs): EChartsCoreOption {
       textStyle: { color: c.text, fontSize: 12 },
       formatter: (p: { dataIndex: number }) => {
         const s = slices[p.dataIndex];
-        return s ? `${a.esc(s.label)}<br/><b>${a.esc(a.format(s.value))}</b> <span style="color:${c.text2}">${shareText(s.share, loc)}</span>` : '';
+        const color = s && s.slot !== null ? c.series[s.slot % c.series.length] : c.text2;
+        return s ? `${a.esc(s.label)}<br/><b>${a.esc(a.format(s.value))}</b> <span style="color:${c.text2}">${shareText(s.share, loc)}</span>${a.tipFor?.(s.raw, color) ?? ''}` : '';
       },
     },
     series: [

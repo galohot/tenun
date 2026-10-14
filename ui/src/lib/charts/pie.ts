@@ -1,7 +1,9 @@
 // Pie and donut (build 07, V4-D7): a result as slices, drawn by `pieparts.ts`. Whether a value can be cut into
 // slices is the one gate's question (measures.ts `tileProblem`), asked before this draws.
 
-import { cell, getLocale, measureLabel, OTHER_KEY } from '../format';
+import { cell, getLocale, measureLabel, numberFormatter, OTHER_KEY } from '../format';
+import { formatOf } from '../measures';
+import { tipHtml, tipKey } from '../tips';
 import { esc, key, slotsFor, type BuildArgs, type Built } from './common';
 import { pieOption, slicesOf, type Slice } from './pieparts';
 
@@ -34,6 +36,19 @@ export function buildPie(a: PieArgs): Built & { slices: Slice[] } {
     loc: getLocale(),
     esc,
     size: Math.min(a.width, a.height),
+    // More in the tooltip (v5 build 10).
+    tipFor: res.tips
+      ? (raw, color) =>
+          tipHtml(
+            res.tips?.[tipKey([raw])],
+            (tile.tooltip?.extra ?? []).map((m) => measureLabel(m, a.tables ?? [])),
+            (tile.tooltip?.extra ?? []).map((m) => numberFormatter(formatOf({ measures: [m] }, 0)).tip),
+            tile.tooltip?.trend ? `Last 12 ${tile.tooltip.trend.grain === 'week' ? 'weeks' : tile.tooltip.trend.grain === 'quarter' ? 'quarters' : tile.tooltip.trend.grain === 'day' ? 'days' : 'months'}` : '',
+            color,
+            colors.text2,
+            esc,
+          )
+      : undefined,
   });
   return {
     option,

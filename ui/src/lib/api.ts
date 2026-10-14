@@ -455,6 +455,8 @@ export interface QueryResult {
    * from the median of the periods around it (signed; ±1e308 when those are all the same), that median, and how many.
    */
   unusual?: { at: number; measure?: number; spreads: number; median: number; around: number }[];
+  /** More in the tooltip of each group (v5 build 10), keyed like `sparks`: the extra values, and a 12-period trend. */
+  tips?: Record<string, { extra?: Cell[]; trend?: (number | null)[] }>;
 }
 
 /**
@@ -731,6 +733,8 @@ export interface Tile {
   forecast?: { periods?: number; band?: boolean };
   /** Line, area and bar over time (v5 build 09, Advanced): mark unusual values. `high` marks more. */
   unusual?: { level?: 'low' | 'medium' | 'high' };
+  /** Charts (v5 build 10, Advanced): up to 3 more values, and a trend of the first value over a date, in the tooltip. */
+  tooltip?: { extra?: Measure[]; trend?: Dim };
 }
 
 /** Settings of this computer (not of the workspace). */

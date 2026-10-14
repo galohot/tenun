@@ -391,6 +391,7 @@
      <div class="inner" style:height={built.rows ? `max(100%, ${built.rows * ROW_PX + 44}px)` : '100%'}>
       <ChartView
         option={built.option}
+        tapShows={!!tile.tooltip}
         horizontal={built.horizontal ?? (!!tile.horizontal && tile.type === 'bar')}
         grids={built.grids}
         onresize={(w, h) => ((width = w), (height = h))}

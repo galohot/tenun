@@ -85,6 +85,9 @@ pub struct Tile {
     /// Line, area and bar over time (v5 build 09, Advanced): mark the values far from the periods around them.
     #[serde(default)]
     pub unusual: Option<crate::analytics::TileUnusual>,
+    /// Charts (v5 build 10, Advanced): up to 3 more values and a small trend in the tooltip of each group.
+    #[serde(default)]
+    pub tooltip: Option<crate::advanced::TileTooltip>,
 }
 
 /// Which tiles a tile's clicks and selections filter (V5-D4, V5-D37).
@@ -779,6 +782,8 @@ fn run_tile_inner(
     // still sees the real last period.
     shape::apply(engine, tile, &q, &wide, &mut res)?;
     advanced::sparks(engine, tile, &q, &mut res)?;
+    // More in the tooltip (v5 build 10): the groups on show, after the top N.
+    advanced::tips(engine, tile, &q, &mut res)?;
     let d = match tile.dims.first() {
         Some(d)
             if d.grain.is_some_and(|g| !g.is_part())

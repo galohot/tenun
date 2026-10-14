@@ -10,6 +10,7 @@ use crate::query::{
 use crate::shape::{Dim0, Layout, OTHER_KEY, classify, cmp_key};
 use crate::snapshot::{Partial, SortBy, Tile, TopN, add_grain, count_rows, iso, js_key, parse_day};
 use chrono::{Datelike, Duration, NaiveDate};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -994,10 +995,47 @@ pub fn sparks(
     if tile.kind != "table" || q.dimensions.is_empty() || res.rows.is_empty() {
         return Ok(());
     }
+    if let Some(lines) = trend_lines(engine, sd, m0, q, &res.rows)? {
+        res.sparks = Some(lines);
+    }
+    Ok(())
+}
+
+/// A tooltip's extra values and its small trend (v5 build 10, V5-D12): up to 3 more values, and a date field whose last
+/// 12 periods of the first value are drawn.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TileTooltip {
+    #[serde(default)]
+    pub extra: Vec<Measure>,
+    #[serde(default)]
+    pub trend: Option<Dimension>,
+}
+
+/// What the tooltip of one group of a chart shows beside its value.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Tip {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trend: Option<Vec<Option<f64>>>,
+}
+
+/// A tooltip shows at most this many more values.
+pub const MAX_TIP_VALUES: usize = 3;
+
+/// The last `SPARK_POINTS` finished periods of `m0` over the date `sd`, for each group of `rows` (the first `nd` values
+/// of a row), keyed by `spark_key`. `None` when the date has no data. A table's trend column and a tooltip's trend.
+fn trend_lines(
+    engine: &Engine,
+    sd: &Dimension,
+    m0: &Measure,
+    q: &SemanticQuery,
+    rows: &[Vec<Value>],
+) -> anyhow::Result<Option<BTreeMap<String, Vec<Option<f64>>>>> {
     let grain = sd.grain.filter(|g| !g.is_part()).unwrap_or(Grain::Month);
     let nd = q.dimensions.len();
     let Some(max_day) = latest_day(engine, sd, &q.filters) else {
-        return Ok(());
+        return Ok(None);
     };
     // The period of the latest date is left out while it is not over (the same rule as a time chart).
     let mut last = period_start(max_day, grain);
@@ -1008,11 +1046,10 @@ pub fn sparks(
     let periods: Vec<String> = (0..SPARK_POINTS as i32)
         .map(|i| iso(add_grain(first, grain, i)))
         .collect();
-    // Only the rows on show are read: the first group of the table, in the values shown.
+    // Only the groups on show are read: the values of the first group.
     let shown: Vec<Value> = {
         let mut seen = HashSet::new();
-        res.rows
-            .iter()
+        rows.iter()
             .map(|r| r[0].clone())
             .filter(|v| js_key(v) != OTHER_KEY && seen.insert(js_key(v)))
             .collect()
@@ -1052,7 +1089,7 @@ pub fn sparks(
         .first()
         .and_then(Value::as_f64);
     let mut lines: BTreeMap<String, Vec<Option<f64>>> = BTreeMap::new();
-    for r in &res.rows {
+    for r in rows {
         if js_key(&r[0]) != OTHER_KEY {
             lines.insert(spark_key(&r[..nd]), vec![empty; SPARK_POINTS]);
         }
@@ -1067,7 +1104,59 @@ pub fn sparks(
             line[i] = r.get(nd + 1).and_then(Value::as_f64);
         }
     }
-    res.sparks = Some(lines);
+    Ok(Some(lines))
+}
+
+/// More in the tooltip (v5 build 10, V5-D12): the extra values of each group of the chart, worked out with the tile's
+/// groups and filters (each a measure of its own, with its own format in the app), and the group's trend. Keyed like a
+/// table's trend column. The "Other" group has none.
+pub fn tips(
+    engine: &Engine,
+    tile: &Tile,
+    q: &SemanticQuery,
+    res: &mut QueryResult,
+) -> anyhow::Result<()> {
+    let Some(tt) = tile.tooltip.as_ref() else {
+        return Ok(());
+    };
+    if q.dimensions.is_empty() || res.rows.is_empty() {
+        return Ok(());
+    }
+    let nd = q.dimensions.len();
+    let mut out: BTreeMap<String, Tip> = BTreeMap::new();
+    for r in &res.rows {
+        if js_key(&r[0]) != OTHER_KEY {
+            out.insert(spark_key(&r[..nd]), Tip::default());
+        }
+    }
+    let extra: Vec<Measure> = tt.extra.iter().take(MAX_TIP_VALUES).cloned().collect();
+    if !extra.is_empty() {
+        let found = engine.query(&SemanticQuery {
+            measures: extra.clone(),
+            dimensions: q.dimensions.clone(),
+            filters: q.filters.clone(),
+            sort: vec![],
+            limit: Some(10_000),
+        })?;
+        for r in &found.rows {
+            if let Some(t) = out.get_mut(&spark_key(&r[..nd])) {
+                t.extra = r[nd..].to_vec();
+            }
+        }
+        for t in out.values_mut().filter(|t| t.extra.is_empty()) {
+            t.extra = vec![Value::Null; extra.len()];
+        }
+    }
+    if let (Some(sd), Some(m0)) = (tt.trend.as_ref(), q.measures.first())
+        && let Some(lines) = trend_lines(engine, sd, m0, q, &res.rows)?
+    {
+        for (k, line) in lines {
+            if let Some(t) = out.get_mut(&k) {
+                t.trend = Some(line);
+            }
+        }
+    }
+    res.tips = Some(out);
     Ok(())
 }
 

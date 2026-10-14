@@ -44,6 +44,8 @@ export function usesAdvanced(tile: Tile): boolean {
     // A forecast (v5 build 08), unusual values (build 09).
     !!tile.forecast ||
     !!tile.unusual ||
+    // More in the tooltip (v5 build 10).
+    !!tile.tooltip ||
     // A Top N, a target or a line that takes a parameter (v5 build 05).
     !!tile.top?.param ||
     !!tile.target?.param ||

@@ -47,6 +47,7 @@
   <div class="chart" bind:clientWidth={width} bind:clientHeight={height}>
     <ChartView
       option={built.option}
+      tapShows={!!tile.tooltip}
       ondrawn={drawn}
       onhover={tile.type === 'donut' ? (i) => (hovered = i) : undefined}
       onitem={onpick ? (_s, i) => {

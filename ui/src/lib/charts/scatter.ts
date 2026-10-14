@@ -8,6 +8,8 @@ import { axisCommon, esc, key, OTHER, slotsFor, tooltipBase, type BuildArgs, typ
 import { axisSpan, levelMarkLine, NAME_ROW, needsSecondRow, resolveLevels, wantsTrend, type Level } from './guides';
 import { fitAt, trendFit, trendSentence } from './lines';
 import { farFromZero } from './math';
+import { formatOf } from '../measures';
+import { tipHtml, tipKey } from '../tips';
 
 /** The query asks for this many dots at most (`snapshot::tile_query`). */
 const DOT_LIMIT = 2000;
@@ -60,7 +62,8 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
   const hasOther = ranked.length > kept.length;
   if (hasOther) groups.push({ name: OTHER, color: c.text2 });
 
-  type Dot = { value: [number, number]; name: string; group: string; size: number | null; symbolSize?: number; itemStyle: { opacity: number } };
+  // More in the tooltip (v5 build 10): each dot's group key, as the engine keys its tips (the first `nd` values).
+  type Dot = { value: [number, number]; name: string; group: string; size: number | null; symbolSize?: number; itemStyle: { opacity: number }; tip: string };
   const data: Dot[][] = groups.map(() => []);
   const dots: Cell[][] = groups.map(() => []);
   for (const r of rows) {
@@ -72,6 +75,7 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
       size: sized ? sizeOf(r) : null,
       ...(sized ? { symbolSize: bubbleSize(sizeOf(r), sizeMax) } : {}),
       itemStyle: { opacity: isSel(r[0]) ? (sized ? 0.85 : 1) : 0.28 },
+      tip: tipKey(r.slice(0, nd)),
     });
     dots[gi].push(r[0]);
   }
@@ -162,7 +166,16 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
       formatter: (p: { data: Dot }) =>
         `<b>${esc(p.data.name)}</b>${p.data.group ? `<br/>${esc(p.data.group)}` : ''}` +
         `<br/>${esc(xName)}: ${esc(fx.tip(p.data.value[0]))}<br/>${esc(yName)}: ${esc(fy.tip(p.data.value[1]))}` +
-        (sized ? `<br/>${esc(sizeName)}: ${p.data.size === null ? '–' : esc(fs.tip(p.data.size))}` : ''),
+        (sized ? `<br/>${esc(sizeName)}: ${p.data.size === null ? '–' : esc(fs.tip(p.data.size))}` : '') +
+        tipHtml(
+          res.tips?.[p.data.tip],
+          (tile.tooltip?.extra ?? []).map((m) => measureLabel(m, tables)),
+          (tile.tooltip?.extra ?? []).map((m) => numberFormatter(formatOf({ measures: [m] }, 0)).tip),
+          tile.tooltip?.trend ? `Last 12 ${tile.tooltip.trend.grain === 'week' ? 'weeks' : tile.tooltip.trend.grain === 'quarter' ? 'quarters' : tile.tooltip.trend.grain === 'day' ? 'days' : 'months'}` : '',
+          c.series[0],
+          c.text2,
+          esc,
+        ),
     },
     xAxis: axis(xName, xFar, fx, true),
     yAxis: axis(yName, yFar, fy, false),

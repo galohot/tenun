@@ -256,6 +256,20 @@ unusual values**.
 
 Unusual is not wrong. A sale, a holiday or a new store can all make a month stand out. The mark says where to look.
 
+## More in the tooltip
+
+A bar, line, area, pie, donut or scatter chart can show more about each group when you point at it (Advanced). In
+the tile's options, under **Tooltip**:
+
+- **Up to 3 more values.** Pick a column or a measure, as for the chart's own value. Each is worked out for the same
+  group and under the same filters, and written in its own format: point at a store and see its orders and its average
+  ticket beside its amount.
+- **A trend.** Pick a date and its periods (days, weeks, months or quarters). The tooltip draws the last 12 finished
+  periods of the chart's first value for that group, as a small line with its last point marked.
+- A click on another tile filters the tooltip's values too, and an exported or published page keeps them.
+- On a touch screen, the first tap on a bar, point or slice shows its tooltip; a second tap on it filters, as a tap
+  always did.
+
 ## What Tenun does not draw
 
 See [the README](../README.md#what-tenun-does-not-do-on-purpose) for the list and the answer to each.

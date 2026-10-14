@@ -443,6 +443,9 @@ pub struct QueryResult {
     /// The values a chart over time marks as unusual (v5 build 09).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unusual: Option<Vec<crate::analytics::UnusualPoint>>,
+    /// More in the tooltip of each group (v5 build 10), keyed like `sparks`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tips: Option<BTreeMap<String, crate::advanced::Tip>>,
 }
 
 /// A compare chart with one value reads two periods of a field. `periods` are those two values, in
@@ -482,6 +485,7 @@ impl QueryResult {
             params: Vec::new(),
             forecast: None,
             unusual: None,
+            tips: None,
         }
     }
 }

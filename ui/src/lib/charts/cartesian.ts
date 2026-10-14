@@ -21,8 +21,10 @@ import {
 import { axisSpan, levelMarkLine, NAME_ROW, needsSecondRow, resolveLevels, wantsTrend, widestName } from './guides';
 import { fitAt, lineSource, MAX_LINES, pointsOf, shownSeries, stepWord, trendFit, trendSentence, usableValues } from './lines';
 import { foldable, normalizeShares, sameUnit, stackMode } from './math';
-import { addsUp as tileAddsUp, whyNotAdded } from '../measures';
+import { addsUp as tileAddsUp, formatOf, whyNotAdded } from '../measures';
 import { isHigh, unusualWords, type UnusualPoint } from '../unusual';
+import { tipHtml, tipKey } from '../tips';
+import { measureLabel } from '../format';
 
 /** The name of the trend line in the legend and the tooltip. */
 const TREND = 'Trend';
@@ -185,12 +187,18 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
               label: { show: false },
             };
           });
+  // The text of each series' value in the tooltip, by series name (v5 build 10 writes the tooltip itself when it has
+  // more to show); the main series by name, for their extra lines.
+  const tipText = new Map<string, (v: number | null, i: number) => string>();
+  const mainIndex = new Map<string, number>();
   const built = order.map((si, pos) => {
     const s = series[si];
     const color = s.slot === null ? c.text2 : c.series[(s.slot ?? si) % c.series.length];
     const isTop = pos === order.length - 1;
     const fmt = fmtOf(si);
     const tooltip = { valueFormatter: (v: number | null, ci: number) => (v === null ? '–' : fmt.tip(v) + unusualTip(si, ci)) };
+    tipText.set(s.name, tooltip.valueFormatter);
+    mainIndex.set(s.name, si);
     const ringed = rings(si, s.values);
     const data = s.values.map((v, ci) => ({
       value: shares ? shares[si][ci] : v,
@@ -371,6 +379,9 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       const name = multi ? `${s.name} estimate` : 'Estimate';
       estimateNames.push(name);
       const fmt = fmtOf(si);
+      const estimateText = (v: number | null, i: number) =>
+        v === null || i === lastDone ? '–' : `${fmt.short(v)}, likely between ${fmt.short(lo[i] as number)} and ${fmt.short(hi[i] as number)}`;
+      tipText.set(name, estimateText);
       (built as object[]).push({
         type: 'line',
         name,
@@ -383,10 +394,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         itemStyle: { color, borderColor: c.surface, borderWidth: 2 },
         emphasis: { focus: 'none', scale: false },
         // "Estimate 18.2 M, likely between 16.9 M and 19.5 M", short as an estimate is; the point it starts from is a value.
-        tooltip: {
-          valueFormatter: (v: number | null, i: number) =>
-            v === null || i === lastDone ? '–' : `${fmt.short(v)}, likely between ${fmt.short(lo[i] as number)} and ${fmt.short(hi[i] as number)}`,
-        },
+        tooltip: { valueFormatter: estimateText },
         data: est,
       });
       if (tile.forecast?.band === false) return;
@@ -448,6 +456,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   });
   const fit = guided && source !== 'points' && wantsTrend(tile.lines) ? trendFit(aligned, undefined, rest) : null;
   const trendTip = fit ? trendSentence(fit, fmtOf(0).short(Math.abs(fit.slope)), `per ${stepWord(temporal ? grain : null)}`) : '';
+  if (fit) tipText.set(TREND, () => trendTip);
   const lineKey = horizontal ? 'xAxis' : 'yAxis';
   // The plot is about as tall (or wide) as the chart less its margins and axis text.
   const plotLength = horizontal ? width - 70 : height - (multi || hasCompare || fit ? 34 : 14) - 30;
@@ -606,6 +615,29 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     );
   };
 
+  // More in the tooltip (v5 build 10): each series' value as usual, then the group's extra values and its trend.
+  const tipNames = (tile.tooltip?.extra ?? []).map((m) => measureLabel(m, tables));
+  // Each extra value in its own format: a named measure's, else as it comes.
+  const tipFormats = (tile.tooltip?.extra ?? []).map((m) => numberFormatter(formatOf({ measures: [m] }, 0), loc).tip);
+  const trendCaption = tile.tooltip?.trend ? `Last 12 ${tile.tooltip.trend.grain === 'week' ? 'weeks' : tile.tooltip.trend.grain === 'quarter' ? 'quarters' : tile.tooltip.trend.grain === 'day' ? 'days' : 'months'}` : '';
+  const tipsTip = (all: { marker: string; seriesName: string; value: unknown; dataIndex: number; axisValueLabel: string }[]) =>
+    `${esc(all[0]?.axisValueLabel ?? '')}` +
+    all
+      .filter((p) => tipText.has(p.seriesName))
+      .map((p) => {
+        const v = typeof p.value === 'number' ? p.value : null;
+        let line = `<br/>${p.marker} ${esc(p.seriesName)} <b>${esc(tipText.get(p.seriesName)!(v, p.dataIndex))}</b>`;
+        const si = mainIndex.get(p.seriesName);
+        if (si !== undefined) {
+          const ci = p.dataIndex;
+          const k = tipKey(nd >= 2 ? [categories[ci], series[si].raw] : [categories[ci]]);
+          const color = series[si].slot === null ? c.text2 : c.series[(series[si].slot ?? si) % c.series.length];
+          line += tipHtml(res.tips?.[k], tipNames, tipFormats, trendCaption, color, c.text2, esc);
+        }
+        return line;
+      })
+      .join('');
+
   // The category axis, and a hidden twin of it for the grey comparison bars.
   const withBehind = <T extends object>(axis: T) =>
     hasCompare && tile.type === 'bar' ? [axis, { ...axis, show: false, axisPointer: { show: false } }] : axis;
@@ -660,7 +692,9 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
           }
         : hasCompare
           ? { formatter: compareTip }
-          : { valueFormatter: (v: number | null) => (v === null ? '–' : fmtOf(0).tip(v)) }),
+          : res.tips
+            ? { formatter: tipsTip }
+            : { valueFormatter: (v: number | null) => (v === null ? '–' : fmtOf(0).tip(v)) }),
     },
     xAxis: horizontal ? quietValue : withBehind({ ...catAxis, axisLabel: { ...catAxis.axisLabel, rotate: !temporal && longest > 10 && categories.length > 6 ? 30 : 0 } }),
     yAxis: horizontal ? withBehind(catAxis) : quietValue,

@@ -18,6 +18,7 @@
     onresize,
     onhover,
     ondrawn,
+    tapShows = false,
   }: {
     option: EChartsCoreOption;
     horizontal?: boolean;
@@ -36,7 +37,26 @@
     onhover?: (index: number | null) => void;
     /** After each drawing, with the instance, to read what ECharts laid out (a pie's hidden labels). */
     ondrawn?: (chart: unknown) => void;
+    /**
+     * The tooltip has more to show (v5 build 10): on a touch screen the first tap on a mark shows it, and a second tap
+     * on the same mark does what a click does. A mouse is unchanged.
+     */
+    tapShows?: boolean;
   } = $props();
+
+  /** The mark a touch last showed the tooltip of; a second tap on it acts. */
+  let shown: string | null = null;
+  const firstTap = (e: { event?: unknown }, mark: string): boolean => {
+    const native = (e.event as { event?: Event } | undefined)?.event ?? (e.event as Event | undefined);
+    const touch = !!native && ((native as PointerEvent).pointerType === 'touch' || native.type.startsWith('touch'));
+    if (!tapShows || !touch) return false;
+    if (shown === mark) {
+      shown = null;
+      return false;
+    }
+    shown = mark;
+    return true;
+  };
 
   /** No animation when the person asked for less motion, or while a picture of the dashboard is made. */
   const still = (o: EChartsCoreOption): EChartsCoreOption => (animates() ? o : { ...o, animation: false });
@@ -67,7 +87,10 @@
     }
     if (onitem) {
       chart.on('click', (e) => {
-        if (e.componentType === 'series' && e.seriesIndex !== undefined && e.dataIndex !== undefined) onitem(e.seriesIndex, e.dataIndex, e.dataType);
+        if (e.componentType === 'series' && e.seriesIndex !== undefined && e.dataIndex !== undefined) {
+          if (firstTap(e, `${e.seriesIndex}:${e.dataIndex}`)) return;
+          onitem(e.seriesIndex, e.dataIndex, e.dataType);
+        }
       });
     }
     // The plot a point falls in, or -1.
@@ -83,7 +106,7 @@
       const v = chart.convertFromPixel({ gridIndex: g }, pt) as number[];
       if (onx) return onx(v[0]);
       const i = Math.round(horizontal ? v[1] : v[0]);
-      if (Number.isFinite(i) && i >= 0) onpick?.(i);
+      if (Number.isFinite(i) && i >= 0 && !firstTap(e, `i:${i}`)) onpick?.(i);
     });
     if (oncontext) {
       // The browser's own menu would cover ours, so it is switched off on the plot.
