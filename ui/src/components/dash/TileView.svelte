@@ -15,6 +15,7 @@
   import { downloadCsv, downloadTilePng, downloadXlsx } from '../../lib/output';
   import Menu from './Menu.svelte';
   import TileBody from './TileBody.svelte';
+  import UnusualList from './UnusualList.svelte';
   import { cardGround, drawnTile } from '../../lib/card';
   import { paramValues, withParams } from '../../lib/params';
 
@@ -383,8 +384,9 @@
       </svelte:boundary>
     {/if}
   </div>
-  {#if ignored.length || note || linkNotes.length}
+  {#if ignored.length || note || linkNotes.length || res?.unusual?.length}
     <footer>
+      {#if res?.unusual?.length}<UnusualList {res} {tile} />{/if}
       {#each linkNotes as n (n)}
         <span class="link-note"><Icon name="warning" size={12} /> {n}</span>
       {/each}

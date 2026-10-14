@@ -29,6 +29,8 @@ export interface Colors {
   /** Status colours. Always paired with a word, a sign or an icon. */
   good: string;
   bad: string;
+  /** A value below the usual (v5 build 09): the warning colour. */
+  warn: string;
 }
 
 export function readColors(el: Element = document.documentElement): Colors {
@@ -46,6 +48,7 @@ export function readColors(el: Element = document.documentElement): Colors {
     inset: v('--inset'),
     good: v('--success'),
     bad: v('--danger'),
+    warn: v('--warn'),
   };
 }
 

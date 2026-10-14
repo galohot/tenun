@@ -22,6 +22,7 @@ import { axisSpan, levelMarkLine, NAME_ROW, needsSecondRow, resolveLevels, wants
 import { fitAt, lineSource, MAX_LINES, pointsOf, shownSeries, stepWord, trendFit, trendSentence, usableValues } from './lines';
 import { foldable, normalizeShares, sameUnit, stackMode } from './math';
 import { addsUp as tileAddsUp, whyNotAdded } from '../measures';
+import { isHigh, unusualWords, type UnusualPoint } from '../unusual';
 
 /** The name of the trend line in the legend and the tooltip. */
 const TREND = 'Trend';
@@ -153,12 +154,44 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     order.sort((a, b) => rank(b) - rank(a));
   }
   const forecasting = forecastRows.length > 0 && !stacked;
+  // Unusual values (v5 build 09): each marked value by series and category, for its ring and the words in the hover.
+  const marked = new Map<string, UnusualPoint>();
+  for (const u of res.unusual ?? []) {
+    const row = res.rows[u.at];
+    if (!row) continue;
+    const ci = categories.findIndex((k) => key(k) === key(row[0]));
+    const si = nd >= 2 ? series.findIndex((s) => key(s.raw) === key(row[1])) : perValue ? (u.measure ?? 0) : 0;
+    if (ci >= 0 && si >= 0) marked.set(`${si}:${ci}`, u);
+  }
+  const unusualTip = (si: number, ci: number) => {
+    const u = marked.get(`${si}:${ci}`);
+    return u ? ` · ${unusualWords(u, grain, fmtOf(si).short)}` : '';
+  };
+  /** A ring around each marked value: the bad colour above the usual, the warn colour below. Not on piled series. */
+  const rings = (si: number, values: (number | null)[]) =>
+    stacked
+      ? []
+      : [...marked.entries()]
+          .filter(([k]) => k.startsWith(`${si}:`))
+          .map(([k, u]) => {
+            const ci = Number(k.split(':')[1]);
+            const v = values[ci];
+            return {
+              coord: horizontal ? [v, ci] : [ci, v],
+              value: v,
+              symbol: 'circle',
+              symbolSize: 18,
+              itemStyle: { color: 'transparent', borderColor: isHigh(u) ? c.bad : c.warn, borderWidth: 2.5 },
+              label: { show: false },
+            };
+          });
   const built = order.map((si, pos) => {
     const s = series[si];
     const color = s.slot === null ? c.text2 : c.series[(s.slot ?? si) % c.series.length];
     const isTop = pos === order.length - 1;
     const fmt = fmtOf(si);
-    const tooltip = { valueFormatter: (v: number | null) => (v === null ? '–' : fmt.tip(v)) };
+    const tooltip = { valueFormatter: (v: number | null, ci: number) => (v === null ? '–' : fmt.tip(v) + unusualTip(si, ci)) };
+    const ringed = rings(si, s.values);
     const data = s.values.map((v, ci) => ({
       value: shares ? shares[si][ci] : v,
       raw: v,
@@ -197,6 +230,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         tooltip,
         emphasis: { focus: 'none' },
         data,
+        ...(ringed.length ? { markPoint: { silent: true, animation: false, data: ringed } } : {}),
       }];
     }
     // The points of a line. With "All" each point says on its own whether it has a label, so a point
@@ -259,6 +293,11 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         data: [point(hi), point(lo)],
       };
     };
+    /** The lowest and highest labels of a line, and the rings of its unusual values, in one set of marks. */
+    function withRings(m: ReturnType<typeof marks>, extra: object[]) {
+      if (!extra.length) return m;
+      return m ? { ...m, data: [...m.data, ...extra] } : { silent: true, animation: false, data: extra };
+    }
     // An unfinished last period: the line stops one point early and a dashed
     // copy draws the final segment, so a half month never reads as a drop.
     const unfinished = lineLike && tile.type !== 'area' && partialKey !== undefined && categories[actual - 1] === partialKey && s.values.length > 1;
@@ -276,7 +315,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       emphasis: { focus: 'none', scale: false },
       connectNulls: false,
       tooltip,
-      markPoint: marks(shares ? shares[si] : s.values),
+      markPoint: withRings(marks(shares ? shares[si] : s.values), ringed),
       data: lineData(si, s.values, unfinished),
       // "All" names every point that has room: with k points to the label, every k-th one from the end
       // (the others are switched off one by one), and the ones that still touch are hidden.

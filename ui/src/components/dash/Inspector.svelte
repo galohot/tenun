@@ -667,6 +667,8 @@
   // A forecast (v5 build 08): a line or an area over a date with a grain, one value.
   const canForecast = $derived((tile.type === 'line' || tile.type === 'area') && dim0 === 'date' && !!tile.dims[0]?.grain && !isPart(tile.dims[0].grain) && tile.measures.length === 1);
   const FORECAST_AHEAD: Record<string, number> = { month: 3, quarter: 2, week: 8, day: 14, year: 2 };
+  // Unusual values (v5 build 09): a line, an area or bars over a date with a grain.
+  const canMarkUnusual = $derived((tile.type === 'line' || tile.type === 'area' || tile.type === 'bar') && dim0 === 'date' && !!tile.dims[0]?.grain && !isPart(tile.dims[0].grain));
 
   /** A target of 0 or less, or an empty box, clears the target. */
   function setTarget(raw: string) {
@@ -1291,6 +1293,24 @@
     </div>
   {:else if tile.compare && compareType}
     <p class="hint">Comparing needs one value, a date with a grain and no split.</p>
+  {/if}
+
+  {#if (advanced || tile.unusual) && canMarkUnusual}
+    <!-- Unusual values (v5 build 09, Advanced): a ring on a value far from the periods around it. -->
+    <div class="sec">
+      <label class="check">
+        <input type="checkbox" checked={!!tile.unusual} onchange={(e) => set({ unusual: e.currentTarget.checked ? {} : undefined })} />
+        Mark unusual values
+      </label>
+      {#if tile.unusual}
+        <div class="grains stack" role="radiogroup" aria-label="How many to mark">
+          {#each [['low', 'Fewer'], ['medium', 'Some'], ['high', 'More']] as [id, label] (id)}
+            <button role="radio" aria-checked={(tile.unusual.level ?? 'medium') === id} class:on={(tile.unusual.level ?? 'medium') === id} onclick={() => set({ unusual: id === 'medium' ? {} : { level: id as 'low' | 'high' } })}>{label}</button>
+          {/each}
+        </div>
+        <p class="hint tight">A value far from the 6 periods around it, measured in their usual spread. Unusual is not wrong: it is worth a look.</p>
+      {/if}
+    </div>
   {/if}
 
   {#if (advanced || tile.forecast) && canForecast}

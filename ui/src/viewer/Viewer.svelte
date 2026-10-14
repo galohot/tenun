@@ -12,6 +12,7 @@
   import Icon from '../components/Icon.svelte';
   import FocusSheet from '../components/dash/FocusSheet.svelte';
   import TileBody from '../components/dash/TileBody.svelte';
+  import UnusualList from '../components/dash/UnusualList.svelte';
   import FlowLayout from '../components/dash/FlowLayout.svelte';
   import { flowOrder } from '../lib/flow';
   import { DRILL } from '../lib/site';
@@ -418,6 +419,7 @@
         <p class="note link-note"><Icon name="warning" size={12} /> {n}</p>
       {/each}
       {#if r.offline && !isStatic(t) && t.type !== 'filter'}<p class="note">Not filtered in this file</p>{/if}
+      {#if r.res?.unusual?.length}<div class="note"><UnusualList res={r.res} tile={shown} /></div>{/if}
     </article>
   {/snippet}
 

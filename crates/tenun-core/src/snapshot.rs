@@ -82,6 +82,9 @@ pub struct Tile {
     /// Line and area over time (v5 build 08, Advanced): forecast the periods ahead.
     #[serde(default)]
     pub forecast: Option<crate::analytics::TileForecast>,
+    /// Line, area and bar over time (v5 build 09, Advanced): mark the values far from the periods around them.
+    #[serde(default)]
+    pub unusual: Option<crate::analytics::TileUnusual>,
 }
 
 /// Which tiles a tile's clicks and selections filter (V5-D4, V5-D37).
@@ -823,6 +826,10 @@ fn run_tile_inner(
     // A forecast (v5 build 08) after the unfinished period is known: it is left out of the fit.
     if matches!(tile.kind.as_str(), "line" | "area") {
         crate::analytics::attach(tile, grain, &mut res);
+    }
+    // Unusual values (v5 build 09): never the unfinished period.
+    if matches!(tile.kind.as_str(), "line" | "area" | "bar") {
+        crate::analytics::attach_unusual(tile, &mut res);
     }
     Ok(res)
 }

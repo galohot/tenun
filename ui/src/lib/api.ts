@@ -450,6 +450,11 @@ export interface QueryResult {
    * with a split. No rows: it could not be made, and `note` says why.
    */
   forecast?: { rows: Cell[][]; method: string; note?: string; split?: boolean };
+  /**
+   * The values a chart over time marks as unusual (v5 build 09): the row, which value of it, how many robust spreads
+   * from the median of the periods around it (signed; ±1e308 when those are all the same), that median, and how many.
+   */
+  unusual?: { at: number; measure?: number; spreads: number; median: number; around: number }[];
 }
 
 /**
@@ -724,6 +729,8 @@ export interface Tile {
   param?: { id: string; style?: 'slider' | 'input' | 'buttons' | 'dropdown' };
   /** Line and area over time (v5 build 08, Advanced): forecast the periods ahead; `band` false hides the range. */
   forecast?: { periods?: number; band?: boolean };
+  /** Line, area and bar over time (v5 build 09, Advanced): mark unusual values. `high` marks more. */
+  unusual?: { level?: 'low' | 'medium' | 'high' };
 }
 
 /** Settings of this computer (not of the workspace). */

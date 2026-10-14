@@ -237,6 +237,25 @@ A line or an area over time can show what comes next (Advanced). In the tile's o
 It is an estimate from the past, not knowledge of the future. A price change, a new store or a holiday that moved
 will not be in it.
 
+## Unusual values
+
+A line, an area or bars over time can mark the values that stand out (Advanced). In the tile's options, tick **Mark
+unusual values**.
+
+- **What it draws:** a ring around the point or the bar: in the bad colour when the value is above the usual, in the
+  warning colour when it is below. Under the chart, "3 unusual values" opens a list of them with their words. The hover
+  says it too: "About 4 times the usual spread above the 6 months around it (median 267M)".
+- **How:** each value is read against the 6 periods around it (3 before and 3 after; more on one side at the ends),
+  not counting itself. Their median is the usual value, and the usual spread is their median distance from it (× 1.4826,
+  so it reads like a standard deviation). A value at least 3.5 spreads away is marked.
+- **How many:** **Fewer** needs 4.5 spreads, **Some** 3.5 and **More** 2.5.
+- When the periods around a value are all the same, any value that differs is marked, and the words say so.
+- A series needs 8 periods with values. The unfinished period (this month, so far) is never marked.
+- Each line of a split chart, and each value of a chart with several, is read on its own.
+- An exported or published page keeps the marks.
+
+Unusual is not wrong. A sale, a holiday or a new store can all make a month stand out. The mark says where to look.
+
 ## What Tenun does not draw
 
 See [the README](../README.md#what-tenun-does-not-do-on-purpose) for the list and the answer to each.

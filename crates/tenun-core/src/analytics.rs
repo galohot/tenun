@@ -385,6 +385,191 @@ pub fn attach(tile: &Tile, grain: Grain, res: &mut QueryResult) {
     });
 }
 
+// ---- unusual values (v5 build 09, V5-D11) ----------------------------------------------------------------------
+
+/// How far from the usual a value must be, in robust spreads, to be marked: low 4.5, medium 3.5, high 2.5.
+pub fn threshold(level: &str) -> f64 {
+    match level {
+        "low" => 4.5,
+        "high" => 2.5,
+        _ => 3.5,
+    }
+}
+
+/// The periods around a point that it is read against: the point itself is left out, so a value that stands out
+/// cannot hide in its own window.
+pub const AROUND: usize = 6;
+/// The fewest periods a series needs before any point is marked.
+pub const MIN_PERIODS: usize = 8;
+
+/// One value that is far from the periods around it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Unusual {
+    /// The index of the point in the series.
+    pub at: usize,
+    /// How many robust spreads above (positive) or below (negative) the median of the periods around it; infinite
+    /// when those periods all have the same value and this one does not.
+    pub spreads: f64,
+    /// The median of the periods around it.
+    pub median: f64,
+    /// How many periods it was read against.
+    pub around: usize,
+}
+
+fn median(v: &mut [f64]) -> f64 {
+    v.sort_by(|a, b| a.total_cmp(b));
+    let n = v.len();
+    if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        (v[n / 2 - 1] + v[n / 2]) / 2.0
+    }
+}
+
+/// The indexes of the `AROUND` periods nearest to `i` (half on each side, more on one side at the ends), not `i`.
+fn neighbours(i: usize, n: usize) -> Vec<usize> {
+    let half = AROUND / 2;
+    let mut lo = i.saturating_sub(half);
+    let mut hi = (i + half).min(n - 1);
+    // At an end, take more from the other side.
+    while hi - lo < AROUND && (lo > 0 || hi < n - 1) {
+        if lo == 0 || (hi < n - 1 && i - lo > hi - i) {
+            hi += 1;
+        } else {
+            lo -= 1;
+        }
+    }
+    (lo..=hi).filter(|&j| j != i).collect()
+}
+
+/// The unusual values of a series over time (finished periods only, oldest first; a blank is never marked and is not
+/// read). A point is unusual when it is at least `k` robust spreads (MAD × 1.4826) from the median of the periods
+/// around it.
+pub fn unusual(y: &[Option<f64>], k: f64) -> Vec<Unusual> {
+    let n = y.len();
+    if y.iter().flatten().count() < MIN_PERIODS {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (i, v) in y.iter().enumerate() {
+        let Some(v) = *v else { continue };
+        let mut w: Vec<f64> = neighbours(i, n).into_iter().filter_map(|j| y[j]).collect();
+        if w.len() < 4 {
+            continue;
+        }
+        let around = w.len();
+        let med = median(&mut w);
+        let mut dev: Vec<f64> = w.iter().map(|x| (x - med).abs()).collect();
+        let spread = median(&mut dev) * 1.4826;
+        let spreads = if spread > 0.0 {
+            (v - med) / spread
+        } else if v != med {
+            // The periods around it are all the same, and this one is not.
+            f64::INFINITY.copysign(v - med)
+        } else {
+            0.0
+        };
+        if spreads.abs() >= k {
+            out.push(Unusual {
+                at: i,
+                spreads,
+                median: med,
+                around,
+            });
+        }
+    }
+    out
+}
+
+/// What a chart over time asks for: how sure a value must be to be marked unusual (v5 build 09).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TileUnusual {
+    /// `low`, `medium` (the default) or `high`: high marks more.
+    #[serde(default)]
+    pub level: Option<String>,
+}
+
+/// A value the chart marks: its row in the result, which value of the row, how far from the usual (in robust spreads,
+/// signed; infinite when the periods around it are all the same), their median, and how many periods those are.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UnusualPoint {
+    pub at: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub measure: usize,
+    #[serde(serialize_with = "spreads_out", deserialize_with = "spreads_in")]
+    pub spreads: f64,
+    pub median: f64,
+    pub around: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
+/// JSON has no infinity: a value unlike periods that are all the same is written as ±1e308.
+fn spreads_out<S: serde::Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_f64(v.clamp(-1e308, 1e308))
+}
+
+fn spreads_in<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    f64::deserialize(d)
+}
+
+/// One series of a chart for the marks: its value of the split field, and its (row, period, value) points.
+type RowSeries = (Value, Vec<(usize, String, Option<f64>)>);
+
+/// Marks the unusual values of a line, area or bar chart over time. Each series is read on its own (a split, or each
+/// value); the unfinished last period is never marked.
+pub fn attach_unusual(tile: &Tile, res: &mut QueryResult) {
+    let Some(ask) = &tile.unusual else { return };
+    let k = threshold(ask.level.as_deref().unwrap_or("medium"));
+    let nd = res
+        .columns
+        .iter()
+        .take_while(|c| c.role == "dimension")
+        .count();
+    let nm = res.columns.len() - nd;
+    let partial = res.partial.as_ref().map(|p| p.key.clone());
+    let mut out = Vec::new();
+    for j in 0..nm {
+        // (series, [(row, period, value)]), the series by the split's value.
+        let mut series: Vec<RowSeries> = Vec::new();
+        for (ri, r) in res.rows.iter().enumerate() {
+            let Some(key) = r.first().and_then(Value::as_str) else {
+                continue;
+            };
+            if partial.as_deref() == Some(key) {
+                continue;
+            }
+            let name = if nd >= 2 {
+                r.get(1).cloned().unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            };
+            let v = r.get(nd + j).and_then(Value::as_f64);
+            match series.iter_mut().find(|(n, _)| *n == name) {
+                Some((_, s)) => s.push((ri, key.to_string(), v)),
+                None => series.push((name, vec![(ri, key.to_string(), v)])),
+            }
+        }
+        for (_, mut s) in series {
+            s.sort_by(|a, b| a.1.cmp(&b.1));
+            let y: Vec<Option<f64>> = s.iter().map(|p| p.2).collect();
+            for u in unusual(&y, k) {
+                out.push(UnusualPoint {
+                    at: s[u.at].0,
+                    measure: j,
+                    spreads: u.spreads,
+                    median: u.median,
+                    around: u.around,
+                });
+            }
+        }
+    }
+    out.sort_by_key(|u| u.at);
+    res.unusual = Some(out);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,5 +632,37 @@ mod tests {
         let f = forecast(&y, Some(12), 6, "months").unwrap();
         assert!(f.low.iter().all(|v| *v >= 0.0), "{:?}", f.low);
         assert!(f.low.contains(&0.0), "{:?}", f.low);
+    }
+
+    #[test]
+    fn a_spike_and_a_dip_are_found_and_the_rest_is_not() {
+        let mut y: Vec<Option<f64>> = (0..24)
+            .map(|t| Some(100.0 + ((t * 7) % 5) as f64))
+            .collect();
+        y[5] = Some(200.0);
+        y[17] = Some(40.0);
+        let found: Vec<usize> = unusual(&y, threshold("medium"))
+            .iter()
+            .map(|u| u.at)
+            .collect();
+        assert_eq!(found, [5, 17]);
+        let u = &unusual(&y, threshold("medium"))[0];
+        assert!(u.spreads > 3.5 && u.around == 6);
+        // The ends are read against the 6 nearest periods too.
+        y[0] = Some(300.0);
+        assert_eq!(unusual(&y, 3.5).first().map(|u| u.at), Some(0));
+    }
+
+    #[test]
+    fn a_flat_series_marks_only_what_differs_and_short_series_mark_nothing() {
+        let mut y: Vec<Option<f64>> = vec![Some(10.0); 12];
+        y[6] = Some(11.0);
+        let u = unusual(&y, 4.5);
+        assert_eq!(u.len(), 1);
+        assert!(u[0].spreads.is_infinite());
+        assert!(unusual(&[Some(1.0); 7], 2.5).is_empty());
+        assert_eq!(neighbours(0, 10), [1, 2, 3, 4, 5, 6]);
+        assert_eq!(neighbours(9, 10), [3, 4, 5, 6, 7, 8]);
+        assert_eq!(neighbours(5, 10), [2, 3, 4, 6, 7, 8]);
     }
 }

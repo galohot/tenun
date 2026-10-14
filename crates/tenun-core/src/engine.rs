@@ -440,6 +440,9 @@ pub struct QueryResult {
     /// A line or area tile's forecast (v5 build 08).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forecast: Option<crate::analytics::ForecastInfo>,
+    /// The values a chart over time marks as unusual (v5 build 09).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unusual: Option<Vec<crate::analytics::UnusualPoint>>,
 }
 
 /// A compare chart with one value reads two periods of a field. `periods` are those two values, in
@@ -478,6 +481,7 @@ impl QueryResult {
             drill: None,
             params: Vec::new(),
             forecast: None,
+            unusual: None,
         }
     }
 }
