@@ -281,8 +281,8 @@ export function tileTitle(t: Tile, tables: Named[], parts?: QueryResult['parts']
   const dtype = d0 ? tables.find((x) => x.id === d0.table)?.columns?.find((c) => c.name === d0.column)?.dtype : undefined;
   const kind = d0 ? dim0Kind(dtype, d0.grain) : 'none';
   const label = (x: Measure, i: number) => measureLabel(x, tables, effectiveShowAs(t, i, kind, parts));
-  // A note or a picture needs no title.
-  if (t.type === 'text' || t.type === 'image' || t.type === 'filter') return '';
+  // A note or a picture needs no title; a filter and a parameter's control write their own name.
+  if (t.type === 'text' || t.type === 'image' || t.type === 'filter' || t.type === 'param') return '';
   if (!t.measures.length && !t.dims.length) return 'New tile';
   let m = t.measures[0] ? label(t.measures[0], 0) : fieldLabel(tables, t.dims[0].table, t.dims[0].column);
   // Several values: "Sales and cost by month".

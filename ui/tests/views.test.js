@@ -57,3 +57,14 @@ test('a copied dashboard keeps its views, pointed at the copied tiles', async ()
   assert.deepEqual(got.selections, { f2: { values: ['Jawa'] } });
   assert.deepEqual(got.drill, { b2: [{}] });
 });
+
+test('a view keeps the values of the parameters that have a control here, and an older view still reads the same', async () => {
+  const { currentState, sameAsView } = await import('../src/lib/views.ts');
+  const dash = { tiles: [...tiles, { id: 's', type: 'param', measures: [], dims: [], param: { id: 'p1' } }], grain: null };
+  const now = currentState(dash, [], {}, { p1: 0.05, p2: 3 });
+  assert.deepEqual(now.params, { p1: 0.05 }, 'p2 has no control on this dashboard');
+  const base = { id: 'v1', name: 'V', filters: [], selections: now.selections, grain: null, drill: {} };
+  assert.equal(sameAsView(now, base), true, 'a view saved before parameters reads the same');
+  assert.equal(sameAsView(now, { ...base, params: { p1: 0.05 } }), true);
+  assert.equal(sameAsView(now, { ...base, params: { p1: 0.1 } }), false);
+});

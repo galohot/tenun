@@ -18,7 +18,7 @@ export const PIVOT_LIMIT = 5000;
 export const MAX_GANTT_ROWS = 100;
 
 /** Tiles that show something the author typed or picked. They ask nothing and have no result. */
-export const STATIC_TYPES: readonly TileType[] = ['text', 'image'];
+export const STATIC_TYPES: readonly TileType[] = ['text', 'image', 'param'];
 /**
  * A tile with no result: text and pictures. A text tile with live numbers (build 10) asks the engine for them, so it is
  * not static; asked by its type alone, a text tile is.
@@ -203,6 +203,8 @@ export function defaultSize(type: TileType): { w: number; h: number } {
       return { w: 3, h: 3 };
     case 'image':
       return { w: 4, h: 3 };
+    case 'param':
+      return { w: 3, h: 2 };
     default:
       return { w: 6, h: 4 };
   }

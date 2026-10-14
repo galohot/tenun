@@ -67,8 +67,8 @@ function at(text) {
 }
 
 test('the function list has every function once, with a signature', () => {
-  assert.equal(FUNCTIONS.length, 66);
-  assert.equal(new Set(FUNCTIONS.map((x) => x.name)).size, 66);
+  assert.equal(FUNCTIONS.length, 67);
+  assert.equal(new Set(FUNCTIONS.map((x) => x.name)).size, 67);
   assert.equal(signature(FUNCTIONS.find((x) => x.name === 'IF')), 'IF(test, a, [b])');
   assert.equal(signature(FUNCTIONS.find((x) => x.name === 'TODAY')), 'TODAY()');
 });

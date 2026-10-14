@@ -265,6 +265,16 @@ in one total must lead, many to one, from one table.
 
 The same total written twice is worked out once.
 
+### Parameters (measures only)
+
+A parameter is a number or a choice that a reader moves on a dashboard (Advanced). Make one in **Data**, under
+**Parameters**. See [Parameters and what-if](#parameters-and-what-if).
+
+- `PARAM("name")`: the value of the parameter with this name, as it is set now. A number parameter gives a number. A
+  choice gives text, or a number when all its values are numbers. Measures only: a calculated column is built once,
+  when the data loads, and a parameter changes while you read.
+  Measure example: `SUM([Orders].[amount]) * (1 + PARAM("Price rise"))`
+
 ## Related columns
 
 In a calculated column, `[Table].[Column]` reads the one row it relates to, like `RELATED` in Power BI.
@@ -490,3 +500,45 @@ finer than months: only the first day of each month has a target, and the note s
 - A measure is a formula only. There is no SQL mode for measures.
 - A target on a number tile for a value written as a percent is typed as 95 for 95 %.
 
+## Parameters and what-if
+
+A parameter is a value that a reader moves on a dashboard: a number on a slider, or a choice from a list. A measure
+reads it with `PARAM("name")`. A Top N, a number tile's target and a chart's target line can take it too. Use it to
+ask "what if": what if prices rise by 5 %?
+
+1. Turn on **Advanced features** in Settings.
+2. Open the **Data** view. Under **Parameters**, choose **New parameter**.
+3. Name it `Price rise`. Choose **A number** and tick **A percent**. Set Smallest 0, Largest 20 and Step 1.
+4. Choose **New measure**. Name it `Revenue if prices rise` and write
+   `SUM([sales].[amount]) * (1 + PARAM("Price rise"))`.
+5. On a dashboard, choose **Add tile › Parameter**. Pick `Price rise` in the tile's options. A slider appears.
+6. Add a number tile with `Revenue if prices rise`. Move the slider: the number follows.
+
+What else can take a parameter:
+
+- **Top N.** In the options of a bar chart or a table, under **Show**, pick a number parameter instead of a number.
+  Add a parameter `Top` from 3 to 20, and a slider sets how many stores a chart shows.
+- **A target.** A number tile's target, and a chart's target line, can take a number parameter.
+- **A saved view** keeps the values of the parameters that have a control on its dashboard.
+
+Rules:
+
+- **A rename follows.** Rename a parameter, and every measure that names it in `PARAM("…")` is written with the new
+  name.
+- **A calculated column cannot read a parameter.** It is built once, when the data loads. A parameter changes while
+  you read. Use the parameter in a measure.
+- **A value is never part of the SQL.** Tenun hands the value to the database as a value, so a choice such as
+  `O'Brien` matches the rows that hold it, and nothing in a value can change a query.
+- **A value stays in range.** A number is kept between its smallest and largest value; a choice must be one of the
+  list.
+
+### In an exported or published page
+
+An exported page has no engine, so it holds the results ahead. For a parameter with at most 21 values (a number from
+its smallest to its largest value, in its steps, or a choice), the file holds the results of the tiles that read it
+for each value, and the reader can move it. A parameter with more values stays at the value it was saved with, and
+its control says "This file holds only the saved value."
+
+One parameter moves at a time. Moving it takes away the clicks and the drill-down, and a click or a drill puts the
+parameters back to their saved values. The file holds each value once, not every mix of values and clicks. A saved
+view holds only its own values.

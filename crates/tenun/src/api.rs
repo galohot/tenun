@@ -64,6 +64,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/workspace/card-styles", put(put_card_styles))
         .route("/workspace/hierarchies", put(put_hierarchies))
         .route("/workspace/calendar", put(put_calendar))
+        .route("/workspace/params", put(put_params))
+        .route("/workspace/params/values", put(put_param_values))
         .route("/workspace/site", put(put_site))
         .route("/sample", post(open_sample))
         .route("/sources", post(add_source))
@@ -753,6 +755,35 @@ async fn put_calendar(
     Ok(Json(
         blocking(&s, move |st| {
             st.engine.set_calendar(b)?;
+            st.emit(json!({ "type": "data-changed" }));
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+/// Replaces the parameters (v5 build 05) and answers with the workspace. A list with a problem is refused in words. Every
+/// tile asks again: a measure may read a value that changed, or a name that a rename wrote anew.
+async fn put_params(State(s): S, Json(b): Json<Vec<tenun_core::params::Param>>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            st.engine.set_params(b)?;
+            st.emit(json!({ "type": "data-changed" }));
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+/// Sets the values of parameters by id (a control moved, a saved view opened) and answers with the workspace. Every
+/// tile asks again. A published page is not sent again: the value is the reader's, as a filter tile's selection is.
+async fn put_param_values(
+    State(s): S,
+    Json(b): Json<std::collections::BTreeMap<String, Value>>,
+) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            st.engine.set_param_values(b)?;
             st.emit(json!({ "type": "data-changed" }));
             Ok(serde_json::to_value(st.engine.snapshot())?)
         })

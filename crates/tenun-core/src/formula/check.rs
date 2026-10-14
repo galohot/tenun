@@ -815,6 +815,9 @@ impl<'a> Checker<'a> {
                 len,
             ));
         }
+        if def.name == "PARAM" {
+            return self.param(e, &args[0], name_len);
+        }
         if functions::is_aggregate(def, n) {
             return self.aggregate(e, def, args, name_len);
         }
@@ -829,6 +832,59 @@ impl<'a> Checker<'a> {
                 args: targs,
             },
             ty,
+            at: e.at,
+            len: e.len,
+        })
+    }
+
+    /// `PARAM("name")` (v5 build 05, V5-D7): the value of a parameter, bound when the query runs, never written into
+    /// the SQL. A calculated column and a grouped table are built once, at load, so they cannot read one.
+    fn param(&mut self, e: &Expr, arg: &Expr, name_len: usize) -> Result<TExpr, FormulaError> {
+        if self.kind != Kind::Measure {
+            let what = if self.kind == Kind::Column {
+                "a calculated column"
+            } else {
+                "a group value"
+            };
+            return Err(FormulaError::new(
+                format!(
+                    "A parameter changes while you read; {what} is built once, at load. Use it in a measure."
+                ),
+                e.at,
+                name_len,
+            ));
+        }
+        let ExprKind::Str(name) = &arg.kind else {
+            return Err(FormulaError::new(
+                "PARAM needs the name of a parameter in double quotes, like PARAM(\"Price rise\").",
+                arg.at,
+                arg.len,
+            ));
+        };
+        let wanted = name.trim().to_lowercase();
+        let Some(p) = self
+            .cx
+            .params
+            .iter()
+            .find(|p| p.name.to_lowercase() == wanted)
+        else {
+            let names = self.cx.params.iter().map(|p| p.name.as_str());
+            let message = match closest(name, names) {
+                Some(s) => format!("No parameter is called {name}. Did you mean {s}?"),
+                None if self.cx.params.is_empty() => {
+                    format!("No parameter is called {name}. Make one in Data, under Parameters.")
+                }
+                None => format!("No parameter is called {name}."),
+            };
+            return Err(FormulaError::new(message, arg.at, arg.len));
+        };
+        let text = p.is_text();
+        Ok(TExpr {
+            node: TNode::Sql {
+                sql: crate::params::sql(&p.id, text),
+                atomic: true,
+            },
+            ty: if text { Ty::Text } else { Ty::Num },
             at: e.at,
             len: e.len,
         })

@@ -131,6 +131,8 @@ pub struct Context<'a> {
     /// table reads one row per key, whatever the health says, because the SQL of a view cannot
     /// follow a later change of the data.
     pub view: bool,
+    /// The parameters a measure can read with `PARAM("…")` (v5 build 05). Their values are bound when a query runs.
+    pub params: &'a [crate::params::Param],
 }
 
 impl<'a> Context<'a> {
@@ -144,6 +146,7 @@ impl<'a> Context<'a> {
             today: now.date(),
             now,
             view: false,
+            params: &[],
         }
     }
 

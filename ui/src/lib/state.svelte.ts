@@ -5,7 +5,7 @@ import { PHONE_MAX } from './layout';
 import { linkTablesOf, setLinkLabels } from './links';
 import { setKnownMeasures } from './measures';
 import type { Drill } from './site';
-import { api, type Calendar, type CardStyle, type CloudStatus, type SiteSettings, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
+import { api, type Calendar, type CardStyle, type Cell, type CloudStatus, type SiteSettings, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
 
 export type Route =
   | { view: 'home' }
@@ -158,6 +158,14 @@ class App {
   /** The month the workspace's year starts in and the day its week starts on (v5 build 04). */
   async setCalendar(calendar: Calendar) {
     await this.run(null, () => api.setCalendar(calendar));
+  }
+
+  /** Moves parameters (v5 build 05): a control, or a saved view. The value is shown at once; every tile asks again. */
+  async setParamValues(values: Record<string, Cell>) {
+    const list = this.snap?.workspace.params;
+    if (!list?.length) return;
+    for (const p of list) if (p.id in values) p.value = values[p.id];
+    await this.run(null, () => api.setParamValues(values));
   }
 
   table(id: string): Table | undefined {

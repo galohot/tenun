@@ -1,7 +1,7 @@
 // The snapshot a dashboard is exported or published as. Built by the Rust
 // engine (`tenun-core::snapshot`); the viewer reads it.
 
-import type { Dashboard, Grain, Hierarchy, NumFormat, QueryResult, SiteSettings, Table } from './api';
+import type { Dashboard, Grain, Hierarchy, NumFormat, Param, QueryResult, SiteSettings, Table } from './api';
 import type { DashFilter } from './tiles';
 
 export interface ExportPayload {
@@ -45,6 +45,10 @@ export interface ExportPayload {
   /** Saved views (v5 build 03): each one as the dashboard reads in it, and the one it opens on. */
   views?: { id: string; name: string; payload: ExportPayload }[];
   defaultView?: string;
+  /** Parameters (v5 build 05): with the values this page shows. Never their descriptions. */
+  params?: Param[];
+  /** `steps[param][valueKey][tile]`: the tiles that read a parameter, at each of its other values (V5-D5, at most 21). */
+  steps?: Record<string, Record<string, Record<string, QueryResult>>>;
 }
 
 /**

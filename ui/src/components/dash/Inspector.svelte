@@ -1,7 +1,8 @@
 <script lang="ts">
   import { drillOptions, drillSetting, drillSettingValue } from '../../lib/drilldown';
   import { api, DATE_PARTS, isPart, type Agg, type Cell, type CondFormat, type Dim, type DType, type Grain, type MapLevel, type MapSpec, type Measure, type NumFormat, type QueryResult, type ShowAs, type Tile, type TileLine, type TileType } from '../../lib/api';
-  import { app } from '../../lib/state.svelte';
+  import { app, go } from '../../lib/state.svelte';
+  import { controlOf, MAX_BUTTONS } from '../../lib/params';
   import { aggNames, cell, measureLabel, OTHER_KEY, tileTitle } from '../../lib/format';
   import { isChange } from '../../lib/cells';
   import { MAX_LINES } from '../../lib/charts/lines';
@@ -272,18 +273,25 @@
     }
   });
   const topKind = $derived(tile.type === 'bar' || isBullet || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'pie' || tile.type === 'pivot' || isHeat);
-  const topChoice = $derived(!tile.top ? 'all' : customTop || !TOP_PRESETS.includes(tile.top.n) ? 'custom' : String(tile.top.n));
+  const topChoice = $derived(
+    !tile.top ? 'all' : tile.top.param ? `param:${tile.top.param}` : customTop || !TOP_PRESETS.includes(tile.top.n) ? 'custom' : String(tile.top.n),
+  );
 
   function setTop(choice: string) {
     customTop = choice === 'custom';
+    const { param: _p, ...own } = tile.top ?? { n: 10 };
     if (choice === 'all') set({ top: undefined });
-    else if (choice === 'custom') set({ top: { ...(tile.top ?? {}), n: tile.top?.n ?? 15 } });
-    else set({ top: { ...(tile.top ?? {}), n: Number(choice) } });
+    // A number parameter gives N (v5 build 05); `n` keeps its value now, for a file without the parameter.
+    else if (choice.startsWith('param:')) {
+      const p = numberParams.find((x) => x.id === choice.slice(6));
+      if (p) set({ top: { ...own, n: typeof p.value === 'number' ? Math.max(1, Math.round(p.value)) : own.n, param: p.id } });
+    } else if (choice === 'custom') set({ top: { ...own, n: tile.top?.n ?? 15 } });
+    else set({ top: { ...own, n: Number(choice) } });
   }
 
   function setTopN(raw: string) {
     const n = Math.round(Number(raw));
-    if (Number.isFinite(n) && n >= 1) set({ top: { ...tile.top, n: Math.min(n, 1000) } });
+    if (Number.isFinite(n) && n >= 1) set({ top: { ...tile.top, n: Math.min(n, 1000), param: undefined } });
   }
 
   const sortId = $derived.by(() => {
@@ -331,8 +339,30 @@
   const isText = $derived(tile.type === 'text');
   const isImage = $derived(tile.type === 'image');
   const isFilter = $derived(tile.type === 'filter');
-  // A note, a picture and a filter have no values to pick.
-  const noFields = $derived(isText || isImage || isFilter);
+  const isParam = $derived(tile.type === 'param');
+  // A note, a picture, a filter and a parameter's control have no values to pick.
+  const noFields = $derived(isText || isImage || isFilter || isParam);
+  // Parameters (v5 build 05): the one a parameter tile moves, and the number ones a Top N, a target or a line can take.
+  const allParams = $derived(app.snap?.workspace.params ?? []);
+  const numberParams = $derived(allParams.filter((p) => p.kind !== 'choice'));
+  const paramDef = $derived(allParams.find((p) => p.id === tile.param?.id));
+  const paramControl = $derived(paramDef ? controlOf(paramDef, tile.param?.style) : 'slider');
+  const controlChoices = $derived<[NonNullable<Tile['param']>['style'], string][]>(
+    !paramDef
+      ? []
+      : paramDef.kind !== 'choice'
+        ? [['slider', 'Slider'], ['input', 'Number box']]
+        : (paramDef.choices ?? []).length <= MAX_BUTTONS
+          ? [['buttons', 'Buttons'], ['dropdown', 'Dropdown']]
+          : [['dropdown', 'Dropdown']],
+  );
+  const paramName = (id: string | undefined) => allParams.find((p) => p.id === id)?.name ?? 'a deleted parameter';
+  /** A target that takes a parameter: its value is the parameter's now (the tile keeps it too, for a file without it). */
+  function setTargetParam(id: string) {
+    const p = numberParams.find((x) => x.id === id);
+    if (!p) return set({ target: tile.target && tile.target.value > 0 ? { value: tile.target.value } : undefined });
+    set({ target: { value: typeof p.value === 'number' ? p.value : (tile.target?.value ?? 0), param: p.id } });
+  }
   const filterStyles: { id: NonNullable<Tile['filter']>['style']; label: string; types: DType[] | null }[] = [
     { id: 'list', label: 'List', types: null },
     { id: 'dropdown', label: 'Dropdown', types: null },
@@ -404,7 +434,7 @@
     lines.some((l) => l.kind === kind && (kind === 'trend' || !isScatter || !l.axis || l.axis === lineAxis));
 
   function lineWords(l: TileLine): string {
-    const value = l.value === undefined ? '' : ` ${cell(l.value, 'number', null, false, formatOf(tile, 0))}`;
+    const value = l.param ? ` from ${paramName(l.param)}` : l.value === undefined ? '' : ` ${cell(l.value, 'number', null, false, formatOf(tile, 0))}`;
     const of = !isScatter || l.kind === 'trend' ? '' : l.axis === 'x' ? ' of X (across)' : l.axis === 'y' ? ' of Y (up)' : l.kind === 'median' ? ' of X and Y' : ' of Y (up)';
     const name = l.label?.trim() || LINE_MENU.find((o) => o.id === l.kind)?.label.replace('…', '') || l.kind;
     return `${name}${l.kind === 'target' ? value : ''}${of}`;
@@ -426,14 +456,18 @@
     setLines([...lines, { kind, ...(isScatter && kind !== 'trend' ? { axis: lineAxis } : {}) }]);
   }
 
+  /** A target line at a number parameter's value (v5 build 05). Not set: a typed value. */
+  let targetParam = $state('');
   function addTarget() {
-    const v = Number(targetValue.replace(/\s/g, '')) / lineUnit.scale;
-    if (targetValue.trim() === '' || !Number.isFinite(v) || lines.length >= MAX_LINES) return;
+    const p = numberParams.find((x) => x.id === targetParam);
+    const v = p ? (typeof p.value === 'number' ? p.value : 0) : Number(targetValue.replace(/\s/g, '')) / lineUnit.scale;
+    if ((!p && targetValue.trim() === '') || !Number.isFinite(v) || lines.length >= MAX_LINES) return;
     const label = targetLabel.trim();
-    setLines([...lines, { kind: 'target', value: v, ...(label ? { label } : {}), ...(isScatter ? { axis: lineAxis } : {}) }]);
+    setLines([...lines, { kind: 'target', value: v, ...(p ? { param: p.id } : {}), ...(label ? { label } : {}), ...(isScatter ? { axis: lineAxis } : {}) }]);
     askTarget = false;
     targetValue = '';
     targetLabel = '';
+    targetParam = '';
   }
 
   // How the cells of a value look in a table or pivot.
@@ -844,6 +878,7 @@
     </div>
   {/if}
 
+  {#if !isParam}
   <div class="sec">
     <div class="types" role="radiogroup" aria-label="Tile type">
       {#each types as t}
@@ -890,9 +925,17 @@
           placeholder="No target"
           aria-label="Target for this number{unit0.unit ? ` in ${unit0.unit}` : ''}"
           value={typed(tile.target?.value, unit0.scale)}
+          disabled={!!tile.target?.param}
           onchange={(e) => setTarget(e.currentTarget.value)} />
         {#if unit0.unit}<span class="unit" aria-hidden="true">{unit0.unit}</span>{/if}
         </span>
+        {#if (advanced && numberParams.length) || tile.target?.param}
+          <select class="field" aria-label="Where the target comes from" value={tile.target?.param ?? ''} onchange={(e) => setTargetParam(e.currentTarget.value)}>
+            <option value="">A number typed here</option>
+            {#each numberParams as p (p.id)}<option value={p.id}>The parameter {p.name}</option>{/each}
+            {#if tile.target?.param && !numberParams.some((p) => p.id === tile.target?.param)}<option value={tile.target.param}>A deleted parameter</option>{/if}
+          </select>
+        {/if}
       </div>
     {/if}
     {#if tile.type === 'bar'}
@@ -902,9 +945,36 @@
       </label>
     {/if}
   </div>
+  {/if}
 
   {#if isText}
     <TextEditor {tile} {set} />
+  {/if}
+
+  {#if isParam}
+    <!-- A parameter's control (v5 build 05): which parameter it moves, and how it looks. -->
+    <div class="sec">
+      <span class="label">Parameter</span>
+      {#if allParams.length}
+        <select class="field" aria-label="The parameter this tile moves" value={tile.param?.id ?? ''} onchange={(e) => set({ param: { ...tile.param, id: e.currentTarget.value } })}>
+          {#if !paramDef}<option value="">Pick a parameter</option>{/if}
+          {#each allParams as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+        </select>
+        {#if paramDef}
+          <div class="grains stack" role="radiogroup" aria-label="Control">
+            {#each controlChoices as [id, label] (id)}
+              <button role="radio" aria-checked={paramControl === id} class:on={paramControl === id} onclick={() => set({ param: { ...tile.param!, style: id } })}>{label}</button>
+            {/each}
+          </div>
+          <p class="hint tight">
+            {paramDef.description?.trim() || `A measure reads it as PARAM("${paramDef.name}").`} Change its range or its list in Data, under Parameters.
+          </p>
+        {/if}
+      {:else}
+        <p class="hint tight">No parameters yet. Make one in Data, under Parameters: a number on a slider, or a choice from a list.</p>
+        <button class="btn small" onclick={() => go({ view: 'data' })}>Open Data</button>
+      {/if}
+    </div>
   {/if}
 
   {#if isImage}
@@ -1447,10 +1517,18 @@
         </select>
         {#if askTarget}
           <div class="targetform">
-            <span class="withunit"><input class="field" type="number" step="any" placeholder="Target value" aria-label="Target value{lineUnit.unit ? ` in ${lineUnit.unit}` : ''}" bind:value={targetValue} />{#if lineUnit.unit}<span class="unit" aria-hidden="true">{lineUnit.unit}</span>{/if}</span>
+            {#if advanced && numberParams.length}
+              <select class="field" aria-label="Where the target comes from" bind:value={targetParam}>
+                <option value="">A number typed here</option>
+                {#each numberParams as p (p.id)}<option value={p.id}>The parameter {p.name}</option>{/each}
+              </select>
+            {/if}
+            {#if !targetParam}
+              <span class="withunit"><input class="field" type="number" step="any" placeholder="Target value" aria-label="Target value{lineUnit.unit ? ` in ${lineUnit.unit}` : ''}" bind:value={targetValue} />{#if lineUnit.unit}<span class="unit" aria-hidden="true">{lineUnit.unit}</span>{/if}</span>
+            {/if}
             <input class="field" placeholder="Name (optional)" aria-label="Name of the target" bind:value={targetLabel} />
             <div class="row">
-              <button class="btn small" disabled={targetValue.trim() === ''} onclick={addTarget}>Add target</button>
+              <button class="btn small" disabled={!targetParam && targetValue.trim() === ''} onclick={addTarget}>Add target</button>
               <button class="link" onclick={() => (askTarget = false)}>Cancel</button>
             </div>
           </div>
@@ -1506,6 +1584,12 @@
         <option value="all">All</option>
         {#each TOP_PRESETS as n}<option value={String(n)}>Top {n}</option>{/each}
         <option value="custom">Custom…</option>
+        {#if (advanced && numberParams.length) || tile.top?.param}
+          <optgroup label="From a parameter">
+            {#each numberParams as p (p.id)}<option value="param:{p.id}">Top {p.name}</option>{/each}
+            {#if tile.top?.param && !numberParams.some((p) => p.id === tile.top?.param)}<option value="param:{tile.top.param}">A deleted parameter (Top {tile.top.n})</option>{/if}
+          </optgroup>
+        {/if}
       </select>
       {#if topChoice === 'custom'}
         <input

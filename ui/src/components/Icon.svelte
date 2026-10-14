@@ -77,6 +77,8 @@
     eye: 'M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5zM10 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4z',
     eyeOff: 'M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5zM10 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4zM4 4l12 12',
     fx: 'M12.6 3.9c-2.2-.6-3.5.5-3.8 2.6L7.7 16.1M5.6 9.3h6.1',
+    // Two rails with a knob on each: a parameter's control (v5 build 05).
+    param: 'M3.5 7h13M3.5 13h13M7 5v4M13 11v4',
   };
   export type IconName = keyof typeof paths;
 </script>

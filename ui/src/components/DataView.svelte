@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { api, type Cell, type Column, type NamedMeasure, type Profile, type Source, type TableSetup, type Tile, type TileRef, type UnpivotPlan, type UrlEvery } from '../lib/api';
+  import { api, type Cell, type Column, type NamedMeasure, type Param, type Profile, type Source, type TableSetup, type Tile, type TileRef, type UnpivotPlan, type UrlEvery } from '../lib/api';
   import { typeIcon } from '../lib/ui';
   import { app, go } from '../lib/state.svelte';
-  import { cell, full, tileTitle } from '../lib/format';
+  import { cell, full, numberFormatter, tileTitle } from '../lib/format';
   import { readersOf, tilesUsing, useWords } from '../lib/formula';
   import { failedText, hasUnpivot, isEmptySetup, withCalc, withHeaderRow, withMainDate, withUnpivot, withoutUnpivot } from '../lib/prep';
   import { tilesWith } from '../lib/measures';
@@ -14,6 +14,7 @@
   import CalcSheet from './data/CalcSheet.svelte';
   import ColumnMenu from './data/ColumnMenu.svelte';
   import MeasureSheet from './data/MeasureSheet.svelte';
+  import ParamSheet from './data/ParamSheet.svelte';
   import ProfileCard from './data/ProfileCard.svelte';
   import UnpivotSheet from './data/UnpivotSheet.svelte';
   import PasteSheet from './data/PasteSheet.svelte';
@@ -209,6 +210,14 @@
   const measures = $derived(app.snap!.workspace.measures ?? []);
   const measureInfo = $derived(app.snap!.measure_info ?? {});
   let measureSheet = $state<{ editing?: string } | null>(null);
+  // Parameters (v5 build 05), Advanced: numbers and choices that measures read with PARAM("…").
+  const params = $derived(app.snap!.workspace.params ?? []);
+  let paramSheet = $state<{ editing?: string } | null>(null);
+  const paramValue = (p: Param) => (typeof p.value === 'number' ? numberFormatter(p.format ?? null).long(p.value) : String(p.value ?? ''));
+  const paramRange = (p: Param) =>
+    p.kind === 'choice'
+      ? `A choice of ${(p.choices ?? []).length}`
+      : `${numberFormatter(p.format ?? null).long(p.min ?? 0)} to ${numberFormatter(p.format ?? null).long(p.max ?? 0)}`;
   /** The measure to delete and the tiles that use it, while the question is open. */
   let askMeasure = $state<{ id: string; name: string; tiles: TileRef[] } | null>(null);
 
@@ -377,6 +386,29 @@
           {/if}
         </section>
       {/if}
+      {#if canCalc || params.length}
+        <section class="measures" aria-label="Parameters">
+          <div class="src">
+            <Icon name="param" size={15} />
+            <span class="src-name">Parameters</span>
+            <span class="kind">{params.length ? `${params.length}` : ''}</span>
+          </div>
+          {#each params as p (p.id)}
+            <div class="msr">
+              <button class="msr-main" onclick={() => canCalc && (paramSheet = { editing: p.id })} disabled={!canCalc} title={p.description ?? `PARAM("${p.name}")`}>
+                <span class="mname">{p.name}</span>
+                <span class="mformula">PARAM("{p.name}") = {paramValue(p)}</span>
+                <span class="muse">{paramRange(p)}</span>
+              </button>
+            </div>
+          {:else}
+            <p class="srcline mhint">A parameter is a number or a choice that a reader moves on a dashboard. A measure reads it, like SUM([amount]) * (1 + PARAM("Price rise")).</p>
+          {/each}
+          {#if canCalc}
+            <button class="btn newm" onclick={() => (paramSheet = {})}><Icon name="plus" size={13} /> New parameter</button>
+          {/if}
+        </section>
+      {/if}
       </div>
     </aside>
 
@@ -536,6 +568,9 @@
 
 {#if measureSheet}
   <MeasureSheet editing={measureSheet.editing} onclose={() => (measureSheet = null)} />
+{/if}
+{#if paramSheet}
+  <ParamSheet editing={paramSheet.editing} onclose={() => (paramSheet = null)} />
 {/if}
 
 {#if askMeasure}

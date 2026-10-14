@@ -23,6 +23,7 @@
   import { isColFilter, stageOf } from '../lib/filters';
   import { EMPTY_RESULT, isStatic } from '../lib/tiles';
   import { phoneLayout, PHONE_MAX, readingOrder } from '../lib/layout';
+  import { paramValues, stepKey, stepsOf, withParams } from '../lib/params';
 
   let {
     data: root,
@@ -79,6 +80,7 @@
     pick = null;
     drilled = {};
     deeper = {};
+    stepAt = {};
     if (useHash) history.replaceState(null, '', id ? `#v=${encodeURIComponent(id)}` : location.pathname + location.search);
   }
   const ROW = 76;
@@ -142,6 +144,32 @@
     if (next) document.querySelector<HTMLElement>(`[data-tile="${CSS.escape(next.id)}"]`)?.focus();
   }
 
+  // Parameters offline (v5 build 05, V5-D40): the file holds the tiles that read a parameter at each of its values, for
+  // the page as it opens. One parameter moves at a time; moving it takes away the clicks and the drill-down, and a click
+  // or a drill puts it back to its saved value.
+  let stepAt = $state<Record<string, Cell>>({});
+  const params = $derived(data.params ?? []);
+  const values = $derived(paramValues(params, stepAt));
+  function moveParam(id: string, v: Cell) {
+    const was = pick;
+    pick = null;
+    drilled = {};
+    deeper = {};
+    if (was && !was.col) onpickchange?.(was.tile, null);
+    const saved = params.find((p) => p.id === id)?.value;
+    stepAt = stepKey(v) === stepKey(saved ?? null) ? {} : { [id]: v };
+  }
+  /** A parameter tile's control: it moves when the file holds the steps of its parameter. */
+  function controlFor(t: Tile) {
+    const p = params.find((x) => x.id === t.param?.id);
+    if (!p) return { param: undefined, value: null };
+    const value = values[p.id] ?? null;
+    if (viewId) return { param: p, value, note: "In a saved view, this file holds only the view's value." };
+    if (everyAt) return { param: p, value, note: 'With a value picked for every page, this file holds only the saved value.' };
+    if (!stepsOf(p)) return { param: p, value, note: 'This file holds only the saved value.' };
+    return { param: p, value, onchange: (v: Cell) => moveParam(p.id, v) };
+  }
+
   /** The key of "Next level" in `down` (`DRILL_ALL_KEY` in the engine). */
   const ALL = '\u0000all';
   /** Drill-down offline (v5 build 01): the tiles a click drills, and the level-1 result each one shows. One level only. */
@@ -153,6 +181,7 @@
 
   function drillClick(t: Tile, v: Cell): boolean {
     if (!drillMode[t.id] || !canDrill(t) || v === OTHER_KEY) return false;
+    stepAt = {};
     const r = data.down?.[t.id]?.[key(v)];
     if (drilled[t.id] || !r) deeper = { ...deeper, [t.id]: true };
     else drilled = { ...drilled, [t.id]: { key: key(v), value: v } };
@@ -166,6 +195,12 @@
   }
 
   function resultFor(t: Tile) {
+    // A moved parameter: the tiles that read it at its value, as the file holds them (v5 build 05).
+    const moved = Object.keys(stepAt)[0];
+    if (moved !== undefined && data.base[t.id]?.params?.includes(moved)) {
+      const r = data.steps?.[moved]?.[stepKey(stepAt[moved])]?.[t.id];
+      return { res: r ?? data.base[t.id], offline: !r };
+    }
     // A value picked on another page for every page: this page's results with it, as the file holds them.
     if (everyAt) {
       const r = everyAt.results?.[t.id];
@@ -186,6 +221,8 @@
   }
 
   function onpick(t: Tile, v: Cell, col = false, stage?: number) {
+    // A click puts the parameters back to their saved values: the file holds its clicks at those (v5 build 05).
+    stepAt = {};
     // With drill-down on, a click opens the level below (v5 build 01).
     if (!col && drillClick(t, v)) return;
     // A tile with an action opens its page, kept to the clicked value (build 13).
@@ -359,8 +396,9 @@
       <div class="body" class:bare={((isStatic(t.type) || t.type === 'filter') && !t.title) || !!ground}>
         {#if r.res || isStatic(t)}
           <TileBody
-            tile={shown}
+            tile={withParams(shown, values)}
             res={r.res ?? EMPTY_RESULT}
+            control={t.type === 'param' ? controlFor(t) : undefined}
             colors={colors!}
             tables={data.tables}
             title={name}

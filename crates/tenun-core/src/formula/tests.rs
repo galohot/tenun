@@ -58,6 +58,8 @@ struct World {
     rels: Vec<Relationship>,
     /// Every link as the data of a usual one to many link says it: clean on the one side.
     health: crate::links::Health,
+    /// One parameter (v5 build 05): "Price rise", a percent from 0 to 20, now 10 %.
+    params: Vec<crate::params::Param>,
 }
 
 fn world() -> &'static World {
@@ -167,6 +169,11 @@ fn world() -> &'static World {
                     )
                 })
                 .collect(),
+            params: vec![
+                serde_json::from_value(json!({ "id": "p1", "name": "Price rise", "kind": "number",
+                    "min": 0.0, "max": 0.2, "step": 0.01, "value": 0.1 }))
+                .unwrap(),
+            ],
         }
     })
 }
@@ -181,6 +188,7 @@ fn cx() -> Context<'static> {
         today,
         now: today.and_hms_opt(14, 3, 22).unwrap(),
         view: false,
+        params: &w.params,
     }
 }
 
@@ -215,6 +223,8 @@ fn to_json(v: V) -> Value {
 /// Runs a SELECT and returns the first column of every row.
 fn query(sql: &str) -> Vec<Value> {
     let db = world().db.lock().unwrap_or_else(|e| e.into_inner());
+    // A measure that reads a parameter: its value is bound first, as the engine binds it.
+    crate::params::using(world().params.clone(), || crate::params::bind(&db, sql)).unwrap();
     let mut stmt = db.prepare(sql).unwrap_or_else(|e| panic!("{sql}\n{e}"));
     let rows = stmt
         .query_map([], |r| r.get::<_, V>(0))
@@ -1762,6 +1772,11 @@ fn guide_totals() -> Vec<(&'static str, Value)> {
             json!(425.5 / 3.0),
         ),
         ("COUNTROWS([Orders])", json!(6)),
+        // "Price rise" is 10 % in the test world (v5 build 05).
+        (
+            r#"SUM([Orders].[amount]) * (1 + PARAM("Price rise"))"#,
+            json!(475.5 * 1.1),
+        ),
         (
             "SUM([Orders].[amount]) / SUM([Targets].[target])",
             json!(475.5 / 950.0),
@@ -2464,4 +2479,43 @@ fn two_columns_that_show_the_same_name_are_ambiguous_too() {
     // The name "Cups sold" is the shown name of qty only, so it is fine; a second column
     // shown the same way would not be.
     assert!(compiled("[Cups sold]", Kind::Column, Some("Orders")).is_ok());
+}
+
+// ---- parameters (v5 build 05) ------------------------------------------------------------
+
+#[test]
+fn param_reads_a_parameter_by_name_in_a_measure_only() {
+    // Inside a total and outside it; the name in any case.
+    expect_total(
+        r#"SUM([Orders].[amount] * (1 + param("PRICE RISE")))"#,
+        json!(475.5 * 1.1),
+    );
+    assert_eq!(
+        m_err(r#"SUM([Orders].[amount]) * PARAM([Orders].[note])"#).0,
+        r#"PARAM needs the name of a parameter in double quotes, like PARAM("Price rise")."#
+    );
+    assert_eq!(
+        m_err(r#"SUM([Orders].[amount]) * PARAM("Price rse")"#),
+        (
+            "No parameter is called Price rse. Did you mean Price rise?".into(),
+            r#""Price rse""#.into()
+        )
+    );
+    assert_eq!(
+        err(
+            r#"[amount] * PARAM("Price rise")"#,
+            Kind::Column,
+            Some("Orders")
+        )
+        .0,
+        "A parameter changes while you read; a calculated column is built once, at load. Use it in a measure."
+    );
+    // The value is never in the SQL: the SQL reads the connection's own table by the parameter's id.
+    let p = parts(r#"SUM([Orders].[amount]) * (1 + PARAM("Price rise"))"#);
+    let sql = format!("{p:?}");
+    assert!(
+        sql.contains("temp.main.tenun_param WHERE id = 'p1'"),
+        "{sql}"
+    );
+    assert!(!sql.contains("0.1"), "{sql}");
 }

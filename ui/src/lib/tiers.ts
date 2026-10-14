@@ -18,6 +18,8 @@ export const ADVANCED_TYPES: readonly TileType[] = [
   'calendar',
   'cohort',
   'gantt',
+  // A parameter's control (v5 build 05).
+  'param',
 ];
 
 /** The types in the second group of the picker, "More charts". */
@@ -38,7 +40,11 @@ export function usesAdvanced(tile: Tile): boolean {
     (tile.type === 'scatter' && tile.measures.length > 2) ||
     // A trend column in a table, and groups that open and close in a pivot.
     !!tile.spark ||
-    !!tile.expand
+    !!tile.expand ||
+    // A Top N, a target or a line that takes a parameter (v5 build 05).
+    !!tile.top?.param ||
+    !!tile.target?.param ||
+    !!tile.lines?.some((l) => l.param)
   );
 }
 

@@ -301,6 +301,7 @@ pub fn top_n(
         TopN {
             n,
             other: Some(true),
+            param: None,
         }
     });
     let Some(top) = slices.as_ref().or(tile.top.as_ref()) else {

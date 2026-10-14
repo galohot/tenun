@@ -884,6 +884,7 @@ fn named_measures_compile_to_the_sql_they_are_pinned_to() {
         health: &health,
         now: today.and_hms_opt(12, 0, 0).unwrap(),
         grains: &grains,
+        params: &[],
     };
     let mut got = Vec::new();
     for (name, q) in named_queries() {

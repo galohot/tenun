@@ -140,7 +140,7 @@ pub fn resolve_card(tile: &mut Value, styles: &[Value]) {
 /// Tiles that show something the user typed or picked, not a query: they have no result.
 /// (A filter tile has one: the values it offers.)
 pub fn is_static(kind: &str) -> bool {
-    matches!(kind, "text" | "image")
+    matches!(kind, "text" | "image" | "param")
 }
 
 /// Like [`is_static`], for one tile: a text tile with live numbers asks the engine for them (build 10), so it has a
@@ -213,6 +213,9 @@ pub struct TopN {
     pub n: u32,
     #[serde(default)]
     pub other: Option<bool>,
+    /// A number parameter that gives `n` (v5 build 05). Gone, or not a number: `n` as it is.
+    #[serde(default)]
+    pub param: Option<String>,
 }
 
 /// A cross-filter from a click on a tile.
@@ -299,11 +302,13 @@ pub fn in_parallel<J: Sync, R: Send>(
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
     let failed = std::sync::atomic::AtomicBool::new(false);
+    // The parameters' values of this call (a saved view's) go with the work to each thread (v5 build 05).
+    let values = crate::params::overrides();
     let mut answers: Vec<(usize, anyhow::Result<R>)> = std::thread::scope(|s| {
         let workers: Vec<_> = forks
             .iter()
             .map(|e| {
-                let (next, failed, job) = (&next, &failed, &job);
+                let (next, failed, job, values) = (&next, &failed, &job, &values);
                 s.spawn(move || {
                     let mut out = Vec::new();
                     loop {
@@ -311,7 +316,7 @@ pub fn in_parallel<J: Sync, R: Send>(
                         if i >= items.len() || failed.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
-                        let r = job(e, &items[i]);
+                        let r = crate::params::with(values, || job(e, &items[i]));
                         if r.is_err() {
                             failed.store(true, std::sync::atomic::Ordering::Relaxed);
                         }
@@ -519,11 +524,23 @@ pub fn run_tile(
     tile: &Tile,
     filters: &[DashFilter],
 ) -> anyhow::Result<QueryResult> {
-    // Period names, year to date and the number tile's periods follow the workspace's calendar (v5 build 04).
-    let (res, crossed) = crate::calendar::with(engine.calendar(), || {
-        engine.collecting(|| run_tile_inner(engine, tile, filters))
+    // A Top N that takes a parameter takes its value of this call (v5 build 05).
+    let top = top_param(engine, tile);
+    let tile = top.as_ref().map_or(tile, |(t, _)| t);
+    // Period names, year to date and the number tile's periods follow the workspace's calendar (v5 build 04). The
+    // parameters its queries read are noted, for the steps of an export (build 05).
+    let ((res, crossed), used) = crate::params::collecting(|| {
+        crate::calendar::with(engine.calendar(), || {
+            engine.collecting(|| run_tile_inner(engine, tile, filters))
+        })
     });
     let mut res = res?;
+    res.params = used.into_iter().collect();
+    if let Some((_, id)) = top
+        && !res.params.contains(&id)
+    {
+        res.params.push(id);
+    }
     res.notes = engine.link_notes(&crossed);
     res.public_notes = engine.public_link_notes(&crossed);
     // What a named measure could not split or filter by names tables and columns only, so the
@@ -544,6 +561,22 @@ pub fn run_tile(
         }
     }
     Ok(res)
+}
+
+/// The tile with its Top N set from its parameter, and the parameter's id; `None` when it has no parameter that is
+/// a number now.
+fn top_param(engine: &Engine, tile: &Tile) -> Option<(Tile, String)> {
+    let id = tile.top.as_ref()?.param.as_ref()?;
+    let n = engine
+        .params_now()
+        .into_iter()
+        .find(|p| &p.id == id && p.is_number())?
+        .number()?;
+    let mut t = tile.clone();
+    if let Some(top) = t.top.as_mut() {
+        top.n = n.round().clamp(1.0, 1000.0) as u32;
+    }
+    Some((t, id.clone()))
 }
 
 /// Like [`run_tile`], for what leaves the computer: a snapshot, an exported page, a published
@@ -1147,7 +1180,15 @@ pub fn build_quiet(
     let dash = engine
         .dashboard(dashboard_id)
         .ok_or_else(|| anyhow::anyhow!("no dashboard {dashboard_id}"))?;
-    let mut payload = build_dash(engine, &dash, filters, cross_too, &BTreeMap::new())?;
+    // The page as it opens holds each step of its parameters (v5 build 05, V5-D5); a saved view holds its own values.
+    let mut payload = build_dash(
+        engine,
+        &dash,
+        filters,
+        cross_too,
+        &BTreeMap::new(),
+        cross_too,
+    )?;
     // Saved views (v5 build 03, V5-D5): each one in full, at most `MAX_VIEWS`, and the one the dashboard opens on.
     let views: Vec<Value> = dash
         .get("views")
@@ -1166,7 +1207,15 @@ pub fn build_quiet(
             let (view_dash, clicks, drills) = with_view(&dash, v);
             let mut fs: Vec<DashFilter> = filters.to_vec();
             fs.extend(clicks);
-            let p = build_dash(engine, &view_dash, &fs, true, &drills)?;
+            // The view's parameter values stand in for the saved ones while it is built (v5 build 05).
+            let values: BTreeMap<String, Value> = v
+                .get("params")
+                .and_then(Value::as_object)
+                .map(|o| o.iter().map(|(k, x)| (k.clone(), x.clone())).collect())
+                .unwrap_or_default();
+            let p = crate::params::with(&values, || {
+                build_dash(engine, &view_dash, &fs, true, &drills, false)
+            })?;
             out.push(json!({ "id": id, "name": name, "payload": p }));
         }
         let default = dash.get("defaultView").and_then(Value::as_str);
@@ -1257,6 +1306,7 @@ fn build_dash(
     filters: &[DashFilter],
     cross_too: bool,
     drills: &BTreeMap<String, crate::drill::DrillState>,
+    steps_too: bool,
 ) -> anyhow::Result<Value> {
     let dashboard_id = dash.get("id").and_then(Value::as_str).unwrap_or_default();
     let dash = dash.clone();
@@ -1592,6 +1642,44 @@ fn build_dash(
         down.entry(id).or_default().insert(key, res);
     }
 
+    // Parameters offline (v5 build 05, V5-D5, V5-D40): for a parameter with at most 21 values, the tiles that read it
+    // at each value but the one shown. One parameter moves at a time, with no click and no drill.
+    let params_now = engine.params_now();
+    let mut jobs: Vec<(String, String, Value, String)> = Vec::new();
+    for p in params_now.iter().filter(|_| steps_too) {
+        let Some(values) = p.steps() else { continue };
+        let readers: Vec<&String> = tiles
+            .iter()
+            .filter(|t| base.get(&t.id).is_some_and(|r| r.params.contains(&p.id)))
+            .map(|t| &t.id)
+            .collect();
+        for v in values.iter().filter(|v| js_key(v) != js_key(&p.value)) {
+            for id in &readers {
+                jobs.push((p.id.clone(), js_key(v), v.clone(), (*id).clone()));
+            }
+        }
+    }
+    let stepped = in_parallel(engine, &jobs, |e, (param, _, v, id)| {
+        let t = tiles
+            .iter()
+            .find(|t| &t.id == id)
+            .expect("a tile of this page");
+        let values = BTreeMap::from([(param.clone(), v.clone())]);
+        crate::params::with(&values, || {
+            crate::drill::run_public(e, t, filters, &Default::default())
+        })
+    })?;
+    let mut steps: BTreeMap<String, BTreeMap<String, BTreeMap<String, QueryResult>>> =
+        BTreeMap::new();
+    for ((param, key, _, id), res) in jobs.into_iter().zip(stepped) {
+        steps
+            .entry(param)
+            .or_default()
+            .entry(key)
+            .or_default()
+            .insert(id, res);
+    }
+
     // The measures the tiles name: what the viewer needs to write their names and to know whether
     // their values add up (V4-D85d). The formula stays at home.
     let mut named: Vec<String> = Vec::new();
@@ -1702,6 +1790,23 @@ fn build_dash(
     let cal = engine.calendar();
     if cal != crate::calendar::Calendar::default() {
         payload["calendar"] = json!(cal);
+    }
+    // The parameters the page uses (its tiles name them, or its measures read them), with the values it shows, without
+    // their descriptions (v5 build 05); the steps it holds.
+    let named = crate::params::ids_named_by(std::slice::from_ref(&dash));
+    let list: Vec<crate::params::Param> = params_now
+        .into_iter()
+        .filter(|p| named.contains(&p.id) || base.values().any(|r| r.params.contains(&p.id)))
+        .map(|p| crate::params::Param {
+            description: None,
+            ..p
+        })
+        .collect();
+    if !list.is_empty() {
+        payload["params"] = json!(list);
+    }
+    if !steps.is_empty() {
+        payload["steps"] = json!(steps);
     }
     if !down.is_empty() {
         payload["down"] = json!(down);

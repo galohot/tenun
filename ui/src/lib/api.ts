@@ -440,6 +440,8 @@ export interface QueryResult {
   drill?: DrillInfo;
   /** Text tiles: live numbers by `<measure id>`, `<id>|compare` and `<id>|period` (build 10). */
   values?: Record<string, Cell>;
+  /** The parameters the tile read, by id (v5 build 05): an export holds its results for each of their values. */
+  params?: string[];
 }
 
 /**
@@ -486,7 +488,9 @@ export type TileType =
   // Advanced types. They always render; only editing them needs the Advanced switch (V3-D2).
   | 'heatmap' | 'funnel' | 'box' | 'bullet' | 'compare' | 'sankey' | 'calendar' | 'cohort' | 'gantt'
   // Simple types added in v4. `donut` draws a donut again (V4-D7); files of v1 to v3 drew it as `share`.
-  | 'map' | 'pie';
+  | 'map' | 'pie'
+  // Advanced, v5: a parameter's control (build 05).
+  | 'param';
 
 /** The level of a map: countries, the provinces of a country, or its second level (kabupaten and kota). */
 export type MapLevel = 'country' | 'province' | 'regency';
@@ -571,6 +575,8 @@ export interface TileLine {
   label?: string;
   /** Scatter only: `y` is a level line (a value up the side), `x` an upright one. Unset: both, for a median. */
   axis?: 'x' | 'y';
+  /** A target line at a number parameter's value (v5 build 05). `value` is the value it had when it was set. */
+  param?: string;
 }
 
 /** How the cells of a value look in a table or pivot. Index-aligned with `Tile.measures`. */
@@ -644,8 +650,8 @@ export interface Tile {
   better?: 'up' | 'down';
   /** `manual` is Advanced. */
   sort?: { by: 'value' | 'label' | 'manual'; desc?: boolean; order?: string[] };
-  /** Keep the biggest N groups; the rest become one "Other" bar. `other` defaults to true. */
-  top?: { n: number; other?: boolean };
+  /** Keep the biggest N groups; the rest become one "Other" bar. `other` defaults to true. `param`: N is a number parameter's value (v5 build 05). */
+  top?: { n: number; other?: boolean; param?: string };
   lines?: TileLine[];
   /** How each value is written, index-aligned with `measures`. */
   formats?: (NumFormat | null)[];
@@ -673,8 +679,8 @@ export interface Tile {
   stack?: 'stacked' | 'side' | 'percent';
   /** Histogram: the width of a bin. Not set: the engine picks one. */
   bins?: { width?: number };
-  /** Number tiles: the goal for the period. */
-  target?: { value: number };
+  /** Number tiles: the goal for the period. `param`: the goal is a number parameter's value (v5 build 05). */
+  target?: { value: number; param?: string };
   /** Number tiles: the card's parts, size, ground and rules, or a card style it uses (build 08). Not set: the number tile as it always was. */
   card?: CardSpec;
   /** Text tiles: the period the live numbers cover, set from the dashboard's grain (build 10). Not set: by month. */
@@ -706,6 +712,8 @@ export interface Tile {
   drill?: { hierarchy?: string };
   /** The tiles its clicks and selections filter (v5 build 02, Advanced): none, or a list. Not set: every tile. */
   reach?: 'none' | string[];
+  /** Parameter tiles (v5 build 05): the parameter it moves, and its control. Not set: a slider or buttons. */
+  param?: { id: string; style?: 'slider' | 'input' | 'buttons' | 'dropdown' };
 }
 
 /** Settings of this computer (not of the workspace). */
@@ -814,6 +822,26 @@ export interface Workspace {
   hierarchies?: Hierarchy[];
   /** The month the year starts in and the day the week starts on (v5 build 04). Not set: January and Monday. */
   calendar?: Calendar;
+  /** Parameters (v5 build 05): numbers and choices that measures read with PARAM("…"), with their values now. */
+  params?: Param[];
+}
+
+/**
+ * A parameter (v5 build 05, V5-D7): a number from `min` to `max` in steps of `step`, or a choice from `choices`. A
+ * measure reads it with PARAM("name"); a Top N, a number tile's target and a chart's line can take it. A new one is
+ * sent with an empty id.
+ */
+export interface Param {
+  id: string;
+  name: string;
+  kind: 'number' | 'choice';
+  value: Cell;
+  min?: number;
+  max?: number;
+  step?: number;
+  choices?: Cell[];
+  format?: NumFormat;
+  description?: string;
 }
 
 export interface Snapshot {
@@ -949,6 +977,8 @@ export const api = {
   newWorkspace: () => call<Snapshot>('POST', '/workspace/new', { lang: navigator.language }),
   setLocale: (locale: 'id' | 'en') => call<Snapshot>('PUT', '/workspace/locale', { locale }),
   setCalendar: (calendar: Calendar) => call<Snapshot>('PUT', '/workspace/calendar', calendar),
+  setParams: (list: Param[]) => call<Snapshot>('PUT', '/workspace/params', list),
+  setParamValues: (values: Record<string, Cell>) => call<Snapshot>('PUT', '/workspace/params/values', values),
   open: (path: string) => call<Snapshot>('POST', '/workspace/open', { path }),
   save: (path?: string) => call<Snapshot>('POST', '/workspace/save', { path: path ?? null }),
   rename: (name: string) => call<Snapshot>('POST', '/workspace/rename', { name }),

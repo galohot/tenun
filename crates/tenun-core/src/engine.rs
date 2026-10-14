@@ -431,6 +431,9 @@ pub struct QueryResult {
     /// A tile that drills (v5 build 01): its levels, the one shown and the path to it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drill: Option<crate::drill::DrillInfo>,
+    /// The parameters the tile read, by id (v5 build 05): an export holds its results for each of their values.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<String>,
 }
 
 /// A compare chart with one value reads two periods of a field. `periods` are those two values, in
@@ -467,6 +470,7 @@ impl QueryResult {
             geo: None,
             values: None,
             drill: None,
+            params: Vec::new(),
         }
     }
 }
@@ -649,7 +653,9 @@ impl Engine {
     }
 
     /// Replaces the workspace (used by open, new and "open sample").
-    pub fn replace(&self, ws: Workspace, path: Option<PathBuf>) {
+    pub fn replace(&self, mut ws: Workspace, path: Option<PathBuf>) {
+        // A file edited by hand may hold parameters that would be refused: they are left out (v5 build 05).
+        ws.params = crate::params::clean(std::mem::take(&mut ws.params));
         {
             let db = self.db.lock().unwrap();
             let s = self.state.read().unwrap();
@@ -1927,7 +1933,7 @@ impl Engine {
                 m.format = None;
             }
         }
-        let (old, catalog, rels, health, dashboards) = {
+        let (old, catalog, rels, health, dashboards, params) = {
             let s = self.state.read().unwrap();
             (
                 s.ws.measures.clone(),
@@ -1935,6 +1941,7 @@ impl Engine {
                 s.ws.relationships.clone(),
                 s.health.clone(),
                 s.ws.dashboards.clone(),
+                s.ws.params.clone(),
             )
         };
         // Ids: a new measure takes the next number; a repeated id is a mistake of the caller.
@@ -2014,6 +2021,7 @@ impl Engine {
             today,
             now: today.and_time(chrono::Local::now().time()),
             view: false,
+            params: &params,
         };
         for (i, m) in list.iter().enumerate() {
             if old.iter().any(|o| o.id == m.id && o.formula == m.formula) {
@@ -2146,7 +2154,7 @@ impl Engine {
                     sql.ok()
                         .and_then(|sql| {
                             let conn = self.conn().ok()?;
-                            run(&conn, &sql, &[]).ok()
+                            self.with_params(|| run(&conn, &sql, &[])).ok()
                         })
                         .and_then(|rows| rows.into_iter().next()?.into_iter().next())
                         .unwrap_or(serde_json::Value::Null)
@@ -2263,6 +2271,98 @@ impl Engine {
 
     pub fn hierarchies(&self) -> Vec<crate::workspace::Hierarchy> {
         self.state.read().unwrap().ws.hierarchies.clone()
+    }
+
+    // ---- parameters (v5 build 05) -------------------------------------------------------------
+
+    /// The parameters of the workspace, with their saved values.
+    pub fn params(&self) -> Vec<crate::params::Param> {
+        self.state.read().unwrap().ws.params.clone()
+    }
+
+    /// The parameters with the values of this call: the saved ones, or a saved view's, or an export step's.
+    pub fn params_now(&self) -> Vec<crate::params::Param> {
+        crate::params::current(&self.state.read().unwrap().ws.params)
+    }
+
+    /// Runs `f` with the parameters' values of this call bound for its queries.
+    pub fn with_params<R>(&self, f: impl FnOnce() -> R) -> R {
+        crate::params::using(self.params_now(), f)
+    }
+
+    /// Replaces the parameters (v5 build 05, V5-D7). A new one gets the next `p<n>`; an id a tile still names is not
+    /// given again. A parameter whose name changes is renamed in every measure that reads it. A list with a problem is
+    /// refused in words.
+    pub fn set_params(&self, mut list: Vec<crate::params::Param>) -> anyhow::Result<()> {
+        let (old, dashboards) = {
+            let s = self.state.read().unwrap();
+            (s.ws.params.clone(), s.ws.dashboards.clone())
+        };
+        if list.len() > crate::params::MAX_PARAMS {
+            anyhow::bail!(
+                "A workspace can have up to {} parameters.",
+                crate::params::MAX_PARAMS
+            );
+        }
+        let number = |id: &str| id.strip_prefix('p').and_then(|n| n.parse::<u64>().ok());
+        let named = crate::params::ids_named_by(&dashboards);
+        let mut next = old
+            .iter()
+            .map(|p| p.id.as_str())
+            .chain(list.iter().map(|p| p.id.as_str()))
+            .chain(named.iter().map(String::as_str))
+            .filter_map(number)
+            .max()
+            .unwrap_or(0);
+        for p in &mut list {
+            if !crate::params::valid_id(&p.id) {
+                next += 1;
+                p.id = format!("p{next}");
+            }
+        }
+        for (i, p) in list.iter().enumerate() {
+            if list[..i].iter().any(|o| o.id == p.id) {
+                anyhow::bail!("Two parameters have the id {}.", p.id);
+            }
+        }
+        let list = crate::params::check(list)?;
+        // The names that change, all at once: two parameters may swap theirs.
+        let renames: Vec<(String, String)> = list
+            .iter()
+            .filter_map(|p| {
+                let o = old.iter().find(|o| o.id == p.id && o.name != p.name)?;
+                Some((o.name.clone(), p.name.clone()))
+            })
+            .collect();
+        {
+            let mut s = self.state.write().unwrap();
+            if !renames.is_empty() {
+                for m in s.ws.measures.iter_mut() {
+                    m.formula = crate::params::rename_in(&m.formula, &renames);
+                }
+            }
+            s.ws.params = list;
+        }
+        self.persist();
+        Ok(())
+    }
+
+    /// Sets the values of parameters by id, as a control or a saved view sets them. A number is kept inside its range;
+    /// a value that is not one of a choice's values, or an unknown id, is left out.
+    pub fn set_param_values(
+        &self,
+        values: BTreeMap<String, serde_json::Value>,
+    ) -> anyhow::Result<()> {
+        {
+            let mut s = self.state.write().unwrap();
+            for p in s.ws.params.iter_mut() {
+                if let Some(v) = values.get(&p.id).and_then(|v| p.allows(v)) {
+                    p.value = v;
+                }
+            }
+        }
+        self.persist();
+        Ok(())
     }
 
     /// Replaces the hierarchies (v5 build 01). Each has a name and 2 to 6 fields that exist, and each field reaches
@@ -2401,8 +2501,9 @@ impl Engine {
     }
 
     pub fn query(&self, q: &SemanticQuery) -> anyhow::Result<QueryResult> {
-        // Grains and relative dates follow the workspace's calendar (v5 build 04).
-        crate::calendar::with(self.calendar(), || self.query_in(q))
+        // Grains and relative dates follow the workspace's calendar (v5 build 04); a measure reads the parameters'
+        // values of this call (build 05).
+        crate::calendar::with(self.calendar(), || self.with_params(|| self.query_in(q)))
     }
 
     fn query_in(&self, q: &SemanticQuery) -> anyhow::Result<QueryResult> {
@@ -2498,7 +2599,8 @@ impl Engine {
             (sql, params, sc.ignored_filters.clone())
         };
         let conn = self.conn()?;
-        Ok((run(&conn, &sql, &params)?, ignored))
+        let rows = self.with_params(|| run(&conn, &sql, &params))?;
+        Ok((rows, ignored))
     }
 
     /// A dashboard stored in the workspace, by id.
@@ -3004,12 +3106,13 @@ impl Engine {
         before: Option<&str>,
         sql: bool,
     ) -> anyhow::Result<formula::CheckReply> {
-        let (mut catalog, rels, health) = {
+        let (mut catalog, rels, health, params) = {
             let s = self.state.read().unwrap();
             (
                 s.catalog.clone(),
                 s.ws.relationships.clone(),
                 s.health.clone(),
+                s.ws.params.clone(),
             )
         };
         let table_id = req
@@ -3037,12 +3140,14 @@ impl Engine {
             now: today.and_time(chrono::Local::now().time()),
             // A column formula is read the way a view reads it: one row per key (V4-D63).
             view: req.kind == formula::Kind::Column,
+            params: &params,
         };
         let conn = self.conn()?;
         if sql {
             return Ok(formula::answer_sql(req, &cx, &conn));
         }
-        Ok(formula::answer(req, &cx, &conn))
+        // A measure's total for all the data reads the parameters' values now (v5 build 05).
+        Ok(self.with_params(|| formula::answer(req, &cx, &conn)))
     }
 }
 
@@ -3208,6 +3313,7 @@ fn measure_env<'a>(
         health: &s.health,
         now: today.and_time(chrono::Local::now().time()),
         grains,
+        params: &s.ws.params,
     }
 }
 
@@ -4752,6 +4858,8 @@ pub(crate) fn run(
     sql: &str,
     params: &[Param],
 ) -> anyhow::Result<Vec<Vec<serde_json::Value>>> {
+    // A measure that reads a parameter: its value goes into the connection first, as a bound value (v5 build 05).
+    crate::params::bind(conn, sql)?;
     let mut stmt = conn.prepare(sql)?;
     let values: Vec<Value> = params.iter().map(to_duck).collect();
     let mut rows = stmt.query(duckdb::params_from_iter(values))?;

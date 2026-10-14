@@ -22,17 +22,23 @@ const selectionOf = (f: TileFilter | undefined): Pick<TileFilter, 'values' | 'ra
   ...(f?.preset ? { preset: f.preset } : {}),
 });
 
-/** The state of a dashboard now: its clicks, the selection of each filter tile, its grain and the drill paths. */
+/**
+ * The state of a dashboard now: its clicks, the selection of each filter tile, its grain, the drill paths, and the
+ * value of each parameter that has a control on it (build 05; `values` are the workspace's).
+ */
 export function currentState(
   dash: Pick<Dashboard, 'tiles' | 'grain'>,
   clicks: readonly DashFilter[],
   drills: Readonly<Record<string, DrillState>>,
+  values: Readonly<Record<string, Cell>> = {},
 ): ViewState {
   const selections: ViewState['selections'] = {};
   for (const t of dash.tiles) if (t.type === 'filter') selections[t.id] = selectionOf(t.filter);
   const drill: ViewState['drill'] = {};
   for (const [id, s] of Object.entries(drills)) if (s.path.length && dash.tiles.some((t) => t.id === id)) drill[id] = s.path;
-  return { filters: [...clicks], selections, grain: dash.grain ?? null, drill };
+  const params: Record<string, Cell> = {};
+  for (const t of dash.tiles) if (t.type === 'param' && t.param?.id && t.param.id in values) params[t.param.id] = values[t.param.id];
+  return { filters: [...clicks], selections, grain: dash.grain ?? null, drill, ...(Object.keys(params).length ? { params } : {}) };
 }
 
 /** A view of the state now, with a name. A new view has an empty id; `newViewId` gives it one. */
@@ -55,6 +61,19 @@ const canon = (s: ViewState) =>
 
 /** Whether the dashboard reads as the view: same clicks, selections, grain, drill paths and parameters. */
 export const sameState = (a: ViewState, b: ViewState): boolean => canon(a) === canon(b);
+
+/**
+ * Whether the dashboard now reads as a saved view. Only the parameters the view holds count: a view saved before a
+ * parameter control was added reads the same.
+ */
+export function sameAsView(now: ViewState, v: SavedView): boolean {
+  const keys = Object.keys(v.params ?? {});
+  const params = Object.fromEntries(keys.filter((k) => now.params && k in now.params).map((k) => [k, now.params![k]]));
+  return sameState(
+    { ...now, params: keys.length ? params : undefined },
+    { filters: v.filters, selections: v.selections ?? {}, grain: v.grain ?? null, drill: v.drill ?? {}, params: v.params },
+  );
+}
 
 /**
  * What opening a view does to the tiles: each filter tile takes the view's selection (none when the view has none for

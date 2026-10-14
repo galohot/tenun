@@ -1,6 +1,6 @@
 <script lang="ts">
   // Draws one tile from its result. Used by the app and by exported files.
-  import type { Cell, QueryResult, Tile, TileFilter } from '../../lib/api';
+  import type { Cell, Param, QueryResult, Tile, TileFilter } from '../../lib/api';
   import { buildOption, CHART_TYPES, type Colors } from '../../lib/chart';
   import { barScale, barSpan, barStyle, goodBad } from '../../lib/cells';
   import { cell, columnHeads, full, numberFormatter, OTHER_KEY, resultDim0, type Named } from '../../lib/format';
@@ -26,6 +26,7 @@
   import ShareView from './ShareView.svelte';
   import SmallMultiples from './SmallMultiples.svelte';
   import TextView from './TextView.svelte';
+  import ParamView from './ParamView.svelte';
 
   let {
     tile: given,
@@ -47,6 +48,7 @@
     onlayout,
     onretry,
     onplaces,
+    control,
   }: {
     tile: Tile;
     res: QueryResult;
@@ -80,6 +82,8 @@
     onretry?: () => void;
     /** Map, in the app: open the list of place names. */
     onplaces?: () => void;
+    /** Parameter tiles (v5 build 05): the parameter, its value, and what moving it does (not set: it is fixed). */
+    control?: { param: Param | undefined; value: Cell; onchange?: (v: Cell) => void; note?: string };
   } = $props();
 
   // A value with no format of its own is written the way its named measure is (build 03).
@@ -259,6 +263,14 @@
   <TextView text={tile.text ?? ''} {editing} values={res.values} style={tile.textStyle} align={tile.textAlign} {pages} {onpage} />
 {:else if tile.type === 'image'}
   <ImageView image={tile.image} {editing} />
+{:else if tile.type === 'param'}
+  <ParamView
+    param={control?.param}
+    value={control?.value ?? null}
+    style={tile.param?.style}
+    named={!tile.title?.trim()}
+    onchange={control?.onchange}
+    note={control?.note ?? ''} />
 {:else if tile.type === 'filter'}
   <FilterView {tile} {res} {tables} {selected} onchange={onfilter} {onpick} />
 {:else if tile.type === 'kpi' && res.kpi}

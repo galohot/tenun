@@ -20,7 +20,8 @@
   import FocusSheet from './dash/FocusSheet.svelte';
   import { drawnTile } from '../lib/card';
   import { shownTile, TOP } from '../lib/drilldown';
-  import { currentState, newViewId, sameState, tilesWithView, viewClicks, viewDrills, viewOf } from '../lib/views';
+  import { currentState, newViewId, sameAsView, tilesWithView, viewClicks, viewDrills, viewOf } from '../lib/views';
+  import { paramValues } from '../lib/params';
   import ViewsMenu from './dash/ViewsMenu.svelte';
   import { flowOrder, insertInOrder, isFlow, moveInOrder } from '../lib/flow';
   import FlowLayout from './dash/FlowLayout.svelte';
@@ -351,6 +352,8 @@
       ...(type === 'filter' ? { filter: { style: 'list' as const } } : {}),
       // A new map starts on Indonesia's provinces (build 06).
       ...(type === 'map' ? { map: { level: 'province' as const, country: 'ID' } } : {}),
+      // A new parameter tile moves the first parameter (v5 build 05); its options pick another.
+      ...(type === 'param' && app.snap?.workspace.params?.length ? { param: { id: app.snap.workspace.params[0].id } } : {}),
     };
     // In a story the tile goes where "+" was clicked, or at the end (build 11).
     if (story) {
@@ -465,10 +468,10 @@
 
   // ---- saved views (build 03) ----
   const views = $derived(dash?.views ?? []);
-  const stateNow = $derived(dash ? currentState(dash, filters, drills) : null);
+  const stateNow = $derived(dash ? currentState(dash, filters, drills, paramValues(app.snap?.workspace.params ?? [])) : null);
   const viewChanged = $derived.by(() => {
     const v = views.find((x) => x.id === openView);
-    return !!v && !!stateNow && !sameState(stateNow, { filters: v.filters, selections: v.selections ?? {}, grain: v.grain ?? null, drill: v.drill ?? {}, params: v.params });
+    return !!v && !!stateNow && !sameAsView(stateNow, v);
   });
   /** Sets the dashboard as the view reads it: the filter tiles' selections, the grain, the clicks and the drill paths. */
   function applyView(v: SavedView, step = true) {
@@ -484,6 +487,10 @@
     filters = viewClicks(dash.tiles, v);
     drills = viewDrills(dash.tiles, v);
     openView = v.id;
+    // The view's parameter values (v5 build 05): saved in the workspace, as a moved control saves them.
+    const values = paramValues(app.snap?.workspace.params ?? []);
+    const moved = Object.fromEntries(Object.entries(v.params ?? {}).filter(([id, x]) => id in values && values[id] !== x));
+    if (Object.keys(moved).length) app.setParamValues(moved);
   }
   function saveViews(list: SavedView[], extra: Partial<Dashboard> = {}) {
     if (!dash) return;
@@ -1076,7 +1083,7 @@
       <button class="btn primary" onclick={() => (addMenu = !addMenu)} aria-expanded={addMenu}><Icon name="plus" /> Add tile</button>
       {#if addMenu}
         <div class="menu" role="menu">
-          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['pie', 'Pie chart'], ['donut', 'Donut chart'], ['table', 'Table'], ['pivot', 'Pivot table'], ['map', 'Map'], ['filter', 'Filter'], ['text', 'Text'], ['image', 'Image'], ...(advanced ? [['heatmap', 'Heat map'], ['funnel', 'Funnel'], ['box', 'Box plot'], ['bullet', 'Bullet chart'], ['compare', 'Compare two values'], ['sankey', 'Sankey'], ['calendar', 'Calendar heat map'], ['cohort', 'Cohort grid'], ...(hasTwoDates(app.tables) ? [['gantt', 'Gantt chart']] : [])] : [])] as [t, label]}
+          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['pie', 'Pie chart'], ['donut', 'Donut chart'], ['table', 'Table'], ['pivot', 'Pivot table'], ['map', 'Map'], ['filter', 'Filter'], ['text', 'Text'], ['image', 'Image'], ...(advanced ? [['heatmap', 'Heat map'], ['funnel', 'Funnel'], ['box', 'Box plot'], ['bullet', 'Bullet chart'], ['compare', 'Compare two values'], ['sankey', 'Sankey'], ['calendar', 'Calendar heat map'], ['cohort', 'Cohort grid'], ...(hasTwoDates(app.tables) ? [['gantt', 'Gantt chart']] : []), ['param', 'Parameter']] : [])] as [t, label]}
             <button role="menuitem" onclick={() => addTile(t as TileType)}>
               <Icon name={(t === 'calendar' ? 'calendarheat' : t) as IconName} /> {label}
             </button>

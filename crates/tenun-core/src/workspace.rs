@@ -93,6 +93,9 @@ pub struct Workspace {
     /// The month the year starts in and the day the week starts on (v5 build 04). Not set: January and Monday.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calendar: Option<crate::calendar::Calendar>,
+    /// Parameters (v5 build 05): numbers and choices that measures read with `PARAM("…")`, with their values now.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<crate::params::Param>,
 }
 
 /// Fields from the top down (Region › Store › Product), 2 to 6 of them. Each lower field reaches the
@@ -145,6 +148,7 @@ impl Default for Workspace {
             site: None,
             hierarchies: Vec::new(),
             calendar: None,
+            params: Vec::new(),
         }
     }
 }

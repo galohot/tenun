@@ -394,5 +394,11 @@
   "args": "table",
   "class": "agg",
   "hint": "The number of rows of a table."
+ },
+ {
+  "name": "PARAM",
+  "args": "name",
+  "class": "row",
+  "hint": "A parameter's value, by its name in double quotes. Measures only."
  }
 ]

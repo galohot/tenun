@@ -16,6 +16,7 @@
   import Menu from './Menu.svelte';
   import TileBody from './TileBody.svelte';
   import { cardGround, drawnTile } from '../../lib/card';
+  import { paramValues, withParams } from '../../lib/params';
 
   let {
     tile,
@@ -194,8 +195,17 @@
   // A link this tile crosses repeats a key on its one side, so the first row was used (V4-D26).
   const linkNotes = $derived(res?.notes ?? []);
   const title = $derived(tileTitle(tile, app.tables, res?.parts));
+  // A target or a line that takes a parameter is drawn at its value now (v5 build 05).
+  const params = $derived(app.snap?.workspace.params ?? []);
+  const values = $derived(paramValues(params));
   // A number card (build 08) is drawn with its style merged in; it fills the tile with its ground and draws its own title.
-  const drawn = $derived(drawnTile(tile, app.snap?.workspace.cardStyles));
+  const drawn = $derived(drawnTile(withParams(tile, values), app.snap?.workspace.cardStyles));
+  /** A parameter tile's control: moving it saves the value, and every tile that reads it asks again. */
+  const control = $derived.by(() => {
+    const id = tile.param?.id;
+    if (tile.type !== 'param' || !id) return undefined;
+    return { param: params.find((p) => p.id === id), value: values[id] ?? null, onchange: (v: Cell) => app.setParamValues({ [id]: v }) };
+  });
   const ground = $derived(cardGround(drawn));
   /** The tile as it is drawn at the drilled level: its first field is that level's field. */
   const view = $derived(shownTile(drawn, res?.drill, app.snap?.workspace.hierarchies ?? []));
@@ -334,10 +344,10 @@
     <DrillBar info={res.drill} onto={(d) => setDrill(toDepth(drill, d))} onup={() => setDrill(up(drill))} onnext={() => setDrill(nextLevel(drill))} />
   {/if}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="body" onpointerdown={bare && !phone ? (e) => !(e.target as HTMLElement).closest('a, button') && ondragstart(e) : undefined}>
+  <div class="body" onpointerdown={bare && !phone ? (e) => !(e.target as HTMLElement).closest('a, button, input, select, textarea') && ondragstart(e) : undefined}>
     {#if fixed || (tile.type === 'text' && !res)}
       <!-- A text with live numbers draws at once; its numbers come in when the engine has them. -->
-      <TileBody {tile} res={EMPTY_RESULT} {colors} selected={null} editing tables={app.tables} {pages} onpage={openPage} />
+      <TileBody {tile} res={EMPTY_RESULT} {colors} selected={null} editing tables={app.tables} {pages} onpage={openPage} {control} />
     {:else if !q}
       <button class="setup" onclick={onselect}>
         <Icon name="plus" />

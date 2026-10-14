@@ -54,6 +54,8 @@ pub struct Env<'a> {
     /// column) → the period (V4-D101). Read from the data once for each load, by the engine. A
     /// main date not in the map is read as it is: any day.
     pub grains: &'a BTreeMap<(String, String), Period>,
+    /// The parameters a measure can read (v5 build 05).
+    pub params: &'a [crate::params::Param],
 }
 
 /// The period a main date counts in when every one of its values is the first day of a period
@@ -291,6 +293,11 @@ fn combine_is_linear(combine: &str) -> bool {
             if self.eat(b'-') || self.eat(b'+') {
                 return self.unary();
             }
+            // A number parameter's value (v5 build 05) is a number.
+            if let Some(n) = crate::params::number_sql_at(&self.s[self.at..]) {
+                self.at += n;
+                return Some(Shape::Number);
+            }
             if self.eat(b'(') {
                 let inner = self.expr()?;
                 return self.eat(b')').then_some(inner);
@@ -376,6 +383,7 @@ pub fn resolve(env: &Env<'_>, catalog: &Catalog, id: &str) -> Result<Resolved, Q
         today: env.now.date(),
         now: env.now,
         view: false,
+        params: env.params,
     };
     let c = formula::compile(&nm.formula, Kind::Measure, None, &cx)
         .map_err(|e| QueryError::MeasureBroken(nm.name.clone(), e.message))?;
@@ -1485,11 +1493,14 @@ mod tests {
             "($p0 / 1e2)",
             "(2e0 * ($p0 + $p1))",
             "$p0 - $p1 + $p2",
+            "($p0 * (1e0 + (SELECT num FROM temp.main.tenun_param WHERE id = 'p1')))",
         ] {
             assert!(combine_is_linear(yes), "{yes}");
         }
         for no in [
             "($p0 + 5e0)",
+            "($p0 + (SELECT num FROM temp.main.tenun_param WHERE id = 'p1'))",
+            "($p0 * (SELECT txt FROM temp.main.tenun_param WHERE id = 'p1'))",
             "($p0 * $p1)",
             "($p0 / $p1)",
             "list_transform([$p0], v0 -> v0)[1]",
