@@ -79,6 +79,9 @@ pub struct Tile {
     /// The tiles its clicks and selections filter (v5 build 02): `"none"`, or a list. Not set: every tile.
     #[serde(default)]
     pub reach: Option<Reach>,
+    /// Line and area over time (v5 build 08, Advanced): forecast the periods ahead.
+    #[serde(default)]
+    pub forecast: Option<crate::analytics::TileForecast>,
 }
 
 /// Which tiles a tile's clicks and selections filter (V5-D4, V5-D37).
@@ -816,6 +819,10 @@ fn run_tile_inner(
                 until: max_raw[..10].to_string(),
             });
         }
+    }
+    // A forecast (v5 build 08) after the unfinished period is known: it is left out of the fit.
+    if matches!(tile.kind.as_str(), "line" | "area") {
+        crate::analytics::attach(tile, grain, &mut res);
     }
     Ok(res)
 }

@@ -41,6 +41,8 @@ export function usesAdvanced(tile: Tile): boolean {
     // A trend column in a table, and groups that open and close in a pivot.
     !!tile.spark ||
     !!tile.expand ||
+    // A forecast (v5 build 08).
+    !!tile.forecast ||
     // A Top N, a target or a line that takes a parameter (v5 build 05).
     !!tile.top?.param ||
     !!tile.target?.param ||

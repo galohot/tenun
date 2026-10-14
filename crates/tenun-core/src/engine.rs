@@ -437,6 +437,9 @@ pub struct QueryResult {
     /// The parameters the tile read, by id (v5 build 05): an export holds its results for each of their values.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<String>,
+    /// A line or area tile's forecast (v5 build 08).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forecast: Option<crate::analytics::ForecastInfo>,
 }
 
 /// A compare chart with one value reads two periods of a field. `periods` are those two values, in
@@ -474,6 +477,7 @@ impl QueryResult {
             values: None,
             drill: None,
             params: Vec::new(),
+            forecast: None,
         }
     }
 }

@@ -59,7 +59,13 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const room = horizontal ? Math.floor((height - 16) / 26) : Math.floor(width / 44);
   // A result that already has its "Other" is never folded again.
   const whole = pivot(res, tile, tables);
-  const { categories, series } = temporal || noFold || tile.type !== 'bar' || res.other ? whole : fold(whole, Math.max(4, room), addsUp);
+  const shaped = temporal || noFold || tile.type !== 'bar' || res.other ? whole : fold(whole, Math.max(4, room), addsUp);
+  const { series } = shaped;
+  // A forecast (v5 build 08) adds its periods after the data. The data's own periods are the first `actual`.
+  const categories = [...shaped.categories];
+  const actual = categories.length;
+  const forecastRows = tile.type !== 'bar' && temporal ? (res.forecast?.rows ?? []) : [];
+  for (const r of forecastRows) if (!categories.some((k) => key(k) === key(r[0]))) categories.push(r[0]);
   const multi = series.length > 1;
   const hasBar = combo ? series.some((_, si) => drawnAs(si) === 'bar') : tile.type === 'bar';
   // Series are drawn in the order of `built`; the combo decides bar or line for each value.
@@ -146,6 +152,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     const rank = (i: number) => (series[i].name === OTHER ? -1 : total(i));
     order.sort((a, b) => rank(b) - rank(a));
   }
+  const forecasting = forecastRows.length > 0 && !stacked;
   const built = order.map((si, pos) => {
     const s = series[si];
     const color = s.slot === null ? c.text2 : c.series[(s.slot ?? si) % c.series.length];
@@ -254,7 +261,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     };
     // An unfinished last period: the line stops one point early and a dashed
     // copy draws the final segment, so a half month never reads as a drop.
-    const unfinished = lineLike && tile.type !== 'area' && partialKey !== undefined && categories.at(-1) === partialKey && s.values.length > 1;
+    const unfinished = lineLike && tile.type !== 'area' && partialKey !== undefined && categories[actual - 1] === partialKey && s.values.length > 1;
     const main = {
       type: 'line',
       name: s.name,
@@ -285,7 +292,8 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       labelLayout: { hideOverlap: true },
       endLabel: unfinished ? { show: false } : endLabel,
     };
-    if (!unfinished) return [main];
+    // With a forecast, the unfinished period is the estimate's: the line stops at the last finished one.
+    if (!unfinished || forecasting) return [main];
     const n = s.values.length;
     const dashed = {
       type: 'line',
@@ -300,6 +308,57 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     };
     return [main, dashed];
   }).flat();
+
+  // The forecast (v5 build 08): a dashed line in each series' colour from its last finished point, and its 90 % range
+  // as a light tint, named "Estimate" in the legend and the hover.
+  const estimateNames: string[] = [];
+  if (forecasting && res.forecast) {
+    const split = !!res.forecast.split;
+    const lastDone = partialKey !== undefined && categories[actual - 1] === partialKey ? actual - 2 : actual - 1;
+    series.forEach((s, si) => {
+      const rows = forecastRows.filter((r) => !split || key(r[1]) === key(s.raw));
+      if (!rows.length) return;
+      const vi = split ? 2 : 1;
+      const color = s.slot === null ? c.text2 : c.series[(s.slot ?? si) % c.series.length];
+      const est: (number | null)[] = categories.map(() => null);
+      const lo: (number | null)[] = categories.map(() => null);
+      const hi: (number | null)[] = categories.map(() => null);
+      const start = lastDone >= 0 ? s.values[lastDone] : null;
+      if (start !== null && start !== undefined) [est[lastDone], lo[lastDone], hi[lastDone]] = [start, start, start];
+      for (const r of rows) {
+        const i = categories.findIndex((k) => key(k) === key(r[0]));
+        if (i >= 0) [est[i], lo[i], hi[i]] = [r[vi] as number, r[vi + 1] as number, r[vi + 2] as number];
+      }
+      const name = multi ? `${s.name} estimate` : 'Estimate';
+      estimateNames.push(name);
+      const fmt = fmtOf(si);
+      (built as object[]).push({
+        type: 'line',
+        name,
+        z: 4,
+        showSymbol: false,
+        symbol: 'circle',
+        symbolSize: 6,
+        connectNulls: false,
+        lineStyle: { width: 2, color, type: [7, 5], cap: 'round' },
+        itemStyle: { color, borderColor: c.surface, borderWidth: 2 },
+        emphasis: { focus: 'none', scale: false },
+        // "Estimate 18.2 M, likely between 16.9 M and 19.5 M", short as an estimate is; the point it starts from is a value.
+        tooltip: {
+          valueFormatter: (v: number | null, i: number) =>
+            v === null || i === lastDone ? '–' : `${fmt.short(v)}, likely between ${fmt.short(lo[i] as number)} and ${fmt.short(hi[i] as number)}`,
+        },
+        data: est,
+      });
+      if (tile.forecast?.band === false) return;
+      // The range: an unseen line at its low end, and the gap up to its high end stacked on it and tinted.
+      const band = { type: 'line', stack: `estimate${si}`, silent: true, z: 1, showSymbol: false, symbol: 'none', lineStyle: { opacity: 0, width: 0 }, tooltip: { show: false }, emphasis: { disabled: true } };
+      (built as object[]).push(
+        { ...band, data: lo },
+        { ...band, areaStyle: { color, opacity: 0.14 }, data: hi.map((h, i) => (h === null || lo[i] === null ? null : h - (lo[i] as number))) },
+      );
+    });
+  }
 
   if (topLabels && series[0]) {
     // With "All" on upright bars, a number stands on every k-th bar from the end (the others are switched
@@ -518,16 +577,16 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     grid: {
       left: 4,
       right: namesOutside ? Math.max(44, nameW + 8) : tile.type === 'bar' && horizontal ? 44 : nameEnds ? 72 : multi ? 12 : 44,
-      top: (indexed ? (multi ? 56 : 34) : multi || hasCompare || fit ? 34 : horizontal && markLine ? 30 : 14) + (horizontal && secondRow ? NAME_ROW : 0),
+      top: (indexed ? (multi ? 56 : 34) : multi || hasCompare || fit || estimateNames.length ? 34 : horizontal && markLine ? 30 : 14) + (horizontal && secondRow ? NAME_ROW : 0),
       bottom: 4,
       containLabel: true,
     },
-    legend: multi || hasCompare || fit
+    legend: multi || hasCompare || fit || estimateNames.length
       ? {
           type: 'scroll',
           // The comparison goes behind the others but is named last, and the trend after it.
           // The unseen series that carries the lines is not named.
-          data: [...(hasCompare ? [series[0].name, compareName] : series.map((s) => s.name)), ...(fit ? [TREND] : [])],
+          data: [...(hasCompare ? [series[0].name, compareName] : series.map((s) => s.name)), ...estimateNames, ...(fit ? [TREND] : [])],
           top: 0,
           left: 0,
           icon: hasBar ? 'roundRect' : 'circle',

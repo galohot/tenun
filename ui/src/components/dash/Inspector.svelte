@@ -664,6 +664,9 @@
   // The same period last year needs a line, area or bar over a date with a grain, one value, no split.
   const compareType = $derived(tile.type === 'bar' || tile.type === 'line' || tile.type === 'area');
   const canCompare = $derived(compareType && dim0 === 'date' && !!tile.dims[0]?.grain && !isPart(tile.dims[0].grain) && tile.measures.length <= 1 && !tile.dims[1]);
+  // A forecast (v5 build 08): a line or an area over a date with a grain, one value.
+  const canForecast = $derived((tile.type === 'line' || tile.type === 'area') && dim0 === 'date' && !!tile.dims[0]?.grain && !isPart(tile.dims[0].grain) && tile.measures.length === 1);
+  const FORECAST_AHEAD: Record<string, number> = { month: 3, quarter: 2, week: 8, day: 14, year: 2 };
 
   /** A target of 0 or less, or an empty box, clears the target. */
   function setTarget(raw: string) {
@@ -1290,6 +1293,38 @@
     <p class="hint">Comparing needs one value, a date with a grain and no split.</p>
   {/if}
 
+  {#if (advanced || tile.forecast) && canForecast}
+    <!-- A forecast (v5 build 08, Advanced): the periods ahead, and the 90 % range. -->
+    <div class="sec">
+      <label class="check">
+        <input type="checkbox" checked={!!tile.forecast} onchange={(e) => set({ forecast: e.currentTarget.checked ? {} : undefined })} />
+        Forecast
+      </label>
+      {#if tile.forecast}
+        <label class="ahead">
+          <span>Periods ahead</span>
+          <input
+            class="field"
+            type="number"
+            min="1"
+            max="36"
+            aria-label="Periods to forecast"
+            placeholder={String(FORECAST_AHEAD[tile.dims[0]?.grain ?? 'month'] ?? 3)}
+            value={tile.forecast.periods ?? ''}
+            onchange={(e) => {
+              const n = Math.round(Number(e.currentTarget.value));
+              set({ forecast: { ...tile.forecast, periods: e.currentTarget.value.trim() && n >= 1 ? Math.min(n, 36) : undefined } });
+            }} />
+        </label>
+        <label class="check">
+          <input type="checkbox" checked={tile.forecast.band !== false} onchange={(e) => set({ forecast: { ...tile.forecast, band: e.currentTarget.checked ? undefined : false } })} />
+          Show the likely range
+        </label>
+        <p class="hint tight">An estimate from the periods before: their level, trend and season. It needs two full years of months (or of quarters, weeks or days); the unfinished period is not used.</p>
+      {/if}
+    </div>
+  {/if}
+
   {#if isMap}
     <div class="sec">
       <span class="label">Map</span>
@@ -1862,4 +1897,6 @@
   .mixrow { display: grid; grid-template-columns: 1fr 90px; align-items: center; gap: 8px; font-size: 12px; }
   .error { display: flex; gap: 6px; margin: 0; color: var(--danger); font-size: 12px; }
   .error :global(svg) { flex: none; margin-top: 1px; }
+  .ahead { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .ahead .field { width: 80px; }
 </style>

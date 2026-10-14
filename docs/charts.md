@@ -214,6 +214,29 @@ region. You set it up once (Advanced); anyone who reads the dashboard can use it
 - **Exported files and tenun.cloud** hold one level of drill-down for the first 50 values of each chart, and Next level.
   A click past that says so. Maps do not drill, because a place can be written several ways in the data.
 
+## Forecast
+
+A line or an area over time can show what comes next (Advanced). In the tile's options, tick **Forecast**.
+
+- **What it draws:** a dashed line in the series' colour from the last finished period, and a light band for the
+  likely range. The legend and the hover call it **Estimate**. Under "Dec 2026", the hover says "Estimate 18.2 M,
+  likely between 16.9 M and 19.5 M".
+- **Periods ahead:** 3 months, 2 quarters, 8 weeks or 14 days unless you set another number (up to 36).
+- **How:** exponential smoothing with a season and a slowing trend, the method Power BI and Tableau use. Tenun fits it
+  on your computer to the periods the chart shows. The same data always gives the same forecast.
+- **The season** is a year: 12 months, 4 quarters, 52 weeks; for days it is a week. A chart by year has no season,
+  only a trend.
+- **When it refuses:** it needs two full seasons and two more periods (26 months, 10 quarters, 106 weeks, 16 days,
+  6 years). With fewer, the chart says how many it has.
+- **The unfinished period** (this month, so far) is not used to fit. The estimate stands in for it.
+- **The range** is where 9 in 10 values would fall if the past errors hold. It widens with each step ahead. Untick
+  **Show the likely range** to hide it.
+- One value per chart; a chart split into up to 4 lines gets one forecast for each.
+- An exported or published page keeps the forecast as it was worked out.
+
+It is an estimate from the past, not knowledge of the future. A price change, a new store or a holiday that moved
+will not be in it.
+
 ## What Tenun does not draw
 
 See [the README](../README.md#what-tenun-does-not-do-on-purpose) for the list and the answer to each.

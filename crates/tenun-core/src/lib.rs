@@ -1,6 +1,7 @@
 //! Tenun's engine: sources, relationships and the query compiler, on DuckDB.
 
 pub mod advanced;
+pub mod analytics;
 pub mod calc;
 pub mod calendar;
 pub mod catalog;

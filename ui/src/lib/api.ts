@@ -445,6 +445,11 @@ export interface QueryResult {
   values?: Record<string, Cell>;
   /** The parameters the tile read, by id (v5 build 05): an export holds its results for each of their values. */
   params?: string[];
+  /**
+   * A line or area tile's forecast (v5 build 08): rows `[key, value, low, high]`, or `[key, series, value, low, high]`
+   * with a split. No rows: it could not be made, and `note` says why.
+   */
+  forecast?: { rows: Cell[][]; method: string; note?: string; split?: boolean };
 }
 
 /**
@@ -717,6 +722,8 @@ export interface Tile {
   reach?: 'none' | string[];
   /** Parameter tiles (v5 build 05): the parameter it moves, and its control. Not set: a slider or buttons. */
   param?: { id: string; style?: 'slider' | 'input' | 'buttons' | 'dropdown' };
+  /** Line and area over time (v5 build 08, Advanced): forecast the periods ahead; `band` false hides the range. */
+  forecast?: { periods?: number; band?: boolean };
 }
 
 /** Settings of this computer (not of the workspace). */
