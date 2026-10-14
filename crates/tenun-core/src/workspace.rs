@@ -96,6 +96,68 @@ pub struct Workspace {
     /// Parameters (v5 build 05): numbers and choices that measures read with `PARAM("…")`, with their values now.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<crate::params::Param>,
+    /// Alerts (v5 build 12): a number tile's value against a threshold, told to a chat or a web address. Their
+    /// addresses are in the secrets of the computer that sends them, never here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alerts: Vec<AlertRule>,
+}
+
+/// An alert (v5 build 12, V5-D15): when a number tile's value goes below, above or outside what the rule says, a
+/// message goes to the rule's channel; one more when it is back, if the rule asks.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AlertRule {
+    /// Letters, digits, `-` and `_`. The rule's state and its address on a computer are kept under it, so the app
+    /// makes it random.
+    pub id: String,
+    pub dashboard: String,
+    pub tile: String,
+    /// Which value of the tile, from 0. Not set: the first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measure: Option<usize>,
+    pub op: AlertOp,
+    pub value: f64,
+    /// The top of the range for `outside`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<f64>,
+    pub channel: AlertChannel,
+    #[serde(default = "yes")]
+    pub on: bool,
+    /// Also tell when it is back to normal.
+    #[serde(default)]
+    pub back: bool,
+    /// What a message calls the value when the tile's title does not: the words the app shows for it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AlertOp {
+    Below,
+    Above,
+    Outside,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AlertChannel {
+    pub kind: ChannelKind,
+    /// The name of its entry in the secrets: `alert:<rule id>`.
+    #[serde(default)]
+    pub secret: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ChannelKind {
+    Slack,
+    Teams,
+    Discord,
+    Telegram,
+    Webhook,
 }
 
 /// Fields from the top down (Region › Store › Product), 2 to 6 of them. Each lower field reaches the
@@ -149,6 +211,7 @@ impl Default for Workspace {
             hierarchies: Vec::new(),
             calendar: None,
             params: Vec::new(),
+            alerts: Vec::new(),
         }
     }
 }

@@ -45,6 +45,11 @@ enum Command {
         #[arg(long, value_name = "VARIABLE")]
         password_from_env: Option<String>,
     },
+    /// Alerts (v5 build 12): `tenun alerts check <file>` checks them once, for a scheduled task.
+    Alerts {
+        #[command(subcommand)]
+        action: AlertsAction,
+    },
     /// Keep published dashboards updated, without the app (for an always-on computer).
     Agent {
         /// The .tenun workspace.
@@ -69,6 +74,15 @@ enum Command {
         /// With --site: write a ZIP of a folder, one file for each page.
         #[arg(long)]
         zip: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum AlertsAction {
+    /// Check every alert that is on, once, and send what is due.
+    Check {
+        /// The .tenun workspace.
+        file: PathBuf,
     },
 }
 
@@ -106,6 +120,9 @@ async fn main() -> anyhow::Result<()> {
             return agent::publish_now(&file, dashboard.as_deref(), password_from_env.as_deref());
         }
         Some(Command::Agent { file }) => return agent::run(&file),
+        Some(Command::Alerts {
+            action: AlertsAction::Check { file },
+        }) => return agent::alerts_once(&file),
         _ => {}
     }
     let (file, port, host, no_open) = match cli.command {

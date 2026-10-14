@@ -1367,6 +1367,70 @@ pub fn build_quiet(
     Ok(payload)
 }
 
+/// One tile as its page opens (v5 build 12): with the dashboard's saved filters, its filter tiles' selections, its one
+/// grain and the every-page filters, under its default view when it has one. Never a reader's clicks. An alert reads
+/// its value here.
+pub fn tile_as_opened(
+    engine: &Engine,
+    dashboard_id: &str,
+    tile_id: &str,
+) -> anyhow::Result<QueryResult> {
+    let dash = engine
+        .dashboard(dashboard_id)
+        .ok_or_else(|| anyhow::anyhow!("no dashboard {dashboard_id}"))?;
+    let view = dash
+        .get("defaultView")
+        .and_then(Value::as_str)
+        .and_then(|d| {
+            dash.get("views")?
+                .as_array()?
+                .iter()
+                .find(|v| v.get("id").and_then(Value::as_str) == Some(d))
+                .cloned()
+        });
+    let (dash, clicks, drills) = match &view {
+        Some(v) => with_view(&dash, v),
+        None => (dash, Vec::new(), BTreeMap::new()),
+    };
+    let values: BTreeMap<String, Value> = view
+        .as_ref()
+        .and_then(|v| v.get("params"))
+        .and_then(Value::as_object)
+        .map(|o| o.iter().map(|(k, x)| (k.clone(), x.clone())).collect())
+        .unwrap_or_default();
+    crate::params::with(&values, || {
+        let grain = filters::dashboard_grain(&dash);
+        let styles = engine.card_styles();
+        let mut tiles = Vec::new();
+        for mut raw in dash
+            .get("tiles")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            if let Some(g) = grain {
+                filters::apply_grain(&mut raw, g);
+            }
+            resolve_card(&mut raw, &styles);
+            tiles.push(serde_json::from_value::<Tile>(raw)?);
+        }
+        let mut fs = filters::dashboard_filters(engine, &dash, &tiles);
+        fs.extend(filters::every_page(engine, dashboard_id));
+        let own: HashSet<String> = fs.iter().map(|f| f.from_tile.clone()).collect();
+        fs.extend(clicks.into_iter().filter(|f| !own.contains(&f.from_tile)));
+        let tile = tiles
+            .iter()
+            .find(|t| t.id == tile_id)
+            .ok_or_else(|| anyhow::anyhow!("no tile {tile_id}"))?;
+        crate::drill::run_public(
+            engine,
+            tile,
+            &fs,
+            &drills.get(tile_id).cloned().unwrap_or_default(),
+        )
+    })
+}
+
 /// A dashboard keeps at most this many views; an export holds each one in full (V5-D5).
 pub const MAX_VIEWS: usize = 10;
 

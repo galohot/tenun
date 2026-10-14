@@ -264,7 +264,7 @@ class App {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/api/events`);
     ws.onmessage = (m) => {
-      let ev: { type: string; message?: string };
+      let ev: { type: string; message?: string; sent?: number; failed?: number };
       try {
         ev = JSON.parse(m.data);
       } catch {
@@ -291,6 +291,10 @@ class App {
         this.siteProgress = { done: p.done, total: p.total };
       } else if (ev.type === 'published') {
         this.refresh();
+      } else if (ev.type === 'alerts') {
+        // An alert went, or could not (v5 build 12): the list in Settings says why.
+        if (ev.failed) this.toast('An alert could not be sent. Settings › Alerts says why.', 'error');
+        else if (ev.sent) this.toast(ev.sent === 1 ? 'An alert was sent' : `${ev.sent} alerts were sent`);
       } else if (ev.type === 'error' && ev.message) {
         this.toast(ev.message, 'error');
       }

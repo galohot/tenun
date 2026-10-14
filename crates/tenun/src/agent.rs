@@ -4,7 +4,7 @@
 
 use std::path::Path;
 use std::time::Duration;
-use tenun::cloud;
+use tenun::{alerts, cloud};
 use tenun_core::Engine;
 use tenun_core::secrets::Secrets;
 
@@ -128,13 +128,60 @@ pub fn publish_now(
     Ok(())
 }
 
+/// Checks the alerts once and writes what went (v5 build 12). True when nothing failed.
+fn alerts_now(engine: &Engine, s: &Secrets) -> bool {
+    let out = alerts::check(engine, s, chrono::Utc::now());
+    for (id, text) in &out.sent {
+        log(&format!(
+            "alert {id} sent: {}",
+            text.lines().next().unwrap_or_default()
+        ));
+    }
+    for (id, e) in &out.failed {
+        log(&format!("alert {id}: {e}"));
+    }
+    out.failed.is_empty()
+}
+
+/// `tenun alerts check`: every alert that is on, once (v5 build 12). For a scheduled task.
+pub fn alerts_once(file: &Path) -> anyhow::Result<()> {
+    let engine = open(file)?;
+    let on: Vec<_> = engine.alerts().into_iter().filter(|a| a.on).collect();
+    if on.is_empty() {
+        println!("no alert is on in {}", file.display());
+        return Ok(());
+    }
+    let s = secrets();
+    let ok = alerts_now(&engine, &s);
+    // What stops an alert that sent nothing: its tile, or no address on this computer.
+    let states = alerts::load_states(&alerts::state_path(&s));
+    for a in &on {
+        if let Some(st) = states.get(&a.id) {
+            for e in [&st.problem, &st.error]
+                .into_iter()
+                .filter(|e| !e.is_empty())
+            {
+                log(&format!("alert {}: {e}", a.id));
+            }
+        }
+    }
+    if !ok {
+        anyhow::bail!("some alerts were not sent");
+    }
+    Ok(())
+}
+
 pub fn run(file: &Path) -> anyhow::Result<()> {
     let base = cloud::base_url();
     let s = secrets();
-    if cloud::connection(&s, &base).is_none() {
-        anyhow::bail!("this computer is not connected; run `tenun login` first");
-    }
+    let connected = cloud::connection(&s, &base).is_some();
     let engine = std::sync::Arc::new(open(file)?);
+    // Alerts run without tenun.cloud (v5 build 12).
+    if !connected && engine.alerts().iter().all(|a| !a.on) {
+        anyhow::bail!(
+            "this computer is not connected and the workspace has no alert that is on; run `tenun login` first"
+        );
+    }
     let schedule = std::sync::Arc::new(std::sync::Mutex::new(cloud::Schedule::default()));
 
     // Data files that change mark "on change" dashboards as due.
@@ -170,11 +217,12 @@ pub fn run(file: &Path) -> anyhow::Result<()> {
         )
         .collect();
     log(&format!(
-        "tenun agent {} watching {} — {} scheduled: {}",
+        "tenun agent {} watching {} — {} scheduled: {}; {} alerts on",
         tenun::VERSION,
         file.display(),
         scheduled.len(),
-        scheduled.join(", ")
+        scheduled.join(", "),
+        engine.alerts().iter().filter(|a| a.on).count()
     ));
     loop {
         // CSV links are fetched again on their own schedule, and dashboards that publish
@@ -189,12 +237,15 @@ pub fn run(file: &Path) -> anyhow::Result<()> {
             log(&format!("fetched {}", urls.join(", ")));
             schedule.lock().unwrap().mark_changed(&engine);
         }
-        let (ok, failed) = cloud::run_due(&engine, &s, &base, &mut schedule.lock().unwrap());
-        for id in ok {
-            log(&format!("published {}", cloud::item_name(&id)));
-        }
-        for (id, e) in failed {
-            log(&format!("{}: {e}", cloud::item_name(&id)));
+        alerts_now(&engine, &s);
+        if connected {
+            let (ok, failed) = cloud::run_due(&engine, &s, &base, &mut schedule.lock().unwrap());
+            for id in ok {
+                log(&format!("published {}", cloud::item_name(&id)));
+            }
+            for (id, e) in failed {
+                log(&format!("{}: {e}", cloud::item_name(&id)));
+            }
         }
         std::thread::sleep(Duration::from_secs(60));
     }

@@ -1,7 +1,7 @@
 //! JSON routes under `/api`, the event socket, and the embedded UI files.
 
 use crate::settings::Settings;
-use crate::{AppState, VERSION, cloud, export, fsbrowse, sample, xlsx};
+use crate::{AppState, VERSION, alerts, cloud, export, fsbrowse, sample, xlsx};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, Uri, header};
@@ -66,6 +66,11 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/workspace/calendar", put(put_calendar))
         .route("/workspace/params", put(put_params))
         .route("/workspace/params/values", put(put_param_values))
+        .route("/workspace/alerts", put(put_alerts))
+        .route("/alerts", get(alert_states))
+        .route("/alerts/address", put(put_alert_address))
+        .route("/alerts/test", post(alert_test))
+        .route("/alerts/check", post(alert_check))
         .route("/workspace/site", put(put_site))
         .route("/sample", post(open_sample))
         .route("/sources", post(add_source))
@@ -774,6 +779,94 @@ async fn put_params(State(s): S, Json(b): Json<Vec<tenun_core::params::Param>>) 
         })
         .await?,
     ))
+}
+
+/// Replaces the alerts (v5 build 12) and answers with the workspace.
+async fn put_alerts(
+    State(s): S,
+    Json(b): Json<Vec<tenun_core::workspace::AlertRule>>,
+) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            st.engine.set_alerts(b)?;
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+/// Each alert of the workspace with its state on this computer and whether this computer has its address.
+async fn alert_states(State(s): S) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, |st| {
+            let states = alerts::load_states(&alerts::state_path(&st.secrets));
+            let out: serde_json::Map<String, Value> = st
+                .engine
+                .alerts()
+                .iter()
+                .map(|a| {
+                    let mut v =
+                        serde_json::to_value(states.get(&a.id).cloned().unwrap_or_default())
+                            .unwrap_or_else(|_| json!({}));
+                    v["hasAddress"] = json!(alerts::address(&st.secrets, &a.id).is_some());
+                    (a.id.clone(), v)
+                })
+                .collect();
+            Ok(Value::Object(out))
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct AlertAddressBody {
+    id: String,
+    kind: tenun_core::workspace::ChannelKind,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    token: String,
+    #[serde(default)]
+    chat: String,
+}
+
+/// Where an alert sends to: kept in this computer's secrets, never in the workspace.
+async fn put_alert_address(State(s): S, Json(b): Json<AlertAddressBody>) -> R<Json<Value>> {
+    blocking(&s, move |st| {
+        alerts::set_address(
+            &st.secrets,
+            &b.id,
+            b.kind,
+            &alerts::Address {
+                url: b.url,
+                token: b.token,
+                chat: b.chat,
+            },
+        )
+    })
+    .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct AlertIdBody {
+    id: String,
+}
+
+/// "Send a test": a message to the alert's address now.
+async fn alert_test(State(s): S, Json(b): Json<AlertIdBody>) -> R<Json<Value>> {
+    let text = blocking(&s, move |st| alerts::test(&st.engine, &st.secrets, &b.id)).await?;
+    Ok(Json(json!({ "ok": true, "text": text })))
+}
+
+/// Checks the alerts now and answers with their states.
+async fn alert_check(State(s): S) -> R<Json<Value>> {
+    blocking(&s, |st| {
+        st.run_alerts();
+        Ok(())
+    })
+    .await?;
+    alert_states(State(s)).await
 }
 
 /// Sets the values of parameters by id (a control moved, a saved view opened) and answers with the workspace. Every

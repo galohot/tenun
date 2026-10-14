@@ -19,6 +19,7 @@ pub mod jsonrec;
 pub mod links;
 pub mod maptile;
 pub mod measures;
+pub mod numtext;
 pub mod params;
 pub mod paste;
 pub mod prep;

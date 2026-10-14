@@ -852,6 +852,8 @@ export interface Workspace {
   calendar?: Calendar;
   /** Parameters (v5 build 05): numbers and choices that measures read with PARAM("…"), with their values now. */
   params?: Param[];
+  /** Alerts (v5 build 12). Their addresses are in this computer's secrets, never here. */
+  alerts?: AlertRule[];
 }
 
 /**
@@ -859,6 +861,45 @@ export interface Workspace {
  * measure reads it with PARAM("name"); a Top N, a number tile's target and a chart's line can take it. A new one is
  * sent with an empty id.
  */
+/** Where an alert sends to (v5 build 12). */
+export type ChannelKind = 'slack' | 'teams' | 'discord' | 'telegram' | 'webhook';
+
+/** An alert (v5 build 12, V5-D15): a number tile's value against a threshold, told to a channel. */
+export interface AlertRule {
+  /** Random: each computer keeps the rule's state and its address under it. */
+  id: string;
+  dashboard: string;
+  tile: string;
+  /** Which value of the tile, from 0. Not set: the first. */
+  measure?: number;
+  op: 'below' | 'above' | 'outside';
+  value: number;
+  /** The top of the range for `outside`. */
+  to?: number;
+  /** `secret` is the name of the address's entry in this computer's secrets; the engine sets it. */
+  channel: { kind: ChannelKind; secret: string };
+  on: boolean;
+  /** Also tell when it is back to normal. */
+  back?: boolean;
+  /** What a message calls the value when the tile's title does not. */
+  name?: string;
+}
+
+/** The state of an alert on this computer. */
+export interface AlertState {
+  holding_since?: string;
+  told: boolean;
+  pending?: 'start' | 'back' | 'test';
+  tries: number;
+  error?: string;
+  problem?: string;
+  value?: number | null;
+  period?: string;
+  checked?: string;
+  /** This computer has the alert's address. */
+  hasAddress: boolean;
+}
+
 export interface Param {
   id: string;
   name: string;
@@ -1006,6 +1047,11 @@ export const api = {
   setLocale: (locale: 'id' | 'en') => call<Snapshot>('PUT', '/workspace/locale', { locale }),
   setCalendar: (calendar: Calendar) => call<Snapshot>('PUT', '/workspace/calendar', calendar),
   setParams: (list: Param[]) => call<Snapshot>('PUT', '/workspace/params', list),
+  setAlerts: (list: AlertRule[]) => call<Snapshot>('PUT', '/workspace/alerts', list),
+  alertStates: () => call<Record<string, AlertState>>('GET', '/alerts'),
+  alertAddress: (b: { id: string; kind: ChannelKind; url?: string; token?: string; chat?: string }) => call<{ ok: boolean }>('PUT', '/alerts/address', b),
+  alertTest: (id: string) => call<{ ok: boolean; text: string }>('POST', '/alerts/test', { id }),
+  alertCheck: () => call<Record<string, AlertState>>('POST', '/alerts/check', {}),
   setParamValues: (values: Record<string, Cell>) => call<Snapshot>('PUT', '/workspace/params/values', values),
   open: (path: string) => call<Snapshot>('POST', '/workspace/open', { path }),
   save: (path?: string) => call<Snapshot>('POST', '/workspace/save', { path: path ?? null }),

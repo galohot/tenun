@@ -44,6 +44,7 @@
     onflow,
     onaction,
     onreach,
+    onalert,
     drillState,
     ondrill,
     onremove,
@@ -89,6 +90,8 @@
     onaction?: (page: string | null) => void;
     /** Opens "Filters other tiles" (v5 build 02, Advanced). */
     onreach?: () => void;
+    /** Opens "Alert me…" (v5 build 12, Advanced): number tiles only. */
+    onalert?: () => void;
     /** The drill state the dashboard keeps (build 03), and how to change it. Not set: the tile keeps its own. */
     drillState?: DrillState;
     ondrill?: (s: DrillState) => void;
@@ -275,6 +278,7 @@
       ...(onreach && (canPick || tile.type === 'filter')
         ? [{ label: tile.reach === undefined ? 'Filters other tiles: all' : tile.reach === 'none' ? 'Filters other tiles: none' : `Filters other tiles: ${tile.reach.length}`, run: onreach }]
         : []),
+      ...(onalert ? [{ label: 'Alert me…', run: onalert }] : []),
       { label: 'Duplicate', run: onduplicate },
       { label: 'Copy to dashboard', sub: [...dashboards.map((d) => ({ label: d.title || 'Untitled', run: () => oncopy(d.id) })), { label: 'New dashboard', run: () => oncopy(null) }] },
       { label: 'Download as PNG', run: png },

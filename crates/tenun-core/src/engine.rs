@@ -153,6 +153,8 @@ pub fn tiles_using(dashboards: &[serde_json::Value], id: &str) -> Vec<TileRef> {
 pub const LIVE_CHECK_ROWS: u64 = 1_000_000;
 
 /// The card styles a workspace keeps at most (build 08).
+/// A workspace keeps at most this many alerts (v5 build 12).
+pub const MAX_ALERTS: usize = 50;
 pub const MAX_CARD_STYLES: usize = 200;
 
 pub struct Engine {
@@ -2455,6 +2457,53 @@ impl Engine {
             }
         }
         self.state.write().unwrap().ws.hierarchies = list;
+        self.persist();
+        Ok(())
+    }
+
+    /// The alerts of the workspace (v5 build 12).
+    pub fn alerts(&self) -> Vec<crate::workspace::AlertRule> {
+        self.state.read().unwrap().ws.alerts.clone()
+    }
+
+    /// Replaces the alerts (v5 build 12). Each needs an id of letters and digits that no other has, a number, and for
+    /// "outside" a top that is not below it; it points at its secret by its id. A refused list changes nothing.
+    pub fn set_alerts(&self, mut list: Vec<crate::workspace::AlertRule>) -> anyhow::Result<()> {
+        use crate::workspace::AlertOp;
+        if list.len() > MAX_ALERTS {
+            anyhow::bail!("A workspace can have up to {MAX_ALERTS} alerts.");
+        }
+        let mut ids = HashSet::new();
+        for a in &mut list {
+            if a.id.is_empty()
+                || a.id.len() > 40
+                || !a
+                    .id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            {
+                anyhow::bail!("An alert needs an id of letters and digits.");
+            }
+            if !ids.insert(a.id.clone()) {
+                anyhow::bail!("Two alerts have the id {}.", a.id);
+            }
+            if !a.value.is_finite() {
+                anyhow::bail!("An alert needs a number to compare with.");
+            }
+            if a.op == AlertOp::Outside {
+                let to = a.to.filter(|t| t.is_finite()).ok_or_else(|| {
+                    anyhow::anyhow!("\"Outside\" needs two numbers: the bottom and the top.")
+                })?;
+                if to < a.value {
+                    anyhow::bail!("The range goes from the lower number to the higher one.");
+                }
+            } else {
+                a.to = None;
+            }
+            a.name = a.name.trim().chars().take(120).collect();
+            a.channel.secret = format!("alert:{}", a.id);
+        }
+        self.state.write().unwrap().ws.alerts = list;
         self.persist();
         Ok(())
     }

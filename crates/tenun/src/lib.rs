@@ -1,6 +1,7 @@
 //! Tenun's local HTTP server: the JSON API, live events and the embedded UI.
 //! The desktop app and `tenun serve` both run this same server.
 
+pub mod alerts;
 mod api;
 pub mod cloud;
 mod export;
@@ -92,6 +93,8 @@ pub struct AppState {
     pub settings_path: PathBuf,
     pub cloud_base: String,
     pub schedule: Mutex<cloud::Schedule>,
+    /// One alert check at a time (v5 build 12): a reload and the minute could otherwise send one message twice.
+    pub alerts_lock: Mutex<()>,
 }
 
 pub struct Running {
@@ -102,6 +105,17 @@ pub struct Running {
 }
 
 impl AppState {
+    /// Checks the alerts now (v5 build 12) and tells the windows when one went or failed.
+    pub fn run_alerts(&self) {
+        let _one = self.alerts_lock.lock().unwrap();
+        let out = alerts::check(&self.engine, &self.secrets, chrono::Utc::now());
+        if !out.sent.is_empty() || !out.failed.is_empty() {
+            self.emit(serde_json::json!({
+                "type": "alerts", "sent": out.sent.len(), "failed": out.failed.len()
+            }));
+        }
+    }
+
     /// Points the watcher at the current file and folder sources.
     pub fn rewatch(&self) {
         let files: Vec<PathBuf> = self
@@ -157,6 +171,7 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
         settings_path: settings::Settings::default_path(),
         cloud_base: cloud::base_url(),
         schedule: Mutex::new(cloud::Schedule::default()),
+        alerts_lock: Mutex::new(()),
     });
 
     // A check of live database links finishes after the load that began it: tell the windows.
@@ -187,6 +202,7 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
             state.emit(serde_json::json!({
                 "type": "data-changed", "sources": changed, "tables": tables
             }));
+            state.run_alerts();
         });
     })?;
     *state.watcher.lock().unwrap() = Some(watcher);
@@ -221,6 +237,8 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
                         "type": "data-changed", "sources": urls, "tables": tables
                     }));
                 }
+                // Alerts read the data as it is now (v5 build 12).
+                st.run_alerts();
                 let mut schedule = st.schedule.lock().unwrap();
                 let (ok, failed) =
                     cloud::run_due(&st.engine, &st.secrets, &st.cloud_base, &mut schedule);

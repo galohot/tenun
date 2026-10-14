@@ -110,6 +110,71 @@ journalctl --user -u tenun-agent -f
 launchctl load ~/Library/LaunchAgents/cloud.tenun.agent.plist
 ```
 
+## Alerts
+
+An alert watches one number tile. When its value goes below, above or outside the numbers you set,
+Tenun sends one message. It can send one more when the value is back to normal. Set one in the app:
+turn on **Advanced features** in Settings, open the tile's **⋯** menu, and choose **Alert me…**.
+
+Tenun reads the value as the page opens: its saved filters, its filter tiles and its default view.
+It never reads someone's clicks. The app checks after each reload of the data and once a minute,
+while it is open. `tenun agent` checks on each cycle, with or without publishing. To check once from
+a scheduled task, run:
+
+```sh
+tenun alerts check path/to/sales.tenun
+```
+
+A message that cannot be sent is tried again at the next check, three times in all. Then the alert
+shows the error in Settings › Alerts, and Tenun stops trying until the value starts to hold again.
+
+The address of an alert (a web address, or a Telegram bot token) is kept in the private secrets file
+of the computer where you set it. It is not in the `.tenun` file. So set the alert on the computer
+that checks it. On another computer, the alert says that it has no address there.
+
+**What a message holds:** one sentence with the tile's name, its value, the period and the number it
+was compared with, the dashboard's name, and its tenun.cloud link when it is published. Nothing else.
+For example: `Revenue (Oct 1–14, 2026, so far) is 12.1M, below 15M. — Coffee overview`.
+
+### Slack
+
+In Slack, add the **Incoming Webhooks** app to the channel. Copy its webhook URL
+(`https://hooks.slack.com/services/…`) and paste it in **Send to › Slack**.
+
+### Microsoft Teams
+
+In the Teams channel, open **Workflows** and choose the template **Post to a channel when a webhook
+request is received**. Copy the URL it gives you and paste it in **Send to › Microsoft Teams**.
+Tenun sends the message as an Adaptive Card, which is what that template posts.
+
+### Discord
+
+In Discord, open **Server Settings › Integrations › Webhooks**, make a webhook for the channel, and
+copy its URL (`https://discord.com/api/webhooks/…`).
+
+### Telegram
+
+1. In Telegram, talk to **@BotFather**, send `/newbot`, and copy the token it gives you
+   (`123456789:AA…`).
+2. Add the bot to the group or channel.
+3. Type the chat id: a number such as `-1001234567890`, or `@channelname` for a public channel.
+
+### Another web address
+
+Tenun sends a `POST` with a JSON body:
+
+```json
+{
+  "rule": "a3f9…", "event": "start", "name": "Revenue", "value": 12100000,
+  "op": "below", "threshold": 15000000, "to": null, "period": "Oct 1–14, 2026, so far",
+  "dashboard": "Coffee overview", "link": "https://tenun.cloud/d/…", "at": "2026-10-14T09:10:00Z",
+  "text": "Revenue (Oct 1–14, 2026, so far) is 12.1M, below 15M. — Coffee overview"
+}
+```
+
+`event` is `start` when the alert starts to hold, `back` when it is back to normal, and `test` for
+**Send a test**. Any answer from 200 to 299 counts as sent.
+
 ## When something goes wrong
 
 - A failed publish is tried again after 5 minutes, then 10, 20 and so on, up to 6 hours.

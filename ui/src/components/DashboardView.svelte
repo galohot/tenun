@@ -6,6 +6,7 @@
   import { filterText } from '../lib/filterText';
   import { canExclude, colFilter, everyPageFilters, everySource, hasPeriod, markFilter, newPinId, PERIODS, pinFilter, reachOf, sameFilter, tileFilters, withGrain } from '../lib/filters';
   import ReachSheet from './dash/ReachSheet.svelte';
+  import AlertSheet from './dash/AlertSheet.svelte';
   import { COLS, compact, defaultSize, minHeight, newDashboard, newId, place } from '../lib/tiles';
   import { phoneLayout, readingOrder } from '../lib/layout';
   import { downloadDashboardPdf, downloadDashboardPng, type DashboardPicture } from '../lib/output';
@@ -107,6 +108,8 @@
   }
   /** The tile whose "Filters other tiles" sheet is open (v5 build 02). */
   let reachFor = $state<string | null>(null);
+  /** The number tile whose alert sheet is open (v5 build 12). */
+  let alertFor = $state<string | null>(null);
 
   // The tile as it is drawn: with the dashboard's grain. The same object is returned while nothing
   // changed, so a tile only asks again when its question is different.
@@ -1192,6 +1195,10 @@
       onsave={(reach) => change({ ...rt, reach })}
       onclose={() => (reachFor = null)} />
   {/if}
+  {#if alertFor && dash.tiles.find((x) => x.id === alertFor)}
+    {@const at = dash.tiles.find((x) => x.id === alertFor)!}
+    <AlertSheet {dash} tile={at} title={tileTitle(eff(at), app.tables)} onclose={() => (alertFor = null)} />
+  {/if}
   {#if rowsReq}
     <RowsSheet title={rowsReq.title} data={rowsReq.data} error={rowsReq.error} onclose={() => (rowsSeq++, (rowsReq = null))} />
   {/if}
@@ -1237,6 +1244,7 @@
           oncopy={(to) => copyTo(t.id, to)}
           onaction={(page) => setAction(t.id, page)}
           onreach={advancedOn() ? () => (reachFor = t.id) : undefined}
+          onalert={advancedOn() && t.type === 'kpi' ? () => (alertFor = t.id) : undefined}
           drillState={drills[t.id] ?? TOP}
           ondrill={(st) => (drills = { ...drills, [t.id]: st })}
       onclip={() => {

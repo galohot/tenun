@@ -1,5 +1,9 @@
 <script lang="ts">
   // Settings of this computer. They are not saved in the workspace file (V3-D1).
+  import { api, type AlertRule, type AlertState } from '../lib/api';
+  import { channelOf, conditionText, stateText } from '../lib/alerts';
+  import { compact, timeShort, tileTitle } from '../lib/format';
+  import { formatOf } from '../lib/measures';
   import { app } from '../lib/state.svelte';
   import { SHOW_ADVANCED_SWITCH } from '../lib/tiers';
   import Modal from './Modal.svelte';
@@ -10,6 +14,27 @@
   let places = $state(false);
   /** The workspace's calendar (v5 build 04). */
   const cal = $derived(app.snap?.workspace.calendar ?? {});
+  /** Alerts (v5 build 12): the rules are in the workspace; their state is this computer's. */
+  const rules = $derived(app.snap?.workspace.alerts ?? []);
+  let states = $state<Record<string, AlertState>>({});
+  $effect(() => {
+    if (rules.length) api.alertStates().then((s) => (states = s)).catch(() => {});
+  });
+  function placeOf(r: AlertRule) {
+    const d = app.dashboards.find((x) => x.id === r.dashboard);
+    const t = d?.tiles.find((x) => x.id === r.tile);
+    const fmt = (n: number) => compact(n, t ? formatOf(t, r.measure ?? 0) : null);
+    const name = t && (r.measure ?? 0) === 0 && t.title ? t.title : r.name || (t ? tileTitle(t, app.tables) : 'A removed tile');
+    return { page: d?.title || 'Untitled', name, fmt };
+  }
+  async function turn(r: AlertRule, on: boolean) {
+    try {
+      app.snap = await api.setAlerts(rules.map((x) => (x.id === r.id ? { ...x, on } : x)));
+      states = await api.alertCheck();
+    } catch (e) {
+      app.error(e);
+    }
+  }
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 </script>
 
@@ -66,6 +91,28 @@
         </div>
       </div>
     {/if}
+    {#if rules.length}
+      <div class="row stack">
+        <span class="text">
+          <span class="name">Alerts</span>
+          <span class="muted hint">Checked while Tenun is open on this computer, after each reload and once a minute. Edit one from its tile's menu.</span>
+        </span>
+        <ul class="alerts">
+          {#each rules as r (r.id)}
+            {@const p = placeOf(r)}
+            {@const line = stateText(r, states[r.id], p.fmt, (iso) => timeShort(iso))}
+            <li>
+              <span class="text">
+                <span class="name">{p.name} {conditionText(r, p.fmt)} → {channelOf(r.channel.kind).name}</span>
+                <span class="muted hint">{p.page}</span>
+                <span class="hint state {line.tone}">{line.text}</span>
+              </span>
+              <input type="checkbox" role="switch" class="switch" aria-label="On" checked={r.on} onchange={(e) => turn(r, e.currentTarget.checked)} />
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
     <div class="row">
       <span class="text">
         <span class="name">Place names for maps</span>
@@ -74,11 +121,15 @@
       <button type="button" class="btn" onclick={() => (places = true)}>Show</button>
     </div>
   </div>
-  <p class="muted note">The number and date format, and the year and week, are saved in your workspace file. The other settings belong to this computer.</p>
+  <p class="muted note">The number and date format, the year and week, and the alerts are saved in your workspace file; an alert's address is not. The other settings belong to this computer.</p>
 </Modal>
 {/if}
 
 <style>
+  .alerts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; width: 100%; align-self: stretch; }
+  .alerts li { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+  .state.err { color: var(--danger); }
+  .state.warn { color: var(--warn, var(--text)); }
   .rows { display: flex; flex-direction: column; gap: 14px; }
   .row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
