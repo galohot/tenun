@@ -70,7 +70,18 @@ fn find(engine: &Engine, want: &str) -> Option<String> {
     })
 }
 
-pub fn publish_now(file: &Path, dashboard: Option<&str>) -> anyhow::Result<()> {
+pub fn publish_now(
+    file: &Path,
+    dashboard: Option<&str>,
+    password_env: Option<&str>,
+) -> anyhow::Result<()> {
+    // Read before anything is opened: a missing variable stops here, with nothing changed.
+    let password = password_env
+        .map(|name| {
+            std::env::var(name)
+                .map_err(|_| anyhow::anyhow!("the environment variable {name} is not set"))
+        })
+        .transpose()?;
     let engine = open(file)?;
     let base = cloud::base_url();
     let ids: Vec<String> = match dashboard {
@@ -91,6 +102,11 @@ pub fn publish_now(file: &Path, dashboard: Option<&str>) -> anyhow::Result<()> {
         anyhow::bail!(
             "no dashboard is set to publish; publish one from the app first, or name it with --dashboard"
         );
+    }
+    if let Some(pw) = &password {
+        for id in &ids {
+            cloud::set_item_password(&engine, &secrets(), id, pw)?;
+        }
     }
     let mut failed = false;
     for id in ids {

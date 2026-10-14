@@ -126,7 +126,7 @@ impl AppState {
     }
 }
 
-fn random_token() -> String {
+pub(crate) fn random_token() -> String {
     let mut b = [0u8; 16];
     getrandom::fill(&mut b).expect("system randomness");
     b.iter().map(|x| format!("{x:02x}")).collect()

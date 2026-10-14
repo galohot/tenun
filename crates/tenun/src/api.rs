@@ -105,6 +105,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/cloud/publish", post(cloud_publish))
         .route("/cloud/unpublish", post(cloud_unpublish))
         .route("/cloud/publish-site", post(cloud_publish_site))
+        .route("/cloud/password", post(cloud_password))
         .route("/cloud/unpublish-site", post(cloud_unpublish_site))
         .route("/snapshot", post(snapshot))
         .route("/export-html", post(export_html))
@@ -1160,6 +1161,32 @@ async fn cloud_unpublish(State(s): S, Json(b): Json<DashBody>) -> R<Json<Value>>
     Ok(Json(
         blocking(&s, move |st| {
             cloud::unpublish(&st.engine, &st.secrets, &st.cloud_base, &b.dashboard)?;
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct PasswordBody {
+    #[serde(default)]
+    dashboard: String,
+    #[serde(default)]
+    site: bool,
+    password: String,
+}
+
+/// A new password for a dashboard or the site (v5 build 11): kept in this computer's secrets, sent with the next
+/// publish. The `.tenun` file never holds it.
+async fn cloud_password(State(s): S, Json(b): Json<PasswordBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let id = if b.site {
+                cloud::SITE_ID.to_string()
+            } else {
+                b.dashboard
+            };
+            cloud::set_item_password(&st.engine, &st.secrets, &id, &b.password)?;
             Ok(serde_json::to_value(st.engine.snapshot())?)
         })
         .await?,

@@ -5,6 +5,12 @@ import type { HonoEnv } from './env';
 import { LIMITS, type Kind } from './env';
 import type { DashRow } from './pages';
 import { now, rid, sha256, userCode, validEmail } from './util';
+import { cookie } from './akun/token';
+import { MAX_PASSWORD, MIN_PASSWORD, cookieName, cookieOpens, hashPassword } from './password';
+
+/** The columns of an item as its owner and the pages read them. A password is access 'password' (v5 build 11). */
+export const ROW_COLUMNS =
+  "id, title, CASE WHEN pw_hash IS NOT NULL AND access = 'link' THEN 'password' ELSE access END AS access, source, every_minutes, version, generated_at, bytes, kind, pages, embed";
 
 export const api = new Hono<HonoEnv>();
 
@@ -72,9 +78,7 @@ api.get('/me', async (c) => {
   const who = await bearer(c);
   if (!who) return fail(c, 401, 'unauthorized');
   const acc = await c.env.DB.prepare('SELECT email FROM accounts WHERE id = ?1').bind(who.account).first<{ email: string }>();
-  const { results } = await c.env.DB.prepare(
-    'SELECT id, title, access, source, every_minutes, version, generated_at, bytes, kind, pages FROM dashboards WHERE account_id = ?1 ORDER BY created_at',
-  )
+  const { results } = await c.env.DB.prepare(`SELECT ${ROW_COLUMNS} FROM dashboards WHERE account_id = ?1 ORDER BY created_at`)
     .bind(who.account)
     .all<DashRow>();
   const origin = new URL(c.req.url).origin;
@@ -128,13 +132,49 @@ async function patchItem(c: Context<HonoEnv>, kind: Kind) {
   if (!who) return fail(c, 401, 'unauthorized');
   const id = c.req.param('id') ?? '';
   if (!(await owned(c, id, who.account, kind))) return fail(c, 404, 'not_found');
-  const b = await c.req.json<{ title?: string; access?: string; invites?: string[] }>().catch(() => null);
+  const b = await c.req.json<{ title?: string; access?: string; invites?: string[]; password?: string; embed?: boolean }>().catch(() => null);
   if (!b) return fail(c, 400, 'invalid_json');
+  const cur = await c.env.DB.prepare('SELECT access, pw_hash, embed FROM dashboards WHERE id = ?1')
+    .bind(id)
+    .first<{ access: string; pw_hash: string | null; embed: number }>();
   const stmts: D1PreparedStatement[] = [];
   if (b.title !== undefined) stmts.push(c.env.DB.prepare('UPDATE dashboards SET title = ?1 WHERE id = ?2').bind(String(b.title).slice(0, 120), id));
-  if (b.access !== undefined) {
-    if (b.access !== 'link' && b.access !== 'invited') return fail(c, 400, 'access must be link or invited');
-    stmts.push(c.env.DB.prepare('UPDATE dashboards SET access = ?1 WHERE id = ?2').bind(b.access, id));
+  if (b.access !== undefined && b.access !== 'link' && b.access !== 'invited' && b.access !== 'password') {
+    return fail(c, 400, 'access must be link, password or invited');
+  }
+  // Embedding works for a link or a password; inside another site, a Google sign-in fails (V5-D14).
+  const access = b.access ?? (cur?.pw_hash && cur.access === 'link' ? 'password' : (cur?.access ?? 'link'));
+  const embed = b.embed ?? !!cur?.embed;
+  if (embed && access === 'invited') {
+    return fail(c, 400, 'embed_invited', { message: 'A dashboard for invited people cannot be embedded: their Google sign-in does not work inside another site.' });
+  }
+  if (b.embed !== undefined) stmts.push(c.env.DB.prepare('UPDATE dashboards SET embed = ?1 WHERE id = ?2').bind(b.embed ? 1 : 0, id));
+  if (b.access === 'password') {
+    // A new password replaces the old one, and the cookies of the old one stop opening it. Without one, the
+    // password set before stays; there must be one.
+    if (b.password !== undefined) {
+      const pw = String(b.password);
+      // Counted in characters, as the app counts them (an emoji is one).
+      const n = [...pw].length;
+      if (n < MIN_PASSWORD || n > MAX_PASSWORD) {
+        return fail(c, 400, 'password', { message: `A password has ${MIN_PASSWORD} to ${MAX_PASSWORD} characters.` });
+      }
+      const h = await hashPassword(pw);
+      stmts.push(
+        c.env.DB.prepare("UPDATE dashboards SET access = 'link', pw_hash = ?1, pw_salt = ?2, pw_iter = ?3, pw_version = pw_version + 1 WHERE id = ?4").bind(
+          h.hash,
+          h.salt,
+          h.iter,
+          id,
+        ),
+      );
+    } else if (!cur?.pw_hash) {
+      return fail(c, 400, 'password', { message: 'Set a password first.' });
+    } else {
+      stmts.push(c.env.DB.prepare("UPDATE dashboards SET access = 'link' WHERE id = ?1").bind(id));
+    }
+  } else if (b.access !== undefined) {
+    stmts.push(c.env.DB.prepare('UPDATE dashboards SET access = ?1, pw_hash = NULL, pw_salt = NULL, pw_iter = NULL WHERE id = ?2').bind(b.access, id));
   }
   if (b.invites !== undefined) {
     const emails = [...new Set(b.invites.map((e) => String(e).trim().toLowerCase()))];
@@ -237,20 +277,27 @@ async function putSnapshot(c: Context<HonoEnv>, kind: Kind) {
 
 // ---- the hosted dashboard's data -------------------------------------------
 
-/** Can the current visitor see this dashboard? */
-export async function canView(c: Context<HonoEnv>, id: string, kind: Kind = 'dashboard'): Promise<{ row: DashRow | null; allowed: boolean; needsSignIn: boolean }> {
-  const row = await c.env.DB.prepare(
-    'SELECT id, account_id, title, access, source, every_minutes, version, generated_at, bytes, kind, pages FROM dashboards WHERE id = ?1 AND kind = ?2',
-  )
+/** Can the current visitor see this dashboard? A password one opens with the cookie a right password set (v5 build 11). */
+export async function canView(
+  c: Context<HonoEnv>,
+  id: string,
+  kind: Kind = 'dashboard',
+): Promise<{ row: DashRow | null; allowed: boolean; needsSignIn: boolean; needsPassword: boolean }> {
+  const row = await c.env.DB.prepare(`SELECT ${ROW_COLUMNS}, account_id, pw_version FROM dashboards WHERE id = ?1 AND kind = ?2`)
     .bind(id, kind)
-    .first<DashRow & { account_id: string }>();
-  if (!row) return { row: null, allowed: false, needsSignIn: false };
-  if (row.access === 'link') return { row, allowed: true, needsSignIn: false };
+    .first<DashRow & { account_id: string; pw_version: number }>();
+  if (!row) return { row: null, allowed: false, needsSignIn: false, needsPassword: false };
+  if (row.access === 'link') return { row, allowed: true, needsSignIn: false, needsPassword: false };
   const me = c.get('account');
-  if (!me) return { row, allowed: false, needsSignIn: true };
-  if (me.id === row.account_id) return { row, allowed: true, needsSignIn: false };
+  if (row.access === 'password') {
+    // Its owner needs no password; anyone else needs the cookie of the current password.
+    const open = (me && me.id === row.account_id) || (await cookieOpens(c.env, row.id, row.pw_version, cookie(c.req.raw, cookieName(row.id)) ?? undefined));
+    return { row, allowed: !!open, needsSignIn: false, needsPassword: !open };
+  }
+  if (!me) return { row, allowed: false, needsSignIn: true, needsPassword: false };
+  if (me.id === row.account_id) return { row, allowed: true, needsSignIn: false, needsPassword: false };
   const inv = await c.env.DB.prepare('SELECT 1 AS ok FROM invites WHERE dashboard_id = ?1 AND email = ?2').bind(id, me.email.toLowerCase()).first();
-  return { row, allowed: !!inv, needsSignIn: false };
+  return { row, allowed: !!inv, needsSignIn: false, needsPassword: false };
 }
 
 for (const [seg, kind] of [['d', 'dashboard'], ['s', 'site']] as const) api.get(`/${seg}/:id/snapshot`, (c) => snapshotOf(c, kind));
@@ -264,6 +311,7 @@ async function snapshotOf(c: Context<HonoEnv>, kind: Kind) {
     headers: {
       'content-type': 'application/json',
       'content-encoding': 'gzip',
+      // Only an open link may sit in a shared cache; a password or an invitation is per reader.
       'cache-control': row.access === 'link' ? 'public, max-age=300' : 'private, max-age=60',
       'x-content-type-options': 'nosniff',
     },

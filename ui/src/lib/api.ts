@@ -749,8 +749,15 @@ export interface PublishSettings {
   url?: string;
   last?: string;
   error?: string;
-  access: 'link' | 'invited';
+  /** `password`: anyone with the link and the password (v5 build 11). */
+  access: 'link' | 'invited' | 'password';
   invites: string[];
+  /** Other sites may show it in a frame (v5 build 11). Never for `invited`. */
+  embed?: boolean;
+  /** The entry of the password in this computer's secrets: set once a password is (never the password). */
+  pw_key?: string;
+  /** tenun.cloud holds that password. */
+  pw_sent?: boolean;
   every: 'manual' | 'change' | 'hour' | 'day';
   /** Overrides this computer's name on the hosted page. */
   source: string;
@@ -1137,6 +1144,9 @@ export const api = {
   /** The whole site, every page in one upload (build 14). */
   publishSite: () => call<{ ok: boolean; url: string; version: number; snapshot: Snapshot }>('POST', '/cloud/publish-site', {}),
   unpublishSite: () => call<Snapshot>('POST', '/cloud/unpublish-site', {}),
+  /** A new password for a dashboard or the site (v5 build 11); it goes to tenun.cloud with the next publish. */
+  cloudPassword: (target: { dashboard: string } | { site: true }, password: string) =>
+    call<Snapshot>('POST', '/cloud/password', { ...target, password }),
   /** Writes the HTML file (desktop app) when `path` is given. */
   exportTo: (dashboard: string, filters: unknown[], path: string) =>
     call<{ ok: boolean }>('POST', '/export-html', { dashboard, filters, path }),

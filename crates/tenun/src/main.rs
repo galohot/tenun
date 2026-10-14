@@ -40,6 +40,10 @@ enum Command {
         /// Dashboard id or title (default: every dashboard set to publish).
         #[arg(long)]
         dashboard: Option<String>,
+        /// Give what is published this password ("Anyone with the password"), read from the environment variable
+        /// of this name. A password typed on the command line can be seen by other users of the computer.
+        #[arg(long, value_name = "VARIABLE")]
+        password_from_env: Option<String>,
     },
     /// Keep published dashboards updated, without the app (for an always-on computer).
     Agent {
@@ -94,8 +98,12 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Command::Login) => return agent::login(),
         Some(Command::Logout) => return agent::logout(),
-        Some(Command::Publish { file, dashboard }) => {
-            return agent::publish_now(&file, dashboard.as_deref());
+        Some(Command::Publish {
+            file,
+            dashboard,
+            password_from_env,
+        }) => {
+            return agent::publish_now(&file, dashboard.as_deref(), password_from_env.as_deref());
         }
         Some(Command::Agent { file }) => return agent::run(&file),
         _ => {}

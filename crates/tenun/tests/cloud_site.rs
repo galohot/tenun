@@ -151,7 +151,7 @@ fn a_site_is_published_as_one_site_and_keeps_its_link() {
     let patch: Value = serde_json::from_slice(&reqs[1].body).unwrap();
     assert_eq!(
         patch,
-        json!({ "title": "Shops", "access": "invited", "invites": ["a@example.com"] })
+        json!({ "title": "Shops", "access": "invited", "invites": ["a@example.com"], "embed": false })
     );
     let put = &reqs[2];
     assert_eq!(put.header("x-tenun-pages"), Some("2"));

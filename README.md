@@ -229,7 +229,15 @@ Choose **Publish** on a dashboard to give it a private link on [tenun.cloud](htt
 builds the dashboard on your computer and sends only the results: not your files, and never your
 database passwords. The cloud never connects to your data.
 
-- **Who can see it:** anyone with the link, or only people you invite (they sign in with Google).
+- **Who can see it:** anyone with the link, anyone with the link and a password, or only people you
+  invite (they sign in with Google).
+- **A password:** Tenun keeps it on your computer, not in the `.tenun` file, and sends it once.
+  tenun.cloud keeps only a hash of it (a form it cannot turn back into the password). A right
+  password opens that dashboard in that browser for 7 days. Five wrong passwords in a minute from one
+  address must wait a minute. A new password closes it again for everyone.
+- **Embed it (Advanced):** "Allow embedding in other sites" gives the code for an `<iframe>` (a frame
+  in another web page). A dashboard for invited people cannot be embedded, because their Google
+  sign-in does not work inside another site. Every other page of tenun.cloud refuses to be framed.
 - **Keep it updated:** when the data changes, hourly, daily, or by hand. Updates run while the app is
   open; [`tenun agent`](docs/agent.md) keeps them running on a computer that stays on.
 - **Always honest about age:** every hosted dashboard says when it was updated and from which
@@ -244,6 +252,7 @@ database passwords. The cloud never connects to your data.
 ```sh
 tenun login                    # connect this computer (approve a code in the browser)
 tenun publish sales.tenun      # publish now
+TENUN_PASSWORD='…' tenun publish sales.tenun --password-from-env TENUN_PASSWORD   # with a password
 tenun agent sales.tenun        # keep publishing on schedule
 ```
 

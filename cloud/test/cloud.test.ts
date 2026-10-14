@@ -19,7 +19,7 @@ async function boot(vars: Record<string, string>) {
   });
   const db = await m.getD1Database('DB');
   // Every migration, in order.
-  const sql = ['0001_init.sql', '0002_sites.sql']
+  const sql = ['0001_init.sql', '0002_sites.sql', '0003_v5.sql']
     .map((f) => readFileSync(`migrations/${f}`, 'utf8'))
     .join('\n')
     .split('\n')
@@ -245,8 +245,151 @@ describe('tenun.cloud', () => {
     expect((await req(`/s/${id}`)).status).toBe(404);
   });
 
+  it('opens a password dashboard only with its right password, for that dashboard only, until the password changes', async () => {
+    const owner = await connect('pw@example.com');
+    const make = async (title: string) => {
+      const { id } = (await (await req('/api/v1/dashboards', { method: 'POST', headers: auth(owner), body: JSON.stringify({ title }) })).json()) as { id: string };
+      expect((await publish(owner, id, 1)).status).toBe(200);
+      return id;
+    };
+    const a = await make('Secret plan');
+    const b = await make('Other plan');
+    const patch = (id: string, body: Record<string, unknown>) =>
+      req(`/api/v1/dashboards/${id}`, { method: 'PATCH', headers: auth(owner), body: JSON.stringify(body) });
+    // A password item needs a password of 4 to 200 characters.
+    expect((await patch(a, { access: 'password' })).status).toBe(400);
+    expect((await patch(a, { access: 'password', password: 'abc' })).status).toBe(400);
+    expect((await patch(a, { access: 'password', password: 'x'.repeat(201) })).status).toBe(400);
+    expect((await patch(a, { access: 'password', password: 'open sesame' })).status).toBe(200);
+    expect((await patch(b, { access: 'password', password: 'open sesame' })).status).toBe(200);
+    // The owner sees it as a password item; no part of the password leaves the server.
+    const me = await (await req('/api/v1/me', { headers: auth(owner) })).text();
+    expect(JSON.parse(me).dashboards[0]).toMatchObject({ id: a, access: 'password', embed: 0 });
+    expect(me).not.toContain('pw_');
+    // Without the password: a page with no data and no title, and no snapshot.
+    const locked = await req(`/d/${a}`);
+    expect(locked.status).toBe(401);
+    expect(locked.headers.get('cache-control')).toBe('private, no-store');
+    const html = await locked.text();
+    expect(html).toContain('This dashboard has a password');
+    expect(html).not.toContain('Secret plan');
+    expect(html).not.toContain('snapshot');
+    expect((await req(`/api/v1/d/${a}/snapshot`)).status).toBe(404);
+    const unlock = (id: string, password: string, headers: Record<string, string> = { origin: ORIGIN }) =>
+      req(`/d/${id}/unlock`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', 'cf-connecting-ip': '198.51.100.1', ...headers },
+        body: `password=${encodeURIComponent(password)}`,
+      });
+    // Only from its own page; a wrong one says so.
+    expect((await unlock(a, 'open sesame', {})).status).toBe(403);
+    const wrong = await unlock(a, 'open says me');
+    expect(wrong.status).toBe(401);
+    expect(await wrong.text()).toContain('That password is not right.');
+    expect(wrong.headers.get('set-cookie')).toBeNull();
+    // The right one: a cookie for this dashboard alone, then back to it.
+    const right = await unlock(a, 'open sesame');
+    expect(right.status).toBe(303);
+    expect(right.headers.get('location')).toBe(`/d/${a}`);
+    const set = right.headers.get('set-cookie') ?? '';
+    expect(set).toMatch(new RegExp(`^tn_pw_${a}=1\\.[A-Za-z0-9_-]+; Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Lax$`));
+    const cookie = set.split(';')[0];
+    expect((await req(`/d/${a}`, { cookie })).status).toBe(200);
+    const snap = await req(`/api/v1/d/${a}/snapshot`, { cookie });
+    expect(snap.status).toBe(200);
+    // Never in a shared cache.
+    expect(snap.headers.get('cache-control')).toBe('private, max-age=60');
+    // The same password on another dashboard: its cookie does not open that one, under either name.
+    expect((await req(`/d/${b}`, { cookie })).status).toBe(401);
+    expect((await req(`/d/${b}`, { cookie: cookie.replace(a, b) })).status).toBe(401);
+    // Its owner needs no password.
+    expect((await req(`/d/${a}`, { cookie: await signIn('pw@example.com') })).status).toBe(200);
+    // Saying "password" again keeps it; a new password closes the old cookies.
+    expect((await patch(a, { access: 'password', title: 'Secret plan' })).status).toBe(200);
+    expect((await req(`/d/${a}`, { cookie })).status).toBe(200);
+    expect((await patch(a, { access: 'password', password: 'new words' })).status).toBe(200);
+    expect((await req(`/d/${a}`, { cookie })).status).toBe(401);
+    // An old cookie with its number changed to the new password's does not open it either: the number is signed.
+    expect((await req(`/d/${a}`, { cookie: cookie.replace('=1.', '=2.') })).status).toBe(401);
+    expect((await unlock(a, 'open sesame')).status).toBe(401);
+    expect((await unlock(a, 'new words')).headers.get('set-cookie')).toContain(`tn_pw_${a}=2.`);
+    // Back to "anyone with the link": open, and the password is gone for good.
+    expect((await patch(a, { access: 'link' })).status).toBe(200);
+    expect((await req(`/d/${a}`)).status).toBe(200);
+    expect((await unlock(a, 'new words')).status).toBe(303);
+    expect((await patch(a, { access: 'password' })).status).toBe(400);
+    // A site has the same lock, at its own link.
+    const { id: s } = (await (await req('/api/v1/sites', { method: 'POST', headers: auth(owner), body: '{}' })).json()) as { id: string };
+    expect((await req(`/api/v1/sites/${s}`, { method: 'PATCH', headers: auth(owner), body: JSON.stringify({ access: 'password', password: 'site words' }) })).status).toBe(200);
+    expect(await (await req(`/s/${s}`)).text()).toContain('This site has a password');
+    const site = await req(`/s/${s}/unlock`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded', 'cf-connecting-ip': '198.51.100.2' },
+      body: 'password=site+words',
+    });
+    expect(site.headers.get('location')).toBe(`/s/${s}`);
+  });
+
+  it('stops an address after five wrong passwords in a minute, and keeps no address', async () => {
+    const owner = await connect('tries@example.com');
+    const { id } = (await (await req('/api/v1/dashboards', { method: 'POST', headers: auth(owner), body: '{}' })).json()) as { id: string };
+    await publish(owner, id, 1);
+    await req(`/api/v1/dashboards/${id}`, { method: 'PATCH', headers: auth(owner), body: JSON.stringify({ access: 'password', password: 'right one' }) });
+    const unlock = (password: string, ip: string) =>
+      req(`/d/${id}/unlock`, {
+        method: 'POST',
+        headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded', 'cf-connecting-ip': ip },
+        body: `password=${encodeURIComponent(password)}`,
+      });
+    for (let i = 0; i < 5; i++) expect((await unlock(`wrong ${i}`, '203.0.113.9')).status).toBe(401);
+    // The sixth waits, even when it is right.
+    const wait = await unlock('right one', '203.0.113.9');
+    expect(wait.status).toBe(429);
+    expect(await wait.text()).toContain('Wait a minute');
+    expect((await unlock('right one', '203.0.113.10')).status).toBe(303);
+    const db = await mf.getD1Database('DB');
+    const { results } = await db.prepare('SELECT who FROM unlock_tries').all<{ who: string }>();
+    expect(results.length).toBeGreaterThanOrEqual(5);
+    expect(JSON.stringify(results)).not.toContain('203.0.113');
+  });
+
+  it('lets other sites frame an item only when its owner allows it, and never one for invited people', async () => {
+    const owner = await connect('embed@example.com');
+    const { id } = (await (await req('/api/v1/dashboards', { method: 'POST', headers: auth(owner), body: '{}' })).json()) as { id: string };
+    await publish(owner, id, 1);
+    const patch = (body: Record<string, unknown>) => req(`/api/v1/dashboards/${id}`, { method: 'PATCH', headers: auth(owner), body: JSON.stringify(body) });
+    const frame = async (path: string, cookie?: string) => (await req(path, { cookie })).headers.get('content-security-policy') ?? '';
+    expect(await frame(`/d/${id}`)).toContain("frame-ancestors 'none'");
+    expect((await patch({ embed: true })).status).toBe(200);
+    expect(await frame(`/d/${id}`)).toContain('frame-ancestors *');
+    // Only that item: every other page still refuses a frame.
+    expect(await frame('/api/v1/health')).toContain("frame-ancestors 'none'");
+    expect(await frame('/account')).toContain("frame-ancestors 'none'");
+    // Invited people sign in with Google, which does not work inside another site.
+    const refused = await patch({ access: 'invited', invites: ['a@example.com'] });
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toBe('embed_invited');
+    expect((await patch({ access: 'invited', invites: ['a@example.com'], embed: false })).status).toBe(200);
+    expect((await patch({ embed: true })).status).toBe(400);
+    // Even when the database says embed, an item for invited people is never framed.
+    const db = await mf.getD1Database('DB');
+    await db.prepare('UPDATE dashboards SET embed = 1 WHERE id = ?1').bind(id).run();
+    expect(await frame(`/d/${id}`)).toContain("frame-ancestors 'none'");
+    // A password item inside another site: its cookie is sent there, kept to that site.
+    expect((await patch({ access: 'password', password: 'framed', embed: true })).status).toBe(200);
+    expect(await frame(`/d/${id}`)).toContain('frame-ancestors *');
+    const right = await req(`/d/${id}/unlock`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded', 'cf-connecting-ip': '198.51.100.3' },
+      body: 'password=framed',
+    });
+    expect(right.headers.get('set-cookie')).toMatch(/; HttpOnly; Secure; SameSite=None; Partitioned$/);
+    const account = await (await req('/account', { cookie: await signIn('embed@example.com') })).text();
+    expect(account).toContain('Anyone with the password · can be embedded');
+  });
+
   it('applies every migration file the folder holds', () => {
-    expect(readdirSync('migrations').sort()).toEqual(['0001_init.sql', '0002_sites.sql']);
+    expect(readdirSync('migrations').sort()).toEqual(['0001_init.sql', '0002_sites.sql', '0003_v5.sql']);
   });
 
   it('refuses page forms from other sites', async () => {

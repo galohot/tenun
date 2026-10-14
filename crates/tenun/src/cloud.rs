@@ -350,10 +350,20 @@ pub struct PublishSettings {
     pub id: String,
     #[serde(default)]
     pub url: String,
+    /// `link`, `password` (v5 build 11) or `invited`.
     #[serde(default = "link")]
     pub access: String,
     #[serde(default)]
     pub invites: Vec<String>,
+    /// Other sites may show it in a frame (v5 build 11, V5-D14). Never sent for `invited`.
+    #[serde(default)]
+    pub embed: bool,
+    /// The entry of the password in `Secrets` (`publish:<key>`): a random key, never the password (v5 build 11).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pw_key: String,
+    /// tenun.cloud holds the password of that entry, so a publish does not send it again.
+    #[serde(default)]
+    pub pw_sent: bool,
     #[serde(default)]
     pub every: Every,
     /// Overrides this computer's name on the hosted page.
@@ -379,6 +389,9 @@ impl Default for PublishSettings {
             url: String::new(),
             access: link(),
             invites: vec![],
+            embed: false,
+            pw_key: String::new(),
+            pw_sent: false,
             every: Every::Manual,
             source: String::new(),
             last: String::new(),
@@ -391,6 +404,97 @@ pub fn settings(dashboard: &Value) -> Option<PublishSettings> {
     dashboard
         .get("publish")
         .and_then(|p| serde_json::from_value(p.clone()).ok())
+}
+
+// ---- password links (v5 build 11, V5-D13) --------------------------------------
+
+/// A password has 4 to 200 characters, as tenun.cloud asks.
+pub const MIN_PASSWORD: usize = 4;
+pub const MAX_PASSWORD: usize = 200;
+
+fn password_entry(key: &str) -> String {
+    format!("publish:{key}")
+}
+
+/// Keeps a new password in `Secrets` and marks it to go with the next publish. The settings (and so the `.tenun` file)
+/// keep only the random key of its entry.
+pub fn set_password(
+    secrets: &Secrets,
+    ps: &mut PublishSettings,
+    password: &str,
+) -> Result<(), CloudError> {
+    let n = password.chars().count();
+    if !(MIN_PASSWORD..=MAX_PASSWORD).contains(&n) {
+        return Err(CloudError::Refused(format!(
+            "A password has {MIN_PASSWORD} to {MAX_PASSWORD} characters."
+        )));
+    }
+    if ps.pw_key.is_empty() {
+        ps.pw_key = crate::random_token();
+    }
+    secrets
+        .set(&password_entry(&ps.pw_key), password)
+        .map_err(|e| CloudError::Refused(e.to_string()))?;
+    ps.access = "password".into();
+    ps.pw_sent = false;
+    Ok(())
+}
+
+/// Sets the password of a dashboard, or of the site for `SITE_ID`, and saves its settings.
+pub fn set_item_password(
+    engine: &Engine,
+    secrets: &Secrets,
+    id: &str,
+    password: &str,
+) -> Result<(), CloudError> {
+    if id == SITE_ID {
+        let mut ps = site_settings(engine).unwrap_or_default();
+        set_password(secrets, &mut ps, password)?;
+        save_site_settings(engine, Some(&ps));
+        return Ok(());
+    }
+    let dash = engine
+        .dashboard(id)
+        .ok_or_else(|| CloudError::Refused(format!("no dashboard {id}")))?;
+    let mut ps = settings(&dash).unwrap_or_default();
+    set_password(secrets, &mut ps, password)?;
+    engine.update_dashboard(id, |d| {
+        d["publish"] = serde_json::to_value(&ps).unwrap_or(Value::Null);
+    });
+    Ok(())
+}
+
+/// What a publish sends with its settings: the title, who can see it, and the password only when tenun.cloud does not
+/// hold it yet (`fresh`: the cloud item was made by this publish). The second value says whether the password went.
+fn settings_body(
+    secrets: &Secrets,
+    title: &str,
+    ps: &PublishSettings,
+    fresh: bool,
+) -> (Value, bool) {
+    let mut body = json!({ "title": title, "access": ps.access, "invites": ps.invites,
+        "embed": ps.embed && ps.access != "invited" });
+    if ps.access == "password"
+        && (fresh || !ps.pw_sent)
+        && !ps.pw_key.is_empty()
+        && let Some(pw) = secrets
+            .get(&password_entry(&ps.pw_key))
+            .filter(|p| !p.is_empty())
+    {
+        body["password"] = json!(pw);
+        return (body, true);
+    }
+    (body, false)
+}
+
+/// After a publish: tenun.cloud holds the password when it was sent. Any other access drops it there, so a later
+/// password access sends it again.
+fn after_publish(ps: &mut PublishSettings, sent: bool) {
+    if ps.access != "password" {
+        ps.pw_sent = false;
+    } else if sent {
+        ps.pw_sent = true;
+    }
 }
 
 fn gzip(bytes: &[u8]) -> Vec<u8> {
@@ -418,23 +522,24 @@ pub fn publish(
         .ok_or_else(|| CloudError::Refused(format!("no dashboard {dashboard_id}")))?;
     let mut ps = settings(&dash).unwrap_or_default();
     let title = dash["title"].as_str().unwrap_or("Dashboard").to_string();
+    let mut sent = false;
 
     let result = (|| {
         for attempt in 0..2 {
-            if ps.id.is_empty() {
+            let fresh = ps.id.is_empty();
+            if fresh {
                 ps.id = client.create_dashboard(&token, &title)?;
             }
-            client
-                .patch_dashboard(
-                    &token,
-                    &ps.id,
-                    &json!({ "title": title, "access": ps.access, "invites": ps.invites }),
-                )
+            let (body, with_password) = settings_body(secrets, &title, &ps, fresh);
+            let applied = client
+                .patch_dashboard(&token, &ps.id, &body)
+                .map(|_| true)
                 .or_else(|e| match e {
                     // Deleted on the website: start again with a new cloud dashboard.
-                    CloudError::Refused(ref m) if m == "not_found" && attempt == 0 => Ok(()),
+                    CloudError::Refused(ref m) if m == "not_found" && attempt == 0 => Ok(false),
                     other => Err(other),
                 })?;
+            sent |= applied && with_password;
             let mut snap = tenun_core::snapshot::build(engine, dashboard_id, &[])
                 .map_err(|e| CloudError::Refused(e.to_string()))?;
             // The map shapes go with it, as in an exported file, so tenun.cloud draws its maps (build 14).
@@ -472,6 +577,8 @@ pub fn publish(
             }
             Err(e) => p.error = e.to_string(),
         }
+        // The settings went before the upload, so they hold even when the upload failed.
+        after_publish(&mut p, sent);
         d["publish"] = serde_json::to_value(p).unwrap_or(Value::Null);
     });
     result
@@ -526,6 +633,7 @@ pub fn publish_site(engine: &Engine, secrets: &Secrets, base: &str) -> Result<Va
     let (token, _) = connection(secrets, base).ok_or(CloudError::NotConnected)?;
     let client = Client::new(base.to_string());
     let mut ps = site_settings(engine).unwrap_or_default();
+    let mut sent = false;
     let result = (|| {
         let mut site = tenun_core::site::build_site(engine, |_, _| {})
             .map_err(|e| CloudError::Refused(e.to_string()))?;
@@ -538,21 +646,20 @@ pub fn publish_site(engine: &Engine, secrets: &Secrets, base: &str) -> Result<Va
         crate::export::site_with_maps(&mut site, &engine.geo_dir());
         let title = site["title"].as_str().unwrap_or("Site").to_string();
         for attempt in 0..2 {
-            if ps.id.is_empty() {
+            let fresh = ps.id.is_empty();
+            if fresh {
                 ps.id = client.create(KIND_SITE, &token, &title)?;
             }
-            client
-                .patch(
-                    KIND_SITE,
-                    &token,
-                    &ps.id,
-                    &json!({ "title": title, "access": ps.access, "invites": ps.invites }),
-                )
+            let (body, with_password) = settings_body(secrets, &title, &ps, fresh);
+            let applied = client
+                .patch(KIND_SITE, &token, &ps.id, &body)
+                .map(|_| true)
                 .or_else(|e| match e {
                     // Deleted on the website: start again with a new cloud site.
-                    CloudError::Refused(ref m) if m == "not_found" && attempt == 0 => Ok(()),
+                    CloudError::Refused(ref m) if m == "not_found" && attempt == 0 => Ok(false),
                     other => Err(other),
                 })?;
+            sent |= applied && with_password;
             let meta = SnapMeta {
                 generated: site["generated"].as_str().unwrap_or_default().to_string(),
                 source: if ps.source.is_empty() {
@@ -588,6 +695,7 @@ pub fn publish_site(engine: &Engine, secrets: &Secrets, base: &str) -> Result<Va
         }
         Err(e) => ps.error = e.to_string(),
     }
+    after_publish(&mut ps, sent);
     save_site_settings(engine, Some(&ps));
     result
 }

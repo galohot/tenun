@@ -8,6 +8,7 @@
   import { dateTimeMedium } from '../../lib/format';
   import { CLOUD_SITE_PAGES, normaliseSite } from '../../lib/site';
   import { app } from '../../lib/state.svelte';
+  import { advancedOn } from '../../lib/tiers';
   import Icon from '../Icon.svelte';
   import Modal from '../Modal.svelte';
 
@@ -27,6 +28,13 @@
   let ps = $state<PublishSettings>(untrack(() => ({ ...defaults, ...(current ?? {}) })));
   let invitesText = $state(untrack(() => (current?.invites ?? []).join('\n')));
   let busy = $state<string | null>(null);
+  /** A new password, typed here; it is never kept in the form or the file. */
+  let password = $state('');
+  /** A password counts characters, as tenun.cloud does (an emoji is one). */
+  const passwordOk = $derived([...password].length >= 4 && [...password].length <= 200);
+  const hasPassword = $derived(!!current?.pw_key);
+  /** "Anyone with the password" with no password set and none typed: Publish waits. */
+  const needsPassword = $derived(ps.access === 'password' && !hasPassword && !passwordOk);
 
   /** Shows the settings of the other choice. */
   function choose(t: 'site' | 'page') {
@@ -34,6 +42,7 @@
     const from = t === 'site' ? site.publish : dash.publish;
     ps = { ...defaults, ...(from ?? {}) };
     invitesText = (from?.invites ?? []).join('\n');
+    password = '';
   }
 
   const cloud = $derived(app.cloud);
@@ -49,7 +58,7 @@
       .split(/[\s,;]+/)
       .map((e) => e.trim().toLowerCase())
       .filter((e) => e.includes('@'));
-    const next: PublishSettings = { ...(current ?? {}), access: ps.access, invites, every: ps.every, source: ps.source.trim() };
+    const next: PublishSettings = { ...(current ?? {}), access: ps.access, invites, embed: !!ps.embed, every: ps.every, source: ps.source.trim() };
     if (forSite) {
       app.saveSite({ ...site, publish: next });
     } else {
@@ -69,10 +78,21 @@
     }
   }
 
-  async function publish() {
+  /** Keeps the typed password on this computer; it goes to tenun.cloud with the next publish. */
+  async function setPassword(quiet = false) {
+    if (!passwordOk) return;
     save();
+    await new Promise((r) => setTimeout(r, 400)); // let the settings save first
+    app.snap = await api.cloudPassword(forSite ? { site: true } : { dashboard: dash.id }, password);
+    password = '';
+    if (!quiet) app.toast(published ? 'Password set. Publish to use it.' : 'Password set');
+  }
+
+  async function publish() {
     busy = 'Publishing…';
     try {
+      if (ps.access === 'password' && password) await setPassword(true);
+      save();
       await new Promise((r) => setTimeout(r, 400)); // let the settings save first
       const r = forSite ? await api.publishSite() : await api.publish(dash.id);
       app.snap = r.snapshot;
@@ -104,6 +124,13 @@
     if (!current?.url) return;
     await navigator.clipboard.writeText(current.url);
     app.toast('Link copied');
+  }
+
+  /** The code another site puts in its page to show this one. */
+  const iframe = $derived(current?.url ? `<iframe src="${current.url}" width="100%" height="720" style="border:0"></iframe>` : '');
+  async function copyEmbed() {
+    await navigator.clipboard.writeText(iframe);
+    app.toast('Code copied');
   }
 
   const when = (iso?: string) => {
@@ -179,11 +206,62 @@
     <div class="sec">
       <span class="label">Who can see it</span>
       <label class="radio"><input type="radio" bind:group={ps.access} value="link" onchange={save} /> Anyone with the link</label>
+      <label class="radio"><input type="radio" bind:group={ps.access} value="password" onchange={save} /> Anyone with the link and the password</label>
+      {#if ps.access === 'password'}
+        <div class="pw">
+          <input
+            class="field"
+            type="password"
+            aria-label="Password"
+            placeholder={hasPassword ? 'Type a new password to change it' : 'Password, 4 characters or more'}
+            autocomplete="new-password"
+            maxlength="200"
+            bind:value={password}
+            onkeydown={(e) => e.key === 'Enter' && setPassword().catch((err) => app.error(err))}
+          />
+          <button class="btn" onclick={() => setPassword().catch((err) => app.error(err))} disabled={!passwordOk || !!busy}>{hasPassword ? 'Change' : 'Set password'}</button>
+        </div>
+        <p class="muted small">
+          {hasPassword ? 'A password is set. ' : ''}Tenun keeps it on this computer, not in the .tenun file. tenun.cloud keeps only a
+          hash of it (a form it cannot turn back into the password). Give the password to the people who may see it.
+        </p>
+      {/if}
       <label class="radio"><input type="radio" bind:group={ps.access} value="invited" onchange={save} /> Only people I invite (they sign in with Google)</label>
       {#if ps.access === 'invited'}
         <textarea class="field area" rows="3" placeholder="Email addresses, one per line" bind:value={invitesText} onblur={save}></textarea>
       {/if}
     </div>
+
+    {#if advancedOn() || ps.embed}
+      <div class="sec">
+        <span class="label">Embed</span>
+        <label class="radio">
+          <input
+            type="checkbox"
+            checked={!!ps.embed && ps.access !== 'invited'}
+            disabled={ps.access === 'invited'}
+            onchange={(e) => {
+              ps.embed = e.currentTarget.checked;
+              save();
+            }}
+          />
+          Allow embedding in other sites
+        </label>
+        {#if ps.access === 'invited'}
+          <p class="muted small">A {forSite ? 'site' : 'dashboard'} for invited people cannot be embedded: their Google sign-in does not work inside another site.</p>
+        {:else if ps.embed}
+          {#if iframe}
+            <div class="embed">
+              <code>{iframe}</code>
+              <button class="btn" onclick={copyEmbed}>Copy code</button>
+            </div>
+            {#if ps.access === 'password'}<p class="muted small">Inside the other site, people type the password first.</p>{/if}
+          {:else}
+            <p class="muted small">Publish first. The code to put in the other site's page shows here.</p>
+          {/if}
+        {/if}
+      </div>
+    {/if}
 
     <div class="sec">
       <span class="label">Keep it updated</span>
@@ -212,7 +290,7 @@
     <span class="spacer"></span>
     <button class="btn" onclick={onclose}>Close</button>
     {#if cloud?.connected}
-      <button class="btn primary" onclick={publish} disabled={!!busy || tooBig}>{busy ?? (published ? 'Publish now' : forSite ? 'Publish site' : 'Publish')}</button>
+      <button class="btn primary" onclick={publish} disabled={!!busy || tooBig || needsPassword} title={needsPassword ? 'Type a password first' : undefined}>{busy ?? (published ? 'Publish now' : forSite ? 'Publish site' : 'Publish')}</button>
     {/if}
   {/snippet}
 </Modal>
@@ -246,6 +324,11 @@
   .target > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .target b { font-size: 13px; }
   .radio { display: flex; gap: 8px; align-items: center; }
+  .pw { display: flex; gap: 6px; margin-left: 24px; }
+  .pw .field { flex: 1; min-width: 0; }
+  .sec > .small { margin: 0 0 0 24px; }
+  .embed { display: flex; gap: 8px; align-items: center; }
+  .embed code { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 6px 8px; }
   .area { height: auto; padding: 8px 10px; resize: vertical; font-family: inherit; }
   select.field { height: 30px; }
   code { font-family: var(--mono); font-size: 11px; background: var(--inset); padding: 1px 4px; border-radius: 4px; }

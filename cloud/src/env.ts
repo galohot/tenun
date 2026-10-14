@@ -14,7 +14,8 @@ export type Env = {
 
 export type Account = { id: string; email: string; name: string };
 
-export type HonoEnv = { Bindings: Env; Variables: { account: Account | null } };
+/** `frame`: other sites may frame this response (an embedded item, v5 build 11). */
+export type HonoEnv = { Bindings: Env; Variables: { account: Account | null; frame?: boolean } };
 
 /** The free plan (V2-D3). Numbers are tuned at build time, not promises. */
 export const LIMITS = {

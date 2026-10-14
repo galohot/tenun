@@ -34,6 +34,22 @@ in a folder called `<workspace name> data`.
 To test: `tenun publish path/to/sales.tenun` publishes every dashboard that has publish settings,
 and the site when it has them, once, and prints the links.
 
+### A password
+
+A password is not in the `.tenun` file. It is kept in the private secrets file of the computer
+where it was set, and tenun.cloud keeps a hash of it. So the agent on another computer does not need
+it: it publishes, and the password stays as it is.
+
+To set a password from the command line, put it in an environment variable and name the variable:
+
+```sh
+TENUN_PASSWORD='the password' tenun publish path/to/sales.tenun --password-from-env TENUN_PASSWORD
+```
+
+This gives every dashboard it publishes (or the one named with `--dashboard`) that password. Their
+access becomes "anyone with the link and the password". Do not type a password as a command-line
+argument. Other users of the computer can see the arguments of a running program.
+
 ## 3. Run the agent
 
 ```sh

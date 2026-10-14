@@ -2,10 +2,13 @@
 // (/style.css) plus /cloud.css. No inline scripts anywhere (the CSP forbids them).
 import { esc } from './util';
 
-export function page(title: string, body: string, opts: { account?: { email: string } | null } = {}): string {
-  const who = opts.account
-    ? `<span class="who">${esc(opts.account.email)}</span><a href="/account">Account</a><a href="/auth/logout">Sign out</a>`
-    : `<a href="/auth/login">Sign in</a>`;
+export function page(title: string, body: string, opts: { account?: { email: string } | null; bare?: boolean } = {}): string {
+  // A bare page (a password page, which may sit inside another site) has no sign-in links.
+  const who = opts.bare
+    ? ''
+    : opts.account
+      ? `<span class="who">${esc(opts.account.email)}</span><a href="/account">Account</a><a href="/auth/logout">Sign out</a>`
+      : `<a href="/auth/login">Sign in</a>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -36,7 +39,10 @@ export type DashRow = {
   /** A site's pages. */
   pages?: number;
   title: string;
-  access: 'link' | 'invited';
+  /** `password` is a link with a password (v5 build 11). */
+  access: 'link' | 'invited' | 'password';
+  /** Other sites may frame it (v5 build 11). */
+  embed?: number;
   source: string;
   every_minutes: number | null;
   version: number;
@@ -55,6 +61,8 @@ const ago = (ms: number | null) => {
   return `${Math.round(s / 86400)} days ago`;
 };
 
+const ACCESS: Record<string, string> = { link: 'Anyone with the link', password: 'Anyone with the password', invited: 'Only invited people' };
+
 const size = (b: number) => (b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1048576).toFixed(1)} MB`);
 
 export function accountPage(
@@ -68,7 +76,7 @@ export function accountPage(
         .map(
           (d) => `<li class="row">
       <div><a class="title" href="/${d.kind === 'site' ? 's' : 'd'}/${esc(d.id)}">${esc(d.title)}</a>
-      <p class="meta">${d.kind === 'site' ? `Site of ${d.pages ?? 1} ${(d.pages ?? 1) === 1 ? 'page' : 'pages'} · ` : ''}${d.access === 'link' ? 'Anyone with the link' : 'Only invited people'} ·
+      <p class="meta">${d.kind === 'site' ? `Site of ${d.pages ?? 1} ${(d.pages ?? 1) === 1 ? 'page' : 'pages'} · ` : ''}${ACCESS[d.access] ?? ACCESS.link}${d.embed ? ' · can be embedded' : ''} ·
       ${d.generated_at ? `updated ${esc(ago(Date.parse(d.generated_at)))}` : 'not published yet'}${d.source ? ` from ${esc(d.source)}` : ''} ·
       ${size(d.bytes)}</p></div>
       <form method="post" action="/account/dashboards/${esc(d.id)}/delete"><button class="button small danger">Delete</button></form>
@@ -125,6 +133,25 @@ export function connectPage(account: { email: string }, code: string, label: str
 
 export function notice(title: string, text: string, status: 'ok' | 'warn' = 'ok', account?: { email: string } | null): string {
   return page(title, `<h1>${esc(title)}</h1><p class="lede ${status}">${text}</p>`, { account });
+}
+
+/**
+ * The page a password item shows until the right password is given (v5 build 11). It holds no data and not even the
+ * title: the owner may not want that seen either.
+ */
+export function passwordPage(kind: 'dashboard' | 'site', id: string, error = ''): string {
+  const what = kind === 'site' ? 'site' : 'dashboard';
+  return page(
+    'Password',
+    `<h1>This ${what} has a password</h1>
+     <p class="lede">Type the password its owner gave you.</p>
+     ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
+     <form method="post" action="/${kind === 'site' ? 's' : 'd'}/${esc(id)}/unlock" class="stack">
+     <label for="pw">Password</label>
+     <input id="pw" name="password" type="password" class="field" required autocomplete="current-password" autofocus>
+     <button class="button primary">Open</button></form>`,
+    { bare: true },
+  );
 }
 
 /** The hosted dashboard or site: the viewer bundle reads the snapshot URL and freshness from meta tags. */

@@ -1,17 +1,19 @@
 // tenun.cloud: the landing page (static), the publish API, account pages, and hosted dashboards.
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { api, canView, deleteDashboard } from './api';
+import { ROW_COLUMNS, api, canView, deleteDashboard } from './api';
 import { auth, loadAccount, safeReturn, sameOrigin } from './auth';
 import type { HonoEnv } from './env';
 import { LIMITS, type Kind } from './env';
-import { accountPage, connectPage, hostedShell, notice, page, type DashRow, type TokenRow } from './pages';
+import { accountPage, connectPage, hostedShell, notice, page, passwordPage, type DashRow, type TokenRow } from './pages';
+import { OPEN_SECONDS, TRIES, checkPassword, cookieName, cookieValue, triesOf, whoOf, wrongTry } from './password';
 import { now, rid, sha256 } from './util';
 
 const app = new Hono<HonoEnv>();
 
-// No page here runs inline script, and nothing may frame it.
-const CSP = [
+// No page here runs inline script, and nothing may frame it, except an item its owner lets other sites embed.
+const csp = (frame: boolean) =>
+  [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
@@ -21,12 +23,12 @@ const CSP = [
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'self' https://api.workos.com",
-  "frame-ancestors 'none'",
+  frame ? 'frame-ancestors *' : "frame-ancestors 'none'",
 ].join('; ');
 
 app.use('*', async (c, next) => {
   await next();
-  c.res.headers.set('content-security-policy', CSP);
+  c.res.headers.set('content-security-policy', csp(!!c.get('frame')));
   c.res.headers.set('x-content-type-options', 'nosniff');
   c.res.headers.set('referrer-policy', 'same-origin');
 });
@@ -76,7 +78,7 @@ app.get('/account', async (c) => {
   const me = c.get('account');
   if (!me) return c.redirect('/auth/login?return=/account');
   const [d, t] = await c.env.DB.batch([
-    c.env.DB.prepare('SELECT id, title, access, source, every_minutes, version, generated_at, bytes, kind, pages FROM dashboards WHERE account_id = ?1 ORDER BY created_at').bind(me.id),
+    c.env.DB.prepare(`SELECT ${ROW_COLUMNS} FROM dashboards WHERE account_id = ?1 ORDER BY created_at`).bind(me.id),
     c.env.DB.prepare('SELECT id, label, created_at, last_used_at FROM tokens WHERE account_id = ?1 ORDER BY created_at').bind(me.id),
   ]);
   return c.html(accountPage(me, d.results as DashRow[], t.results as TokenRow[], LIMITS.dashboards));
@@ -114,8 +116,14 @@ app.post('/account/delete', async (c) => {
 /** A hosted dashboard (/d/) or site (/s/, build 14): the same access rules for both. */
 async function hosted(c: Context<HonoEnv>, kind: Kind) {
   const what = kind === 'site' ? 'site' : 'dashboard';
-  const { row, allowed, needsSignIn } = await canView(c, c.req.param('id') ?? '', kind);
+  const { row, allowed, needsSignIn, needsPassword } = await canView(c, c.req.param('id') ?? '', kind);
   if (!row) return c.html(notice('Not found', `This ${what} does not exist, or its owner deleted it.`, 'warn', c.get('account')), 404);
+  // An item for invited people is never framed: a Google sign-in does not work inside another site (V5-D14).
+  c.set('frame', !!row.embed && row.access !== 'invited');
+  if (needsPassword) {
+    c.header('cache-control', 'private, no-store');
+    return c.html(passwordPage(kind, row.id), 401);
+  }
   if (needsSignIn) return c.redirect(`/auth/login?return=${encodeURIComponent(`/${kind === 'site' ? 's' : 'd'}/${row.id}`)}`);
   if (!allowed) {
     return c.html(
@@ -130,6 +138,45 @@ async function hosted(c: Context<HonoEnv>, kind: Kind) {
 
 app.get('/d/:id', (c) => hosted(c, 'dashboard'));
 app.get('/s/:id', (c) => hosted(c, 'site'));
+
+/**
+ * A password, typed on the password page. Right: a cookie for this item only, for 7 days, then back to the item.
+ * Wrong: the page again, and one more try counted against the address; at five in a minute, even the right one waits.
+ */
+async function unlock(c: Context<HonoEnv>, kind: Kind) {
+  const id = c.req.param('id') ?? '';
+  const back = `/${kind === 'site' ? 's' : 'd'}/${encodeURIComponent(id)}`;
+  const row = await c.env.DB.prepare(
+    "SELECT id, embed, pw_hash, pw_salt, pw_iter, pw_version FROM dashboards WHERE id = ?1 AND kind = ?2 AND access = 'link' AND pw_hash IS NOT NULL",
+  )
+    .bind(id, kind)
+    .first<{ id: string; embed: number; pw_hash: string; pw_salt: string; pw_iter: number; pw_version: number }>();
+  if (!row) return c.redirect(back, 303);
+  if (!sameOrigin(c)) return c.text('Forbidden', 403);
+  c.set('frame', !!row.embed);
+  c.header('cache-control', 'private, no-store');
+  const who = await whoOf(c.req.header('cf-connecting-ip'));
+  if ((await triesOf(c.env, who)) >= TRIES) {
+    return c.html(passwordPage(kind, row.id, 'Too many wrong passwords. Wait a minute, then try again.'), 429);
+  }
+  const form = await c.req.parseBody();
+  const pw = typeof form.password === 'string' ? form.password : '';
+  if (!pw || !(await checkPassword(pw, row))) {
+    await wrongTry(c.env, who);
+    return c.html(passwordPage(kind, row.id, 'That password is not right.'), 401);
+  }
+  // Inside another site, a cookie is sent only when it is SameSite=None; Partitioned keeps it to that site.
+  const secure = new URL(c.req.url).protocol === 'https:' || c.env.DEV_LOGIN !== '1';
+  const site = row.embed && secure ? 'SameSite=None; Partitioned' : 'SameSite=Lax';
+  c.header(
+    'set-cookie',
+    `${cookieName(row.id)}=${await cookieValue(c.env, row.id, row.pw_version)}; Path=/; Max-Age=${OPEN_SECONDS}; HttpOnly;${secure ? ' Secure;' : ''} ${site}`,
+  );
+  return c.redirect(back, 303);
+}
+
+app.post('/d/:id/unlock', (c) => unlock(c, 'dashboard'));
+app.post('/s/:id/unlock', (c) => unlock(c, 'site'));
 // A page of a site: the site routes by the address's #, which a server never sees.
 app.get('/s/:id/:page', (c) => c.redirect(`/s/${encodeURIComponent(c.req.param('id'))}#/p/${encodeURIComponent(c.req.param('page'))}`));
 
@@ -142,12 +189,13 @@ app.notFound(async (c) => {
 
 export default {
   fetch: app.fetch,
-  /** Daily: delete publish records older than a day and devices that expired. */
+  /** Daily: delete publish records older than a day, devices that expired, and wrong passwords older than a minute. */
   async scheduled(_e: ScheduledController, env: HonoEnv['Bindings']) {
     const t = now();
     await env.DB.batch([
       env.DB.prepare('DELETE FROM publishes WHERE at < ?1').bind(t - 86400_000),
       env.DB.prepare('DELETE FROM devices WHERE expires_at < ?1').bind(t),
+      env.DB.prepare('DELETE FROM unlock_tries WHERE at < ?1').bind(t - 60_000),
     ]);
   },
 } satisfies ExportedHandler<HonoEnv['Bindings']>;

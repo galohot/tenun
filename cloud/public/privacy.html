@@ -23,12 +23,16 @@
 <li><b>Freshness:</b> when each snapshot was made, the name of the computer that published it (you choose this label), and how often it updates.</li>
 <li><b>Connected apps:</b> a fingerprint (hash) of each publishing key, when it was created and last used. The key itself is not stored.</li>
 <li><b>Invited people:</b> the email addresses you add to a dashboard.</li>
+<li><b>Passwords of dashboards:</b> a hash of each password (a form that cannot be turned back into the password), never the password itself.</li>
+<li><b>Wrong passwords:</b> when someone types a wrong password, a hash of their internet address and the time, to allow at most five wrong tries a minute. Deleted within a day.</li>
 </ul>
 
 <h2>Who can see it</h2>
 <ul>
 <li>A dashboard set to <b>anyone with the link</b> can be seen by anyone who has its address. The address is long and random, and search engines are told not to index it.</li>
+<li>A dashboard set to <b>anyone with the password</b> can be seen by anyone who has its address and its password.</li>
 <li>A dashboard set to <b>invited people</b> can be seen only after signing in with an email you invited.</li>
+<li>A dashboard can be shown inside other websites only when its owner allows it. A dashboard for invited people never can.</li>
 <li>We do not sell data, show ads, or use analytics or tracking cookies.</li>
 </ul>
 
@@ -40,6 +44,7 @@
 
 <h2>Cookies</h2>
 <p>One cookie keeps you signed in. It is needed for sign-in and is not used for anything else.</p>
+<p>After a right password, one cookie for that dashboard keeps it open in that browser for 7 days. It holds no password and is not used for anything else.</p>
 
 <h2>Services we use</h2>
 <ul>
