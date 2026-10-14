@@ -133,6 +133,9 @@ pub const DEFS: &[Def] = &[
     agg("COUNTIF", 2, 2),
     agg("AVERAGEIF", 2, 2),
     agg("COUNTROWS", 1, 1),
+    // A total over fewer groups or fewer filters (v5 build 06): the checker reads them itself.
+    row("TOTAL", 1, MANY),
+    row("UNFILTERED", 1, MANY),
     // Parameters (v5 build 05): the checker reads the name and writes the SQL itself.
     row("PARAM", 1, 1),
 ];

@@ -5,7 +5,7 @@
 
 use super::functions::{self, Def};
 use super::parse::{BinOp, Expr, ExprKind, UnOp, parse};
-use super::{Context, FormulaError, Kind};
+use super::{Context, FormulaError, Kind, PartScope};
 use crate::catalog::{Catalog, DType, Table};
 use crate::links::{Links, PathError, Paths, first_links, link_label, reach};
 use crate::workspace::Relationship;
@@ -105,11 +105,12 @@ pub enum TNode {
         name: &'static str,
         args: Vec<TExpr>,
     },
-    /// An aggregate over the rows of the table `home`.
+    /// An aggregate over the rows of the table `home`; `scope` is what a `TOTAL` or an `UNFILTERED` around it keeps.
     Agg {
         name: &'static str,
         args: Vec<TExpr>,
         home: String,
+        scope: Option<super::PartScope>,
     },
 }
 
@@ -269,6 +270,7 @@ pub fn check(
         current,
         uses: Vec::new(),
         agg: None,
+        scoped: false,
     };
     let root = c.expr(&ast)?;
     if kind != Kind::Column && !has_agg(&root) {
@@ -319,6 +321,8 @@ struct Checker<'a> {
     uses: Vec<String>,
     /// Set while the arguments of an aggregate are checked.
     agg: Option<AggScope>,
+    /// Set while the total inside a `TOTAL` or an `UNFILTERED` is checked (v5 build 06).
+    scoped: bool,
 }
 
 impl<'a> Checker<'a> {
@@ -425,8 +429,10 @@ impl<'a> Checker<'a> {
                 ));
             }
         };
-        // A column or a group reads related tables through the many-to-one path from its own.
+        // A column or a group reads related tables through the many-to-one path from its own. Inside a total, a column
+        // reads the rows of a table that points to it instead (v5 build 06): `related_total` checks that.
         if self.kind != Kind::Measure
+            && !(self.kind == Kind::Column && self.agg.is_some())
             && let Some(cur) = self.current
             && t.id != cur.id
         {
@@ -518,7 +524,7 @@ impl<'a> Checker<'a> {
                 );
             }
             format!(
-                "{text} has many values for each row of {cur_label}. Total it in a measure with SUMIF or COUNTROWS, or check the line between {t_label} and {cur_label} in Model.",
+                "{text} has many values for each row of {cur_label}. Add them up with a total, like SUM({text}), or check the line between {t_label} and {cur_label} in Model.",
                 cur_label = cur.label,
                 t_label = t.label
             )
@@ -818,6 +824,9 @@ impl<'a> Checker<'a> {
         if def.name == "PARAM" {
             return self.param(e, &args[0], name_len);
         }
+        if matches!(def.name, "TOTAL" | "UNFILTERED") {
+            return self.scoped_total(e, def, args, name_len);
+        }
         if functions::is_aggregate(def, n) {
             return self.aggregate(e, def, args, name_len);
         }
@@ -890,17 +899,20 @@ impl<'a> Checker<'a> {
         })
     }
 
-    fn aggregate(
+    /// `TOTAL(t, [col]…)` and `UNFILTERED(t, [col]…)` (v5 build 06, V5-D8): one total, worked out over fewer of the
+    /// tile's groups or without some of its filters. Whether the tile is grouped by the named columns is known only
+    /// when a tile asks, so the measure checks that then.
+    fn scoped_total(
         &mut self,
         e: &Expr,
         def: &'static Def,
         args: &[Expr],
         name_len: usize,
     ) -> Result<TExpr, FormulaError> {
-        if self.kind == Kind::Column {
+        if self.kind != Kind::Measure {
             return Err(FormulaError::new(
                 format!(
-                    "{} works over many rows, so it belongs in a measure, not in a calculated column. To read one value from a related table, use [Table].[Column].",
+                    "{} belongs in a measure: it changes which groups or filters of a tile a total reads.",
                     def.name
                 ),
                 e.at,
@@ -914,9 +926,200 @@ impl<'a> Checker<'a> {
                 name_len,
             ));
         }
+        if self.scoped {
+            return Err(FormulaError::new(
+                "TOTAL and UNFILTERED do not go inside each other.",
+                e.at,
+                name_len,
+            ));
+        }
+        // One total, written as itself: SUM(…), AVERAGE(…), COUNTROWS(…).
+        let one_total = matches!(&args[0].kind, ExprKind::Call { name, args: a }
+            if functions::lookup(&name.to_uppercase()).is_some_and(|d| functions::is_aggregate(d, a.len())));
+        if !one_total {
+            return Err(FormulaError::new(
+                format!(
+                    "{} takes one total, like {}(SUM([amount])).",
+                    def.name, def.name
+                ),
+                args[0].at,
+                args[0].len,
+            ));
+        }
+        self.scoped = true;
+        let inner = self.expr(&args[0]);
+        self.scoped = false;
+        let inner = inner?;
+        let mut cols = Vec::new();
+        for a in &args[1..] {
+            let ExprKind::Ref { table, column } = &a.kind else {
+                return Err(FormulaError::new(
+                    format!(
+                        "After the total, {} takes columns, like {}(SUM([amount]), [Stores].[region]).",
+                        def.name, def.name
+                    ),
+                    a.at,
+                    a.len,
+                ));
+            };
+            let named = self.named_column(a, table.as_deref(), column)?;
+            if !cols.contains(&named) {
+                cols.push(named);
+            }
+        }
+        let TExpr { node, ty, .. } = inner;
+        let TNode::Agg {
+            name, args, home, ..
+        } = node
+        else {
+            unreachable!("one total was checked above");
+        };
+        let scope = if def.name == "TOTAL" {
+            PartScope::Total(cols)
+        } else {
+            PartScope::Unfiltered(cols)
+        };
+        Ok(TExpr {
+            node: TNode::Agg {
+                name,
+                args,
+                home,
+                scope: Some(scope),
+            },
+            ty,
+            at: e.at,
+            len: e.len,
+        })
+    }
+
+    /// A column a `TOTAL` or an `UNFILTERED` names, as (table id, column). It is not read, so it needs no total.
+    fn named_column(
+        &mut self,
+        e: &Expr,
+        table: Option<&str>,
+        column: &str,
+    ) -> Result<(String, String), FormulaError> {
+        let text = self.src.snip(e.at, e.len);
+        let t: &Table = match table {
+            Some(name) => self.table_or_link(name, e)?.0,
+            None => match self.current {
+                Some(t) => t,
+                None => {
+                    return Err(FormulaError::new(
+                        format!(
+                            "{text} needs its table here. Write the table first, like [Table].[{column}]."
+                        ),
+                        e.at,
+                        e.len,
+                    ));
+                }
+            },
+        };
+        match find_column(t, column) {
+            Found::One(c) => Ok((t.id.clone(), c.name.clone())),
+            Found::Two(a, b) => Err(FormulaError::new(
+                format!(
+                    "{text} matches two columns, [{}] and [{}]. Rename one of them so a formula can tell them apart.",
+                    a.name, b.name
+                ),
+                e.at,
+                e.len,
+            )),
+            Found::No => {
+                let names = t
+                    .columns
+                    .iter()
+                    .flat_map(|c| std::iter::once(c.name.as_str()).chain(c.label.as_deref()));
+                Err(FormulaError::new(
+                    match closest(column, names) {
+                        Some(s) => format!("No column [{column}]. Did you mean [{s}]?"),
+                        None => format!("No column [{column}] in {}.", t.label),
+                    },
+                    e.at,
+                    e.len,
+                ))
+            }
+        }
+    }
+
+    /// A total in a calculated column (v5 build 06) adds up the rows of a table that points straight to the column's
+    /// table: `SUM([Orders].[amount])` in Customers is each customer's orders. Its own rows, or a table it reaches
+    /// another way, are errors in words.
+    fn related_total(
+        &self,
+        def: &Def,
+        home: &str,
+        e: &Expr,
+        name_len: usize,
+    ) -> Result<(), FormulaError> {
+        if self.kind != Kind::Column {
+            return Ok(());
+        }
+        let cur = self.current.expect("a column has a table");
+        if home == cur.id {
+            return Err(FormulaError::new(
+                format!(
+                    "{} over the rows of {} belongs in a measure, not in one of its columns. In a column, a total adds up a table that points to this one, like SUM([Orders].[amount]) in Customers.",
+                    def.name, cur.label
+                ),
+                e.at,
+                name_len,
+            ));
+        }
+        let label = self
+            .cx
+            .catalog
+            .table(home)
+            .map_or_else(|| home.to_string(), |t| t.label.clone());
+        let links = self.cx.links();
+        let direct: Vec<&Relationship> = self
+            .cx
+            .rels
+            .iter()
+            .filter(|r| r.from.table == home && r.to.table == cur.id && links.usable(r))
+            .collect();
+        match direct.len() {
+            1 => Ok(()),
+            0 => Err(FormulaError::new(
+                format!(
+                    "A total in a column of {cur} adds up a table that points to {cur} with one link, like SUM([Orders].[amount]) in Customers. {label} does not point to {cur} that way.",
+                    cur = cur.label
+                ),
+                e.at,
+                e.len.max(name_len),
+            )),
+            _ => Err(FormulaError::new(
+                format!(
+                    "Two links lead from {label} to {}. A total in a column cannot tell which one to follow yet; total it in a measure.",
+                    cur.label
+                ),
+                e.at,
+                e.len.max(name_len),
+            )),
+        }
+    }
+
+    fn aggregate(
+        &mut self,
+        e: &Expr,
+        def: &'static Def,
+        args: &[Expr],
+        name_len: usize,
+    ) -> Result<TExpr, FormulaError> {
+        if let Some(outer) = &self.agg {
+            return Err(FormulaError::new(
+                format!("{} cannot sit inside {}.", def.name, outer.name),
+                e.at,
+                name_len,
+            ));
+        }
         // COUNTROWS names a table, not a column.
         if def.name == "COUNTROWS" {
-            return self.count_rows(e, &args[0]);
+            let t = self.count_rows(e, &args[0])?;
+            if let TNode::Agg { home, .. } = &t.node {
+                self.related_total(def, home, e, name_len)?;
+            }
+            return Ok(t);
         }
         self.agg = Some(AggScope {
             name: def.name,
@@ -929,12 +1132,14 @@ impl<'a> Checker<'a> {
         let scope = self.agg.take().expect("set above");
         let targs = targs?;
         let home = self.home_of(def, &scope.tables, e, name_len)?;
+        self.related_total(def, &home, e, name_len)?;
         let ty = functions::type_of(def, &targs, &self.src)?;
         Ok(TExpr {
             node: TNode::Agg {
                 name: def.name,
                 args: targs,
                 home,
+                scope: None,
             },
             ty,
             at: e.at,
@@ -974,6 +1179,7 @@ impl<'a> Checker<'a> {
                 name: "COUNTROWS",
                 args: Vec::new(),
                 home: t.id.clone(),
+                scope: None,
             },
             ty: Ty::Num,
             at: e.at,

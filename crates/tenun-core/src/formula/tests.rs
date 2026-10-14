@@ -1213,10 +1213,22 @@ fn a_total_in_a_column_points_to_measures() {
     assert_eq!(
         col_err("SUM([amount])"),
         (
-            "SUM works over many rows, so it belongs in a measure, not in a calculated column. To read one value from a related table, use [Table].[Column]."
+            "SUM over the rows of Orders belongs in a measure, not in one of its columns. In a column, a total adds up a table that points to this one, like SUM([Orders].[amount]) in Customers."
                 .into(),
             "SUM".into()
         )
+    );
+    // A total of a table that points to this one is a related total (v5 build 06); any other table is not.
+    assert!(compiled("SUM([Orders].[amount])", Kind::Column, Some("Stores")).is_ok());
+    assert!(compiled("COUNTROWS([Orders])", Kind::Column, Some("Stores")).is_ok());
+    assert_eq!(
+        err("SUM([Orders].[amount])", Kind::Column, Some("Regions")).0,
+        "A total in a column of Regions adds up a table that points to Regions with one link, like SUM([Orders].[amount]) in Customers. Orders does not point to Regions that way."
+    );
+    assert!(
+        err("SUM([Orders].[amount])", Kind::Column, Some("Targets"))
+            .0
+            .contains("does not point to Targets")
     );
     assert_eq!(col_err("COUNTROWS([Orders])").1, "COUNTROWS");
     // One value is a total; two are the smaller of them.
@@ -1596,7 +1608,7 @@ fn a_column_cannot_read_towards_the_many_side() {
     let (m, p) = err("[Orders].[amount]", Kind::Column, Some("Stores"));
     assert_eq!(
         m,
-        "[Orders].[amount] has many values for each row of Stores. Total it in a measure with SUMIF or COUNTROWS, or check the line between Orders and Stores in Model."
+        "[Orders].[amount] has many values for each row of Stores. Add them up with a total, like SUM([Orders].[amount]), or check the line between Orders and Stores in Model."
     );
     assert_eq!(p, "[Orders].[amount]");
     // Two steps away is the same.
@@ -1772,6 +1784,12 @@ fn guide_totals() -> Vec<(&'static str, Value)> {
             json!(425.5 / 3.0),
         ),
         ("COUNTROWS([Orders])", json!(6)),
+        // With no group and no filter, a total over more of the data is the total itself (v5 build 06).
+        (
+            "SUM([Orders].[amount]) / TOTAL(SUM([Orders].[amount]))",
+            json!(1.0),
+        ),
+        ("UNFILTERED(SUM([Orders].[amount]))", json!(475.5)),
         // "Price rise" is 10 % in the test world (v5 build 05).
         (
             r#"SUM([Orders].[amount]) * (1 + PARAM("Price rise"))"#,

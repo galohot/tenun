@@ -18,6 +18,8 @@ export interface FnInfo {
 
 /** Every function of the engine, with a one-line hint. The engine's own list is tested against this one. */
 export const FUNCTIONS: readonly FnInfo[] = functions as FnInfo[];
+/** Functions a calculated column cannot use: they read a tile's groups, filters or controls (v5 builds 05 and 06). */
+export const MEASURE_ONLY: readonly string[] = ['TOTAL', 'UNFILTERED', 'PARAM'];
 
 export const signature = (f: FnInfo): string => `${f.name}(${f.args})`;
 
@@ -253,10 +255,12 @@ export function suggest(text: string, caret: number, scope: Scope): Completion |
   while (start > 0 && /[A-Za-z0-9_]/.test(text[start - 1])) start--;
   const word = text.slice(start, caret);
   if (!word || !/^[A-Za-z_]/.test(word)) return null;
-  // A measure or a group value is made of totals, so the totals come first: SU offers SUM before SUBSTITUTE.
+  // A measure or a group value is made of totals, so the totals come first: SU offers SUM before SUBSTITUTE. A column
+  // works row by row, and its totals add up a related table (v5 build 06), so they come after. TOTAL, UNFILTERED and
+  // PARAM belong in measures only.
   const fits =
     scope.kind === 'column'
-      ? FUNCTIONS.filter((f) => f.class !== 'agg')
+      ? [...FUNCTIONS.filter((f) => f.class !== 'agg' && !MEASURE_ONLY.includes(f.name)), ...FUNCTIONS.filter((f) => f.class === 'agg')]
       : [...FUNCTIONS.filter((f) => f.class !== 'row'), ...FUNCTIONS.filter((f) => f.class === 'row')];
   const found = rank([...fits], word, (f) => [f.name]).filter((f) => f.name.toLowerCase().startsWith(word.toLowerCase()));
   // A function that is already typed in full, with its bracket, needs no help.

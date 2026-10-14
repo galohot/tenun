@@ -24,7 +24,7 @@
 //! A plain measure beside a named one is a part of its own and reads as it does alone.
 
 use crate::catalog::{Catalog, Column, DType, ident};
-use crate::formula::{self, AggregateSql, Body, Join, Kind};
+use crate::formula::{self, AggregateSql, Body, Join, Kind, PartScope};
 use crate::links::{Health, Links, PathError};
 use crate::query::{
     self, Agg, Compiled, Dimension, Filter, Grain, Joins, Measure, OutColumn, PartNote, QueryError,
@@ -513,6 +513,9 @@ struct Group {
     members: Vec<Member>,
     /// A plain measure with a ratio or a link of its own: its sub-query is built from that measure.
     lone: bool,
+    /// `TOTAL` or `UNFILTERED` (v5 build 06): the sub-query reads fewer of the tile's groups or filters. It never
+    /// gives the tile its group values; it is joined to them.
+    scope: Option<PartScope>,
 }
 
 impl Group {
@@ -879,10 +882,12 @@ pub fn compile(
             Item::Named(r) => {
                 for p in &r.agg.parts {
                     lookup(catalog, &p.home_table)?;
-                    let g = match groups
-                        .iter()
-                        .position(|g| !g.lone && g.home == p.home_table && g.joins == p.joins)
-                    {
+                    let g = match groups.iter().position(|g| {
+                        !g.lone
+                            && g.home == p.home_table
+                            && g.joins == p.joins
+                            && g.scope == p.scope
+                    }) {
                         Some(g) => g,
                         None => {
                             groups.push(Group {
@@ -890,6 +895,7 @@ pub fn compile(
                                 joins: p.joins.clone(),
                                 members: Vec::new(),
                                 lone: false,
+                                scope: p.scope.clone(),
                             });
                             groups.len() - 1
                         }
@@ -899,10 +905,9 @@ pub fn compile(
                 }
             }
             Item::Plain(m) if m.per.is_none() && m.via.is_none() => {
-                let g = match groups
-                    .iter()
-                    .position(|g| !g.lone && g.home == m.table && g.joins.is_empty())
-                {
+                let g = match groups.iter().position(|g| {
+                    !g.lone && g.home == m.table && g.joins.is_empty() && g.scope.is_none()
+                }) {
                     Some(g) => g,
                     None => {
                         groups.push(Group {
@@ -910,6 +915,7 @@ pub fn compile(
                             joins: Vec::new(),
                             members: Vec::new(),
                             lone: false,
+                            scope: None,
                         });
                         groups.len() - 1
                     }
@@ -929,6 +935,7 @@ pub fn compile(
                             joins: Vec::new(),
                             members: vec![Member::Plain(m.clone())],
                             lone: true,
+                            scope: None,
                         });
                         groups.len() - 1
                     }
@@ -955,11 +962,74 @@ pub fn compile(
         ));
     }
 
+    // A question whose totals all have a TOTAL or an UNFILTERED still has the tile's own group values: they come
+    // from the rows of the first such table under all the filters (v5 build 06).
+    if groups.iter().all(|g| g.scope.is_some()) {
+        let first = &groups[0];
+        groups.push(Group {
+            home: first.home.clone(),
+            joins: first.joins.clone(),
+            members: vec![Member::Plain(count_rows(&first.home))],
+            lone: false,
+            scope: None,
+        });
+    }
+
     // 2. What each group can reach of the groups and the filters of the question.
     let nd = q.dimensions.len();
     let mut read: Vec<Reads> = Vec::new();
     for g in &groups {
         read.push(reads(catalog, env, links, &g.home, q)?);
+    }
+    // What a TOTAL or an UNFILTERED leaves out on purpose: no note says that a part is not split or not filtered
+    // by it (v5 build 06, V5-D8).
+    let mut dropped_dims = vec![vec![false; nd]; groups.len()];
+    // The parts that have no value on this tile, and why.
+    let mut blank_groups: Vec<(usize, String)> = Vec::new();
+    let mut dropped_filters = vec![vec![false; q.filters.len()]; groups.len()];
+    for (gi, g) in groups.iter().enumerate() {
+        match &g.scope {
+            Some(PartScope::Total(keep)) => {
+                let named = |t: &str, c: &str| keep.iter().any(|k| k.0 == t && k.1 == c);
+                // A column the tile is not grouped by (a tile by store, or the total row of a table): the value is
+                // blank, and the tile says why. The grand total would be the wrong answer. A filter that keeps one
+                // value of it (a filter tile on one region, a drill into it) is as good as the group.
+                if let Some(k) = keep.iter().find(|k| {
+                    !q.dimensions
+                        .iter()
+                        .any(|d| d.table == k.0 && d.column == k.1)
+                        && !q.filters.iter().any(|f| {
+                            f.table == k.0
+                                && f.column == k.1
+                                && f.op == query::FilterOp::In
+                                && f.values.len() == 1
+                        })
+                }) {
+                    blank_groups.push((
+                        gi,
+                        format!(
+                            "TOTAL keeps the groups of {}, but this tile is not grouped by it, so the value is blank. Group the tile by it too, or leave it out of TOTAL.",
+                            column_label(catalog, &k.0, &k.1)
+                        ),
+                    ));
+                }
+                for (i, d) in q.dimensions.iter().enumerate() {
+                    if !named(&d.table, &d.column) {
+                        read[gi].dims[i] = None;
+                        dropped_dims[gi][i] = true;
+                    }
+                }
+            }
+            Some(PartScope::Unfiltered(drop)) => {
+                for (j, f) in q.filters.iter().enumerate() {
+                    if drop.is_empty() || drop.iter().any(|k| k.0 == f.table && k.1 == f.column) {
+                        read[gi].filters[j] = None;
+                        dropped_filters[gi][j] = true;
+                    }
+                }
+            }
+            None => {}
+        }
     }
     // A group that no table can reach is an error, in the words a plain question gives.
     for (i, d) in q.dimensions.iter().enumerate() {
@@ -1043,7 +1113,10 @@ pub fn compile(
         };
         let period = main.and_then(|c| env.grains.get(&(g.home.clone(), c.name.clone())).copied());
         for (i, d) in q.dimensions.iter().enumerate() {
-            if read[gi].dims[i].is_none() && read.iter().any(|r| r.dims[i].is_some()) {
+            if read[gi].dims[i].is_none()
+                && !dropped_dims[gi][i]
+                && read.iter().any(|r| r.dims[i].is_some())
+            {
                 let c = column_label(catalog, &d.table, &d.column);
                 let time = d.grain.is_some() && is_main(catalog, env, &d.table, &d.column);
                 // This table has the same value for every group: the groups do not add up (V4-D99a).
@@ -1089,6 +1162,7 @@ pub fn compile(
         }
         for (j, f) in q.filters.iter().enumerate() {
             if read[gi].filters[j].is_none()
+                && !dropped_filters[gi][j]
                 && catalog.table(&f.table).is_some()
                 && read.iter().any(|r| r.filters[j].is_some())
             {
@@ -1126,6 +1200,24 @@ pub fn compile(
                     measure: j,
                     note: n.clone(),
                     repeats: *repeats,
+                    overlap: false,
+                    split_only: false,
+                };
+                if !parts.contains(&p) {
+                    parts.push(p);
+                }
+            }
+        }
+    }
+
+    // A TOTAL that keeps a group the tile does not have: the measure is blank, and says why (v5 build 06).
+    for (j, mine) in slots.iter().enumerate() {
+        for (g, words) in &blank_groups {
+            if mine.iter().any(|s| s.group == *g) {
+                let p = PartNote {
+                    measure: j,
+                    note: words.clone(),
+                    repeats: false,
                     overlap: false,
                     split_only: false,
                 };
@@ -1234,7 +1326,7 @@ pub fn compile(
         Item::Plain(_) => true,
     });
     let order = order_limit(q, columns.len(), &ordered, true);
-    if groups.len() == 1 && one_total_each {
+    if groups.len() == 1 && one_total_each && groups[0].scope.is_none() {
         // The fast path: one SELECT, as a plain question from the table is.
         let sc = &scopes[0];
         let mut select = Vec::new();
@@ -1311,8 +1403,10 @@ pub fn compile(
 
     // The group values of the tile: the sub-queries that reach all of them, side by side.
     let has = |gi: usize, i: usize| dim_exprs[gi][i].is_some();
+    // A part with a TOTAL or an UNFILTERED never gives the tile its group values: an UNFILTERED part would bring back
+    // a store the filters took away. It is joined to the values the other parts give.
     let full: Vec<usize> = (0..groups.len())
-        .filter(|&gi| (0..nd).all(|i| has(gi, i)))
+        .filter(|&gi| groups[gi].scope.is_none() && (0..nd).all(|i| has(gi, i)))
         .collect();
     let d = |gi: usize, i: usize| format!("g{gi}.{}", ident(&format!("d{i}")));
     let mut from = String::new();
@@ -1359,7 +1453,7 @@ pub fn compile(
         let extra: Vec<usize> = partial
             .iter()
             .copied()
-            .filter(|&g| (0..nd).any(|i| has(g, i)))
+            .filter(|&g| groups[g].scope.is_none() && (0..nd).any(|i| has(g, i)))
             .collect();
         if !extra.is_empty() {
             let own: Vec<String> = (0..nd)
@@ -1404,7 +1498,10 @@ pub fn compile(
         // No sub-query reaches all the groups: every value of each group, in every combination.
         let mut sources = Vec::new();
         for i in 0..nd {
-            let gi = (0..groups.len()).find(|&g| has(g, i)).unwrap_or(0);
+            let gi = (0..groups.len())
+                .find(|&g| groups[g].scope.is_none() && has(g, i))
+                .or_else(|| (0..groups.len()).find(|&g| has(g, i)))
+                .unwrap_or(0);
             sources.push(format!(
                 "(SELECT DISTINCT {} AS {} FROM g{gi}) AS k{i}",
                 d(gi, i),
@@ -1439,7 +1536,13 @@ pub fn compile(
         select.push(format!("{k} AS {}", ident(&format!("d{i}"))));
     }
     for (j, item) in items.iter().enumerate() {
-        let value = |s: &Slot| format!("g{}.{}", s.group, ident(&format!("v{}", s.member)));
+        let value = |s: &Slot| {
+            if blank_groups.iter().any(|(g, _)| *g == s.group) {
+                "CAST(NULL AS DOUBLE)".to_string()
+            } else {
+                format!("g{}.{}", s.group, ident(&format!("v{}", s.member)))
+            }
+        };
         let expr = match item {
             Item::Named(r) => {
                 let vals: Vec<String> = slots[j].iter().map(value).collect();

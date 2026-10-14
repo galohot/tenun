@@ -230,7 +230,8 @@ Where a function wants text, a number or a date is turned into text the same way
 
 ### Totals (measures and group values)
 
-A total reads many rows and gives one number. In a calculated column it is an error.
+A total reads many rows and gives one number. In a calculated column, a total adds up the rows of a table that
+points to that column's table (see [A total per row](#a-total-per-row)); its own rows belong in a measure.
 
 - `SUM(x)`, `AVERAGE(x)`: the sum and the mean of a number column.
   Measure example: `SUM([Orders].[amount])`
@@ -265,6 +266,19 @@ in one total must lead, many to one, from one table.
 
 The same total written twice is worked out once.
 
+### Totals over more of the data (measures only)
+
+A tile works out each total for its groups and under its filters. These two change that for one total. Each takes
+one total, like `SUM(…)`, and does not go inside the other. See
+[Totals of a bigger group](#totals-of-a-bigger-group).
+
+- `TOTAL(t)`: the total `t` over all the tile's groups, under the same filters. `TOTAL(t, [col], …)` keeps only the
+  tile's groups on the columns named. The tile must be grouped by each column named.
+  Measure example: `SUM([Orders].[amount]) / TOTAL(SUM([Orders].[amount]))`
+- `UNFILTERED(t)`: the total `t` with no filter of the dashboard, no click and no filter tile. The tile's groups stay.
+  `UNFILTERED(t, [col], …)` leaves out only the filters on the columns named.
+  Measure example: `UNFILTERED(SUM([Orders].[amount]))`
+
 ### Parameters (measures only)
 
 A parameter is a number or a choice that a reader moves on a dashboard (Advanced). Make one in **Data**, under
@@ -281,9 +295,9 @@ In a calculated column, `[Table].[Column]` reads the one row it relates to, like
 
 Example: `[amount] / [Stores].[rent]`
 
-A formula goes from the many side to the one side and never the other way. That holds for a link
-table too (see [relationships](relationships.md#many-to-many-with-a-link-table)): a formula does not
-cross it. A chart can group by a table behind a link table, and a measure works with that group,
+A formula reads one value from the many side to the one side. The other way there are many values, so a formula
+adds them up with a total: see [A total per row](#a-total-per-row). A formula does not cross a link table (see
+[relationships](relationships.md#many-to-many-with-a-link-table)). A chart can group by a table behind a link table, and a measure works with that group,
 because each of its tables is totalled on its own.
 
 ## Add a column
@@ -499,6 +513,67 @@ finer than months: only the first day of each month has a target, and the note s
   them, and a tile that uses one says why it does not work.
 - A measure is a formula only. There is no SQL mode for measures.
 - A target on a number tile for a value written as a percent is typed as 95 for 95 %.
+
+## Totals of a bigger group
+
+A tile works out each total for its own groups and under its own filters. Two functions change that for one total
+inside a measure, so a measure can compare a group with a bigger one. They answer most of what other tools do with
+filter-context languages, with no new idea to learn.
+
+### Share of its group: TOTAL
+
+`TOTAL(t)` is the total `t` over all the tile's groups, under the same filters. `TOTAL(t, [Table].[column], …)`
+keeps only the tile's groups on the columns named.
+
+Share of its region, for each store:
+
+```
+SUM([sales].[revenue]) / TOTAL(SUM([sales].[revenue]), [stores].[region])
+```
+
+Put it in a table or a pivot grouped by region and store. Each store's share is of its own region, so the shares of
+one region add up to 100 %. The tile must be grouped by each column `TOTAL` names, or filtered to one value of it (a
+filter tile on one region, a drill into it). Grouped by store alone, the tile has no region to keep, so the value is
+blank and the tile says why. The total row of a table is blank the same way.
+
+When you only want the share of the whole tile, **Show value as › % of total** needs no formula. Use `TOTAL` when the
+share is part of a bigger formula, or when it is the share of a group level, as above.
+
+### Against everything: UNFILTERED
+
+`UNFILTERED(t)` is the total `t` with no filter of the dashboard, no click and no filter tile. The tile's groups stay.
+`UNFILTERED(t, [Table].[column], …)` leaves out only the filters on the columns named.
+
+Java against all regions, on a page with a region filter:
+
+```
+SUM([sales].[revenue]) / UNFILTERED(SUM([sales].[revenue]), [stores].[region])
+```
+
+With Java picked, this is Java's share of all regions, and the date filter still holds. Without the column, the
+date filter goes too.
+
+Rules:
+
+- Each takes one total, like `SUM(…)`, and they do not go inside each other.
+- They belong in measures. A calculated column has no tile.
+- A total over more of the data is the same for many groups, so a measure that uses one is not added up: **% of
+  total** and running totals are not offered for it.
+- A total of another table counts each of its rows once, as every total does: `TOTAL(SUM([targets].[target]))`
+  is the sum of the targets, however many sales each store has.
+
+### A total per row
+
+In a calculated column, a total adds up the rows of a table that points to the column's table with one link. In
+`stores`, `SUM([sales].[revenue])` is each store's revenue over all its sales. In a customers table,
+`SUM([orders].[amount])` is each customer's lifetime value.
+
+- It reads every row of the other table: no filter of a page changes it. It is worked out when the data loads, like
+  every calculated column, and again when the other table changes.
+- A row with no related rows gets 0 for a sum or a count, and blank for an average.
+- The new column works like any other: group by it, bin it in a histogram, filter by it.
+- Only a table that points straight to this one, with one link. A table two links away, or behind a link table, is
+  refused in words: add the column to the table in between first.
 
 ## Parameters and what-if
 

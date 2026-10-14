@@ -240,6 +240,18 @@ pub struct Part {
     /// filled cells. An average, a middle value, a distinct count, a least or a most do not. A
     /// share of the whole, a running total and a pile of bars are only right for these.
     pub additive: bool,
+    /// `TOTAL` or `UNFILTERED` around the aggregate (v5 build 06): the part is worked out over fewer of the tile's
+    /// groups, or without some of its filters. Not set: as the tile asks.
+    pub scope: Option<PartScope>,
+}
+
+/// What a part keeps of the tile it is asked for (v5 build 06, V5-D8). The columns are (table id, column).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PartScope {
+    /// `TOTAL(t, [col]…)`: only the tile's groups on these columns; none named, no group at all.
+    Total(Vec<(String, String)>),
+    /// `UNFILTERED(t, [col]…)`: the tile's filters on these columns are dropped; none named, every filter.
+    Unfiltered(Vec<(String, String)>),
 }
 
 impl AggregateSql {

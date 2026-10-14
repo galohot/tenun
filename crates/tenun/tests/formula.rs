@@ -158,7 +158,7 @@ fn the_engine_rejects_a_total_in_a_column_and_a_bare_column_in_a_measure() {
         a.error
             .unwrap()
             .message
-            .starts_with("SUM works over many rows")
+            .starts_with("SUM over the rows of orders belongs in a measure")
     );
     let b = check(&e, "[orders].[amount] / 2", Kind::Measure, None);
     assert_eq!(

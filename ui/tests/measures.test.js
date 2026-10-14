@@ -304,9 +304,9 @@ test('the formula field offers the tables of a measure, which has no table of it
   assert.ok(fns.items.some((i) => i.label === 'SUM'));
   // The totals come first in a measure: SU offers SUM, then SUBSTITUTE.
   assert.deepEqual(fns.items.map((i) => i.label).slice(0, 3), ['SUM', 'SUMIF', 'SUBSTITUTE']);
-  // A column has no totals, so it is offered the row functions only.
+  // A column offers the row functions first; its totals add up a related table (v5 build 06).
   const colScope = { ...scope, table: tables[0], kind: 'column' };
-  assert.ok(!suggest('SU', 2, colScope).items.some((i) => i.label === 'SUM'));
+  assert.deepEqual(suggest('SU', 2, colScope).items.map((i) => i.label), ['SUBSTITUTE', 'SUM', 'SUMIF']);
 });
 
 test('V4-D85d: the small bars of a bar chart are summed into Other only when their values add up', () => {

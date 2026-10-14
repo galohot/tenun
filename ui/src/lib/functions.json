@@ -396,6 +396,18 @@
   "hint": "The number of rows of a table."
  },
  {
+  "name": "TOTAL",
+  "args": "total, [column], …",
+  "class": "row",
+  "hint": "The total over all the tile's groups, or only those on the columns named."
+ },
+ {
+  "name": "UNFILTERED",
+  "args": "total, [column], …",
+  "class": "row",
+  "hint": "The total without the tile's filters, or without those on the columns named."
+ },
+ {
   "name": "PARAM",
   "args": "name",
   "class": "row",

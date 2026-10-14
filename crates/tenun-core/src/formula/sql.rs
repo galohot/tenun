@@ -22,7 +22,9 @@
 use super::check::{TExpr, TNode, Ty, Typed, unify};
 use super::functions::{emit, emit_aggregate};
 use super::parse::{BinOp, UnOp};
-use super::{AggregateSql, Body, ColumnSql, Compiled, Context, FormulaError, Join, Kind, Part};
+use super::{
+    AggregateSql, Body, ColumnSql, Compiled, Context, FormulaError, Join, Kind, Part, PartScope,
+};
 use crate::catalog::{ident, lit};
 use crate::links::{Paths, join_on};
 
@@ -43,6 +45,7 @@ pub fn compile_within(
     let (body, size) = if typed.kind == Kind::Column {
         let home = typed.table.as_deref().expect("a column has a table");
         let mut g = Gen::new(cx, home);
+        g.column_of = Some(home.to_string());
         let sql = finish(g.expr(&typed.root), ty);
         let size = sql.len() + g.plan.joins.iter().map(|j| j.on.len()).sum::<usize>();
         (
@@ -182,6 +185,8 @@ pub(crate) struct Gen<'a> {
     next_var: usize,
     /// The columns read so far, as (table id, column): what a part of a measure reads (V4-D103).
     reads: Vec<(String, String)>,
+    /// Writing a calculated column of this table: a total in it adds up a related table (v5 build 06).
+    column_of: Option<String>,
 }
 
 /// True for a value that costs nothing to write again: a number, a text, a column, a name.
@@ -213,6 +218,7 @@ impl<'a> Gen<'a> {
             parts: Vec::new(),
             next_var: 0,
             reads: Vec::new(),
+            column_of: None,
         }
     }
 
@@ -250,12 +256,27 @@ impl<'a> Gen<'a> {
             }
             TNode::Bin(op, l, r) => self.binary(*op, l, r),
             TNode::Call { name, args } => emit(self, name, args, e.ty),
-            TNode::Agg { name, args, home } => self.aggregate(name, args, home, e.ty),
+            TNode::Agg {
+                name,
+                args,
+                home,
+                scope,
+            } => match self.column_of.clone() {
+                Some(table) => self.related_total(&table, name, args, home),
+                None => self.aggregate(name, args, home, scope, e.ty),
+            },
         }
     }
 
     /// An aggregate becomes a part of its own, over its home table. Here it is a placeholder.
-    fn aggregate(&mut self, name: &str, args: &[TExpr], home: &str, ty: Ty) -> String {
+    fn aggregate(
+        &mut self,
+        name: &str,
+        args: &[TExpr],
+        home: &str,
+        scope: &Option<PartScope>,
+        ty: Ty,
+    ) -> String {
         let mut sub = Gen::new(self.cx, home);
         let sql = emit_aggregate(&mut sub, name, args);
         let part = Part {
@@ -269,10 +290,13 @@ impl<'a> Gen<'a> {
                 name,
                 "SUM" | "SUMIF" | "COUNT" | "COUNTA" | "COUNTD" | "COUNTIF" | "COUNTROWS"
             ),
-            additive: matches!(
-                name,
-                "SUM" | "SUMIF" | "COUNT" | "COUNTA" | "COUNTIF" | "COUNTROWS"
-            ),
+            // A total over fewer groups or filters is the same for many groups: they do not add up to it.
+            additive: scope.is_none()
+                && matches!(
+                    name,
+                    "SUM" | "SUMIF" | "COUNT" | "COUNTA" | "COUNTIF" | "COUNTROWS"
+                ),
+            scope: scope.clone(),
         };
         let i = match self.parts.iter().position(|p| *p == part) {
             Some(i) => i,
@@ -282,6 +306,80 @@ impl<'a> Gen<'a> {
             }
         };
         format!("$p{i}")
+    }
+
+    /// A total in a calculated column of `table` (v5 build 06): the rows of `home`, which points to `table` with one
+    /// link, grouped by that link's key in a sub-query that is joined to each row. A row with no related rows gets 0
+    /// for a sum or a count, and blank for the rest. The checker made sure there is exactly one such link.
+    fn related_total(&mut self, table: &str, name: &str, args: &[TExpr], home: &str) -> String {
+        let links = self.cx.links();
+        let (Some(rel), Some(many), Some(one)) = (
+            self.cx
+                .rels
+                .iter()
+                .find(|r| r.from.table == home && r.to.table == table && links.usable(r)),
+            self.cx.catalog.table(home),
+            self.cx.catalog.table(table),
+        ) else {
+            return typed_null(Ty::Num);
+        };
+        let (Some(fk), Some(pk)) = (many.column(&rel.from.column), one.column(&rel.to.column))
+        else {
+            return typed_null(Ty::Num);
+        };
+        let mut sub = Gen::new(self.cx, home);
+        let agg = emit_aggregate(&mut sub, name, args);
+        for r in sub.reads.drain(..) {
+            if !self.reads.contains(&r) {
+                self.reads.push(r);
+            }
+        }
+        let mut from = format!(
+            "(SELECT t0.{} AS k, {agg} AS v FROM {} AS t0",
+            ident(&rel.from.column),
+            many.sql_ref
+        );
+        for j in &sub.plan.joins {
+            from.push_str(&j.to_sql());
+        }
+        from.push_str(" GROUP BY 1)");
+        // The same total written twice is one sub-query.
+        let alias = match self.plan.joins.iter().find(|j| j.sql_ref == from) {
+            Some(j) => j.alias.clone(),
+            None => {
+                let n = self
+                    .plan
+                    .joins
+                    .iter()
+                    .filter(|j| j.alias.starts_with('u'))
+                    .count();
+                let alias = format!("u{}", n + 1);
+                let on = join_on(
+                    &format!("t0.{}", ident(&rel.to.column)),
+                    &format!("{alias}.k"),
+                    pk.dtype,
+                    fk.dtype,
+                );
+                self.plan.joins.push(Join {
+                    table: home.to_string(),
+                    sql_ref: from,
+                    alias: alias.clone(),
+                    on,
+                    rel: rel.id.clone(),
+                    warn: false,
+                });
+                alias
+            }
+        };
+        let zero = matches!(
+            name,
+            "SUM" | "SUMIF" | "COUNT" | "COUNTA" | "COUNTD" | "COUNTIF" | "COUNTROWS"
+        );
+        if zero {
+            format!("COALESCE({alias}.v, 0e0)")
+        } else {
+            format!("{alias}.v")
+        }
     }
 
     /// The value as the kind `ty`. A date becomes a date and time when the other side is one,

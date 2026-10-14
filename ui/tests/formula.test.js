@@ -67,8 +67,8 @@ function at(text) {
 }
 
 test('the function list has every function once, with a signature', () => {
-  assert.equal(FUNCTIONS.length, 67);
-  assert.equal(new Set(FUNCTIONS.map((x) => x.name)).size, 67);
+  assert.equal(FUNCTIONS.length, 69);
+  assert.equal(new Set(FUNCTIONS.map((x) => x.name)).size, 69);
   assert.equal(signature(FUNCTIONS.find((x) => x.name === 'IF')), 'IF(test, a, [b])');
   assert.equal(signature(FUNCTIONS.find((x) => x.name === 'TODAY')), 'TODAY()');
 });
@@ -179,8 +179,15 @@ test('a word outside brackets offers the functions that start with it', () => {
   const t = suggest('TOD', 3, scope);
   const d = apply('TOD', t, t.items[0]);
   assert.deepEqual(d, { text: 'TODAY()', caret: 7 });
-  // Totals belong to measures.
-  assert.equal(suggest('SUM', 3, scope), null);
+  // In a column a total adds up a related table (v5 build 06): offered after the row functions that match.
+  assert.deepEqual(
+    suggest('SU', 2, scope).items.map((i) => i.label),
+    ['SUBSTITUTE', 'SUM', 'SUMIF'],
+  );
+  // TOTAL, UNFILTERED and PARAM belong to measures.
+  assert.equal(suggest('TOT', 3, scope), null);
+  assert.equal(suggest('PAR', 3, scope), null);
+  assert.ok(suggest('TOT', 3, scopeOf(oneLink, 'measure')).items.some((i) => i.label === 'TOTAL'));
   assert.ok(suggest('SUM', 3, scopeOf(oneLink, 'measure')).items.some((i) => i.label === 'SUMIF'));
   // Case does not matter, and what is typed in full with its bracket needs no help.
   assert.equal(suggest('rou', 3, scope).items[0].label, 'ROUND');
