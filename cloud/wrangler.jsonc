@@ -15,6 +15,7 @@
   "r2_buckets": [{ "binding": "SNAPSHOTS", "bucket_name": "tenun-snapshots" }],
   "triggers": { "crons": ["17 3 * * *"] },
   // Sign-in stays closed until the Akun keys are set as secrets and SIGNIN is switched to "open".
-  "vars": { "SIGNIN": "closed" },
+  // Email updates stay off until the paid Workers plan and the Email Service are set up (V5-D16, V5-D23).
+  "vars": { "SIGNIN": "closed", "EMAIL_UPDATES": "off" },
   "observability": { "enabled": true }
 }

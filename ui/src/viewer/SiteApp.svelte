@@ -14,7 +14,7 @@
   import SiteFrame from '../components/site/SiteFrame.svelte';
   import Viewer from './Viewer.svelte';
 
-  let { data, hosted = null }: { data: SitePayload; hosted?: { updated: string; source: string; every: number | null } | null } = $props();
+  let { data, hosted = null }: { data: SitePayload; hosted?: { updated: string; source: string; every: number | null; updates?: string | null } | null } = $props();
 
   // The pages as the navigation needs them: a title and whether the navigation shows it.
   const hidden = $derived(new Set(data.hidden ?? []));

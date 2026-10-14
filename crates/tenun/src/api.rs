@@ -1149,12 +1149,14 @@ async fn cloud_status(State(s): S) -> R<Json<Value>> {
     let v = blocking(&s, |st| {
         let conn = cloud::connection(&st.secrets, &st.cloud_base);
         // How much of the free plan is used; the app works without it when offline.
-        let usage = conn.as_ref().and_then(|(token, _)| {
-            let me = cloud::Client::new(st.cloud_base.clone()).me(token).ok()?;
-            Some(json!({
+        let me = conn
+            .as_ref()
+            .and_then(|(token, _)| cloud::Client::new(st.cloud_base.clone()).me(token).ok());
+        let usage = me.as_ref().map(|me| {
+            json!({
                 "dashboards": me["dashboards"].as_array().map(|a| a.len()).unwrap_or(0),
                 "limit": me["limits"]["dashboards"],
-            }))
+            })
         });
         Ok(json!({
             "base": st.cloud_base,
@@ -1162,6 +1164,8 @@ async fn cloud_status(State(s): S) -> R<Json<Value>> {
             "email": conn.map(|c| c.1),
             "source": cloud::source_label(),
             "usage": usage,
+            // Email updates are sent once tenun.cloud turns them on (v5 build 13).
+            "emailUpdates": me.as_ref().and_then(|m| m["emailUpdates"].as_bool()).unwrap_or(false),
         }))
     })
     .await?;

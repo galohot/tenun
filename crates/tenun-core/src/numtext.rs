@@ -231,6 +231,18 @@ fn percent_text(n: f64, loc: Locale, f: &NumFormat) -> String {
     format!("{}{body}%", if v < 0.0 && !zero { "−" } else { "" })
 }
 
+/// A change as a number tile writes it after its arrow: 0.042 → "4.2%", 0.31 → "31%" (one decimal under 10 %).
+pub fn change_pct(delta: f64, loc: Locale) -> String {
+    let d = if delta.abs() < 0.1 { 1 } else { 0 };
+    let (whole, kept) = fixed((delta * 100.0).abs(), d);
+    let (dec, _) = marks(loc);
+    if kept.is_empty() {
+        format!("{whole}%")
+    } else {
+        format!("{whole}{dec}{kept}%")
+    }
+}
+
 /// The short form, as a number tile shows it: 18.4K, 1,2 jt, Rp 1,2 jt. `compact: false` keeps every digit.
 pub fn short(n: f64, loc: Locale, f: &NumFormat) -> String {
     if !n.is_finite() {

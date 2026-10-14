@@ -16,6 +16,7 @@ pub mod folder;
 pub mod formula;
 pub mod geo;
 pub mod jsonrec;
+pub mod labels;
 pub mod links;
 pub mod maptile;
 pub mod measures;

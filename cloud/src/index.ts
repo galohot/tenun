@@ -7,6 +7,7 @@ import type { HonoEnv } from './env';
 import { LIMITS, type Kind } from './env';
 import { accountPage, connectPage, hostedShell, notice, page, passwordPage, type DashRow, type TokenRow } from './pages';
 import { OPEN_SECONDS, TRIES, checkPassword, cookieName, cookieValue, triesOf, whoOf, wrongTry } from './password';
+import { emailOn, sendScheduled } from './mail';
 import { now, rid, sha256 } from './util';
 
 const app = new Hono<HonoEnv>();
@@ -37,7 +38,27 @@ app.use('*', loadAccount);
 app.route('/auth', auth);
 app.route('/api/v1', api);
 
-app.get('/api/v1/health', (c) => c.json({ ok: true, service: 'tenun.cloud', limits: LIMITS }));
+app.get('/api/v1/health', (c) => c.json({ ok: true, service: 'tenun.cloud', limits: LIMITS, emailUpdates: emailOn(c.env) }));
+
+// ---- one-click unsubscribe (v5 build 13) -------------------------------------------
+
+/** Stops the email updates of one recipient of one item. The token in the link is the only key. */
+async function unsubscribe(c: Context<HonoEnv>) {
+  const token = c.req.param('token') ?? '';
+  const r = await c.env.DB.prepare('SELECT r.dashboard_id, d.title FROM recipients r JOIN dashboards d ON d.id = r.dashboard_id WHERE r.token = ?1')
+    .bind(token)
+    .first<{ dashboard_id: string; title: string }>();
+  if (r) await c.env.DB.prepare('UPDATE recipients SET active = 0 WHERE token = ?1').bind(token).run();
+  return r;
+}
+
+app.get('/u/:token', async (c) => {
+  const r = await unsubscribe(c);
+  if (!r) return c.html(notice('Not found', 'This link does not stop any email updates any more.', 'warn'), 404);
+  return c.html(notice('No more emails', `You will get no more email updates about “${r.title.replace(/[<>&"]/g, '')}”.`, 'ok'));
+});
+// The one-click unsubscribe of mail apps (RFC 8058) posts to the same link.
+app.post('/u/:token', async (c) => ((await unsubscribe(c)) ? c.text('Unsubscribed') : c.text('Not found', 404)));
 
 // ---- device approval --------------------------------------------------------
 
@@ -133,7 +154,9 @@ async function hosted(c: Context<HonoEnv>, kind: Kind) {
   }
   if (!row.version) return c.html(notice('Not published yet', `The owner has not published this ${what} yet.`, 'warn'), 404);
   c.header('cache-control', 'private, no-cache');
-  return c.html(hostedShell(row));
+  // Invited readers may ask for email updates on the page, when the owner offers them and tenun.cloud sends them.
+  const updates = emailOn(c.env) && row.access === 'invited' && !!row.updates && row.updates !== 'off' && !!c.get('account');
+  return c.html(hostedShell(row, { updates }));
 }
 
 app.get('/d/:id', (c) => hosted(c, 'dashboard'));
@@ -189,13 +212,16 @@ app.notFound(async (c) => {
 
 export default {
   fetch: app.fetch,
-  /** Daily: delete publish records older than a day, devices that expired, and wrong passwords older than a minute. */
-  async scheduled(_e: ScheduledController, env: HonoEnv['Bindings']) {
-    const t = now();
+  /** Daily: delete publish records older than a day, devices that expired, and wrong passwords older than a minute; send the
+   *  daily and weekly email updates. */
+  async scheduled(e: ScheduledController, env: HonoEnv['Bindings']) {
+    const t = e.scheduledTime || now();
     await env.DB.batch([
       env.DB.prepare('DELETE FROM publishes WHERE at < ?1').bind(t - 86400_000),
       env.DB.prepare('DELETE FROM devices WHERE expires_at < ?1').bind(t),
       env.DB.prepare('DELETE FROM unlock_tries WHERE at < ?1').bind(t - 60_000),
     ]);
+    // Daily and weekly email updates (v5 build 13); nothing while they are off.
+    await sendScheduled(env, t).catch(() => 0);
   },
 } satisfies ExportedHandler<HonoEnv['Bindings']>;

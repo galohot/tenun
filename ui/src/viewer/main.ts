@@ -33,7 +33,8 @@ async function start() {
   // The maps the file carries are drawn from it, with no network (build 06).
   useCarried(data.geo);
   const every = Number(meta('tenun-every')) || null;
-  const hosted = url ? { updated: meta('tenun-updated') || data.generated, source: meta('tenun-source'), every } : null;
+  // An invited reader may ask for email updates (v5 build 13): the page says where.
+  const hosted = url ? { updated: meta('tenun-updated') || data.generated, source: meta('tenun-source'), every, updates: meta('tenun-updates') || null } : null;
   // A whole site (build 13): its navigation around the page the address names. On tenun.cloud (build 14), each page
   // says how fresh it is, as a hosted dashboard does.
   if ((data as unknown as SitePayload).kind === 'site') {

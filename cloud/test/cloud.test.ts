@@ -7,7 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 let mf: Miniflare;
 const ORIGIN = 'https://tenun.cloud';
 
-async function boot(vars: Record<string, string>) {
+/** Emails the Worker hands to its `MAIL_OUTBOX` stand-in, for each instance. */
+type Sent = { to: string; subject: string; text: string; html: string; headers: Record<string, string> };
+
+async function boot(vars: Record<string, string>, outbox: Sent[] = []) {
   const m = new Miniflare({
     modules: true,
     scriptPath: '.build/worker.js',
@@ -15,7 +18,13 @@ async function boot(vars: Record<string, string>) {
     d1Databases: { DB: 'db' },
     r2Buckets: ['SNAPSHOTS'],
     bindings: { SESSION_SECRET: 'test-secret-that-is-long-enough', ...vars },
-    serviceBindings: { ASSETS: async () => new Response('missing', { status: 404 }) },
+    serviceBindings: {
+      ASSETS: async () => new Response('missing', { status: 404 }),
+      MAIL_OUTBOX: async (r: Request) => {
+        outbox.push((await r.json()) as Sent);
+        return new Response('ok');
+      },
+    },
   });
   const db = await m.getD1Database('DB');
   // Every migration, in order.
@@ -92,8 +101,11 @@ async function objects(prefix: string) {
   return (await bucket.list({ prefix })).objects.map((o) => o.key);
 }
 
+/** What the instance with email updates off was asked to send: it must stay empty. */
+const offOutbox: Sent[] = [];
+
 beforeAll(async () => {
-  mf = await boot({ SIGNIN: 'dev', DEV_LOGIN: '1' });
+  mf = await boot({ SIGNIN: 'dev', DEV_LOGIN: '1' }, offOutbox);
 });
 afterAll(async () => {
   await mf.dispose();
@@ -419,6 +431,151 @@ describe('tenun.cloud', () => {
     expect(r.status).toBe(302);
     expect(await objects(`snap/${id}/`)).toEqual([]);
     expect((await req('/api/v1/me', { headers: auth(token) })).status).toBe(401);
+  });
+});
+
+/** A digest as the app sends it beside a snapshot: base64 (URL alphabet) of JSON. */
+const digestHeader = (d: unknown) => Buffer.from(JSON.stringify(d)).toString('base64url');
+const DIGEST = {
+  title: 'Shops',
+  items: [
+    { name: 'Amount', value: '18.4K', change: '▲ 6.3% vs Sep 1–14', period: 'Oct 1–14, 2026, so far' },
+    { name: 'Number of orders', value: '475' },
+  ],
+};
+
+async function publishWith(token: string, id: string, n: number, digest: unknown = DIGEST) {
+  return req(`/api/v1/dashboards/${id}/snapshot`, {
+    method: 'PUT',
+    headers: { ...auth(token), 'content-type': 'application/gzip', 'x-tenun-generated': '2026-10-14T09:00:00Z', 'x-tenun-digest': digestHeader(digest) },
+    body: snapshot(n),
+  });
+}
+
+async function invitedItem(owner: string, updates: string, invites: string[]) {
+  const token = await connect(owner);
+  const { id } = (await (await req('/api/v1/dashboards', { method: 'POST', headers: auth(token), body: JSON.stringify({ title: 'Shops' }) })).json()) as { id: string };
+  const patch = await req(`/api/v1/dashboards/${id}`, { method: 'PATCH', headers: auth(token), body: JSON.stringify({ access: 'invited', invites, updates }) });
+  expect(patch.status).toBe(200);
+  return { token, id };
+}
+
+const optIn = (id: string, cookie: string, on?: boolean) =>
+  on === undefined
+    ? req(`/api/v1/d/${id}/updates`, { cookie })
+    : req(`/api/v1/d/${id}/updates`, { method: 'POST', cookie, headers: { origin: ORIGIN }, body: JSON.stringify({ on }) });
+
+describe('email updates (v5 build 13)', () => {
+  const outbox: Sent[] = [];
+  let off: Miniflare;
+  beforeAll(async () => {
+    off = mf;
+    mf = await boot({ SIGNIN: 'dev', DEV_LOGIN: '1', EMAIL_UPDATES: 'on' }, outbox);
+  });
+  afterAll(async () => {
+    await mf.dispose();
+    mf = off;
+  });
+
+  it('sends the new numbers after each update, at most once a day, to the owner and the invited people who asked', async () => {
+    const { token, id } = await invitedItem('mail-owner@example.com', 'each', ['reader@example.com']);
+    expect((await publishWith(token, id, 1)).status).toBe(200);
+    expect(outbox.map((m) => m.to)).toEqual(['mail-owner@example.com']);
+    const m = outbox[0];
+    expect(m.subject).toBe('Shops: updated');
+    // The numbers are the digest's, as the app wrote them, and the link opens the page.
+    expect(m.text).toContain('Amount: 18.4K (Oct 1–14, 2026, so far), ▲ 6.3% vs Sep 1–14');
+    expect(m.text).toContain('Number of orders: 475');
+    expect(m.text).toContain(`Open it: ${ORIGIN}/d/${id}`);
+    expect(m.html).toContain('18.4K');
+    expect(m.headers['List-Unsubscribe']).toMatch(new RegExp(`^<${ORIGIN}/u/[A-Za-z0-9]{32}>$`));
+    expect(m.headers['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click');
+
+    // An invited reader asks on the page (from the page only); a stranger cannot.
+    const reader = await signIn('reader@example.com');
+    expect(((await (await optIn(id, reader)).json()) as { on: boolean }).on).toBe(false);
+    expect((await req(`/api/v1/d/${id}/updates`, { method: 'POST', cookie: reader, body: '{"on":true}' })).status).toBe(403);
+    expect(((await (await optIn(id, reader, true)).json()) as { on: boolean }).on).toBe(true);
+    expect((await optIn(id, await signIn('stranger@example.com'), true)).status).toBe(404);
+    // The page offers it to them.
+    expect(await (await req(`/d/${id}`, { cookie: reader })).text()).toContain(`<meta name="tenun-updates" content="d/${id}">`);
+
+    // The next update today: the owner had one today, the reader had none.
+    await publishWith(token, id, 2);
+    expect(outbox.map((m) => m.to)).toEqual(['mail-owner@example.com', 'reader@example.com']);
+    await publishWith(token, id, 3);
+    expect(outbox.length).toBe(2);
+    // The reader switches it off again.
+    expect(((await (await optIn(id, reader, false)).json()) as { on: boolean }).on).toBe(false);
+  });
+
+  it('stops in one click, and sends daily and weekly updates from the daily run', async () => {
+    outbox.length = 0;
+    const { token, id } = await invitedItem('daily-owner@example.com', 'daily', ['fan@example.com']);
+    await publishWith(token, id, 1);
+    // "Daily" sends nothing after an update.
+    expect(outbox.length).toBe(0);
+    expect(((await (await optIn(id, await signIn('fan@example.com'), true)).json()) as { on: boolean }).on).toBe(true);
+    const worker = await mf.getWorker();
+    const run = (day: string) => worker.scheduled({ scheduledTime: new Date(`${day}T03:17:00Z`), cron: '17 3 * * *' });
+    await run('2026-10-20');
+    expect(outbox.map((m) => m.to).sort()).toEqual(['daily-owner@example.com', 'fan@example.com']);
+    // The owner stops them with the link of the email, as a mail app does (a POST), or by opening it.
+    const link = outbox.find((m) => m.to === 'daily-owner@example.com')!.headers['List-Unsubscribe'].slice(1, -1);
+    const path = new URL(link).pathname;
+    expect((await req(path, { method: 'POST' })).status).toBe(200);
+    const page = await req(path);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('no more email updates about “Shops”');
+    expect((await req('/u/' + 'x'.repeat(32))).status).toBe(404);
+    // Once a day at most: the same day again sends nothing; the next day only the fan gets one.
+    await run('2026-10-20');
+    expect(outbox.length).toBe(2);
+    await run('2026-10-21');
+    expect(outbox.slice(2).map((m) => m.to)).toEqual(['fan@example.com']);
+    // Weekly: on Mondays only.
+    await req(`/api/v1/dashboards/${id}`, { method: 'PATCH', headers: auth(token), body: JSON.stringify({ updates: 'weekly' }) });
+    await run('2026-10-22');
+    expect(outbox.length).toBe(3);
+    await run('2026-10-26');
+    expect(outbox.slice(3).map((m) => m.to)).toEqual(['fan@example.com']);
+  });
+
+  it('offers updates on invited pages only, to at most 10 people with the owner', async () => {
+    const readers = Array.from({ length: 10 }, (_, i) => `r${i}@example.com`);
+    const { token, id } = await invitedItem('many-owner@example.com', 'each', readers);
+    await publishWith(token, id, 1);
+    for (const r of readers.slice(0, 9)) expect((await optIn(id, await signIn(r), true)).status).toBe(200);
+    const last = await optIn(id, await signIn(readers[9]), true);
+    expect(last.status).toBe(403);
+    expect(((await last.json()) as { error: string }).error).toBe('limit');
+    // A page for anyone with the link offers nothing: there is no list of readers to ask.
+    const { id: open } = (await (await req('/api/v1/dashboards', { method: 'POST', headers: auth(token), body: '{}' })).json()) as { id: string };
+    await req(`/api/v1/dashboards/${open}`, { method: 'PATCH', headers: auth(token), body: JSON.stringify({ updates: 'each' }) });
+    expect((await optIn(open, await signIn('r0@example.com'), true)).status).toBe(403);
+    expect((await req(`/api/v1/dashboards/${open}`, { method: 'PATCH', headers: auth(token), body: JSON.stringify({ updates: 'hourly' }) })).status).toBe(400);
+    expect(((await (await req('/api/v1/health')).json()) as { emailUpdates: boolean; limits: { recipients: number } }).limits.recipients).toBe(10);
+  });
+});
+
+describe('email updates while they are off (the default)', () => {
+  it('keeps the setting and the numbers, and sends and offers nothing', async () => {
+    const { token, id } = await invitedItem('quiet-owner@example.com', 'each', ['quiet@example.com']);
+    expect((await publishWith(token, id, 1)).status).toBe(200);
+    expect(offOutbox).toEqual([]);
+    expect(((await (await req('/api/v1/health')).json()) as { emailUpdates: boolean }).emailUpdates).toBe(false);
+    const me = (await (await req('/api/v1/me', { headers: auth(token) })).json()) as { emailUpdates: boolean; dashboards: { updates: string }[] };
+    expect(me.emailUpdates).toBe(false);
+    expect(me.dashboards[0].updates).toBe('each');
+    const reader = await signIn('quiet@example.com');
+    expect((await optIn(id, reader, true)).status).toBe(404);
+    expect(await (await req(`/d/${id}`, { cookie: reader })).text()).not.toContain('tenun-updates');
+    // The digest is kept beside the snapshots, and goes with them.
+    expect(await objects(`snap/${id}/`)).toContain(`snap/${id}/digest.json`);
+    await (await mf.getWorker()).scheduled({ scheduledTime: new Date('2026-10-26T03:17:00Z'), cron: '17 3 * * *' });
+    expect(offOutbox).toEqual([]);
+    expect((await req(`/api/v1/dashboards/${id}`, { method: 'DELETE', headers: auth(token) })).status).toBe(200);
+    expect(await objects(`snap/${id}/`)).toEqual([]);
   });
 });
 

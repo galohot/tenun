@@ -58,7 +58,15 @@
       .split(/[\s,;]+/)
       .map((e) => e.trim().toLowerCase())
       .filter((e) => e.includes('@'));
-    const next: PublishSettings = { ...(current ?? {}), access: ps.access, invites, embed: !!ps.embed, every: ps.every, source: ps.source.trim() };
+    const next: PublishSettings = {
+      ...(current ?? {}),
+      access: ps.access,
+      invites,
+      embed: !!ps.embed,
+      updates: ps.updates ?? 'off',
+      every: ps.every,
+      source: ps.source.trim(),
+    };
     if (forSite) {
       app.saveSite({ ...site, publish: next });
     } else {
@@ -259,6 +267,26 @@
           {:else}
             <p class="muted small">Publish first. The code to put in the other site's page shows here.</p>
           {/if}
+        {/if}
+      </div>
+    {/if}
+
+    {#if advancedOn() || (ps.updates ?? 'off') !== 'off'}
+      <div class="sec">
+        <span class="label">Email updates</span>
+        <select class="field" value={ps.updates ?? 'off'} onchange={(e) => ((ps.updates = e.currentTarget.value as PublishSettings['updates']), save())}>
+          <option value="off">Off</option>
+          <option value="each">After each update</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly, on Monday</option>
+        </select>
+        {#if (ps.updates ?? 'off') !== 'off'}
+          <p class="muted small">
+            The values of the number tiles and the link go to you{ps.access === 'invited' ? ', and to invited people who ask for them on the page' : ''}:
+            at most one email a day for each person, each with a link to stop them.{cloud?.emailUpdates
+              ? ''
+              : ' tenun.cloud does not send emails yet. Your choice is kept, and the emails start when it does.'}
+          </p>
         {/if}
       </div>
     {/if}

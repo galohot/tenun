@@ -7,10 +7,12 @@ import type { DashRow } from './pages';
 import { now, rid, sha256, userCode, validEmail } from './util';
 import { cookie } from './akun/token';
 import { MAX_PASSWORD, MIN_PASSWORD, cookieName, cookieOpens, hashPassword } from './password';
+import { UPDATES, addOwner, digestKey, emailOn, readDigest, sendUpdates } from './mail';
+import { sameOrigin } from './auth';
 
 /** The columns of an item as its owner and the pages read them. A password is access 'password' (v5 build 11). */
 export const ROW_COLUMNS =
-  "id, title, CASE WHEN pw_hash IS NOT NULL AND access = 'link' THEN 'password' ELSE access END AS access, source, every_minutes, version, generated_at, bytes, kind, pages, embed";
+  "id, title, CASE WHEN pw_hash IS NOT NULL AND access = 'link' THEN 'password' ELSE access END AS access, source, every_minutes, version, generated_at, bytes, kind, pages, embed, updates";
 
 export const api = new Hono<HonoEnv>();
 
@@ -86,6 +88,8 @@ api.get('/me', async (c) => {
     email: acc?.email,
     dashboards: results.map((d) => ({ ...d, url: urlOf(origin, d.kind, d.id) })),
     limits: LIMITS,
+    // Email updates are kept as a setting either way; they are sent only when tenun.cloud turns them on (V5-D16).
+    emailUpdates: emailOn(c.env),
   });
 });
 
@@ -132,7 +136,9 @@ async function patchItem(c: Context<HonoEnv>, kind: Kind) {
   if (!who) return fail(c, 401, 'unauthorized');
   const id = c.req.param('id') ?? '';
   if (!(await owned(c, id, who.account, kind))) return fail(c, 404, 'not_found');
-  const b = await c.req.json<{ title?: string; access?: string; invites?: string[]; password?: string; embed?: boolean }>().catch(() => null);
+  const b = await c.req
+    .json<{ title?: string; access?: string; invites?: string[]; password?: string; embed?: boolean; updates?: string }>()
+    .catch(() => null);
   if (!b) return fail(c, 400, 'invalid_json');
   const cur = await c.env.DB.prepare('SELECT access, pw_hash, embed FROM dashboards WHERE id = ?1')
     .bind(id)
@@ -149,6 +155,10 @@ async function patchItem(c: Context<HonoEnv>, kind: Kind) {
     return fail(c, 400, 'embed_invited', { message: 'A dashboard for invited people cannot be embedded: their Google sign-in does not work inside another site.' });
   }
   if (b.embed !== undefined) stmts.push(c.env.DB.prepare('UPDATE dashboards SET embed = ?1 WHERE id = ?2').bind(b.embed ? 1 : 0, id));
+  if (b.updates !== undefined) {
+    if (!(UPDATES as readonly string[]).includes(b.updates)) return fail(c, 400, 'updates must be off, each, daily or weekly');
+    stmts.push(c.env.DB.prepare('UPDATE dashboards SET updates = ?1 WHERE id = ?2').bind(b.updates, id));
+  }
   if (b.access === 'password') {
     // A new password replaces the old one, and the cookies of the old one stop opening it. Without one, the
     // password set before stays; there must be one.
@@ -183,6 +193,11 @@ async function patchItem(c: Context<HonoEnv>, kind: Kind) {
     for (const e of emails) stmts.push(c.env.DB.prepare('INSERT INTO invites (dashboard_id, email) VALUES (?1, ?2)').bind(id, e));
   }
   if (stmts.length) await c.env.DB.batch(stmts);
+  // Its owner gets the updates first (v5 build 13).
+  if (b.updates !== undefined && b.updates !== 'off') {
+    const acc = await c.env.DB.prepare('SELECT email FROM accounts WHERE id = ?1').bind(who.account).first<{ email: string }>();
+    if (acc) await addOwner(c.env, id, acc.email);
+  }
   return json(c, 200, { ok: true });
 }
 
@@ -190,6 +205,7 @@ async function patchItem(c: Context<HonoEnv>, kind: Kind) {
 export async function deleteDashboard(env: HonoEnv['Bindings'], id: string) {
   const { results } = await env.DB.prepare('SELECT version FROM versions WHERE dashboard_id = ?1').bind(id).all<{ version: number }>();
   if (results.length) await env.SNAPSHOTS.delete(results.map((r) => snapKey(id, r.version)));
+  await env.SNAPSHOTS.delete(digestKey(id));
   await env.DB.prepare('DELETE FROM dashboards WHERE id = ?1').bind(id).run();
 }
 
@@ -248,6 +264,9 @@ async function putSnapshot(c: Context<HonoEnv>, kind: Kind) {
   await c.env.SNAPSHOTS.put(snapKey(id, version), bytes, {
     httpMetadata: { contentType: 'application/json', contentEncoding: 'gzip' },
   });
+  // The numbers an email update holds, as the app wrote them (v5 build 13): the Worker never parses a snapshot.
+  const digest = readDigest(c.req.header('x-tenun-digest'));
+  if (digest) await c.env.SNAPSHOTS.put(digestKey(id), JSON.stringify(digest), { httpMetadata: { contentType: 'application/json' } });
   const stmts = [
     c.env.DB.prepare('INSERT INTO versions (dashboard_id, version, bytes, generated_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5)').bind(
       id,
@@ -272,7 +291,54 @@ async function putSnapshot(c: Context<HonoEnv>, kind: Kind) {
     await c.env.SNAPSHOTS.delete(old.map((r) => snapKey(id, r.version)));
     await c.env.DB.prepare(`DELETE FROM versions WHERE dashboard_id = ?1 AND version <= ?2`).bind(id, old[0].version).run();
   }
+  // "After each update": its recipients get the new numbers now, at most one email a day each. A failed send never
+  // fails the publish.
+  if (emailOn(c.env)) {
+    const row = await c.env.DB.prepare('SELECT updates FROM dashboards WHERE id = ?1').bind(id).first<{ updates: string }>();
+    if (row?.updates === 'each') await sendUpdates(c.env, id, 'each', new URL(c.req.url).origin).catch(() => 0);
+  }
   return json(c, 200, { version, url: urlOf(new URL(c.req.url).origin, kind, id) });
+}
+
+// ---- email updates: invited people ask for them on the page (v5 build 13) --------
+
+for (const [seg, kind] of [['d', 'dashboard'], ['s', 'site']] as const) {
+  api.get(`/${seg}/:id/updates`, (c) => updatesFor(c, kind, null));
+  api.post(`/${seg}/:id/updates`, async (c) => {
+    if (!sameOrigin(c)) return fail(c, 403, 'forbidden');
+    const b = await c.req.json<{ on?: boolean }>().catch(() => null);
+    return updatesFor(c, kind, !!b?.on);
+  });
+}
+
+/** Whether the signed-in reader gets email updates of an item; with `on`, switches them. Invited items only. */
+async function updatesFor(c: Context<HonoEnv>, kind: Kind, on: boolean | null) {
+  if (!emailOn(c.env)) return fail(c, 404, 'email_updates_off');
+  const me = c.get('account');
+  if (!me) return fail(c, 401, 'sign_in');
+  const { row, allowed } = await canView(c, c.req.param('id') ?? '', kind);
+  if (!row || !allowed) return fail(c, 404, 'not_found');
+  if (row.access !== 'invited' || !row.updates || row.updates === 'off') {
+    return fail(c, 403, 'not_offered', { message: 'This page does not offer email updates.' });
+  }
+  const email = me.email.toLowerCase();
+  if (on === true) {
+    const n = await c.env.DB.prepare('SELECT count(*) AS n FROM recipients WHERE dashboard_id = ?1 AND active = 1 AND email != ?2')
+      .bind(row.id, email)
+      .first<{ n: number }>();
+    if ((n?.n ?? 0) >= LIMITS.recipients) {
+      return fail(c, 403, 'limit', { message: `This page already sends updates to ${LIMITS.recipients} people, the most it can.` });
+    }
+    await c.env.DB.prepare(
+      'INSERT INTO recipients (dashboard_id, email, token, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (dashboard_id, email) DO UPDATE SET active = 1',
+    )
+      .bind(row.id, email, rid(32), now())
+      .run();
+  } else if (on === false) {
+    await c.env.DB.prepare('UPDATE recipients SET active = 0 WHERE dashboard_id = ?1 AND email = ?2').bind(row.id, email).run();
+  }
+  const r = await c.env.DB.prepare('SELECT active FROM recipients WHERE dashboard_id = ?1 AND email = ?2').bind(row.id, email).first<{ active: number }>();
+  return json(c, 200, { on: r?.active === 1, updates: row.updates });
 }
 
 // ---- the hosted dashboard's data -------------------------------------------

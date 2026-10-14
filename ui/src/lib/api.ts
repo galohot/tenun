@@ -759,6 +759,8 @@ export interface PublishSettings {
   /** tenun.cloud holds that password. */
   pw_sent?: boolean;
   every: 'manual' | 'change' | 'hour' | 'day';
+  /** Email updates (v5 build 13). Not set: off. */
+  updates?: 'off' | 'each' | 'daily' | 'weekly';
   /** Overrides this computer's name on the hosted page. */
   source: string;
 }
@@ -827,6 +829,8 @@ export interface CloudStatus {
   source: string;
   /** Free-plan usage; null when tenun.cloud could not be reached. */
   usage: { dashboards: number; limit: number } | null;
+  /** tenun.cloud sends email updates (v5 build 13); until it does, the setting is kept and nothing is sent. */
+  emailUpdates?: boolean;
 }
 
 export interface Workspace {

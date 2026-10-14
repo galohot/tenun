@@ -43,6 +43,8 @@ export type DashRow = {
   access: 'link' | 'invited' | 'password';
   /** Other sites may frame it (v5 build 11). */
   embed?: number;
+  /** Email updates: off, each, daily or weekly (v5 build 13). */
+  updates?: string;
   source: string;
   every_minutes: number | null;
   version: number;
@@ -155,7 +157,7 @@ export function passwordPage(kind: 'dashboard' | 'site', id: string, error = '')
 }
 
 /** The hosted dashboard or site: the viewer bundle reads the snapshot URL and freshness from meta tags. */
-export function hostedShell(d: DashRow): string {
+export function hostedShell(d: DashRow, opts: { updates?: boolean } = {}): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -169,7 +171,7 @@ export function hostedShell(d: DashRow): string {
 <meta name="tenun-snapshot" content="/api/v1/${d.kind === 'site' ? 's' : 'd'}/${esc(d.id)}/snapshot?v=${d.version}">
 <meta name="tenun-updated" content="${esc(d.generated_at ?? '')}">
 <meta name="tenun-source" content="${esc(d.source)}">
-<meta name="tenun-every" content="${d.every_minutes ?? ''}">
+<meta name="tenun-every" content="${d.every_minutes ?? ''}">${opts.updates ? `\n<meta name="tenun-updates" content="${d.kind === 'site' ? 's' : 'd'}/${esc(d.id)}">` : ''}
 </head>
 <body>
 <div id="app"></div>

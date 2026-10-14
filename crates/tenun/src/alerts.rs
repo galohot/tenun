@@ -133,7 +133,7 @@ pub struct Reading {
 }
 
 /// The format a tile writes its value `i` in: its named measure's, with the tile's own over it, field by field.
-fn format_of(engine: &Engine, tile: &Value, i: usize) -> NumFormat {
+pub fn format_of(engine: &Engine, tile: &Value, i: usize) -> NumFormat {
     let mut f = serde_json::Map::new();
     if let Some(named) = tile
         .pointer(&format!("/measures/{i}/named"))
@@ -154,6 +154,13 @@ fn format_of(engine: &Engine, tile: &Value, i: usize) -> NumFormat {
         f.extend(own.clone());
     }
     serde_json::from_value(Value::Object(f)).unwrap_or_default()
+}
+
+/// The name the app gives a tile's value `i` ("Amount", "Number of orders").
+pub fn value_name(engine: &Engine, tile: &Value, i: usize) -> String {
+    serde_json::from_value::<tenun_core::query::Measure>(tile["measures"][i].clone())
+        .map(|m| tenun_core::labels::measure_label(&engine.catalog(), &engine.measures(), &m))
+        .unwrap_or_else(|_| "The value".into())
 }
 
 /// Reads a rule's value now. `Ok(None)`: the tile has no value (no data in its period).
@@ -186,7 +193,7 @@ pub fn read(engine: &Engine, rule: &AlertRule) -> anyhow::Result<Option<Reading>
     } else if !rule.name.trim().is_empty() {
         rule.name.trim().to_string()
     } else {
-        "The value".into()
+        value_name(engine, &raw, i)
     };
     // A value over all the data has no period to name.
     let mut period = if kpi.period == "All data" {

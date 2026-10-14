@@ -1,6 +1,7 @@
 <script lang="ts">
   // The exported dashboard. Everything it shows was computed when the file was
   // made; clicking a bar or a slice switches to the stored filtered results.
+  import EmailMe from './EmailMe.svelte';
   import { onMount } from 'svelte';
   import type { Cell, QueryResult, Tile } from '../lib/api';
   import { shownTile } from '../lib/drilldown';
@@ -42,7 +43,7 @@
   }: {
     data: ExportPayload;
     /** Set on tenun.cloud: when and where the snapshot was published, and how often it should update. */
-    hosted?: { updated: string; source: string; every: number | null } | null;
+    hosted?: { updated: string; source: string; every: number | null; updates?: string | null } | null;
     /** Drawn inside the app (the site preview, build 12): the app keeps its own theme. */
     embedded?: boolean;
     /** A site's pages: a page link in a text opens one (build 12). Not set: page links are plain text. */
@@ -457,7 +458,7 @@
 
   <footer>
     {#if hosted}
-      Published with <a href="https://tenun.cloud" target="_blank" rel="noopener">Tenun</a> · the numbers update when the owner's computer publishes them.
+      Published with <a href="https://tenun.cloud" target="_blank" rel="noopener">Tenun</a> · the numbers update when the owner's computer publishes them.{#if hosted.updates}<EmailMe path={hosted.updates} />{/if}
     {:else}
       Made with <a href="https://github.com/galohot/tenun" target="_blank" rel="noopener">Tenun</a> · the data in this file is a snapshot.
     {/if}

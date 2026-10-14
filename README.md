@@ -240,6 +240,12 @@ database passwords. The cloud never connects to your data.
   sign-in does not work inside another site. Every other page of tenun.cloud refuses to be framed.
 - **Keep it updated:** when the data changes, hourly, daily, or by hand. Updates run while the app is
   open; [`tenun agent`](docs/agent.md) keeps them running on a computer that stays on.
+- **Email updates (Advanced):** after each update, daily, or weekly on Monday. They go to you, and on a page
+  for invited people, to each invited person who asks for them on the page (up to 10 people). An email
+  holds the page's title, when it was updated, the value, change and period of each number tile (as the
+  page writes them), and the link. Nothing else. Each email has a link that stops them in one click, and
+  nobody gets more than one a day for a page. *tenun.cloud does not send emails yet: sending needs a paid
+  Cloudflare service. Your choice is kept, and the emails start when it does.*
 - **Always honest about age:** every hosted dashboard says when it was updated and from which
   computer, and shows a banner when an update is late.
 - **A whole site:** when the workspace is a site, **Publish** offers the whole site first: every page

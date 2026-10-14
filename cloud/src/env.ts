@@ -2,6 +2,12 @@ export type Env = {
   DB: D1Database;
   SNAPSHOTS: R2Bucket;
   ASSETS: Fetcher;
+  /** Email updates (v5 build 13): 'on' sends them. Anything else, or not set: nothing is sent (V5-D16). */
+  EMAIL_UPDATES?: string;
+  /** Cloudflare's Email Service (a `send_email` binding); it needs the paid Workers plan. */
+  EMAIL?: { send(m: unknown): Promise<unknown> };
+  /** A service that takes each email as JSON: it stands in for the Email Service in tests. */
+  MAIL_OUTBOX?: Fetcher;
   /** HMAC key for our own session cookies (wrangler secret). */
   SESSION_SECRET: string;
   /** Akun (WorkOS) keys; sign-in stays closed until both exist. */
@@ -32,6 +38,8 @@ export const LIMITS = {
   /** A site (build 14, V4-D17): its pages, and its compressed size. It counts as one item toward `dashboards`. */
   sitePages: 10,
   siteMaxBytes: 25 * 1024 * 1024,
+  /** Email updates (v5 build 13): people who get them, for each item, the owner included. */
+  recipients: 10,
 };
 
 /** What a published item is: one dashboard, or a whole site (build 14). */

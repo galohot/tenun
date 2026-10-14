@@ -257,6 +257,9 @@ impl Client {
         if let Some(p) = meta.pages {
             req = req.header("x-tenun-pages", p.to_string());
         }
+        if let Some(d) = &meta.digest {
+            req = req.header("x-tenun-digest", base64url(d.to_string().as_bytes()));
+        }
         let r = self.send(req.send(&gz[..]))?;
         if r.status == 404 {
             return Ok(None);
@@ -285,6 +288,8 @@ pub struct SnapMeta {
     pub every_minutes: Option<u32>,
     /// A site's pages (build 14): tenun.cloud holds up to 10.
     pub pages: Option<usize>,
+    /// The number tiles an email update shows (v5 build 13), as [`digest`] writes them.
+    pub digest: Option<Value>,
 }
 
 /// The API paths of what can be published.
@@ -358,6 +363,9 @@ pub struct PublishSettings {
     /// Other sites may show it in a frame (v5 build 11, V5-D14). Never sent for `invited`.
     #[serde(default)]
     pub embed: bool,
+    /// Email updates (v5 build 13): off, each, daily or weekly. tenun.cloud sends them once it sends email at all.
+    #[serde(default = "off")]
+    pub updates: String,
     /// The entry of the password in `Secrets` (`publish:<key>`): a random key, never the password (v5 build 11).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub pw_key: String,
@@ -381,6 +389,10 @@ fn link() -> String {
     "link".into()
 }
 
+fn off() -> String {
+    "off".into()
+}
+
 impl Default for PublishSettings {
     /// New dashboards are shared by link and published by hand until a schedule is chosen.
     fn default() -> Self {
@@ -390,6 +402,7 @@ impl Default for PublishSettings {
             access: link(),
             invites: vec![],
             embed: false,
+            updates: off(),
             pw_key: String::new(),
             pw_sent: false,
             every: Every::Manual,
@@ -404,6 +417,87 @@ pub fn settings(dashboard: &Value) -> Option<PublishSettings> {
     dashboard
         .get("publish")
         .and_then(|p| serde_json::from_value(p.clone()).ok())
+}
+
+// ---- email updates (v5 build 13, V5-D51) ----------------------------------------
+
+/// A digest holds at most this many number tiles.
+pub const DIGEST_ITEMS: usize = 12;
+
+/// Base64 with the URL alphabet and no padding: a header value.
+fn base64url(bytes: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for i in 0..=chunk.len() {
+            out.push(A[((n >> (18 - 6 * i)) & 63) as usize] as char);
+        }
+    }
+    out
+}
+
+/// The number tiles of a page as an email update shows them: each one's name, value, change and period, written as
+/// the page writes them, as it opens. tenun.cloud never parses a snapshot (its free plan allows ~10 ms of CPU), so the
+/// app sends these few lines beside it.
+pub fn digest(engine: &Engine, dashboard_id: &str) -> Value {
+    let Some(dash) = engine.dashboard(dashboard_id) else {
+        return json!({ "items": [] });
+    };
+    let loc = engine.locale();
+    let mut items = Vec::new();
+    for t in dash["tiles"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|t| t["type"] == "kpi")
+        .take(DIGEST_ITEMS)
+    {
+        let Some(id) = t["id"].as_str() else { continue };
+        let Some(k) = tenun_core::snapshot::tile_as_opened(engine, dashboard_id, id)
+            .ok()
+            .and_then(|r| r.kpi)
+        else {
+            continue;
+        };
+        let Some(v) = k.value.filter(|v| v.is_finite()) else {
+            continue;
+        };
+        let name = t["title"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| crate::alerts::value_name(engine, t, 0));
+        let fmt = crate::alerts::format_of(engine, t, 0);
+        let mut item = json!({ "name": name, "value": tenun_core::numtext::short(v, loc, &fmt) });
+        if !k.period.is_empty() && k.period != "All data" {
+            item["period"] = json!(if k.partial {
+                format!("{}, so far", k.period)
+            } else {
+                k.period.clone()
+            });
+        }
+        if let (Some(d), Some(vs)) = (k.delta, &k.versus) {
+            // As the tile writes it: "▲ 6.3% vs Sep 1–14", "≈ Same vs Sep 1–14".
+            item["change"] = json!(if d.abs() < 0.005 {
+                format!("≈ Same vs {vs}")
+            } else {
+                format!(
+                    "{} {} vs {vs}",
+                    if d > 0.0 { "▲" } else { "▼" },
+                    tenun_core::numtext::change_pct(d, loc)
+                )
+            });
+        }
+        items.push(item);
+    }
+    json!({ "title": dash["title"], "items": items })
 }
 
 // ---- password links (v5 build 11, V5-D13) --------------------------------------
@@ -473,7 +567,7 @@ fn settings_body(
     fresh: bool,
 ) -> (Value, bool) {
     let mut body = json!({ "title": title, "access": ps.access, "invites": ps.invites,
-        "embed": ps.embed && ps.access != "invited" });
+        "embed": ps.embed && ps.access != "invited", "updates": ps.updates });
     if ps.access == "password"
         && (fresh || !ps.pw_sent)
         && !ps.pw_key.is_empty()
@@ -546,6 +640,7 @@ pub fn publish(
             crate::export::with_maps(&mut snap, &engine.geo_dir());
             let meta = SnapMeta {
                 pages: None,
+                digest: Some(digest(engine, dashboard_id)),
                 generated: snap["generated"].as_str().unwrap_or_default().to_string(),
                 source: if ps.source.is_empty() {
                     source_label()
@@ -670,6 +765,11 @@ pub fn publish_site(engine: &Engine, secrets: &Secrets, base: &str) -> Result<Va
                 title: title.clone(),
                 every_minutes: ps.every.minutes(),
                 pages: Some(pages),
+                // A site's update shows the numbers of the page it opens on.
+                digest: site["site"]["home"]
+                    .as_str()
+                    .or_else(|| site["order"][0].as_str())
+                    .map(|home| digest(engine, home)),
             };
             match client.put(
                 KIND_SITE,
