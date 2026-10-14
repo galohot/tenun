@@ -170,6 +170,9 @@ pub struct Engine {
     /// Milliseconds a link check waits before it reads the data. Tests use it to hold the moment
     /// after a reload open; the app never sets it.
     check_delay: Arc<AtomicU64>,
+    /// Milliseconds a question waits between its plan and its run. Tests use it to let a reload swap the data in
+    /// between; the app never sets it.
+    plan_delay: Arc<AtomicU64>,
     /// (table id, main date column) → the `State.data_gen` it was read under, and its period (V4-D101).
     grain_cache: Mutex<GrainCache>,
 }
@@ -550,6 +553,7 @@ impl Engine {
             listener: Arc::new(Mutex::new(None)),
             live_rows: Arc::new(AtomicU64::new(LIVE_CHECK_ROWS)),
             check_delay: Arc::new(AtomicU64::new(0)),
+            plan_delay: Arc::new(AtomicU64::new(0)),
             grain_cache: Mutex::new(BTreeMap::new()),
         })
     }
@@ -568,6 +572,7 @@ impl Engine {
             listener: self.listener.clone(),
             live_rows: self.live_rows.clone(),
             check_delay: self.check_delay.clone(),
+            plan_delay: self.plan_delay.clone(),
             grain_cache: Mutex::new(self.grain_cache.lock().unwrap().clone()),
         })
     }
@@ -1097,8 +1102,13 @@ impl Engine {
             }
         }
         // The data is about to change. From now until the check has read it, the links of this
-        // source are unknown, so no query can join them as if they were clean (V4-D51).
-        forget_links(&mut self.state.write().unwrap(), id);
+        // source are unknown, so no query can join them as if they were clean (V4-D51). A question
+        // planned before this point sees the new generation when it ends, and asks again.
+        {
+            let mut s = self.state.write().unwrap();
+            forget_links(&mut s, id);
+            s.data_gen += 1;
+        }
         let result = match &src.kind {
             // A new table is a view over tables of the catalog, written from its spec (V4-D6).
             SourceKind::Derived { spec } => {
@@ -1329,6 +1339,13 @@ impl Engine {
     /// reload open to see that nothing is counted twice there). The app never calls it.
     pub fn slow_link_checks(&self, wait: Duration) {
         self.check_delay
+            .store(wait.as_millis() as u64, Ordering::Relaxed);
+    }
+
+    /// Makes every question wait between its plan and its run (tests let a reload swap the data in between, to see
+    /// that the question is asked again). The app never calls it.
+    pub fn slow_plans(&self, wait: Duration) {
+        self.plan_delay
             .store(wait.as_millis() as u64, Ordering::Relaxed);
     }
 
@@ -2506,7 +2523,21 @@ impl Engine {
         crate::calendar::with(self.calendar(), || self.with_params(|| self.query_in(q)))
     }
 
+    /// A question is planned on what the links say now and then run. A load that swaps the data in between would
+    /// let it join the new data as the old check allowed (V4-D51): when the data generation moved while it ran, it is
+    /// asked again, on what the links say then.
     fn query_in(&self, q: &SemanticQuery) -> anyhow::Result<QueryResult> {
+        for _ in 0..3 {
+            let before = self.state.read().unwrap().data_gen;
+            let res = self.query_once(q)?;
+            if self.state.read().unwrap().data_gen == before {
+                return Ok(res);
+            }
+        }
+        self.query_once(q)
+    }
+
+    fn query_once(&self, q: &SemanticQuery) -> anyhow::Result<QueryResult> {
         let today = self.today();
         let grains = self.grains_for(q);
         let compiled = {
@@ -2523,6 +2554,10 @@ impl Engine {
             .collect();
         if !blank.is_empty() {
             note_crossed(&blank);
+        }
+        let wait = self.plan_delay.load(Ordering::Relaxed);
+        if wait > 0 {
+            std::thread::sleep(Duration::from_millis(wait));
         }
         let start = std::time::Instant::now();
         let conn = self.conn()?;
@@ -2581,7 +2616,23 @@ impl Engine {
     pub fn query_custom(
         &self,
         q: &SemanticQuery,
-        build: impl FnOnce(&query::Scope<'_>) -> Result<(String, Vec<Param>), query::QueryError>,
+        mut build: impl FnMut(&query::Scope<'_>) -> Result<(String, Vec<Param>), query::QueryError>,
+    ) -> anyhow::Result<(Vec<Vec<serde_json::Value>>, Vec<usize>)> {
+        // Asked again when a load swapped the data while it ran, as [`Engine::query`] is (V4-D51).
+        for _ in 0..3 {
+            let before = self.state.read().unwrap().data_gen;
+            let out = self.custom_once(q, &mut build)?;
+            if self.state.read().unwrap().data_gen == before {
+                return Ok(out);
+            }
+        }
+        self.custom_once(q, &mut build)
+    }
+
+    fn custom_once(
+        &self,
+        q: &SemanticQuery,
+        build: &mut impl FnMut(&query::Scope<'_>) -> Result<(String, Vec<Param>), query::QueryError>,
     ) -> anyhow::Result<(Vec<Vec<serde_json::Value>>, Vec<usize>)> {
         let today = self.today();
         let (sql, params, ignored) = {

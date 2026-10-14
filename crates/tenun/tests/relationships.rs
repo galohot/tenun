@@ -998,6 +998,29 @@ fn nothing_is_counted_twice_while_a_file_is_being_reloaded() {
 }
 
 #[test]
+fn a_question_planned_before_a_reload_is_asked_again() {
+    // A question planned on the clean link waits; meanwhile a save repeats a key and the reload swaps the data in.
+    // Run as planned, it would join the repeated key twice. It sees that the data changed and asks again (V4-D51).
+    let lab = std::sync::Arc::new(Lab::new("plan").with_order_link());
+    lab.e.slow_plans(std::time::Duration::from_millis(400));
+    let asker = {
+        let lab = lab.clone();
+        std::thread::spawn(move || {
+            run(&lab.e, tile(sum_amount(), by_region_of_store()), vec![]).unwrap()
+        })
+    };
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    std::fs::write(
+        lab.d.join("stores.csv"),
+        format!("{STORES}1,Kopi A (copy),East\n"),
+    )
+    .unwrap();
+    lab.e.load("s2");
+    let r = asker.join().unwrap();
+    assert_eq!(groups(&r), map(&[("West", 425.5), ("East", 50.0)]));
+}
+
+#[test]
 fn a_check_that_cannot_read_the_data_leaves_the_link_deduplicated() {
     let lab = Lab::new("failed").with_order_link();
     // The stores file loses the column the link needs. The tables load, the check fails.
