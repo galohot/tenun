@@ -1,5 +1,78 @@
 # Changelog
 
+## 0.5.0 (2026-10-14)
+
+This release adds drill-down, saved views, what-if parameters, forecasts, unusual values and alerts. A
+published dashboard can now have a password, sit inside another site, and (soon) send email updates. An
+AI app you already use can build dashboards in Tenun. A 0.4.0 workspace opens as it is.
+
+Most new features are **Advanced**: turn on **Advanced features** in Settings. Anyone can pick a saved view.
+
+### Read a dashboard more ways
+
+- **Saved views (making them is Advanced):** a view remembers the clicks, what the filter tiles have chosen, the time grain and how far
+  each chart is drilled. Save one for the Monday meeting and one for each region; choose which one the
+  dashboard opens on. Exported and published dashboards hold every view.
+- **Drill down (Advanced):** a chart over time goes from years to quarters, months and days; a chart by region
+  goes to the stores of a region. Set it up once; anyone who reads the dashboard can use it, offline too.
+- **Which tiles a click filters (Advanced):** a click on a tile can filter every tile, no tile, or the tiles
+  you tick.
+- **A filter for every page (Advanced):** pick Java on one page, and every page of the workspace shows Java.
+- **Your year and your week (Advanced):** a business year that starts in April (FY 2027), and a week that
+  starts on Saturday or Sunday. Year to date, "this year" and week numbers follow them.
+
+### What-if, totals and balances (Advanced)
+
+- **Parameters:** a value a reader moves on the dashboard, on a slider or from a list. A measure reads it with
+  `PARAM("Growth")`; a Top N and a target can use it too. What if prices rise by 5 %?
+- **Totals of a bigger group:** `TOTAL(...)` and `UNFILTERED(...)` compare a group with a bigger one: the share
+  of a store in its region, or a month against the whole year. A calculated column can add up a related
+  table's rows: each customer's orders.
+- **Stock and balances:** `CLOSING(...)` and `OPENING(...)` read the last (first) day of each period, so the
+  stock of a month is the stock on its last day, not the sum of every day.
+
+### Analytics (Advanced)
+
+- **Forecast:** a line over time shows its next periods as a dashed line with a 90 % band. Tenun fits it on
+  your computer from the chart's own numbers, and says so in words when there are too few periods.
+- **Unusual values:** a ring marks each value far from the periods around it, with a list under the chart.
+- **More in the tooltip:** up to three more values and a small trend of each group when you point at it.
+
+### Alerts (Advanced)
+
+- **Alert me…** on a number tile: when its value goes below, above or outside the numbers you set, Tenun
+  sends one message to Slack, Microsoft Teams, Discord, Telegram or any web address, and one more when it
+  is back to normal. The app checks after each reload and once a minute; `tenun agent` checks on a computer
+  that stays on; `tenun alerts check` checks once. The address stays on your computer. See
+  [Keep published dashboards updated](docs/agent.md#alerts).
+
+### Share online with tenun.cloud
+
+- **Anyone with the link and the password:** the password stays on your computer and goes to tenun.cloud
+  once; tenun.cloud keeps only a hash of it. A new password closes the page again for everyone.
+- **Embed it in another site (Advanced):** "Allow embedding" gives the `<iframe>` code. A page for invited
+  people cannot be embedded.
+- **Email updates (Advanced):** after each update, daily or weekly, to you and to invited people who ask on
+  the page. *tenun.cloud does not send emails yet:* sending needs a paid Cloudflare service. Your choice is
+  kept, and the emails start when it does.
+- `tenun publish --password-from-env VAR` sets a password from the command line.
+
+### Use your own AI app
+
+- **`tenun mcp`** lets Claude Desktop, Claude Code or any MCP app read a workspace and build dashboards in it.
+  Each change shows in the Tenun app at once, with **Undo**. Tenun calls no AI and sends nothing anywhere;
+  the AI app sends what it reads to its own company. It cannot run SQL, read files, see passwords or publish.
+  See [Use your own AI app](docs/ai.md).
+
+### Real files, faster
+
+- Tested on 50 public files from government and open-data sites: title lines above a CSV header, Windows
+  text, decimal commas, `.xls` files that are really `.xlsx`, a quote deep in a large CSV. All 49 readable
+  ones load; a workbook with a password says so in words.
+- A CSV is read once and kept in memory (up to 1 GB): tiles are 5 to 10 times faster, and an export works
+  out its clicks in parallel. See [the benchmark](docs/benchmark.md).
+- Fixed: a tile asked while a file reloaded could count rows twice.
+
 ## 0.4.0 (2026-10-13)
 
 This release adds calculations, maps, number cards you design, pie and donut charts, text with live

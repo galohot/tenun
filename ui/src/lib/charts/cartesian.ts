@@ -658,6 +658,9 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
           // The comparison goes behind the others but is named last, and the trend after it.
           // The unseen series that carries the lines is not named.
           data: [...(hasCompare ? [series[0].name, compareName] : series.map((s) => s.name)), ...estimateNames, ...(fit ? [TREND] : [])],
+          // One value is named as the app names it ("Amount"), not by its column ("amount"): a legend shows it beside a
+          // forecast, a comparison or a trend.
+          formatter: (n: string) => (!multi && n === series[0]?.name && tile.measures[0] ? measureLabel(tile.measures[0], tables) : n),
           top: 0,
           left: 0,
           icon: hasBar ? 'roundRect' : 'circle',

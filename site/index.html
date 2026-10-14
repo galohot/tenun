@@ -140,9 +140,65 @@
 
   <section class="model">
     <div>
+      <h2>Save the way you read it</h2>
+      <p>A saved view remembers the clicks, the filter choices, the time grain and how far each chart is drilled. Keep one for the Monday meeting and one for each region. Drill down from years to months to days, or from a region to its stores, on the same chart.</p>
+    </div>
+    <picture class="shot">
+      <source srcset="/views-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/views-light.webp" width="1440" height="900" alt="The Drill down dashboard on the saved view "Jawa, by store": revenue of the three stores of Jawa, with the list of views open. Demo data" loading="lazy">
+    </picture>
+  </section>
+
+  <section class="model">
+    <div>
+      <h2>Ask "what if"</h2>
+      <p>Put a slider on the dashboard and let a measure read it: what if prices rise by 5 %? Every chart follows as you move it, and an exported file keeps each step. A business year that starts in April, the stock on the last day of a month, a store's share of its region: each is one setting or one function.</p>
+    </div>
+    <picture class="shot">
+      <source srcset="/whatif-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/whatif-light.webp" width="1440" height="900" alt="The What if dashboard: a Price change slider at 5, revenue of 382M and 401M after the change, and both by month. Demo data" loading="lazy">
+    </picture>
+  </section>
+
+  <section class="model">
+    <div>
+      <h2>See what comes next, and what stands out</h2>
+      <p>A line over time shows its next months with a 90 % range. Rings mark the months far from the ones around them, with a list under the chart. Both are worked out on your computer from the chart's own numbers, and say so in words when there are too few.</p>
+    </div>
+    <picture class="shot">
+      <source srcset="/forecast-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/forecast-light.webp" width="1440" height="900" alt="Revenue by month with a dashed forecast and its range, and the same as bars with three unusual months marked. Demo data" loading="lazy">
+    </picture>
+  </section>
+
+  <section class="model">
+    <div>
+      <h2>Hear about it in your chat</h2>
+      <p>An alert watches a number: when revenue goes below what you set, Tenun sends one message to Slack, Microsoft Teams, Discord, Telegram or any web address, and one when it is back. The app checks while it is open, and <code>tenun agent</code> on a computer that stays on. The address stays on your computer.</p>
+    </div>
+    <picture class="shot">
+      <source srcset="/alerts-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/alerts-light.webp" width="1440" height="900" alt="The Alert me sheet on the Revenue tile: below 350,000,000, sent to Slack, also when back to normal. Demo data" loading="lazy">
+    </picture>
+  </section>
+
+  <section class="model">
+    <div>
+      <h2>Bring your own AI</h2>
+      <p>Ask the AI app you already use, such as Claude, to build a dashboard. <code>tenun mcp</code> gives it Tenun's tools; each change shows in the app at once, with Undo.</p>
+      <p style="margin-top:0.75rem">Tenun calls no AI and sends nothing anywhere. The AI app sends what it reads to its own company. It cannot run SQL, read your files, see a password or publish.</p>
+    </div>
+    <picture class="shot">
+      <source srcset="/ai-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/ai-light.webp" width="1440" height="900" alt="A dashboard an AI app built through tenun mcp: revenue, revenue by store and revenue by month with a forecast, and the notice "An AI app added the tile" with Undo. Demo data" loading="lazy">
+    </picture>
+  </section>
+
+  <section class="model">
+    <div>
       <h2>Simple by default. Advanced when you want it.</h2>
       <p>Tenun starts with the charts an Excel user knows: bars, lines, areas, scatter, histogram, waterfall and pivot tables with totals. Keep the top 5 and group the rest as Other. Show a value as a share, a running total or a change. Add a target and a trend line. Clean a messy sheet, turn months into rows, read a whole folder of files, or read a web link to CSV or JSON data.</p>
-      <p style="margin-top:0.75rem">One free switch, <b>Advanced features</b>, adds calculated columns, measures and new tables made by append, merge or group. It adds heat maps, funnels, box plots, bullet charts, Sankey, calendar, cohort and Gantt charts, and small multiples. Dashboards that use them still open when the switch is off.</p>
+      <p style="margin-top:0.75rem">One free switch, <b>Advanced features</b>, adds calculated columns, measures and new tables made by append, merge or group. It adds heat maps, funnels, box plots, bullet charts, Sankey, calendar, cohort and Gantt charts, and small multiples. Version 0.5.0 adds drill-down, views you save, parameters, forecasts, unusual values and alerts. Dashboards that use them still open when the switch is off.</p>
     </div>
     <picture class="shot">
       <source srcset="/more-views-dark.webp" media="(prefers-color-scheme: dark)">
@@ -154,7 +210,7 @@
     <h2>Share it online, keep the data at home</h2>
     <p>Choose <b>Publish</b> and a dashboard, or a whole site, gets a private link on tenun.cloud. Tenun builds it on your computer and sends only the results. The cloud never connects to your files or databases, and never sees a password.</p>
     <ul>
-      <li><b>Anyone with the link</b>, or <b>only people you invite</b>.</li>
+      <li><b>Anyone with the link</b>, <b>anyone with the link and a password</b>, or <b>only people you invite</b>. Put a dashboard inside your own website with one line of code.</li>
       <li><b>Updates by itself</b> when the data changes, hourly or daily. <code>tenun agent</code> keeps it going on a computer that stays on.</li>
       <li><b>Never silently stale:</b> every page says when it was updated, and warns when an update is late.</li>
       <li><b>Free</b> for up to 3 dashboards or sites. A site holds up to 10 pages.</li>
@@ -164,7 +220,7 @@
 
   <section id="download" class="download">
     <h2>Download</h2>
-    <p>Version <span data-version>0.4.0</span>. Free and open source.</p>
+    <p>Version <span data-version>0.5.0</span>. Free and open source.</p>
     <div class="platforms">
       <a class="platform" href="https://github.com/galohot/tenun/releases/latest"><strong>Windows</strong><span>64-bit installer</span></a>
       <a class="platform" href="https://github.com/galohot/tenun/releases/latest"><strong>macOS</strong><span>Apple silicon and Intel</span></a>

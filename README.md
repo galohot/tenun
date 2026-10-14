@@ -89,6 +89,22 @@ every other chart filters. Save the Excel file and the dashboard updates.
   **Duplicate dashboard** is in the dashboard's **⋯** menu, and undo takes it back.
 - **Exports:** one HTML file, a PNG or PDF of the dashboard, a PNG of one tile, and the numbers of
   a tile as CSV or Excel.
+- **Saved views:** a view remembers the clicks, the filter tiles' choices, the time grain and how far each chart
+  is drilled. Pick one from the dashboard's **Views** menu; an export holds them all.
+- **Drill down (Advanced):** years to quarters to months to days, or region to store, on one chart. See
+  [drill down](docs/charts.md#drill-down).
+- **What-if parameters (Advanced):** a slider or a list on the dashboard that a measure reads with
+  `PARAM("Growth")`. See [parameters](docs/formulas.md#parameters-and-what-if).
+- **Totals of a bigger group and balances (Advanced):** `TOTAL`, `UNFILTERED`, `CLOSING` and `OPENING` for the
+  share of a store in its region, a month against the year, and the stock on the last day of a month.
+- **Forecast and unusual values (Advanced):** a line over time shows its next periods with a 90 % band, and rings
+  mark the values far from the periods around them. Both are worked out on your computer. See
+  [forecast](docs/charts.md#forecast).
+- **Your year and your week (Advanced):** a business year that starts in April, a week that starts on Saturday.
+- **Alerts (Advanced):** a number tile tells Slack, Teams, Discord, Telegram or any web address when its value
+  goes below, above or outside the numbers you set. See [alerts](docs/agent.md#alerts).
+- **Use your own AI app:** `tenun mcp` lets Claude Desktop, Claude Code or any MCP app build dashboards here. See
+  [below](#use-your-own-ai-app).
 - **Works on a phone-width screen,** with keyboard and screen reader support.
 - **Honest comparisons:** a number tile says which period it covers and compares it fairly. If
   October is only half over, it compares October 1–14 with September 1–14, not with all of
@@ -122,7 +138,10 @@ features** in Settings. The switch is free, and nothing is locked. It only shows
   compare two values (dumbbell and slope), Sankey, calendar heat map, cohort grid and Gantt chart. It
   also adds small multiples, separate panels and indexed lines for values with different units, bars
   plus a line, bubble size, a trend column in tables, pivot groups that open and close, standard
-  deviation, a manual sort order and reference bands.
+  deviation, a manual sort order and reference bands. From 0.5.0 it also adds drill-down, making saved
+  views, which tiles a click filters, a filter for every page, the year and week settings, parameters,
+  `TOTAL`, `UNFILTERED`, `CLOSING` and `OPENING`, forecast, unusual values, more in the tooltip, alerts,
+  embedding and email updates.
 - A dashboard made with Advanced features opens and works with the switch off. You only cannot edit
   those parts until you turn it on. Exported files show them either way.
 
@@ -139,7 +158,7 @@ features** in Settings. The switch is free, and nothing is locked. It only shows
 </p>
 
 <p align="center">
-  <img src="docs/advanced-picker.png" alt="The Add tile menu with Advanced features on: number, bar, line, area, share, pie, donut, table, pivot, map, filter, text and image, then heat map, funnel, box plot, bullet, compare, Sankey, calendar and cohort" width="270">
+  <img src="docs/advanced-picker.png" alt="The Add tile menu with Advanced features on: number, bar, line, area, share, pie, donut, table, pivot, map, filter, text and image, then heat map, funnel, box plot, bullet, compare, Sankey, calendar, cohort and parameter" width="200">
 </p>
 
 ## What Tenun does not do, on purpose
@@ -337,8 +356,8 @@ cargo run --release --example corpus -- ~/tenun-corpus    # load every file and 
 
 ## Not in this version
 
-User accounts in the app, shared servers, row-level security, scheduled emails, parameters and what-if
-inputs, forecasting, and street maps under a map.
+User accounts in the app, shared servers, row-level security, and street maps under a map. Email
+updates are built, and tenun.cloud sends them once its paid email service is on.
 
 ## Licence
 
