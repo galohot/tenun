@@ -16,7 +16,8 @@
   import Menu from './Menu.svelte';
   import TileBody from './TileBody.svelte';
   import UnusualList from './UnusualList.svelte';
-  import { cardGround, drawnTile } from '../../lib/card';
+  import { cardGround, changeTone, drawnTile } from '../../lib/card';
+  import { pctChange } from '../../lib/format';
   import { paramValues, withParams } from '../../lib/params';
 
   let {
@@ -50,6 +51,7 @@
     onremove,
     onnav,
     onopen,
+    subtitle = '',
   }: {
     tile: Tile;
     filters: DashFilter[];
@@ -100,6 +102,8 @@
     onnav: (step: 1 | -1) => void;
     /** Enter on the tile: edit it, or open it large on a phone. */
     onopen: () => void;
+    /** A line under the title in the tile's header: what the tile reads (look v3). */
+    subtitle?: string;
   } = $props();
 
   let res = $state<QueryResult | null>(null);
@@ -223,6 +227,15 @@
     }
     onpick(v, res?.otherOf, res?.bins, stage, view);
   }
+  // A number tile names its change in the header, top right, as a pill (look v3). A one-row tile, a card and a tile in
+  // another place (an exported file, the large view) keep it beside the value.
+  const kpiHead = $derived(tile.type === 'kpi' && !ground && !flow);
+  const pill = $derived.by(() => {
+    const k = res?.kpi;
+    if (!kpiHead || tile.h <= 1 || !k?.versus || k.delta === null) return null;
+    const tone = changeTone(k.delta, tile.better ?? 'up');
+    return { tone, text: tone === 'flat' ? '≈ Same' : `${k.delta > 0 ? '▲' : '▼'} ${pctChange(k.delta)}`, title: `${tone === 'flat' ? 'About the same as' : k.delta > 0 ? 'Up on' : 'Down on'} ${k.versus}` };
+  });
   // A note or a picture with no title has no header, so the whole tile drags. Nor has a card. A text with live numbers
   // asks the engine, but it is still a note (build 10).
   const bare = $derived(((isStatic(tile.type) || tile.type === 'filter') && !title) || !!ground);
@@ -316,34 +329,40 @@
 <!-- A tile is a stop for the keyboard: arrows go to the next and the previous tile, Enter opens it. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <article class="tile" class:active class:bare class:phone class:flow={!!flow} class:grounded={!!ground && ground !== 'surface'} class:onaccent={ground === 'accent'} style:background={ground ? `var(--${ground})` : undefined} bind:this={el} tabindex="0" data-tile={tile.id} aria-label={title || 'Tile'} onkeydown={onkey}>
-  <header role="group" aria-label={phone ? undefined : 'Drag to move'} onpointerdown={phone ? undefined : ondragstart}>
-    <h3 title={title}>{title}</h3>
+  <header role="group" class:kpihead={kpiHead} class:hair={!kpiHead && !bare && !flow} aria-label={phone ? undefined : 'Drag to move'} onpointerdown={phone ? undefined : ondragstart}>
+    <div class="titles">
+      <h3 title={title}>{title}</h3>
+      {#if subtitle && !kpiHead && !bare}<span class="sub" title={subtitle}>{subtitle}</span>{/if}
+    </div>
     {#if loading}<span class="spin" aria-label="Loading"></span>{/if}
-    {#if res?.drill}
-      <button
-        class="btn plain icon keep drillsw"
-        class:on={drillMode}
-        aria-pressed={drillMode}
-        title={drillMode ? 'A click drills down. Click to make a click filter again.' : 'Drill down: make a click open the level below.'}
-        aria-label="Drill down"
-        onpointerdown={(e) => e.stopPropagation()}
-        onclick={() => (drillMode = !drillMode)}>
-        <Icon name="drill" size={14} />
-      </button>
-    {/if}
-    {#if hasData}
-      <button class="btn plain icon edit keep" title="Open large" aria-label="Open large" onpointerdown={(e) => e.stopPropagation()} onclick={onfocus}>
-        <Icon name="expand" size={14} />
-      </button>
-    {/if}
-    {#if !phone}
-      <button class="btn plain icon edit" title="More" aria-label="More" aria-haspopup="menu" onpointerdown={(e) => e.stopPropagation()} onclick={more}>
-        <Icon name="more" size={14} />
-      </button>
-      <button class="btn plain icon edit" title="Edit tile" aria-label="Edit tile" onpointerdown={(e) => e.stopPropagation()} onclick={onselect}>
-        <Icon name="pencil" size={14} />
-      </button>
-    {/if}
+    {#if pill}<span class="pill {pill.tone}" title={pill.title}>{pill.text}</span>{/if}
+    <div class="actions" class:held={drillMode}>
+      {#if res?.drill}
+        <button
+          class="btn plain icon keep drillsw"
+          class:on={drillMode}
+          aria-pressed={drillMode}
+          title={drillMode ? 'A click drills down. Click to make a click filter again.' : 'Drill down: make a click open the level below.'}
+          aria-label="Drill down"
+          onpointerdown={(e) => e.stopPropagation()}
+          onclick={() => (drillMode = !drillMode)}>
+          <Icon name="drill" size={14} />
+        </button>
+      {/if}
+      {#if hasData}
+        <button class="btn plain icon edit keep" title="Open large" aria-label="Open large" onpointerdown={(e) => e.stopPropagation()} onclick={onfocus}>
+          <Icon name="expand" size={14} />
+        </button>
+      {/if}
+      {#if !phone}
+        <button class="btn plain icon edit" title="Edit tile" aria-label="Edit tile" onpointerdown={(e) => e.stopPropagation()} onclick={onselect}>
+          <Icon name="pencil" size={14} />
+        </button>
+        <button class="btn plain icon edit" title="More" aria-label="More" aria-haspopup="menu" onpointerdown={(e) => e.stopPropagation()} onclick={more}>
+          <Icon name="more" size={14} />
+        </button>
+      {/if}
+    </div>
   </header>
   {#if res?.drill && (drillMode || !isTop(drill))}
     <DrillBar info={res.drill} onto={(d) => setDrill(toDepth(drill, d))} onup={() => setDrill(up(drill))} onnext={() => setDrill(nextLevel(drill))} />
@@ -381,7 +400,8 @@
           onwidths={tile.type === 'table' ? onwidths : undefined}
           onlayout={advancedOn() ? onlayout : undefined}
           onretry={() => retry++}
-          onplaces={() => (places = true)} />
+          onplaces={() => (places = true)}
+          kpiDelta={pill ? 'none' : 'inline'} />
         {#snippet failed()}
           <p class="error"><Icon name="warning" size={14} /> This tile could not be drawn. Check its fields.</p>
         {/snippet}
@@ -422,42 +442,89 @@
     flex-direction: column;
     border-radius: var(--r-card);
     background: var(--surface);
-    box-shadow: var(--shadow-tile);
+    box-shadow: 0 0 0 1px var(--sep);
     overflow: hidden;
-    transition: box-shadow 120ms;
+    font-variant-numeric: tabular-nums;
+    transition: box-shadow 150ms var(--spring);
   }
+  .tile:hover { box-shadow: 0 0 0 1px var(--sep-strong); }
   .tile.active, .tile:focus-visible { box-shadow: 0 0 0 2px var(--accent); outline: none; }
   header {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 6px;
-    height: 36px;
-    padding: 0 6px 0 14px;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 8px 0 16px;
     cursor: grab;
     flex: none;
   }
+  /* A chart's header: the title and its subtitle above a hairline, as in the design (look v3). */
+  header.hair { min-height: 44px; padding-top: 9px; padding-bottom: 9px; border-bottom: 1px solid var(--sep); margin-bottom: 10px; }
+  /* A number tile: a quiet label, and the change as a pill on the right. */
+  header.kpihead { min-height: 0; padding-top: 12px; padding-right: 12px; }
+  header.kpihead h3 { font-size: 12px; font-weight: 500; color: var(--text-2); }
   header:active { cursor: grabbing; }
+  .titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   h3 {
-    flex: 1;
     min-width: 0;
     font-size: 13px;
     font-weight: 600;
+    line-height: 18px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .edit { width: 24px; height: 24px; color: var(--text-2); opacity: 0; }
-  .tile:hover .edit, .tile.active .edit, .tile:focus-within .edit, .edit:focus-visible { opacity: 1; }
-  /* On a phone there is no pointer to hover with, so the one button left stays in view. */
-  .phone .edit.keep { opacity: 1; }
+  .sub { font-size: 12px; line-height: 16px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex: none;
+  }
+  .pill.flat { color: var(--text-2); background: var(--inset); }
+  /* A light tint of the status colour; the words keep 4.5:1 on it (on the inset ground in dark mode). */
+  .pill.good { color: var(--success); background: color-mix(in srgb, var(--success) 10%, var(--surface)); }
+  .pill.bad { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--surface)); }
+  :global(:root[data-theme='dark']) .pill.good { background: color-mix(in srgb, var(--success) 10%, var(--inset)); }
+  :global(:root[data-theme='dark']) .pill.bad { background: color-mix(in srgb, var(--danger) 10%, var(--inset)); }
+  /* The tile's buttons float over the right end of the header and show on hover and on keyboard focus. */
+  .actions {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding-left: 6px;
+    background: var(--surface);
+    border-radius: var(--r-control);
+    opacity: 0;
+    transform: translateY(-50%);
+    transition: opacity 120ms var(--spring);
+  }
+  .kpihead .actions { top: 22px; }
+  .tile:hover .actions, .tile.active .actions, .tile:focus-within .actions, .actions.held { opacity: 1; }
+  .edit, .drillsw { width: 26px; height: 26px; color: var(--text-2); }
+  .edit:hover, .drillsw:hover { color: var(--text); }
+  /* On a phone there is no pointer to hover with: the buttons stay in view, in the row. */
+  .phone .actions { position: static; transform: none; opacity: 1; padding: 0; background: none; }
   .phone header { cursor: default; }
-  .body { flex: 1; min-height: 0; padding: 0 14px 10px; position: relative; }
+  /* A narrow number tile on a phone: its label may take two lines rather than be cut. */
+  .phone header.kpihead h3 { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; line-height: 16px; }
+  .body { flex: 1; min-height: 0; padding: 0 16px 12px; position: relative; }
   /* No title: the header shrinks to the edit button, which floats over the corner. */
-  .bare header { position: absolute; top: 4px; right: 4px; z-index: 2; height: 24px; padding: 0; background: transparent; border-radius: 12px; }
-  .bare:hover header, .bare.active header { background: var(--surface); }
-  .bare h3 { display: none; }
+  .bare header { position: absolute; top: 4px; right: 4px; z-index: 2; min-height: 26px; padding: 0; background: transparent; border-radius: 12px; }
+  .bare .actions { position: static; transform: none; padding: 0; background: none; }
+  .bare:hover header, .bare.active header, .bare:focus-within header { background: var(--surface); }
+  .bare .titles { display: none; }
   /* In a story the frame steps back: no ring, the page's ground, a title in the heading style (build 11). */
-  .tile.flow { box-shadow: none; background: transparent; }
+  .tile.flow, .tile.flow:hover { box-shadow: none; background: transparent; }
   .tile.flow.active, .tile.flow:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
   .tile.flow h3 { font-size: 15px; letter-spacing: -0.01em; }
   /* A tile on the page's ground lines up with the text; a card keeps its ground and its padding. */
@@ -501,7 +568,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 4px 12px;
-    padding: 0 14px 8px;
+    padding: 0 16px 10px;
     font-size: 11px;
     color: var(--text-2);
   }

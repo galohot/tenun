@@ -49,6 +49,7 @@
     onretry,
     onplaces,
     control,
+    kpiDelta = 'inline',
   }: {
     tile: Tile;
     res: QueryResult;
@@ -84,6 +85,8 @@
     onplaces?: () => void;
     /** Parameter tiles (v5 build 05): the parameter, its value, and what moving it does (not set: it is fixed). */
     control?: { param: Param | undefined; value: Cell; onchange?: (v: Cell) => void; note?: string };
+    /** Number tile: the change beside the value, or none when the tile's header shows it (look v3). */
+    kpiDelta?: 'inline' | 'none';
   } = $props();
 
   // A value with no format of its own is written the way its named measure is (build 03).
@@ -278,7 +281,7 @@
   {#if tile.card}
     <CardView kpi={res.kpi} {tile} card={resolveCard(tile.card, [], (tile.target?.value ?? 0) > 0)} {title} parts={res.parts} {tables} />
   {:else}
-    <KpiView kpi={res.kpi} {tile} {colors} parts={res.parts} />
+    <KpiView kpi={res.kpi} {tile} {colors} parts={res.parts} delta={kpiDelta} />
   {/if}
 {:else if tile.type === 'map'}
   <MapView {tile} {res} {colors} {selected} {tables} onpick={onpick ? (c) => onpick(c) : undefined} {onretry} {onplaces} />
