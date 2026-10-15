@@ -1457,7 +1457,8 @@
         dashGrain={dash.grain ?? null}
         onclose={() => (selectedTile = null)}
         onchange={change}
-        onremove={() => removeTile(sel.id)} />
+        onremove={() => removeTile(sel.id)}
+        onduplicate={() => duplicate(sel.id)} />
     {/if}
   </div>
 {/if}
