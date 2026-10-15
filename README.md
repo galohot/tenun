@@ -190,7 +190,8 @@ Tenun aims to do a few things well. These are left out by choice. Each has an an
 | macOS (Intel) | `Tenun_x.y.z_x64.dmg` |
 | Linux | `.AppImage` or `.deb` |
 
-The apps are not code-signed yet:
+The apps are not code-signed yet (Windows signing is on the way, see the
+[code signing policy](#code-signing-policy)):
 
 - **macOS:** open the app once and close the warning. Then open **System Settings → Privacy &
   Security**, scroll down, and choose **Open Anyway**. You do this once. Or, in Terminal:
@@ -332,6 +333,27 @@ workspace a site**. It is off by default, and with it off nothing about export o
   uses the network too, and only that: a web link you add as a source, publishing to tenun.cloud, and
   an alert (one message to the Slack, Teams, Discord, Telegram or web address you give it, holding the
   value and the tile's name). `tenun mcp` talks only to the Tenun app on this computer.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+The Windows installers (`.msi` and `-setup.exe`) are signed once the project is approved. Until then,
+they are not signed, and Windows shows a SmartScreen warning.
+
+- **What is signed:** only files that the [release workflow](.github/workflows/release.yml) of this
+  repository builds on GitHub Actions from a release tag. Nothing built on a personal computer is signed.
+- **Committers and reviewers:** [@galohot](https://github.com/galohot), the maintainer. A change from
+  anyone else comes as a pull request, and the maintainer reviews it before it is merged.
+- **Approvers:** [@galohot](https://github.com/galohot) approves every signing request.
+- **Accounts:** every account that can change this repository or approve a signature uses
+  multi-factor authentication.
+- **Privacy:** Tenun has no telemetry and sends nothing about you or your data anywhere. It uses the
+  network only for what [Privacy and security](#privacy-and-security) lists: a connector or map
+  boundaries it downloads when you first need them, and what you set up yourself (a web link as a
+  source, publishing to tenun.cloud, an alert). tenun.cloud has its own
+  [privacy policy](https://tenun.cloud/privacy).
 
 ## Build from source
 

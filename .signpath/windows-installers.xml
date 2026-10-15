@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The SignPath artifact configuration "windows-installers": what the sign job of .github/workflows/release.yml sends
+  (one ZIP with msi/ and nsis/) and what gets signed. The copy in SignPath is the one that counts; this one is kept in
+  the repository so a change to either can be compared.
+
+  - The MSI is deep-signed: the app inside it, then the MSI itself.
+  - The NSIS setup is signed as one file. SignPath cannot open an NSIS installer, so the app it installs is not signed.
+  - Every signed file must say product name "Tenun" and the release's version (the code signing policy of SignPath
+    Foundation). Tauri writes both from app/src-tauri/tauri.conf.json and Cargo.toml.
+  - The path of the app inside the MSI was read with msiextract from 0.6.0 (PFiles/Tenun/tenun-app.exe). Check it
+    against the structure SignPath shows when the 0.6.0 MSI is uploaded in its web app.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <msi-file path="msi/Tenun_${version}_x64_en-US.msi">
+      <pe-file path="PFiles/Tenun/tenun-app.exe" product-name="Tenun" product-version="${version}" file-version="${version}">
+        <authenticode-sign />
+      </pe-file>
+      <authenticode-sign />
+    </msi-file>
+    <pe-file path="nsis/Tenun_${version}_x64-setup.exe" product-name="Tenun" product-version="${version}" file-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

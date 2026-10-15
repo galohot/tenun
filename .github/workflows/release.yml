@@ -56,10 +56,20 @@ jobs:
           projectPath: app
           tagName: ${{ github.ref_name }}
           releaseName: Tenun ${{ github.ref_name }}
-          releaseBody: See the README for install notes. The apps are not code-signed yet.
+          releaseBody: See the README for install notes. Code signing policy - https://github.com/galohot/tenun#code-signing-policy
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+      # The Windows installers go to the signing job when SignPath is set up (code signing policy in the README).
+      - name: Windows installers to sign
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
 
   cli:
     needs: app
@@ -114,8 +124,50 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.ref_name }}" "$ASSET" --clobber
 
+  # Signs the Windows installers with the SignPath Foundation certificate, then puts the signed files on the release in
+  # place of the unsigned ones. Runs only once the repository has the SIGNPATH_* variables and the SIGNPATH_API_TOKEN
+  # secret; until then the release keeps its unsigned installers. Each signing request waits for an approver.
+  sign:
+    needs: app
+    if: vars.SIGNPATH_ORGANIZATION_ID != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installers
+          path: unsigned
+      - id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers-to-sign
+          path: unsigned
+          if-no-files-found: error
+      - name: Version
+        id: version
+        shell: bash
+        run: echo "v=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'tenun' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIG_SLUG || 'windows-installers' }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          parameters: |
+            version: "${{ steps.version.outputs.v }}"
+          wait-for-completion-timeout-in-seconds: 18000
+          output-artifact-directory: signed
+      - name: Signed installers on the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" signed/msi/*.msi signed/nsis/*-setup.exe --clobber --repo "${{ github.repository }}"
+
   checksums:
-    needs: [app, cli]
+    needs: [app, cli, sign]
+    # After the signed installers are in, or without signing when it is not set up.
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     steps:
       - name: SHA-256 of every asset
