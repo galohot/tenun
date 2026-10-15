@@ -46,6 +46,14 @@
     chevronRight: 'M8 5l5 5-5 5',
     chevronDown: 'M5 8l5 5 5-5',
     chevronLeft: 'M12 5l-5 5 5 5',
+    // Up and down in one: a switcher that opens a list (look 3).
+    chevronUpDown: 'M6.5 8L10 4.5 13.5 8M6.5 12l3.5 3.5 3.5-3.5',
+    // The Return key: "open the picked row" in the command palette (look 3).
+    enter: 'M15.5 4.5v5a2 2 0 0 1-2 2H5M8 8l-3 3.5L8 15',
+    // A small filled-looking dot drawn as a ring: a state in the status bar (look 3).
+    dot: 'M10 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
+    // A bolt: an action in the command palette (look 3).
+    bolt: 'M11 2.5L4.5 11h5l-1 6.5L15.5 9h-5z',
     search: 'M9 4a5 5 0 1 0 0 10A5 5 0 0 0 9 4zM12.7 12.7L16 16',
     sun: 'M10 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM10 2.5v1.5M10 16v1.5M2.5 10H4M16 10h1.5M4.7 4.7l1 1M14.3 14.3l1 1M4.7 15.3l1-1M14.3 5.7l1-1',
     moon: 'M15.5 12.5A6 6 0 0 1 7.5 4.5a6 6 0 1 0 8 8z',

@@ -6,6 +6,7 @@
   import Menu from './dash/Menu.svelte';
   import Icon from './Icon.svelte';
   import FileBrowser from './FileBrowser.svelte';
+  import { palette, modKey } from './Palette.svelte';
 
   let renaming = $state(false);
   let nameDraft = $state('');
@@ -27,6 +28,8 @@
 
   /** A new page: a grid of tiles, or a story that reads like a document (build 11). */
   let newMenu = $state<{ x: number; y: number } | null>(null);
+  /** The workspace switcher (look 3): the start page, rename, save, open and new, under the card. */
+  let wsMenu = $state<{ x: number; y: number } | null>(null);
   function addDashboard(kind: 'grid' | 'story' = 'grid') {
     const n = app.dashboards.length;
     const d = kind === 'story' ? newStory(newId('d'), app.dashboards.filter((x) => x.layout === 'flow').length, newId) : newDashboard(n);
@@ -81,12 +84,13 @@
 </script>
 
 <nav class="side">
-  <div class="ws">
-    <img src="/icon.svg" alt="" width="22" height="22" />
-    {#if renaming}
+  {#if renaming}
+    <div class="ws-card editing">
+      <img src="/icon.svg" alt="" width="28" height="28" />
       <!-- svelte-ignore a11y_autofocus -->
       <input
         class="field rename"
+        aria-label="Workspace name"
         bind:value={nameDraft}
         autofocus
         onblur={commitRename}
@@ -94,35 +98,66 @@
           if (e.key === 'Enter') commitRename();
           if (e.key === 'Escape') renaming = false;
         }} />
-    {:else}
-      <button class="name" title="Rename workspace" ondblclick={startRename} onclick={() => go({ view: 'home' })}>
-        {ws.name}
-      </button>
-    {/if}
-  </div>
-  <div class="file">
-    <span class="state" class:unsaved={app.snap!.dirty}>
-      {#if app.snap!.path}{app.snap!.dirty ? 'Unsaved changes' : 'Saved automatically'}{:else}Not saved yet{/if}
-    </span>
-    <span class="file-actions">
-      <button class="btn plain icon" title="New workspace" onclick={newWs}><Icon name="plus" /></button>
-      <button class="btn plain icon" title="Open workspace…" onclick={open}><Icon name="open" /></button>
-      <button class="btn plain icon" title={app.snap!.path ? 'Save' : 'Save as…'} onclick={save}><Icon name="save" /></button>
-    </span>
-  </div>
+    </div>
+  {:else}
+    <button
+      class="ws-card"
+      title="Workspace: double-click to rename"
+      aria-haspopup="menu"
+      aria-expanded={!!wsMenu}
+      ondblclick={() => {
+        wsMenu = null;
+        startRename();
+      }}
+      onclick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        wsMenu = wsMenu ? null : { x: r.left, y: r.bottom + 4 };
+      }}>
+      <img src="/icon.svg" alt="" width="28" height="28" />
+      <span class="ws-text">
+        <span class="ws-name">{ws.name}</span>
+        <span class="state" class:unsaved={app.snap!.dirty}>
+          {#if app.snap!.path}{app.snap!.dirty ? 'Unsaved changes' : 'Saved automatically'}{:else}Not saved yet{/if}
+        </span>
+      </span>
+      <Icon name="chevronUpDown" size={14} />
+    </button>
+  {/if}
+  {#if wsMenu}
+    <Menu
+      x={wsMenu.x}
+      y={wsMenu.y}
+      items={[
+        { label: 'Start page', run: () => go({ view: 'home' }) },
+        { label: 'Rename…', run: startRename },
+        { label: app.snap!.path ? 'Save' : 'Save as…', run: save },
+        ...(app.snap!.path ? [{ label: 'Save as…', run: saveAs }] : []),
+        { label: 'Open workspace…', run: open },
+        { label: 'New workspace', run: newWs },
+        ...(app.health?.native ? [{ label: 'Open in browser', run: () => void api.openBrowser() }] : []),
+      ]}
+      onclose={() => (wsMenu = null)} />
+  {/if}
 
+  <button class="search" onclick={() => (palette.open = true)} title="Search and commands ({modKey}K)">
+    <Icon name="search" size={14} />
+    <span>Search</span>
+    {#if !app.phone}<kbd>{modKey}K</kbd>{/if}
+  </button>
+
+  <div class="heading section-label"><span>Workspace</span></div>
   <div class="group">
-    <button class="item" class:on={route.view === 'data'} onclick={() => go({ view: 'data' })}>
+    <button class="item" class:on={route.view === 'data'} aria-current={route.view === 'data' ? 'page' : undefined} onclick={() => go({ view: 'data' })}>
       <Icon name="table" /> Data
-      <span class="count">{app.tables.length || ''}</span>
+      {#if app.tables.length}<span class="count">{app.tables.length}</span>{/if}
     </button>
-    <button class="item" class:on={route.view === 'model'} onclick={() => go({ view: 'model' })}>
+    <button class="item" class:on={route.view === 'model'} aria-current={route.view === 'model' ? 'page' : undefined} onclick={() => go({ view: 'model' })}>
       <Icon name="model" /> Model
-      <span class="count">{ws.relationships.length || ''}</span>
+      {#if ws.relationships.length}<span class="count">{ws.relationships.length}</span>{/if}
     </button>
   </div>
 
-  <div class="heading">
+  <div class="heading section-label">
     <span>Dashboards</span>
     <button
       class="btn plain icon small"
@@ -146,10 +181,8 @@
   </div>
   <div class="group dashboards">
     {#each app.dashboards as d (d.id)}
-      <button
-        class="item"
-        class:on={route.view === 'dashboard' && route.id === d.id}
-        onclick={() => go({ view: 'dashboard', id: d.id })}>
+      {@const on = route.view === 'dashboard' && route.id === d.id}
+      <button class="item" class:on aria-current={on ? 'page' : undefined} onclick={() => go({ view: 'dashboard', id: d.id })}>
         <Icon name={d.layout === 'flow' ? 'text' : 'dashboard'} />
         <span class="ellipsis">{d.title}</span>
       </button>
@@ -157,11 +190,11 @@
       <p class="empty">No dashboards yet.</p>
     {/each}
   </div>
-  <button class="site-link" onclick={() => (app.siteOpen = true)}>
-    <Icon name="globe" size={14} /> Site…{#if app.snap?.workspace.site?.on}<span class="on-dot" title="This workspace is a site"></span>{/if}
-  </button>
 
   <div class="foot">
+    <button class="site-link" onclick={() => (app.siteOpen = true)}>
+      <Icon name="globe" size={14} /> Site…{#if app.snap?.workspace.site?.on}<span class="on-dot" title="This workspace is a site"></span>{/if}
+    </button>
     <div class="theme-row">
       <div class="seg" role="radiogroup" aria-label="Appearance">
         {#each themes as t}
@@ -173,15 +206,17 @@
             onclick={() => app.setTheme(t.id)}><Icon name={t.icon} size={14} /></button>
         {/each}
       </div>
-      <button class="btn plain icon gear" title="Settings" aria-label="Settings" onclick={() => (app.settingsOpen = true)}>
-        <Icon name="settings" size={16} />
-      </button>
+      <span class="foot-actions">
+        {#if app.health?.native}
+          <button class="btn plain icon gear" title="Open this workspace in your web browser" aria-label="Open in browser" onclick={() => api.openBrowser()}>
+            <Icon name="globe" size={16} />
+          </button>
+        {/if}
+        <button class="btn plain icon gear" title="Settings" aria-label="Settings" onclick={() => (app.settingsOpen = true)}>
+          <Icon name="settings" size={16} />
+        </button>
+      </span>
     </div>
-    {#if app.health?.native}
-      <button class="btn plain small-text" title="Open this workspace in your web browser" onclick={() => api.openBrowser()}>
-        <Icon name="globe" size={14} /> Open in browser
-      </button>
-    {/if}
   </div>
 </nav>
 
@@ -199,55 +234,56 @@
 {/if}
 
 <style>
-  .site-link { display: flex; align-items: center; gap: 8px; margin: 4px 10px 0; height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: none; font-size: 12px; color: var(--text-2); cursor: pointer; }
-  .site-link:hover { background: var(--hover); color: var(--text); }
-  .on-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
   .side {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 12px 10px;
+    gap: 1px;
+    padding: 10px;
     background: var(--window);
     border-right: 1px solid var(--sep);
     min-height: 0;
     overflow: auto;
   }
-  .ws {
+  .ws-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 46px;
+    padding: 7px 8px;
+    margin-bottom: 8px;
+    border: 1px solid var(--sep);
+    border-radius: 8px;
+    background: var(--surface);
+    text-align: left;
+    color: var(--text);
+    transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+  }
+  button.ws-card:hover { border-color: var(--sep-strong); }
+  button.ws-card[aria-expanded='true'] { border-color: var(--sep-strong); background: var(--hover); }
+  .ws-card img { border-radius: 6px; flex: none; }
+  .ws-card > :global(svg) { color: var(--text-2); }
+  .ws-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .ws-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rename { height: 28px; font-weight: 600; }
+  .state { font-size: var(--fs-label); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .state.unsaved { color: var(--text); }
+  .search {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 2px 6px;
-  }
-  .ws img { border-radius: 5px; flex: none; }
-  .name {
-    border: 0;
-    background: none;
-    padding: 2px 4px;
-    margin-left: -4px;
+    height: 30px;
+    padding: 0 6px 0 8px;
+    margin-bottom: 10px;
+    border: 1px solid transparent;
     border-radius: var(--r-control);
-    font-size: 15px;
-    font-weight: 600;
+    background: var(--inset);
+    color: var(--text-2);
     text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
+    transition: border-color var(--dur-fast) var(--ease);
   }
-  .name:hover { background: var(--hover); }
-  .rename { height: 26px; font-weight: 600; }
-  .file {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 0 6px 36px;
-    border-bottom: 1px solid var(--sep);
-    margin-bottom: 6px;
-  }
-  .state { font-size: 11px; color: var(--text-2); }
-  .state.unsaved { color: var(--text); }
-  .file-actions { display: flex; }
-  .file-actions .btn { width: 24px; height: 24px; color: var(--text-2); }
-  .file-actions .btn:hover { color: var(--text); }
+  .search:hover { border-color: var(--sep-strong); }
+  .search span { flex: 1; }
   .group { display: flex; flex-direction: column; gap: 1px; }
   .item {
     display: flex;
@@ -261,31 +297,67 @@
     text-align: left;
     font-weight: 500;
     min-width: 0;
+    color: var(--text);
+    transition: background var(--dur-fast) var(--ease);
   }
-  .item :global(svg) { color: var(--accent-text); }
+  .item :global(svg) { color: var(--text-2); }
   .item:hover { background: var(--hover); }
-  .item.on { background: var(--selected); }
-  .count { margin-left: auto; font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .item.on { background: var(--selected); color: var(--accent-text); }
+  .item.on :global(svg) { color: var(--accent-text); }
+  .count {
+    margin-left: auto;
+    min-width: 20px;
+    padding: 0 6px;
+    border-radius: 9px;
+    background: var(--inset);
+    font-size: var(--fs-label);
+    line-height: 18px;
+    text-align: center;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .item.on .count { background: var(--surface); }
   .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .heading {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: 14px;
-    padding: 0 4px 2px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-2);
+    min-height: 26px;
+    padding: 6px 4px 4px 8px;
   }
+  .heading + .group { margin-bottom: 0; }
+  .group + .heading { margin-top: 12px; }
   .small { width: 22px; height: 22px; color: var(--text-2); }
+  .small:hover { color: var(--text); }
   .empty { margin: 4px 8px; color: var(--text-2); font-size: 12px; }
   .dashboards { flex: 1; }
   .foot {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .site-link {
+    display: flex;
+    align-items: center;
     gap: 8px;
-    padding: 8px 4px 0;
+    height: 28px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--r-control);
+    background: none;
+    font-size: 12px;
+    color: var(--text-2);
+    transition: background var(--dur-fast) var(--ease);
+  }
+  .site-link:hover { background: var(--hover); color: var(--text); }
+  .on-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+  .theme-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 2px 0 4px;
+    border-top: 1px solid var(--sep);
   }
   .seg {
     display: inline-flex;
@@ -302,10 +374,11 @@
     border-radius: 6px;
     background: none;
     color: var(--text-2);
+    transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
   }
-  .seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
-  .theme-row { display: flex; align-items: center; gap: 6px; }
-  .gear { width: 26px; height: 26px; color: var(--text-2); }
+  .seg button:hover { color: var(--text); }
+  .seg button.on { background: var(--raised); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%), 0 0 0 1px var(--sep); }
+  .foot-actions { display: flex; gap: 2px; }
+  .gear { width: 28px; height: 28px; color: var(--text-2); }
   .gear:hover { color: var(--text); }
-  .small-text { font-size: 12px; height: 24px; padding: 0 6px; color: var(--text-2); }
 </style>

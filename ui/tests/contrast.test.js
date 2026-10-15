@@ -28,18 +28,23 @@ const ratio = (a, b) => {
   return (x + 0.05) / (y + 0.05);
 };
 
+// Look 3 adds: text-2 on hover and selected (a sidebar count, a palette hint on the picked row), and the status
+// bar's states on the window (danger, success, warn).
 const words = [
   ['text', ['surface', 'window', 'raised', 'inset', 'hover', 'selected']],
-  ['text-2', ['surface', 'window', 'raised', 'inset']],
-  ['accent-text', ['surface', 'window', 'selected', 'raised']],
-  ['danger', ['surface', 'window']],
+  ['text-2', ['surface', 'window', 'raised', 'inset', 'hover', 'selected']],
+  ['accent-text', ['surface', 'window', 'selected', 'raised', 'hover']],
+  ['danger', ['surface', 'window', 'raised']],
   ['success', ['surface', 'window']],
+  ['warn', ['surface', 'window']],
   ['axis-text', ['surface']],
 ];
 // Light-mode aqua (s3), yellow (s4) and pink (s5) sit under 3:1 by the
 // palette's design; tiles give them visible labels and tooltips (relief rule).
 const marksLight = ['s1', 's2', 's6', 's7', 's8', 'focus'];
 const marksDark = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 'focus'];
+// Icons in --text-3 sit on the window and on a tile (look 3: the sidebar, the status bar, a tile's ⋯).
+const iconGrounds = ['surface', 'window'];
 
 for (const [name, theme] of [['light', light], ['dark', dark]]) {
   test(`${name}: words clear 4.5:1`, () => {
@@ -53,6 +58,17 @@ for (const [name, theme] of [['light', light], ['dark', dark]]) {
   test(`${name}: white text on the accent clears 4.5:1`, () => {
     const r = ratio('#ffffff', theme.accent);
     assert.ok(r >= 4.5, `white on accent ${theme.accent} is ${r.toFixed(2)}:1`);
+  });
+  test(`${name}: icons in text-3 clear 3:1`, () => {
+    for (const bg of iconGrounds) {
+      const r = ratio(theme['text-3'], theme[bg]);
+      assert.ok(r >= 3, `text-3 ${theme['text-3']} on ${bg} ${theme[bg]} is ${r.toFixed(2)}:1`);
+    }
+  });
+  test(`${name}: the new chrome tokens exist`, () => {
+    for (const t of ['toolbar-h', 'status-h', 'fs-kpi', 'dur-fast', 'dur']) {
+      assert.ok(new RegExp(`--${t}:`).test(css), `--${t} is missing`);
+    }
   });
   test(`${name}: marks clear 3:1`, () => {
     for (const fg of name === 'light' ? marksLight : marksDark) {

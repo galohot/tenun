@@ -14,6 +14,8 @@
   import SitePreview from './components/site/SitePreview.svelte';
   import Toasts from './components/Toasts.svelte';
   import Icon from './components/Icon.svelte';
+  import Palette from './components/Palette.svelte';
+  import StatusBar from './components/StatusBar.svelte';
 
   onMount(() => {
     app.init();
@@ -54,6 +56,7 @@
       <Sidebar />
     {/if}
     <main>
+      <div class="view">
       {#if app.route.view === 'data'}
         <DataView tableId={app.route.table} />
       {:else if app.route.view === 'model'}
@@ -64,6 +67,10 @@
         {/key}
       {:else}
         <Welcome {hasData} />
+      {/if}
+      </div>
+      {#if !app.phone}
+        <StatusBar />
       {/if}
     </main>
   </div>
@@ -79,6 +86,7 @@
   {#if app.preview}
     <SitePreview />
   {/if}
+  <Palette />
 {:else}
   <div class="boot">Starting Tenun…</div>
 {/if}
@@ -87,7 +95,7 @@
 <style>
   .shell {
     display: grid;
-    grid-template-columns: 232px 1fr;
+    grid-template-columns: var(--sidebar-w) 1fr;
     height: 100%;
   }
   .shell.phone { display: flex; flex-direction: column; }
@@ -104,7 +112,8 @@
   }
   .phonebar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .scrim { position: fixed; inset: 0; z-index: 40; background: rgb(0 0 0 / 35%); }
-  .drawer { position: fixed; top: 0; bottom: 0; left: 0; z-index: 41; width: 260px; max-width: 85vw; display: flex; }
+  .drawer { position: fixed; top: 0; bottom: 0; left: 0; z-index: 41; width: 272px; max-width: 85vw; display: flex; box-shadow: var(--shadow-float); animation: drawer-in var(--dur) var(--ease); }
+  @keyframes drawer-in { from { transform: translateX(-16px); opacity: 0; } }
   .drawer :global(.side) { width: 100%; }
   main {
     min-width: 0;
@@ -115,6 +124,8 @@
     flex-direction: column;
   }
   .shell.phone main { flex: 1; height: auto; min-height: 0; }
+  /* The open view takes the room the status bar leaves. */
+  .view { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .boot {
     height: 100%;
     display: grid;

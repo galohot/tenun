@@ -16,8 +16,8 @@
   --selected: #e1ecfb;
 
   --text: #1d1d1f;        /* 16.7:1 on surface */
-  --text-2: #69696e;      /* 5.5:1 on surface, 5.0:1 on window, 4.8:1 on inset */
-  --text-3: #8e8e93;      /* marks and icons only (3.3:1) */
+  --text-2: #69696e;      /* 5.5:1 on surface, 5.0:1 on window, 4.8:1 on inset, 4.6:1 on hover and selected */
+  --text-3: #8a8a8f;      /* marks and icons only: 3.4:1 on surface, 3.2:1 on window */
   --sep: #e3e3e8;
   --sep-strong: #d1d1d6;
 
@@ -56,37 +56,58 @@
   --r-card: 10px;
   --r-sheet: 14px;
   --spring: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* the chrome of a desktop app (look 3): one toolbar on top of every view, one status bar under it */
+  --sidebar-w: 240px;
+  --toolbar-h: 48px;
+  --status-h: 24px;
+
+  /* type scale (look 3). Numbers are tabular everywhere they are read (see .num below). */
+  --fs-kpi: 30px;          /* a number tile's value: weight --fw-kpi, letter-spacing --ls-kpi */
+  --fw-kpi: 650;
+  --ls-kpi: -0.02em;
+  --fs-title: 13px;        /* a tile's title, weight 600 */
+  --fs-sub: 12px;          /* a tile's subtitle, in --text-2 */
+  --fs-small: 11.5px;      /* the status bar, hints, captions */
+  --fs-label: 11px;        /* section labels in capitals */
+
+  /* motion (look 3): hover and press move in --dur-fast, a sheet or a menu opens in --dur. */
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --ease: var(--spring);
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --window: #1c1c1e;
-  --surface: #2c2c2e;
-  --raised: #3a3a3c;
-  --inset: #1f1f21;
-  --hover: #3a3a3c;
-  --selected: #1b3a5e;
+  /* Designed dark, not light turned over (look 3): calm neutrals with a hint of blue-grey, three steps of depth.
+     The window is the deepest ground, a tile sits one step up, a menu one more. A field is a hole: deeper still. */
+  --window: #161618;
+  --surface: #1f1f22;
+  --raised: #2a2a2e;
+  --inset: #131315;
+  --hover: #29292d;
+  --selected: #1d2f4a;
 
-  --text: #f5f5f7;        /* 13.4:1 on surface */
-  --text-2: #a8a8ad;      /* 5.9:1 on surface, 4.8:1 on raised */
-  --text-3: #7c7c80;      /* marks only */
-  --sep: #3d3d40;
-  --sep-strong: #4a4a4e;
+  --text: #ededf0;        /* 14.1:1 on surface, 15.5:1 on window, 12.2:1 on raised */
+  --text-2: #a1a1aa;      /* 6.4:1 on surface, 7.1:1 on window, 5.6:1 on raised, 5.3:1 on selected */
+  --text-3: #71717a;      /* marks and icons only: 3.4:1 on surface, 3.7:1 on window */
+  --sep: #2c2c30;
+  --sep-strong: #3a3a3f;
 
-  --accent: #0a6cdb;      /* white text 4.9:1 */
-  --accent-text: #5aa9ff; /* 5.5:1 on surface, 4.6:1 on selected */
+  --accent: #0a6cdb;      /* white text 5.0:1 */
+  --accent-text: #6cb0ff; /* 7.3:1 on surface, 6.0:1 on selected */
   --accent-hover: #2b7fe0;
-  --focus: #0a84ff;
-  --danger: #ff6b6b;      /* 4.7:1 on surface */
-  --success: #4cc76a;     /* 6.4:1 on surface */
-  --warn: #f0b44c;        /* 7.5:1 on surface, 7.1:1 on tint */
+  --focus: #3b93ff;       /* a mark: 5.3:1 on surface */
+  --danger: #ff7b7b;      /* 6.6:1 on surface */
+  --success: #4fc970;     /* 7.8:1 on surface */
+  --warn: #f0b44c;        /* 8.9:1 on surface, 7.8:1 on tint */
 
-  --tint: #22304a;        /* text 12.1:1, text-2 5.6:1, danger 4.8:1 */
+  --tint: #1c2a40;        /* text 12.4:1, text-2 5.6:1, danger 5.8:1 */
   --on-accent: #ffffff;   /* 5.0:1 on the accent */
   --on-accent-soft: #4a8fe6;
 
-  --grid-line: #3a3a3d;
-  --axis-text: #a8a8ad;
+  --grid-line: #2c2c30;
+  --axis-text: #a1a1aa;
 
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
   --s5: #d55181; --s6: #2e9a2e; --s7: #9085e9; --s8: #e66767;
@@ -99,8 +120,8 @@
   --div-1: #9bbfe9; --div-2: #5a92d8; --div-3: #2f5282; --div-4: #3a3a3f;
   --div-5: #8a4423; --div-6: #d9672c; --div-7: #f6a77a;
 
-  --shadow-float: 0 4px 18px rgb(0 0 0 / 45%), 0 0 0 1px rgb(255 255 255 / 8%);
-  --shadow-tile: 0 0 0 1px rgb(255 255 255 / 4%);
+  --shadow-float: 0 8px 28px rgb(0 0 0 / 50%), 0 0 0 1px rgb(255 255 255 / 7%);
+  --shadow-tile: 0 0 0 1px rgb(255 255 255 / 5%);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -141,9 +162,10 @@ button { cursor: pointer; }
   color: var(--text);
   font-weight: 500;
   white-space: nowrap;
-  transition: background 120ms var(--spring);
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .btn:hover { background: var(--hover); }
+.btn:active:not(:disabled) { transform: scale(0.98); }
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
 .btn.primary:hover { background: var(--accent-hover); }
@@ -167,6 +189,38 @@ button { cursor: pointer; }
 .label { font-size: 12px; font-weight: 500; color: var(--text-2); }
 .muted { color: var(--text-2); }
 .num { font-variant-numeric: tabular-nums; }
+/* Numbers line up in columns wherever they are read: tables, number fields, times, shortcut hints. */
+table, input[type='number'], time, kbd, .kbd, output, progress, meter { font-variant-numeric: tabular-nums; }
+
+/* A section label in capitals (sidebar, palette groups, inspector sections). */
+.section-label {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+/* A keyboard shortcut: ⌘K, Ctrl+K, Esc. In a tooltip-like hint or beside a menu item. */
+kbd, .kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--sep-strong);
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* A sheet or a palette opens from 98 % scale and no opacity; a menu the same, faster. */
+@keyframes tenun-sheet-in { from { opacity: 0; transform: scale(0.98); } }
+.sheet-in { animation: tenun-sheet-in var(--dur) var(--ease); }
 
 h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 h1 { font-size: 22px; }
@@ -175,6 +229,13 @@ h3 { font-size: 13px; }
 
 ::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
 
+/* Motion is a help, never the message: with reduced motion asked for, nothing moves or scales. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; }
+  :root { --dur-fast: 0ms; --dur: 0ms; }
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
