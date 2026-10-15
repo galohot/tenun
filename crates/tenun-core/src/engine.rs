@@ -671,6 +671,54 @@ impl Engine {
         self.persist();
     }
 
+    /// The marks numbers are written with; `None` follows the locale.
+    pub fn digits(&self) -> Option<crate::workspace::Digits> {
+        self.state.read().unwrap().ws.digits
+    }
+
+    pub fn set_digits(&self, digits: Option<crate::workspace::Digits>) {
+        self.state.write().unwrap().ws.digits = digits;
+        self.persist();
+    }
+
+    /// How a column of a table is set up (`<source id>/<table name>`, real column name), if it is.
+    pub fn column_setup(&self, table: &str, column: &str) -> Option<crate::workspace::ColumnSetup> {
+        self.state
+            .read()
+            .unwrap()
+            .ws
+            .tables
+            .get(table)?
+            .columns
+            .get(column)
+            .cloned()
+    }
+
+    /// The number format and date pattern of every column that has one, keyed `<table id>/<column name>`, for the
+    /// tables `keep` accepts. Exported files carry them so the viewer writes cells as the app does.
+    pub fn column_formats(
+        &self,
+        keep: impl Fn(&str) -> bool,
+    ) -> serde_json::Map<String, serde_json::Value> {
+        let s = self.state.read().unwrap();
+        let mut out = serde_json::Map::new();
+        for (table, setup) in s.ws.tables.iter().filter(|(t, _)| keep(t)) {
+            for (column, c) in &setup.columns {
+                let mut entry = serde_json::Map::new();
+                if let Some(f) = &c.format {
+                    entry.insert("format".into(), f.clone());
+                }
+                if let Some(p) = &c.date_pattern {
+                    entry.insert("date_pattern".into(), p.clone().into());
+                }
+                if !entry.is_empty() {
+                    out.insert(format!("{table}/{column}"), entry.into());
+                }
+            }
+        }
+        out
+    }
+
     /// Replaces the workspace (used by open, new and "open sample").
     pub fn replace(&self, mut ws: Workspace, path: Option<PathBuf>) {
         // A file edited by hand may hold parameters that would be refused: they are left out (v5 build 05).

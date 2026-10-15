@@ -60,6 +60,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/workspace/save", post(ws_save))
         .route("/workspace/rename", post(ws_rename))
         .route("/workspace/locale", put(ws_locale))
+        .route("/workspace/digits", put(ws_digits))
         .route("/workspace/measures", put(put_measures))
         .route("/workspace/card-styles", put(put_card_styles))
         .route("/workspace/hierarchies", put(put_hierarchies))
@@ -270,6 +271,25 @@ async fn ws_locale(State(s): S, Json(b): Json<LocaleBody>) -> R<Json<Value>> {
     Ok(Json(
         blocking(&s, move |st| {
             st.engine.set_locale(b.locale);
+            st.emit(json!({ "type": "workspace-changed" }));
+            Ok(serde_json::to_value(st.engine.snapshot())?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct DigitsBody {
+    #[serde(default)]
+    digits: Value,
+}
+
+/// Changes the marks the open workspace writes numbers with. `null`, or a style this version does not know, clears
+/// it: numbers then follow the locale.
+async fn ws_digits(State(s): S, Json(b): Json<DigitsBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            st.engine.set_digits(serde_json::from_value(b.digits).ok());
             st.emit(json!({ "type": "workspace-changed" }));
             Ok(serde_json::to_value(st.engine.snapshot())?)
         })
@@ -1150,7 +1170,13 @@ async fn export_xlsx(State(s): S, Json(b): Json<XlsxBody>) -> R<Response> {
         }
         // A file that leaves the computer carries the notes with no key value and no file name.
         let res = tenun_core::drill::run_public(&st.engine, &t, &b.filters, &b.drill)?;
-        Ok((xlsx::build(&b.tile, &res, &b.headers, &b.title)?, b.path))
+        let pattern_of = |table: &str, column: &str| {
+            st.engine
+                .column_setup(table, column)
+                .and_then(|c| c.date_pattern)
+        };
+        let bytes = xlsx::build_in(&b.tile, &res, &b.headers, &b.title, &pattern_of)?;
+        Ok((bytes, b.path))
     })
     .await?;
     if let Some(p) = path {

@@ -43,6 +43,29 @@ impl Locale {
     }
 }
 
+/// The marks numbers are written with (formats §2.2). Not set: the locale's (`1,234.5` in English,
+/// `1.234,5` in Indonesian). Unit words follow the locale, not the digit style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Digits {
+    /// `1,234.5`
+    CommaDot,
+    /// `1.234,5`
+    DotComma,
+    /// `1 234,5`, with a narrow space.
+    SpaceComma,
+    /// `1’234.5`
+    AposDot,
+    /// `12,34,567.5`: three digits, then groups of two.
+    Indian,
+}
+
+/// A digit style the file names but this version does not know reads as "not set".
+fn lenient_digits<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Digits>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(v.and_then(|v| serde_json::from_value(v).ok()))
+}
+
 /// A locale the file names but this version does not know reads as "not set".
 fn lenient_locale<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Locale>, D::Error> {
     let v = Option::<serde_json::Value>::deserialize(d)?;
@@ -70,6 +93,13 @@ pub struct Workspace {
         skip_serializing_if = "Option::is_none"
     )]
     pub locale: Option<Locale>,
+    /// The marks numbers are written with. Not written until it is set.
+    #[serde(
+        default,
+        deserialize_with = "lenient_digits",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub digits: Option<Digits>,
     /// How each table is prepared: header row, column overrides, unpivot. The key is the table id
     /// (`<source id>/<table name>`). Not written until a table is set up (V3-D11).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -186,8 +216,8 @@ pub struct NamedMeasure {
     pub name: String,
     #[serde(default)]
     pub formula: String,
-    /// How the value is written (decimals, currency, compact, percent), as a tile's own format
-    /// is. A tile's own format wins. The core does not read it; the app does.
+    /// How the value is written (`numtext::NumFormat`: decimals, currency, scale, negative style, code…), as a
+    /// tile's own format is. A tile's own format wins, field by field. The app and alerts read it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -204,6 +234,7 @@ impl Default for Workspace {
             dashboards: Vec::new(),
             layout: serde_json::Value::Null,
             locale: None,
+            digits: None,
             tables: BTreeMap::new(),
             measures: Vec::new(),
             card_styles: Vec::new(),
@@ -308,6 +339,18 @@ impl TableSetup {
             if c.date_format == Some(DateFormat::Auto) {
                 c.date_format = None;
             }
+            if c.format
+                .as_ref()
+                .is_some_and(|f| f.as_object().is_some_and(|o| o.is_empty()))
+            {
+                c.format = None;
+            }
+            if c.date_pattern
+                .as_deref()
+                .is_some_and(|s| s.trim().is_empty())
+            {
+                c.date_pattern = None;
+            }
         }
         self.columns.retain(|_, c| *c != ColumnSetup::default());
         if self
@@ -352,6 +395,13 @@ pub struct ColumnSetup {
     /// A tooltip in the field pickers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// How the column's numbers are written (a number format, kept as JSON as tiles keep theirs). A plain total of
+    /// the column (sum, average, min, max, median, p90) starts from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<serde_json::Value>,
+    /// How the column's dates are written: `yyyy-MM-dd`, `d MMM yyyy`, `EEEE`, `HH:mm`…
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date_pattern: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -816,6 +866,24 @@ mod tests {
         let odd: Workspace =
             serde_json::from_str(r#"{"version":1,"name":"x","locale":"fr"}"#).unwrap();
         assert_eq!(odd.locale, None);
+    }
+
+    #[test]
+    fn digits_and_column_formats_are_optional_and_kept() {
+        // An old file has none and is written back as it was.
+        let old = r#"{"version":1,"name":"x","sources":[],"relationships":[],"dashboards":[],"layout":null,"tables":{"s1/t":{"columns":{"amount":{"label":"Amount"}}}}}"#;
+        let ws: Workspace = serde_json::from_str(old).unwrap();
+        assert_eq!(ws.digits, None);
+        assert_eq!(serde_json::to_string(&ws).unwrap(), old);
+        // The new fields round-trip, and the format keeps fields this version does not know.
+        let text = r#"{"version":1,"name":"x","sources":[],"relationships":[],"dashboards":[],"layout":null,"digits":"space_comma","tables":{"s1/t":{"columns":{"amount":{"format":{"currency":"EUR","later":1}},"day":{"date_pattern":"d MMM yyyy"}}}}}"#;
+        let ws: Workspace = serde_json::from_str(text).unwrap();
+        assert_eq!(ws.digits, Some(Digits::SpaceComma));
+        assert_eq!(serde_json::to_string(&ws).unwrap(), text);
+        // A digit style this version does not know reads as not set.
+        let odd: Workspace =
+            serde_json::from_str(r#"{"version":1,"name":"x","digits":"roman"}"#).unwrap();
+        assert_eq!(odd.digits, None);
     }
 
     #[test]

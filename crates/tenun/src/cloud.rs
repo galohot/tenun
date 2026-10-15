@@ -450,6 +450,7 @@ pub fn digest(engine: &Engine, dashboard_id: &str) -> Value {
         return json!({ "items": [] });
     };
     let loc = engine.locale();
+    let digits = engine.digits();
     let mut items = Vec::new();
     for t in dash["tiles"]
         .as_array()
@@ -475,7 +476,8 @@ pub fn digest(engine: &Engine, dashboard_id: &str) -> Value {
             .map(str::to_string)
             .unwrap_or_else(|| crate::alerts::value_name(engine, t, 0));
         let fmt = crate::alerts::format_of(engine, t, 0);
-        let mut item = json!({ "name": name, "value": tenun_core::numtext::short(v, loc, &fmt) });
+        let mut item =
+            json!({ "name": name, "value": tenun_core::numtext::short_in(v, loc, digits, &fmt) });
         if !k.period.is_empty() && k.period != "All data" {
             item["period"] = json!(if k.partial {
                 format!("{}, so far", k.period)
@@ -491,7 +493,7 @@ pub fn digest(engine: &Engine, dashboard_id: &str) -> Value {
                 format!(
                     "{} {} vs {vs}",
                     if d > 0.0 { "▲" } else { "▼" },
-                    tenun_core::numtext::change_pct(d, loc)
+                    tenun_core::numtext::change_pct_in(d, loc, digits)
                 )
             });
         }
