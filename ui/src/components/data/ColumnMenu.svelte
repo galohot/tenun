@@ -43,6 +43,9 @@
   // svelte-ignore state_referenced_locally
   let description = $state(column.description ?? '');
   let root: HTMLDivElement;
+  let winW = $state(innerWidth);
+  // The menu stays in the window; the number format is wider than the other pages.
+  const left = $derived(Math.max(8, Math.min(x, winW - (mode === 'format' ? 348 : 268))));
 
   const nameProblem = $derived(labelProblem(label, column, table));
   const isDate = (t: string) => t === 'date' || t === 'datetime';
@@ -90,9 +93,9 @@
   }
 </script>
 
-<svelte:window onmousedown={outside} onkeydown={(e) => e.key === 'Escape' && onclose()} />
+<svelte:window bind:innerWidth={winW} onmousedown={outside} onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
-<div class="menu" class:wide={mode === 'format'} bind:this={root} style:left="{x}px" style:top="{y}px" role="menu">
+<div class="menu" class:wide={mode === 'format'} bind:this={root} style:left="{left}px" style:top="{y}px" role="menu">
   {#if mode === 'main'}
     <button role="menuitem" onclick={() => (mode = 'rename')}><Icon name="pencil" size={13} /> Rename</button>
     {#if canRetype}

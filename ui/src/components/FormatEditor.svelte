@@ -56,10 +56,10 @@
   const UNIT_NAMES: [number, string][] = [[3, 'Thousands'], [6, 'Millions'], [9, 'Billions'], [12, 'Trillions']];
 
   const NEGATIVES: { id: NonNullable<NumFormat['negative']>; words: string }[] = [
-    { id: 'minus', words: 'Minus sign' },
-    { id: 'parens', words: 'Brackets' },
-    { id: 'red', words: 'Minus, red' },
-    { id: 'parens_red', words: 'Brackets, red' },
+    { id: 'minus', words: '' },
+    { id: 'parens', words: '' },
+    { id: 'red', words: ' in red' },
+    { id: 'parens_red', words: ' in red' },
   ];
 
   const text = (v: string) => (v === '' ? undefined : v.slice(0, 16));
@@ -104,7 +104,7 @@
       </optgroup>
     </select>
     <select class="field" aria-label="Negative numbers" value={f.negative ?? 'minus'} onchange={(e) => onchange({ negative: e.currentTarget.value === 'minus' ? undefined : (e.currentTarget.value as NumFormat['negative']) })}>
-      {#each NEGATIVES as n (n.id)}<option value={n.id}>{n.words}: {write(-1234, false, { ...f, code: undefined, negative: n.id, zero: undefined })}</option>{/each}
+      {#each NEGATIVES as n (n.id)}<option value={n.id}>{write(-1234, false, { ...f, code: undefined, negative: n.id, zero: undefined, prefix: undefined, suffix: undefined })}{n.words}</option>{/each}
     </select>
     <input class="field" aria-label="Text before" placeholder="Text before" maxlength="16" value={f.prefix ?? ''} onchange={(e) => onchange({ prefix: text(e.currentTarget.value) })} />
     <input class="field" aria-label="Text after" placeholder="Text after: pcs, kg, °C" maxlength="16" value={f.suffix ?? ''} onchange={(e) => onchange({ suffix: text(e.currentTarget.value) })} />
@@ -154,10 +154,21 @@
 
 <style>
   .fe { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-  .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+  .head { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .preview { display: flex; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--text-2); }
   .preview .num { color: var(--text); font-variant-numeric: tabular-nums; }
   .preview i { font-style: normal; color: var(--text-3); }
+  select.field {
+    height: 30px;
+    appearance: none;
+    padding: 0 26px 0 9px;
+    border: 1px solid var(--sep-strong);
+    background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 20 20' fill='none' stroke='%238a8a8f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 8l5 5 5-5'/%3E%3C/svg%3E") no-repeat right 8px center / 12px 12px;
+    font-size: 12px;
+    text-overflow: ellipsis;
+  }
+  select.field:hover { border-color: var(--text-3); }
+  input.field { height: 30px; font-size: 12px; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .grid > * { min-width: 0; }
   .more { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; padding: 0; border: 0; background: none; font-size: 12px; color: var(--text-2); }
