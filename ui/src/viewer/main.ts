@@ -3,7 +3,8 @@ import { mount } from 'svelte';
 import Viewer from './Viewer.svelte';
 import SiteApp from './SiteApp.svelte';
 import type { ExportPayload, SitePayload } from '../lib/export';
-import { setLocale } from '../lib/format';
+import { setDigits, setLocale } from '../lib/format';
+import { setColumnFormats } from '../lib/measures';
 import { setCalendar, type Calendar } from '../lib/locale';
 import { useCarried } from '../lib/geoassets';
 
@@ -28,6 +29,9 @@ async function start() {
   if (!data) return;
   // The numbers and dates read the way the author saw them.
   setLocale(data.locale);
+  // Digits and column formats as the author set them (formats §2.2, §2.3).
+  setDigits(data.digits);
+  setColumnFormats(data.columnFormats);
   // Periods are named in the calendar of the workspace the file came from (v5 build 04).
   setCalendar((data as unknown as { calendar?: Calendar }).calendar);
   // The maps the file carries are drawn from it, with no network (build 06).

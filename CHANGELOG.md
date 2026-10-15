@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Number and date formats
+
+- **Any currency:** all 162 ISO currencies, with their symbol (`£1,234`, `RM 1.234`, `CHF 1,234`), or their
+  code (`USD 1,234`).
+- **Negative numbers** in brackets, in red, or both: `(1,234)`. Red colours the cell of a table or a pivot,
+  and the number of a number tile.
+- **Always in thousands, millions, billions or trillions**, so a column of numbers lines up: `1.2M`, `1,2 jt`.
+- **Text before and after** the number: `1,234 pcs`, `21.5°C`, `$1,234/mo`.
+- **Significant digits**, up to 6 decimals, **durations** (`1:02:05`, `1h 2m`), and a text for **zero** and
+  for an **empty cell**.
+- **A format on a column:** set it once in the Data view; every sum, average, minimum and maximum of the
+  column uses it. A measure or a tile can still set its own.
+- **Date formats** on a date column: `15 Okt 2026`, `15/10/2026`, `2026-10-15`, or your own pattern.
+- **Digits:** besides the language's own, `1 234,5`, `1’234.5` and Indian grouping `12,34,567`.
+- **Format codes (Advanced):** Excel's syntax, with parts, conditions and `[Red]`.
+- One format editor for tiles, measures, parameters and columns, with a preview. Exports, tenun.cloud,
+  alerts and Excel files write numbers the same way. See [number and date formats](docs/formats.md).
+
+### Look
+
+- The app, the landing page and exported pictures use Inter on every system; on Linux they fell back to
+  another font. Section labels, tags and the Welcome page are new.
+
 ## 0.5.0 (2026-10-14)
 
 This release adds drill-down, saved views, what-if parameters, forecasts, unusual values and alerts. A

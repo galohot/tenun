@@ -247,7 +247,7 @@
     const shown =
       bins && typeof v === 'number'
         ? `${cell(v, 'number', null, true)} to ${cell(Math.round((v + bins.width) * 1e10) / 1e10, 'number', null, true)}`
-        : cell(v, dtype, d.grain);
+        : cell(v, dtype, d.grain, false, null, null, d);
     return `${name.charAt(0).toUpperCase() + name.slice(1)}: ${shown}`;
   }
 

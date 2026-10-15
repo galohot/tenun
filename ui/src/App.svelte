@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { app } from './lib/state.svelte';
-  import { setLocale } from './lib/format';
+  import { setDigits, setLocale } from './lib/format';
   import { setCalendar } from './lib/locale';
   import Sidebar from './components/Sidebar.svelte';
   import Welcome from './components/Welcome.svelte';
@@ -28,6 +28,7 @@
   // Numbers and dates follow the open workspace, and so does the calendar of its periods (v5 build 04).
   $effect(() => {
     setLocale(app.locale);
+    setDigits(app.digits);
     setCalendar(app.snap?.workspace.calendar);
   });
 

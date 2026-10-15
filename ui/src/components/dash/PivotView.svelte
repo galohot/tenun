@@ -3,7 +3,7 @@
   // The engine computed every number, totals included. This only lays them out.
   import type { Cell, QueryResult, Tile } from '../../lib/api';
   import { barScale, barSpan, barStyle, goodBad } from '../../lib/cells';
-  import { cell, columnHeads, resultDim0, type Named } from '../../lib/format';
+  import { cell, columnHeads, toneFor, resultDim0, type Named } from '../../lib/format';
   import { effectiveShowAs } from '../../lib/showas';
   import { groupKeys, isExpandable, MAX_PIVOT_ROWS, pivotModel, pivotTree, visibleNodes } from '../../lib/pivot';
 
@@ -40,12 +40,13 @@
   // A value shown another way (build 06) has no meaningful total.
   const noTotal = (j: number) => !!tile.showAs?.[j] && tile.showAs[j] !== 'value';
   const unitOf = (j: number) => res.columns[nd + j]?.unit;
-  const show = (v: Cell | undefined, j: number) => (blank(v) ? '–' : cell(v as Cell, 'number', null, false, fmtOf(j), unitOf(j)));
+  const show = (v: Cell | undefined, j: number) => (blank(v) ? fmtOf(j)?.blank || '–' : cell(v as Cell, 'number', null, false, fmtOf(j), unitOf(j)));
+  const toneAt = (v: Cell | undefined, j: number) => (typeof v === 'number' ? toneFor(v, fmtOf(j)) : null);
   const total = (cells: Cell[] | null | undefined, j: number) => (!cells || noTotal(j) || blank(cells[j]) ? '' : cell(cells[j], 'number', null, false, fmtOf(j)));
   const key = (v: Cell) => (v === null ? '\u0000null' : String(v));
   const rowDimName = (i: number) => heads[i] ?? '';
-  const colLabel = (v: Cell) => cell(v, res.columns[m.nRows]?.dtype ?? 'text', tile.cols?.grain);
-  const rowLabel = (v: Cell, i: number) => cell(v, res.columns[i]?.dtype ?? 'text', tile.dims[i]?.grain);
+  const colLabel = (v: Cell) => cell(v, res.columns[m.nRows]?.dtype ?? 'text', tile.cols?.grain, false, null, null, tile.cols);
+  const rowLabel = (v: Cell, i: number) => cell(v, res.columns[i]?.dtype ?? 'text', tile.dims[i]?.grain, false, null, null, tile.dims[i]);
 
   // How the cells of a value look (build 07). All the cells of one value share a scale; totals have none.
   const kind = $derived(resultDim0(res, tile));
@@ -104,8 +105,8 @@
         class:strong={bold}
         class:dim={!colSel(m.cols[ci].raw)}
         class:empty={blank(c?.[j])}
-        class:good={verdict?.tone === 'good'}
-        class:bad={verdict?.tone === 'bad'}
+        class:good={verdict ? verdict.tone === 'good' : toneAt(c?.[j], j) === 'good'}
+        class:bad={verdict ? verdict.tone === 'bad' : toneAt(c?.[j], j) === 'bad'}
         style={barOf(c?.[j], j) || undefined}
         title={verdict ? `${verdict.word} ${lineText(j)}` : undefined}>
         {#if verdict}<span class="glyph" role="img" aria-label={verdict.word.toLowerCase()}>{verdict.glyph}</span>{/if}{show(c?.[j], j)}

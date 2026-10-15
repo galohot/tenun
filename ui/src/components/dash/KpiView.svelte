@@ -3,7 +3,7 @@
   // shows where the period sits among the last twelve.
   import type { KpiInfo, Tile } from '../../lib/api';
   import type { Colors } from '../../lib/chart';
-  import { compact, pctChange, pctOfTarget, tip } from '../../lib/format';
+  import { compact, pctChange, pctOfTarget, tip, toneFor } from '../../lib/format';
   import { targetInfo, targetWords } from '../../lib/kpi';
   import { barBoxes, changeTone } from '../../lib/card';
   import { paceElapsed, whyNotAdded, type Parts } from '../../lib/measures';
@@ -25,6 +25,8 @@
   } = $props();
 
   const fmt = $derived(tile.formats?.[0] ?? null);
+  // A format that marks the value (red negatives, a code's [Red] or [Green]) colours the number.
+  const TONE_INK: Record<string, string | undefined> = { bad: 'var(--danger)', good: 'var(--success)' };
   let w = $state(300);
   let h = $state(120);
 
@@ -67,6 +69,7 @@
     <span
       class="value"
       style:font-size="{size}px"
+      style:color={kpi.value === null ? undefined : TONE_INK[toneFor(kpi.value, fmt) ?? '']}
       title={kpi.value === null ? '' : `${tip(kpi.value, fmt)}${mini ? ` · ${kpi.period}${kpi.partial ? ' · so far' : ''}` : ''}`}>
       {kpi.value === null ? '–' : compact(kpi.value, fmt)}
     </span>

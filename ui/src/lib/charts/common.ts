@@ -127,7 +127,7 @@ export function pivot(res: QueryResult, tile: Tile, tables: Named[] = []): Pivot
   const names = new Map(keep.map(([k], i) => [k, i]));
   const slots = slotsFor(tile, keep.map(([k]) => k));
   const series: Pivot['series'] = keep.map(([, v], i) => ({
-    name: cell(v.raw, res.columns[1].dtype, tile.dims[1]?.grain),
+    name: cell(v.raw, res.columns[1].dtype, tile.dims[1]?.grain, false, null, null, tile.dims[1]),
     raw: v.raw,
     values: categories.map(() => null),
     slot: slots[i],
@@ -232,7 +232,7 @@ export function makeLabel(res: QueryResult, tile: Tile) {
   const grain = tile.dims[0]?.grain;
   const partialKey = res.partial?.key;
   return (v: Cell) =>
-    v === FOLDED ? 'Other' : cell(v, dim0.dtype, grain, true) + (partialKey !== undefined && v === partialKey ? '*' : '');
+    v === FOLDED ? 'Other' : cell(v, dim0.dtype, grain, true, null, null, tile.dims[0]) + (partialKey !== undefined && v === partialKey ? '*' : '');
 }
 
 export const FOLDED = OTHER_KEY;

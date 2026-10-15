@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { DIGITS, type Digits } from '../lib/numfmt';
   // Settings of this computer. They are not saved in the workspace file (V3-D1).
   import { api, type AlertRule, type AlertState } from '../lib/api';
   import { channelOf, conditionText, stateText } from '../lib/alerts';
@@ -79,6 +80,13 @@
           </button>
         {/each}
       </div>
+      <label class="sub digits">
+        <span class="muted">Digits</span>
+        <select class="field" value={app.digits ?? ''} onchange={(e) => app.setDigits((e.currentTarget.value || null) as Digits | null)}>
+          <option value="">As the language: {app.locale === 'id' ? '1.234.567,5' : '1,234,567.5'}</option>
+          {#each DIGITS as d (d.id)}<option value={d.id}>{d.example}</option>{/each}
+        </select>
+      </label>
     </div>
     {#if app.settings?.advanced || (cal.yearStart ?? 1) !== 1 || (cal.weekStart ?? 1) !== 1}
       <div class="row stack">

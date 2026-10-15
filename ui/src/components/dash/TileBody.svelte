@@ -3,7 +3,7 @@
   import type { Cell, Param, QueryResult, Tile, TileFilter } from '../../lib/api';
   import { buildOption, CHART_TYPES, type Colors } from '../../lib/chart';
   import { barScale, barSpan, barStyle, goodBad } from '../../lib/cells';
-  import { cell, columnHeads, full, numberFormatter, OTHER_KEY, resultDim0, type Named } from '../../lib/format';
+  import { cell, columnHeads, toneFor, full, numberFormatter, OTHER_KEY, resultDim0, type Named } from '../../lib/format';
   import { chartSummary } from '../../lib/summary';
   import { sparkKey, sparkPath, SPARK_H, SPARK_W } from '../../lib/charts/spark';
   import { effectiveShowAs } from '../../lib/showas';
@@ -171,8 +171,14 @@
     const say = (v: number | undefined) => (v === undefined ? '' : cell(v, 'number', null, true, tile.formats?.[0]));
     return { ...sparkPath(values), words: nums.length ? `Last ${values.length} periods, from ${say(nums[0])} to ${say(nums.at(-1))}` : 'No data in the last periods' };
   };
-  const showText = (v: Cell, i: number) =>
-    v === null && res.columns[i].role === 'measure' ? '–' : cell(v, res.columns[i].dtype, tile.dims[i]?.grain, false, formatOf(i), res.columns[i].unit);
+  const showText = (v: Cell, i: number) => {
+    const measure = res.columns[i].role === 'measure';
+    if (v === null && measure) return formatOf(i)?.blank || '–';
+    // A grouping column is written in its own column's format and date pattern (formats §2.3).
+    return cell(v, res.columns[i].dtype, tile.dims[i]?.grain, false, formatOf(i), res.columns[i].unit, measure ? null : tile.dims[i]);
+  };
+  // A format may mark a value: red negatives, or a code's [Red] and [Green] (formats §2).
+  const toneAt = (v: Cell, i: number) => (typeof v === 'number' ? toneFor(v, formatOf(i)) : null);
 
   // How the cells of a value look (build 07). The bars of one value share a scale.
   const condOf = (i: number) => (res.columns[i]?.role === 'measure' ? (tile.cond?.[i - groups] ?? null) : null);
@@ -254,7 +260,7 @@
   const summary = $derived(
     built
       ? chartSummary(tile, res, title, {
-          label: (v, i) => cell(v, res.columns[i]?.dtype ?? 'text', tile.dims[i]?.grain),
+          label: (v, i) => cell(v, res.columns[i]?.dtype ?? 'text', tile.dims[i]?.grain, false, null, null, tile.dims[i]),
           value: (v, i) => numberFormatter(tile.formats?.[i - groups] ?? null, undefined, res.columns[i]?.unit).short(v),
         })
       : '',
@@ -351,8 +357,8 @@
                 {@const verdict = verdictOf(v, i)}
                 <td
                   class:num={res.columns[i].dtype === 'number'}
-                  class:good={verdict?.tone === 'good'}
-                  class:bad={verdict?.tone === 'bad'}
+                  class:good={verdict ? verdict.tone === 'good' : toneAt(v, i) === 'good'}
+                  class:bad={verdict ? verdict.tone === 'bad' : toneAt(v, i) === 'bad'}
                   style={barOf(v, i) || undefined}
                   title={verdict ? `${verdict.word} ${lineText(i)}` : undefined}>
                   {#if verdict}<span class="glyph" role="img" aria-label={verdict.word.toLowerCase()}>{verdict.glyph}</span>{/if}{showText(v, i)}

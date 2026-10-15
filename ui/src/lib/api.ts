@@ -2,6 +2,7 @@
 // requires so that another web page cannot post to it.
 
 import type { ExportPayload } from './export';
+import type { Digits } from './numfmt';
 
 export type DType = 'number' | 'date' | 'datetime' | 'text' | 'bool';
 
@@ -52,6 +53,10 @@ export interface ColumnSetup {
   dtype?: DType;
   /** How dates written as text are read. Only with `dtype` date or datetime. */
   date_format?: DateFormat;
+  /** How the column's numbers are written wherever it is shown or added up (formats §2.3). */
+  format?: NumFormat;
+  /** How the column's dates are written: "d MMM yyyy" (formats §2.3). Day grain and raw dates only. */
+  date_pattern?: string;
   hidden?: boolean;
   description?: string;
 }
@@ -541,15 +546,35 @@ export interface GeoInfo {
 }
 
 /** How one value is written. Index-aligned with `Tile.measures`; every field is optional. */
+/** How a value is written (formats §2). Every field is optional; a missing one reads as before. */
 export interface NumFormat {
-  /** 0–4. Unset: the number as it is, up to 2 decimals. */
+  /** 0–6. Unset: the number as it is, up to 2 decimals. */
   decimals?: number;
-  /** IDR, USD, EUR, SGD or MZN. */
+  /** Significant digits, 1–6 (0: none). Wins over `decimals`. */
+  sig?: number;
+  /** Any ISO 4217 code (ui/src/lib/currencies.json). */
   currency?: string;
+  /** Write the code instead of the symbol: "USD 1,234". */
+  iso?: boolean;
   /** Short (1,2 jt) or full. Unset: short on charts and number tiles, full in tables. */
   compact?: boolean;
+  /** A fixed unit, in both forms: 3 thousands, 6 millions, 9 billions, 12 trillions. */
+  scale?: 0 | 3 | 6 | 9 | 12;
   /** Multiply by 100 and add %. */
   percent?: boolean;
+  /** How a negative value reads: −1,234 (minus), (1,234) (parens); `red` and `parens_red` also mark it bad. */
+  negative?: 'minus' | 'parens' | 'red' | 'parens_red';
+  /** Text before and after the number. A space is added where a letter or a digit touches the number. */
+  prefix?: string;
+  suffix?: string;
+  /** The value counts seconds, minutes, hours or days: "1:02:05", short "1h 2m". */
+  duration?: '' | 's' | 'm' | 'h' | 'd';
+  /** Written for an exact 0. */
+  zero?: string;
+  /** Written for an empty cell. */
+  blank?: string;
+  /** A format code (Excel's syntax, formats §2.1). When it can be read, it decides the text. */
+  code?: string;
 }
 
 /** How a value is shown next to the others. The engine computes it; a total cell is blank for any but `value`. */
@@ -842,6 +867,8 @@ export interface Workspace {
   layout: { model?: Record<string, { x: number; y: number }> } | null;
   /** How numbers and dates read. A file without it reads as English. */
   locale?: 'id' | 'en';
+  /** How digits are grouped and which mark is the decimal (formats §2.2). Not set: from `locale`. */
+  digits?: Digits;
   /** How each table is prepared, by table id. */
   tables?: Record<string, TableSetup>;
   /** Named measures, in the order they were made. */
@@ -1049,6 +1076,7 @@ export const api = {
   workspace: () => call<Snapshot>('GET', '/workspace'),
   newWorkspace: () => call<Snapshot>('POST', '/workspace/new', { lang: navigator.language }),
   setLocale: (locale: 'id' | 'en') => call<Snapshot>('PUT', '/workspace/locale', { locale }),
+  setDigits: (digits: Digits | null) => call<Snapshot>('PUT', '/workspace/digits', { digits }),
   setCalendar: (calendar: Calendar) => call<Snapshot>('PUT', '/workspace/calendar', calendar),
   setParams: (list: Param[]) => call<Snapshot>('PUT', '/workspace/params', list),
   setAlerts: (list: AlertRule[]) => call<Snapshot>('PUT', '/workspace/alerts', list),

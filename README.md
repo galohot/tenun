@@ -70,7 +70,9 @@ every other chart filters. Save the Excel file and the dashboard updates.
   average, median, minimum, maximum and trend lines. Tables can show bars and good/bad colours.
 - **Pivot tables** with row and column totals, in the way an Excel user expects.
 - **Numbers that read right:** English and Indonesian formats (`Rp 1,2 M`, `1.234,5`), chosen for
-  each workspace.
+  each workspace. Any of 162 currencies, brackets or red for negatives, fixed thousands or millions,
+  text before and after, durations, date patterns, a format on a column, and Excel's format codes. See
+  [number and date formats](docs/formats.md).
 - **Data prep for messy Excel:** Tenun finds the header row, skips title and total rows, fills down
   grouped cells, turns months-as-columns into rows, and lets you rename, retype and hide columns.
   See [data prep](docs/data-prep.md).

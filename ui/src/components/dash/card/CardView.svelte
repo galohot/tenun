@@ -4,7 +4,7 @@
   // is the last part sits beside the words in a wide tile, as the number tile always had it. Every colour is a token
   // picked for the ground (`INKS`), so the contrast test covers it.
   import type { KpiInfo, Tile } from '../../../lib/api';
-  import { compact, measureLabel, tip, type Named } from '../../../lib/format';
+  import { compact, measureLabel, tip, toneFor, type Named } from '../../../lib/format';
   import { drawable, fitParts, INKS, ruleFor, ruleWords, sparkBeside, valuePx, type ResolvedCard } from '../../../lib/card';
   import type { Parts } from '../../../lib/measures';
   import Compare from './Compare.svelte';
@@ -40,7 +40,9 @@
   );
   const rule = $derived(ruleFor(card.rules, kpi.value));
   // On the accent ground the value keeps the on-accent colour: the rule's word says it.
-  const valueInk = $derived(rule && card.ground !== 'accent' ? `var(--ink-${rule.tone})` : undefined);
+  // A rule colours the number; without one, a format that marks the value does (red negatives, [Red], [Green]).
+  const formatTone = $derived(kpi.value === null ? null : toneFor(kpi.value, fmt));
+  const valueInk = $derived(card.ground === 'accent' ? undefined : rule ? `var(--ink-${rule.tone})` : formatTone ? `var(--ink-${formatTone})` : undefined);
   const size = $derived(valuePx(card.size, w, valueText.length));
   const extra = (i: number) => {
     const v = kpi.extras?.[i - 1] ?? null;

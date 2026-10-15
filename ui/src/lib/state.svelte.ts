@@ -3,7 +3,8 @@
 import { guessLocale } from './locale';
 import { PHONE_MAX } from './layout';
 import { linkTablesOf, setLinkLabels } from './links';
-import { setKnownMeasures } from './measures';
+import { columnFormatsOf, setColumnFormats, setKnownMeasures } from './measures';
+import type { Digits } from './numfmt';
 import type { Drill } from './site';
 import { api, type Calendar, type CardStyle, type Cell, type CloudStatus, type SiteSettings, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
 
@@ -85,6 +86,8 @@ class App {
   dashboards = $derived<Dashboard[]>(this.snap?.workspace.dashboards ?? []);
   /** How numbers and dates read in the open workspace. A file without it reads as English. */
   locale = $derived<'id' | 'en'>(this.snap?.workspace.locale === 'id' ? 'id' : 'en');
+  /** How digits are grouped in the open workspace (formats §2.2). Null: from the locale. */
+  digits = $derived<Digits | null>(this.snap?.workspace.digits ?? null);
 
   #toastId = 0;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -99,6 +102,7 @@ class App {
     this.#snap = v;
     setLinkLabels(v?.workspace.relationships ?? [], v?.tables ?? []);
     setKnownMeasures(v?.workspace.measures, v?.measure_info);
+    setColumnFormats(columnFormatsOf(v?.workspace.tables));
   }
 
   constructor() {
@@ -155,6 +159,12 @@ class App {
   async setLocale(locale: 'id' | 'en') {
     if (locale === this.locale) return;
     await this.run(null, () => api.setLocale(locale));
+  }
+
+  /** Changes how the open workspace groups digits and marks decimals. Null: as its locale does. */
+  async setDigits(digits: Digits | null) {
+    if (digits === this.digits) return;
+    await this.run(null, () => api.setDigits(digits));
   }
 
   /** The month the workspace's year starts in and the day its week starts on (v5 build 04). */

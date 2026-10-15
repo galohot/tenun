@@ -1,7 +1,10 @@
 <script lang="ts">
-  import type { Column, DateFormat, TableSetup } from '../../lib/api';
+  import type { Column, DateFormat, NumFormat, TableSetup } from '../../lib/api';
   import { DATE_FORMATS, TYPE_CHOICES, labelProblem, withColumn } from '../../lib/prep';
+  import { datePattern, patternProblem } from '../../lib/locale';
+  import { app } from '../../lib/state.svelte';
   import Icon from '../Icon.svelte';
+  import FormatEditor from '../FormatEditor.svelte';
 
   let {
     column,
@@ -31,7 +34,7 @@
     ondelete?: (name: string) => void;
   } = $props();
 
-  type Mode = 'main' | 'rename' | 'type' | 'description';
+  type Mode = 'main' | 'rename' | 'type' | 'description' | 'format' | 'dates';
   let mode = $state<Mode>('main');
   const mine = $derived(setup?.columns?.[column.name]);
   // The forms start from the current text. The menu closes after a save, so it never needs to follow.
@@ -67,6 +70,19 @@
     ondelete?.(name);
   }
 
+  // How the column's numbers and dates are written (formats §2.3). Every change is saved at once.
+  function setFormat(p: Partial<NumFormat>) {
+    const next: Record<string, unknown> = { ...(mine?.format ?? {}), ...p };
+    for (const k of Object.keys(next)) if (next[k] === undefined || next[k] === false || next[k] === '') delete next[k];
+    patch({ format: Object.keys(next).length ? (next as NumFormat) : undefined }, false);
+  }
+  const SAMPLE_DAY = '2026-10-15T14:30:00';
+  const PATTERNS = ['d MMM yyyy', 'd MMMM yyyy', 'dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd', 'EEE, d MMM yyyy', 'MMM yyyy'];
+  const TIME_PATTERNS = ['d MMM yyyy HH:mm', 'dd/MM/yyyy HH:mm', 'yyyy-MM-dd HH:mm:ss', 'd MMM yyyy h:mm a'];
+  // svelte-ignore state_referenced_locally
+  let pattern = $state(setup?.columns?.[column.name]?.date_pattern ?? '');
+  const ownPattern = $derived(pattern.trim() ? patternProblem(pattern.trim()) : null);
+
   function pickType(dtype: Column['dtype']) {
     if (dtype === column.dtype) return;
     // A date column asks for its format next, so the menu stays open.
@@ -76,7 +92,7 @@
 
 <svelte:window onmousedown={outside} onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
-<div class="menu" bind:this={root} style:left="{x}px" style:top="{y}px" role="menu">
+<div class="menu" class:wide={mode === 'format'} bind:this={root} style:left="{x}px" style:top="{y}px" role="menu">
   {#if mode === 'main'}
     <button role="menuitem" onclick={() => (mode = 'rename')}><Icon name="pencil" size={13} /> Rename</button>
     {#if canRetype}
@@ -89,6 +105,17 @@
       <Icon name={column.hidden ? 'check' : 'x'} size={13} /> {column.hidden ? 'Show in field lists' : 'Hide from field lists'}
     </button>
     <button role="menuitem" onclick={() => (mode = 'description')}><Icon name="info" size={13} /> Description</button>
+    {#if column.dtype === 'number'}
+      <button role="menuitem" onclick={() => (mode = 'format')}>
+        <Icon name="hash" size={13} /> Number format
+        <span class="more">{mine?.format ? 'Set' : 'Automatic'}<Icon name="chevronRight" size={12} /></span>
+      </button>
+    {:else if isDate(column.dtype)}
+      <button role="menuitem" onclick={() => (mode = 'dates')}>
+        <Icon name="calendar" size={13} /> Date format
+        <span class="more">{mine?.date_pattern ? datePattern(SAMPLE_DAY, mine.date_pattern, app.locale) : 'Automatic'}<Icon name="chevronRight" size={12} /></span>
+      </button>
+    {/if}
     {#if column.calc && (onedit || ondelete)}
       <div class="rule" role="separator"></div>
       {#if onedit}
@@ -134,6 +161,37 @@
         <button type="button" class="btn" onclick={() => (mode = 'main')}>Back</button>
         <button class="btn primary">Save</button>
       </div>
+    </form>
+  {:else if mode === 'format'}
+    <div class="head"><button class="btn plain icon" aria-label="Back" onclick={() => (mode = 'main')}><Icon name="chevronLeft" size={13} /></button> Number format</div>
+    <div class="pad">
+      <FormatEditor value={mine?.format ?? null} onchange={setFormat} shortDefault={false} blank advanced={!!app.settings?.advanced} label="Every tile that adds up this column" />
+      <p class="hint">A sum, an average, a minimum or a maximum of this column is written this way. A tile or a measure can still set its own.</p>
+      {#if mine?.format}<button type="button" class="btn plain" onclick={() => patch({ format: undefined }, false)}>Back to automatic</button>{/if}
+    </div>
+  {:else if mode === 'dates'}
+    <div class="head"><button class="btn plain icon" aria-label="Back" onclick={() => (mode = 'main')}><Icon name="chevronLeft" size={13} /></button> Date format</div>
+    <button role="menuitemradio" aria-checked={!mine?.date_pattern} class:on={!mine?.date_pattern} onclick={() => { pattern = ''; patch({ date_pattern: undefined }, false); }}>
+      <span class="tick">{#if !mine?.date_pattern}<Icon name="check" size={12} />{/if}</span>Automatic
+    </button>
+    {#each column.dtype === 'datetime' ? TIME_PATTERNS : PATTERNS as p (p)}
+      <button role="menuitemradio" aria-checked={mine?.date_pattern === p} class:on={mine?.date_pattern === p} onclick={() => { pattern = p; patch({ date_pattern: p }, false); }}>
+        <span class="tick">{#if mine?.date_pattern === p}<Icon name="check" size={12} />{/if}</span>{datePattern(SAMPLE_DAY, p, app.locale)}
+      </button>
+    {/each}
+    <form
+      onsubmit={(e) => {
+        e.preventDefault();
+        if (!ownPattern) patch({ date_pattern: pattern.trim() || undefined }, false);
+      }}>
+      <label class="label" for="cm-pat">Your own pattern</label>
+      <input id="cm-pat" class="field mono" bind:value={pattern} placeholder="d MMM yyyy" spellcheck="false" autocomplete="off" />
+      {#if ownPattern}
+        <p class="hint warn" role="alert">{ownPattern}</p>
+      {:else}
+        <p class="hint">{pattern.trim() ? datePattern(SAMPLE_DAY, pattern.trim(), app.locale) : 'yyyy MM MMM MMMM d dd EEE EEEE HH mm ss · \'text\''}</p>
+      {/if}
+      <div class="row"><span class="sp"></span><button class="btn primary" disabled={!!ownPattern || !pattern.trim()}>Use</button></div>
     </form>
   {:else}
     <div class="head"><button class="btn plain icon" aria-label="Back" onclick={() => (mode = 'main')}><Icon name="chevronLeft" size={13} /></button> Read this column as</div>
@@ -196,6 +254,9 @@
   button.danger :global(svg) { color: var(--danger); }
   button.danger:hover, button.danger:hover :global(svg) { color: #fff; }
   .tick { width: 14px; display: inline-grid; place-items: center; }
+  .menu.wide { max-width: 340px; width: 340px; }
+  .pad { display: flex; flex-direction: column; gap: 8px; padding: 4px; }
+  .mono { font-family: var(--mono); }
   .head { display: flex; align-items: center; gap: 4px; padding: 0 4px 4px; font-weight: 600; }
   .sub { padding: 8px 8px 2px; font-size: 11px; font-weight: 600; color: var(--text-2); }
   form { display: flex; flex-direction: column; gap: 6px; padding: 4px; }

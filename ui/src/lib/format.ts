@@ -5,8 +5,9 @@ import { isPart, type Agg, type Cell, type Column, type Dim, type DType, type Gr
 import { dim0Kind, effectiveShowAs, SHOW_AS_WORDS, type Dim0Kind } from './showas';
 import { labelOf } from './prep';
 import { fieldWithLink } from './links';
-import { nameOf } from './measures';
+import { columnFormat, nameOf } from './measures';
 import * as L from './locale';
+import { toneOf, type Tone } from './numfmt';
 import type { Locale } from './locale';
 import { localeState } from './localeState.svelte';
 
@@ -17,7 +18,14 @@ export function setLocale(l: Locale | null | undefined): void {
   localeState.value = l === 'id' ? 'id' : 'en';
 }
 
-export const getLocale = (): Locale => localeState.value;
+/** The digit style of the open workspace (formats §2.2). The viewer sets it from the snapshot. */
+export function setDigits(d: string | null | undefined): void {
+  L.setDigits(d as L.Digits);
+  localeState.digits = L.getDigits();
+}
+
+/** The locale; reading it also follows the digit style, so whatever draws a number draws again when either changes. */
+export const getLocale = (): Locale => (void localeState.digits, localeState.value);
 
 /**
  * The short form of a number: 1,284 · 12.9K · 4.2M · 1.3B in English, 1.284 · 12,9 rb · 4,2 jt · 1,3 M
@@ -53,6 +61,11 @@ export function numberFormatter(f?: NumFormat | null, loc: Locale = getLocale(),
     long: (n: number) => L.longNumber(n, loc, g),
     tip: (n: number) => L.tipNumber(n, loc, g),
   };
+}
+
+/** What a format marks a value as (red negatives, a code's [Red] or [Green]), in the open workspace. */
+export function toneFor(n: number, f?: NumFormat | null): Tone | null {
+  return toneOf(n, getLocale(), f, L.getDigits());
 }
 
 /** A share of a whole, 0–1, as a percentage with a locale decimal mark: "4,2%". */
@@ -118,16 +131,25 @@ export function dateMedium(when: string | Date, loc: Locale = getLocale()): stri
   return new Date(when).toLocaleDateString(tag(loc), { dateStyle: 'medium' });
 }
 
-/** Formats one result cell for display. */
-export function cell(v: Cell, dtype: DType, grain?: Grain | null, short = false, f?: NumFormat | null, unit?: Unit | null): string {
-  if (v === null || v === undefined) return '(blank)';
+/** A column a cell comes from, so it can be written in that column's format and date pattern (formats §2.3). */
+export type ColRef = { table?: string | null; column?: string | null } | null | undefined;
+
+/** Formats one result cell for display. `col` names its column: a number with no format of its own, an empty cell
+ *  and a date at day grain then follow that column's settings. */
+export function cell(v: Cell, dtype: DType, grain?: Grain | null, short = false, f?: NumFormat | null, unit?: Unit | null, col?: ColRef): string {
+  const own = col ? columnFormat(col.table, col.column) : null;
+  if (v === null || v === undefined) return own?.format?.blank || '(blank)';
   if (v === OTHER_KEY) return 'Other';
   if (grain && isPart(grain) && typeof v === 'number') return partName(v, grain);
   if (dtype === 'number' && typeof v === 'number') {
-    if (unit) return short ? numberFormatter(f, getLocale(), unit).short(v) : numberFormatter(f, getLocale(), unit).long(v);
-    return short ? compact(v, f) : full(v, f);
+    const g = f ?? own?.format ?? null;
+    if (unit) return short ? numberFormatter(g, getLocale(), unit).short(v) : numberFormatter(g, getLocale(), unit).long(v);
+    return short ? compact(v, g) : full(v, g);
   }
-  if ((dtype === 'date' || dtype === 'datetime') && typeof v === 'string') return formatDate(v, grain, dtype);
+  if ((dtype === 'date' || dtype === 'datetime') && typeof v === 'string') {
+    if (own?.date_pattern && (!grain || grain === 'day')) return L.datePattern(v, own.date_pattern, getLocale());
+    return formatDate(v, grain, dtype);
+  }
   if (typeof v === 'boolean') return v ? 'Yes' : 'No';
   return String(v);
 }

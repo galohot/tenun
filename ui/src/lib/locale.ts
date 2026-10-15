@@ -5,6 +5,9 @@
 import { formatLocale } from 'd3-format';
 import { timeFormatLocale } from 'd3-time-format';
 import type { Grain, NumFormat } from './api';
+import { digitsFor, isDigits, oneForm, writeNumber, type Digits } from './numfmt.ts';
+
+export type { Digits } from './numfmt.ts';
 
 export type Locale = 'id' | 'en';
 
@@ -12,108 +15,38 @@ export type Locale = 'id' | 'en';
 export const guessLocale = (lang: string | null | undefined): Locale => (/^id/i.test((lang ?? '').trim()) ? 'id' : 'en');
 
 // ---- numbers ---------------------------------------------------------------
+// The writing itself lives in `numfmt.ts` (every field of a format, the digit styles, format codes).
 
-const NUM = {
-  en: formatLocale({ decimal: '.', thousands: ',', grouping: [3], currency: ['$', ''] }),
-  id: formatLocale({ decimal: ',', thousands: '.', grouping: [3], currency: ['Rp ', ''] }),
-};
+let digits: Digits | null = null;
 
-/** Where each currency sits, per locale: [before the number, after it]. */
-const CURRENCY: Record<string, Record<Locale, [string, string]>> = {
-  IDR: { id: ['Rp ', ''], en: ['Rp ', ''] },
-  USD: { id: ['US$', ''], en: ['$', ''] },
-  EUR: { id: ['€', ''], en: ['€', ''] },
-  SGD: { id: ['S$', ''], en: ['S$', ''] },
-  MZN: { id: ['', ' MT'], en: ['MT ', ''] },
-};
-
-/** Compact units for 10³, 10⁶, 10⁹, 10¹² (d3 writes them k, M, G, T). */
-const UNITS: Record<Locale, Record<string, string>> = {
-  en: { k: 'K', M: 'M', G: 'B', T: 'T' },
-  id: { k: ' rb', M: ' jt', G: ' M', T: ' T' },
-};
-const STEPS: [number, string][] = [
-  [1e12, 'T'],
-  [1e9, 'G'],
-  [1e6, 'M'],
-  [1e3, 'k'],
-];
-
-/** Below this a compact number keeps all its digits. */
-const COMPACT_FROM = 10_000;
-
-const digitsFor = (loc: Locale, spec: string) => NUM[loc].format(spec);
-
-/** A minus sign (d3 writes U+2212) is taken off so a currency can go before it. */
-function unsign(s: string): [boolean, string] {
-  return s.startsWith('−') ? [true, s.slice(1)] : [false, s];
+/** Sets the digit style numbers follow (the app: the workspace's; an exported file: the one it carries). Unset: from the language. */
+export function setDigits(d: Digits | null | undefined): void {
+  digits = isDigits(d) ? d : null;
 }
-
-/** Digits grouped, with a fixed number of decimals. */
-const fixedGroup = (n: number, d: number, loc: Locale) => digitsFor(loc, `,.${d}f`)(n);
-
-function fullBody(n: number, loc: Locale, decimals?: number): string {
-  if (decimals !== undefined) return fixedGroup(n, decimals, loc);
-  return Number.isInteger(n) ? digitsFor(loc, ',d')(n) : digitsFor(loc, ',.2~f')(n);
-}
-
-function compactBody(n: number, loc: Locale, decimals?: number): string {
-  const a = Math.abs(n);
-  if (a < COMPACT_FROM) {
-    if (decimals !== undefined) return fixedGroup(n, decimals, loc);
-    return a >= 100 || Number.isInteger(n) ? digitsFor(loc, ',d')(Math.round(n)) : digitsFor(loc, ',.2~f')(n);
-  }
-  if (decimals === undefined) {
-    // Three significant digits: 12.9K · 4.2M · 1.3B.
-    const m = /^(.*?)([kMGT])?$/.exec(digitsFor(loc, '.3~s')(n))!;
-    return m[1] + (m[2] ? UNITS[loc][m[2]] : '');
-  }
-  let i = STEPS.findIndex(([v]) => a >= v);
-  if (i < 0) return fixedGroup(n, decimals, loc);
-  // 999,999 rounds up to 1,000 thousand: use the next unit instead.
-  if (i > 0 && Number((a / STEPS[i][0]).toFixed(decimals)) >= 1000) i--;
-  const [v, u] = STEPS[i];
-  return fixedGroup(n / v, decimals, loc) + UNITS[loc][u];
-}
-
-function decorate(signed: string, loc: Locale, currency: string | undefined): string {
-  const [neg, body] = unsign(signed);
-  const [pre, post] = currency ? (CURRENCY[currency]?.[loc] ?? [`${currency} `, '']) : ['', ''];
-  return (neg ? '−' : '') + pre + body + post;
-}
-
-function percentText(n: number, loc: Locale, f: NumFormat): string {
-  const v = n * 100;
-  const body = f.decimals === undefined ? digitsFor(loc, ',.1~f')(v) : fixedGroup(v, f.decimals, loc);
-  return body + '%';
-}
+export const getDigits = (): Digits | null => digits;
 
 /** The short form: 12.9K, 1,2 jt, Rp 1,2 jt. `compact: false` keeps every digit. */
-export function shortNumber(n: number, loc: Locale, f?: NumFormat | null): string {
-  if (!isFinite(n)) return '–';
-  if (f?.percent) return percentText(n, loc, f);
-  const body = f?.compact === false ? fullBody(n, loc, f.decimals) : compactBody(n, loc, f?.decimals);
-  return decorate(body, loc, f?.currency);
+export function shortNumber(n: number, loc: Locale, f?: NumFormat | null, d: Digits | null = digits): string {
+  return writeNumber(n, loc, f, d, true).text;
 }
 
 /** The full form: grouped digits, up to 2 decimals. `compact: true` asks for the short form. */
-export function longNumber(n: number, loc: Locale, f?: NumFormat | null): string {
-  if (!isFinite(n)) return '–';
-  if (f?.percent) return percentText(n, loc, f);
-  const body = f?.compact === true ? compactBody(n, loc, f.decimals) : fullBody(n, loc, f?.decimals);
-  return decorate(body, loc, f?.currency);
+export function longNumber(n: number, loc: Locale, f?: NumFormat | null, d: Digits | null = digits): string {
+  return writeNumber(n, loc, f, d, false).text;
 }
 
 /** For tooltips: always the full number. In Indonesian a big one adds its unit word: "1.234.567 (1,2 jt)". */
-export function tipNumber(n: number, loc: Locale, f?: NumFormat | null): string {
+export function tipNumber(n: number, loc: Locale, f?: NumFormat | null, d: Digits | null = digits): string {
   if (!isFinite(n)) return '–';
-  const full = longNumber(n, loc, { ...f, compact: false });
-  if (loc !== 'id' || f?.percent || Math.abs(n) < COMPACT_FROM) return full;
-  return `${full} (${shortNumber(n, loc, { ...f, currency: undefined, compact: true })})`;
+  const full = longNumber(n, loc, { ...f, compact: false }, d);
+  if (loc !== 'id' || oneForm(f) || Math.abs(n) < 10_000 || (f?.zero && n === 0)) return full;
+  const { prefix: _p, suffix: _s, currency: _c, ...bare } = f ?? {};
+  return `${full} (${shortNumber(n, loc, { ...bare, negative: 'minus', compact: true }, d)})`;
 }
 
 /** A number with a fixed number of decimals and no grouping: "4,2" or "4.2". */
-export const fixedNumber = (n: number, d: number, loc: Locale) => digitsFor(loc, `.${d}f`)(n);
+export const fixedNumber = (n: number, dec: number, loc: Locale) =>
+  formatLocale({ decimal: digitsFor(loc, digits) === 'dot_comma' || digitsFor(loc, digits) === 'space_comma' ? ',' : '.', thousands: '', grouping: [3], currency: ['', ''] }).format(`.${dec}f`)(n);
 
 // ---- dates -----------------------------------------------------------------
 
@@ -182,6 +115,49 @@ export function formatDate(v: string, loc: Locale, grain?: Grain | null, dtype?:
       return f.day(d);
   }
   return dtype === 'datetime' ? f.time(d) : f.day(d);
+}
+
+const PATTERN = /'[^']*'|yyyy|yy|MMMM|MMM|MM|M|dd|d|EEEE|EEE|HH|H|hh|h|mm|ss|a/g;
+
+/** Why a date pattern cannot be used, or null. */
+export function patternProblem(p: string): string | null {
+  if ((p.match(/'/g) ?? []).length % 2) return 'A quote is not closed.';
+  return /yy|M|d|E|H|h|m|s/.test(p.replace(/'[^']*'/g, '')) ? null : 'The pattern names no part of a date.';
+}
+
+/**
+ * A date in a pattern (formats §2.3): yyyy yy · M MM MMM MMMM · d dd · EEE EEEE · H HH h hh mm ss a · 'text'.
+ * Month and day names follow the language. Anything else is written as it is.
+ */
+export function datePattern(v: string, pattern: string, loc: Locale): string {
+  const d = parseDate(v);
+  if (!d || patternProblem(pattern)) return v;
+  const y = d.getUTCFullYear(), mo = d.getUTCMonth(), day = d.getUTCDate(), wd = d.getUTCDay();
+  const H = d.getUTCHours(), mi = d.getUTCMinutes(), se = d.getUTCSeconds();
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  const h12 = H % 12 || 12;
+  return pattern.replace(PATTERN, (t) => {
+    switch (t) {
+      case 'yyyy': return String(y);
+      case 'yy': return p2(y % 100);
+      case 'MMMM': return MONTHS_LONG[loc][mo];
+      case 'MMM': return MONTHS_SHORT[loc][mo];
+      case 'MM': return p2(mo + 1);
+      case 'M': return String(mo + 1);
+      case 'dd': return p2(day);
+      case 'd': return String(day);
+      case 'EEEE': return DAYS_LONG[loc][wd];
+      case 'EEE': return DAYS_SHORT[loc][wd];
+      case 'HH': return p2(H);
+      case 'H': return String(H);
+      case 'hh': return p2(h12);
+      case 'h': return String(h12);
+      case 'mm': return p2(mi);
+      case 'ss': return p2(se);
+      case 'a': return H < 12 ? 'AM' : 'PM';
+      default: return t.slice(1, -1);
+    }
+  });
 }
 
 /** The name of a period that starts on `d`: "September 2026", "Q3 2026", "Minggu 7 Sep 2026". */

@@ -16,6 +16,7 @@
   import { addsUpHere, baseFormat, formatOf, namedMeasure, ownFormat, stepsByDate, targetUnit, tileProblem, whyNotAdded } from '../../lib/measures';
   import Icon, { type IconName } from '../Icon.svelte';
   import FieldPicker from './FieldPicker.svelte';
+  import FormatEditor from '../FormatEditor.svelte';
   import PlaceNames from '../PlaceNames.svelte';
   import Suggestions from './Suggestions.svelte';
   import CardEditor from './CardEditor.svelte';
@@ -124,8 +125,6 @@
   ];
 
   // How a value is written. Each value has its own (V3-D9). Unset fields keep the defaults.
-  const CURRENCIES = ['IDR', 'USD', 'EUR', 'SGD', 'MZN'];
-  const DECIMALS = [0, 1, 2, 3, 4];
   const tableLike = $derived(tile.type === 'table' || tile.type === 'pivot');
 
   function setFormat(i: number, patch: Partial<NumFormat>) {
@@ -811,31 +810,14 @@
 </script>
 
 {#snippet formatRow(i: number)}
-  {@const f = formatOf(tile, i)}
-  <div class="fmt" role="group" aria-label="Format of this value">
-    <span class="label">Format</span>
-    <div class="pair">
-      <select
-        class="field"
-        aria-label="Currency"
-        value={f?.currency ?? ''}
-        onchange={(e) => setFormat(i, { currency: e.currentTarget.value || undefined })}>
-        <option value="">No currency</option>
-        {#each CURRENCIES as c}<option value={c}>{c}</option>{/each}
-      </select>
-      <select
-        class="field"
-        aria-label="Decimals"
-        value={f?.decimals === undefined ? 'auto' : String(f.decimals)}
-        onchange={(e) => setFormat(i, { decimals: e.currentTarget.value === 'auto' ? undefined : Number(e.currentTarget.value) })}>
-        <option value="auto">Auto decimals</option>
-        {#each DECIMALS as d}<option value={String(d)}>{d} {d === 1 ? 'decimal' : 'decimals'}</option>{/each}
-      </select>
-    </div>
-    <label class="check">
-      <input type="checkbox" checked={f?.compact ?? !tableLike} onchange={(e) => setFormat(i, { compact: e.currentTarget.checked })} />
-      Short ({app.locale === 'id' ? '1,2 jt' : '1.2M'})
-    </label>
+  <div class="fmt">
+  <FormatEditor
+    value={formatOf(tile, i)}
+    onchange={(patch) => setFormat(i, patch)}
+    shortDefault={!tableLike}
+    blank={tableLike}
+    advanced={!!app.settings?.advanced}
+    label="Format of this value" />
   </div>
 {/snippet}
 
@@ -2150,8 +2132,7 @@
   }
   .grains.parts button { text-transform: none; }
   .grains button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
-  .fmt { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; }
-  .fmt .label { font-size: 11px; }
+  .fmt { margin: 6px 0 10px; }
   .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .pair select.field { min-width: 0; }
   .hint { margin: -8px 0 0; font-size: 11px; color: var(--text-2); }

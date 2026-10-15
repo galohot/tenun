@@ -4,12 +4,22 @@
 import type { Dashboard, Grain, Hierarchy, NumFormat, Param, QueryResult, SiteSettings, Table } from './api';
 import type { DashFilter } from './tiles';
 
+/** How one column writes its numbers and dates. */
+export interface ColumnFormat {
+  format?: NumFormat;
+  date_pattern?: string;
+}
+
 export interface ExportPayload {
   version?: number;
   title: string;
   workspace: string;
   /** How the author's numbers and dates read. Older files have none and read as English. */
   locale?: 'id' | 'en';
+  /** The workspace's digit style (formats §2.2), when it sets one. */
+  digits?: string;
+  /** Column formats and date patterns, keyed "<table>/<column>" (formats §2.3). */
+  columnFormats?: Record<string, ColumnFormat>;
   generated: string;
   tables: Pick<Table, 'id' | 'name' | 'label' | 'columns'>[];
   tiles: Dashboard['tiles'];
@@ -62,6 +72,10 @@ export interface SitePayload {
   title: string;
   workspace: string;
   locale?: 'id' | 'en';
+  /** The workspace's digit style (formats §2.2), when it sets one. */
+  digits?: string;
+  /** Column formats and date patterns, keyed "<table>/<column>" (formats §2.3). */
+  columnFormats?: Record<string, ColumnFormat>;
   generated: string;
   site: SiteSettings;
   /** Every page, in the order of the dashboards; hidden ones too, since links reach them. */

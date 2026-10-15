@@ -12,6 +12,7 @@
   import { formulaProblem, nameProblem, tilesWith } from '../../lib/measures';
   import Modal from '../Modal.svelte';
   import Icon from '../Icon.svelte';
+  import FormatEditor from '../FormatEditor.svelte';
   import FormulaField from './FormulaField.svelte';
 
   let {
@@ -87,15 +88,12 @@
   });
 
   // ---- the format ----------------------------------------------------------------------------
-  const CURRENCIES = ['IDR', 'USD', 'EUR', 'SGD', 'MZN'];
-  const DECIMALS = [0, 1, 2, 3, 4];
   function setFmt(patch: Partial<NumFormat>) {
     const next: NumFormat = { ...fmt, ...patch };
-    for (const k of Object.keys(next) as (keyof NumFormat)[]) if (next[k] === undefined || next[k] === false) delete next[k];
+    for (const k of Object.keys(next) as (keyof NumFormat)[]) if (next[k] === undefined || next[k] === false || next[k] === '') delete next[k];
     fmt = next;
     refused = null;
   }
-  const size = $derived(fmt.compact === undefined ? 'auto' : fmt.compact ? 'short' : 'full');
   const hasFormat = $derived(Object.keys(fmt).length > 0);
 
   const total = $derived(check.reply?.preview?.[0]);
@@ -185,27 +183,8 @@
       </div>
     </div>
 
-    <div class="row" role="group" aria-label="How the number is written">
-      <span class="label">Format <em>(optional; a tile can use its own)</em></span>
-      <div class="fmt">
-        <select class="field" aria-label="Currency" value={fmt.currency ?? ''} onchange={(e) => setFmt({ currency: e.currentTarget.value || undefined })}>
-          <option value="">No currency</option>
-          {#each CURRENCIES as c (c)}<option value={c}>{c}</option>{/each}
-        </select>
-        <select class="field" aria-label="Decimals" value={fmt.decimals === undefined ? 'auto' : String(fmt.decimals)} onchange={(e) => setFmt({ decimals: e.currentTarget.value === 'auto' ? undefined : Number(e.currentTarget.value) })}>
-          <option value="auto">Auto decimals</option>
-          {#each DECIMALS as d (d)}<option value={String(d)}>{d} {d === 1 ? 'decimal' : 'decimals'}</option>{/each}
-        </select>
-        <select class="field" aria-label="Size" value={size} onchange={(e) => setFmt({ compact: e.currentTarget.value === 'auto' ? undefined : e.currentTarget.value === 'short' ? true : false })}>
-          <option value="auto">Automatic size</option>
-          <option value="short">Short ({app.locale === 'id' ? '1,2 jt' : '1.2M'})</option>
-          <option value="full">Full</option>
-        </select>
-      </div>
-      <label class="check">
-        <input type="checkbox" checked={!!fmt.percent} onchange={(e) => setFmt({ percent: e.currentTarget.checked || undefined })} />
-        Write it as a percent (0.58 reads 58 %)
-      </label>
+    <div class="row">
+      <FormatEditor value={fmt} onchange={setFmt} advanced={!!app.settings?.advanced} label="Format (optional; a tile can use its own)" />
     </div>
 
     <label class="row">
@@ -256,10 +235,5 @@
     white-space: nowrap;
   }
   .v.blank { color: var(--text-2); font-style: italic; font-weight: 400; }
-  .fmt { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .foot { margin-right: auto; }
-  .check { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-2); }
-  @media (max-width: 520px) {
-    .fmt { grid-template-columns: 1fr; }
-  }
 </style>

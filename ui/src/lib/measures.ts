@@ -2,7 +2,8 @@
 // registry, so the node tests can load this file. The engine decides what a measure means and whether
 // its values add up (`Snapshot.measure_info`); this file only remembers the answer and asks it.
 
-import type { Cell, Dashboard, Measure, MeasureInfo, NamedMeasure, NumFormat, Tile } from './api';
+import type { Cell, Dashboard, Measure, MeasureInfo, NamedMeasure, NumFormat, TableSetup, Tile } from './api';
+import type { ColumnFormat } from './export';
 
 /** A workspace uses this many measures. Same as the engine. */
 export const MAX_MEASURES = 200;
@@ -183,10 +184,33 @@ export const paceElapsed = (tile: Pick<Tile, 'measures'>, elapsed: number | null
 // ---- formats ---------------------------------------------------------------------------------------------
 
 const ownOf = (tile: Pick<Tile, 'formats'>, i: number): NumFormat | null => tile.formats?.[i] ?? null;
-/** The format of the named measure of value `i`, if it has one. */
+
+/** Column formats and date patterns, keyed "<table>/<column>" (formats §2.3): the app's workspace, or an exported file's. */
+let columns = new Map<string, ColumnFormat>();
+export function setColumnFormats(list: Record<string, ColumnFormat> | null | undefined): void {
+  columns = new Map(Object.entries(list ?? {}).filter(([, c]) => c && (c.format || c.date_pattern)));
+}
+/** The column formats of a workspace, keyed as `setColumnFormats` takes them. */
+export function columnFormatsOf(tables: Record<string, TableSetup> | null | undefined): Record<string, ColumnFormat> {
+  const out: Record<string, ColumnFormat> = {};
+  for (const [t, setup] of Object.entries(tables ?? {}))
+    for (const [c, col] of Object.entries(setup.columns ?? {}))
+      if (col.format || col.date_pattern) out[`${t}/${c}`] = { format: col.format, date_pattern: col.date_pattern };
+  return out;
+}
+/** How a column writes its numbers and dates, if it says. */
+export const columnFormat = (table: string | null | undefined, column: string | null | undefined): ColumnFormat | null =>
+  (table && column && columns.get(`${table}/${column}`)) || null;
+
+/** These keep the column's unit (a sum of rupiah is rupiah); a count does not. */
+const KEEPS_UNIT = new Set(['sum', 'avg', 'min', 'max', 'median', 'p90']);
+
+/** The format value `i` starts from: its named measure's, or its column's when it adds up a column (formats §2.3). */
 export const baseFormat = (tile: Pick<Tile, 'measures'>, i: number): NumFormat | null => {
-  const id = tile.measures[i]?.named;
-  return (id && known.find((m) => m.id === id)?.format) || null;
+  const m = tile.measures[i];
+  if (!m) return null;
+  if (m.named) return known.find((k) => k.id === m.named)?.format || null;
+  return (KEEPS_UNIT.has(m.agg) && !m.per && columnFormat(m.table, m.column)?.format) || null;
 };
 
 /**
@@ -200,6 +224,12 @@ export function formatOf(tile: Pick<Tile, 'formats' | 'measures'>, i: number): N
   return { ...base, ...(own ?? {}) };
 }
 
+/** The value that says "no" for a field, so a tile can turn off what its measure turns on. Decimals and "short" have none. */
+const NEUTRAL: Partial<Record<keyof NumFormat, unknown>> = {
+  currency: '', iso: false, percent: false, negative: 'minus', prefix: '', suffix: '', zero: '', blank: '', code: '',
+  duration: '', scale: 0, sig: 0,
+};
+
 /**
  * The format as the tile stores it when the user changes one field: only what differs from its measure.
  * A field the measure sets and the user clears is stored as a neutral value (no currency, not a percent), so
@@ -207,28 +237,19 @@ export function formatOf(tile: Pick<Tile, 'formats' | 'measures'>, i: number): N
  * Swapping the measure then never leaves a copy of the old measure's format behind.
  */
 export function ownFormat(base: NumFormat | null, own: NumFormat | null, patch: Partial<NumFormat>): NumFormat | null {
-  const next: NumFormat = { ...(own ?? {}) };
-  if ('currency' in patch) {
-    const v = patch.currency || '';
-    if (v && v !== base?.currency) next.currency = v;
-    else if (!v && base?.currency) next.currency = '';
-    else delete next.currency;
+  const next: Record<string, unknown> = { ...(own ?? {}) };
+  for (const key of Object.keys(patch) as (keyof NumFormat)[]) {
+    const v = patch[key];
+    const b = base?.[key];
+    const neutral = NEUTRAL[key];
+    if (v === undefined || (neutral !== undefined && v === neutral)) {
+      // Cleared: say no where the measure says yes, if this field has a "no"; otherwise go back to the measure.
+      if (neutral !== undefined && b !== undefined && b !== neutral) next[key] = neutral;
+      else delete next[key];
+    } else if (v === b) delete next[key];
+    else next[key] = v;
   }
-  if ('decimals' in patch) {
-    // Automatic cannot undo the decimals of the measure; it goes back to them.
-    if (patch.decimals !== undefined && patch.decimals !== base?.decimals) next.decimals = patch.decimals;
-    else delete next.decimals;
-  }
-  if ('compact' in patch) {
-    if (patch.compact !== undefined && patch.compact !== base?.compact) next.compact = patch.compact;
-    else delete next.compact;
-  }
-  if ('percent' in patch) {
-    if (patch.percent && !base?.percent) next.percent = true;
-    else if (!patch.percent && base?.percent) next.percent = false;
-    else delete next.percent;
-  }
-  return Object.keys(next).length ? next : null;
+  return Object.keys(next).length ? (next as NumFormat) : null;
 }
 
 /**
@@ -236,7 +257,7 @@ export function ownFormat(base: NumFormat | null, own: NumFormat | null, patch: 
  * named measure, or with nothing to add, is returned as it is.
  */
 export function withNamedFormats<T extends Pick<Tile, 'formats' | 'measures'>>(tile: T): T {
-  if (!tile.measures.some((m) => m.named)) return tile;
+  if (!tile.measures.some((_, i) => baseFormat(tile, i))) return tile;
   const formats = tile.measures.map((_, i) => formatOf(tile, i));
   if (!formats.some(Boolean) || formats.every((f, i) => JSON.stringify(f) === JSON.stringify(ownOf(tile, i)))) return tile;
   return { ...tile, formats };

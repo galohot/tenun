@@ -50,7 +50,7 @@
     const have = new Set(options.map((o) => keyOf(o.value)));
     const extra = chosen.filter((v) => !have.has(keyOf(v))).map((value) => ({ value, count: 0 }));
     const word = q.trim().toLowerCase();
-    return [...extra, ...options].filter((o) => !word || cell(o.value, dtype, null).toLowerCase().includes(word));
+    return [...extra, ...options].filter((o) => !word || cell(o.value, dtype, null, false, null, null, d).toLowerCase().includes(word));
   });
   const isOn = (v: Cell) => chosen.some((c) => keyOf(c) === keyOf(v));
   const all = $derived(chosen.length === 0);
@@ -68,7 +68,7 @@
   }
 
   const summary = $derived(
-    all ? 'All' : chosen.length === 1 ? cell(chosen[0], dtype, null) : `${chosen.length} selected`,
+    all ? 'All' : chosen.length === 1 ? cell(chosen[0], dtype, null, false, null, null, d) : `${chosen.length} selected`,
   );
 
   function openPop() {
@@ -132,7 +132,7 @@
     {#each shown as o (keyOf(o.value))}
       <label class="opt">
         <input type={single ? 'radio' : 'checkbox'} checked={isOn(o.value) || (all && !single)} disabled={!editable && !onpick} onchange={() => toggle(o.value)} />
-        <span class="lab" class:blank={o.value === null || o.value === ''}>{o.value === '' ? '(blank)' : cell(o.value, dtype, null)}</span>
+        <span class="lab" class:blank={o.value === null || o.value === ''}>{o.value === '' ? '(blank)' : cell(o.value, dtype, null, false, null, null, d)}</span>
         <span class="n">{o.count ? o.count.toLocaleString() : '–'}</span>
       </label>
     {:else}

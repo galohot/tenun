@@ -8,6 +8,7 @@
   import { choicesFrom, MAX_CHOICES, MAX_STEPS, newParam, paramProblem, stepCount } from '../../lib/params';
   import Modal from '../Modal.svelte';
   import Icon from '../Icon.svelte';
+  import FormatEditor from '../FormatEditor.svelte';
 
   let {
     editing,
@@ -36,8 +37,6 @@
   let saving = $state(false);
   let refused = $state<string | null>(null);
 
-  const CURRENCIES = ['IDR', 'USD', 'EUR', 'SGD', 'MZN'];
-  const DECIMALS = [0, 1, 2, 3, 4];
 
   $effect(() => {
     if (p.kind === 'choice') p.choices = choicesFrom(choicesText);
@@ -171,19 +170,7 @@
           {steps <= MAX_STEPS ? 'An exported file can move it.' : `An exported file holds only the value it was saved with (it can hold up to ${MAX_STEPS}).`}
         </p>
       {/if}
-      <div class="row" role="group" aria-label="How the number is written">
-        <span class="label">Format</span>
-        <div class="fmt">
-          <select class="field" aria-label="Currency" value={p.format?.currency ?? ''} onchange={(e) => setFmt({ currency: e.currentTarget.value || undefined })}>
-            <option value="">No currency</option>
-            {#each CURRENCIES as c (c)}<option value={c}>{c}</option>{/each}
-          </select>
-          <select class="field" aria-label="Decimals" value={p.format?.decimals === undefined ? 'auto' : String(p.format.decimals)} onchange={(e) => setFmt({ decimals: e.currentTarget.value === 'auto' ? undefined : Number(e.currentTarget.value) })}>
-            <option value="auto">Auto decimals</option>
-            {#each DECIMALS as d (d)}<option value={String(d)}>{d} {d === 1 ? 'decimal' : 'decimals'}</option>{/each}
-          </select>
-        </div>
-      </div>
+      <FormatEditor value={p.format ?? null} onchange={setFmt} percent={false} sample={typeof p.value === 'number' ? p.value : 1234.5} advanced={!!app.settings?.advanced} />
     {:else}
       <label class="row">
         <span class="label">Values to choose from <em>(one per line, at most {MAX_CHOICES})</em></span>
@@ -232,7 +219,6 @@
   .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .three .field { min-width: 0; }
   .short { max-width: 200px; }
-  .fmt { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
   .seg { display: flex; gap: 4px; }
   .seg button { flex: 1; height: 30px; border: 1px solid var(--sep-strong); border-radius: 8px; background: var(--inset); font-size: 13px; color: var(--text); cursor: pointer; }

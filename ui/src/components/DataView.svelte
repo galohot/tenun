@@ -5,7 +5,7 @@
   import { cell, full, numberFormatter, tileTitle } from '../lib/format';
   import { readersOf, tilesUsing, useWords } from '../lib/formula';
   import { failedText, hasUnpivot, isEmptySetup, withCalc, withHeaderRow, withMainDate, withUnpivot, withoutUnpivot } from '../lib/prep';
-  import { tilesWith } from '../lib/measures';
+  import { columnFormat, tilesWith } from '../lib/measures';
   import { looksTabular, sinceWords, EVERY_CHOICES } from '../lib/sources';
   import { fromWords } from '../lib/derived';
   import NewTableSheet from './data/NewTableSheet.svelte';
@@ -25,6 +25,16 @@
   const sources = $derived(app.snap!.workspace.sources);
   const errors = $derived(app.snap!.errors);
   const table = $derived(tableId ? app.table(tableId) : app.tables[0]);
+  // A cell of the grid: in its column's format and date pattern when the column has them (formats §2.3); an id
+  // keeps its plain digits unless its column says otherwise.
+  const gridText = (v: Cell, i: number): string => {
+    const c = preview?.columns[i];
+    if (!c) return String(v ?? '');
+    const own = columnFormat(table?.id, c.name);
+    if (v === null) return own?.format?.blank ?? '';
+    if (own && (c.dtype === 'number' || c.dtype === 'date' || c.dtype === 'datetime')) return cell(v, c.dtype, null, false, null, null, { table: table?.id, column: c.name });
+    return c.dtype === 'number' && !isId(c.name) ? cell(v, 'number') : String(v);
+  };
 
   let preview = $state<{ columns: Column[]; rows: Cell[][] } | null>(null);
   let previewError = $state('');
@@ -550,7 +560,7 @@
                     <td class="rn">{ri + 1}</td>
                     {#each r as v, i}
                       <td class:num={preview.columns[i].dtype === 'number'} class:blank={v === null}>
-                        {v === null ? '' : preview.columns[i].dtype === 'number' && !isId(preview.columns[i].name) ? cell(v, 'number') : String(v)}
+                        {gridText(v, i)}
                       </td>
                     {/each}
                   </tr>
