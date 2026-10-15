@@ -173,14 +173,6 @@
   /** Below 720 px the list of sources is above the table and folded away (V4-D76). */
   let sourcesOpen = $state(false);
 
-  /** The tip of a column: its description, what it is, and the day a calculated one is as of. */
-  function tip(c: Column): string {
-    const parts = [c.description || (c.calc ? '' : c.raw_type)];
-    if (c.calc) parts.push(c.error ? 'Calculated column. It could not be computed.' : 'Calculated column.');
-    if (c.as_of) parts.push(`As of ${c.as_of}.`);
-    return parts.filter(Boolean).join(' ');
-  }
-
   function wantDelete(name: string) {
     if (!table) return;
     const shown = colOf(name)?.label ?? name;
@@ -289,6 +281,35 @@
     hover = null;
   }
 
+  /** The key that goes with a shortcut on this computer. */
+  const mod = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+';
+  const fileKinds = ['excel', 'csv', 'parquet', 'sqlite', 'duckdb', 'folder'];
+  /** The state of a source in one word, for its dot: read and watched, live, or failed. */
+  function liveOf(s: Source): { on: boolean; bad: boolean; words: string } | null {
+    if (errors[s.id]) return { on: false, bad: true, words: 'It could not be read' };
+    if (s.kind === 'derived') return null;
+    if (s.kind === 'url') {
+      const at = app.snap?.loaded_at?.[s.id];
+      return at ? { on: true, bad: false, words: `Fetched ${sinceWords(at)}` } : { on: false, bad: false, words: 'Not fetched yet' };
+    }
+    if (s.kind === 'postgres' || s.kind === 'mysql') return { on: true, bad: false, words: 'Queried live' };
+    return { on: true, bad: false, words: 'Watched: saved changes show up by themselves' };
+  }
+  /** Where the rows of the table on show come from, under the grid. */
+  const readFrom = $derived(
+    !sourceOf
+      ? ''
+      : sourceOf.kind === 'derived'
+        ? 'Made from other tables'
+        : sourceOf.kind === 'url'
+          ? app.snap?.loaded_at?.[sourceOf.id] ? `Fetched ${sinceWords(app.snap.loaded_at[sourceOf.id])}` : 'Not fetched yet'
+          : sourceOf.kind === 'postgres' || sourceOf.kind === 'mysql'
+            ? 'Queried live from the database'
+            : fileKinds.includes(sourceOf.kind)
+              ? `Read live from the ${sourceOf.kind === 'folder' ? 'folder' : 'file'} · saved changes show up by themselves`
+              : '',
+  );
+
   function openMenu(e: MouseEvent, name: string) {
     leave();
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -297,9 +318,19 @@
 </script>
 
 <header class="toolbar">
-  <h2>Data</h2>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <span class="crumb ws">{app.snap?.workspace.name || 'Workspace'}</span>
+    <Icon name="chevronRight" size={12} />
+    {#if table && sources.length}
+      <button class="crumb link" onclick={() => go({ view: 'data' })}>Data</button>
+      <Icon name="chevronRight" size={12} />
+      <h2 class="crumb now">{table.label}</h2>
+    {:else}
+      <h2 class="crumb now">Data</h2>
+    {/if}
+  </nav>
   <span class="spacer"></span>
-  <button class="btn" title="Paste cells from Excel or Google Sheets as a new table (Ctrl+V)" onclick={() => readClipboard(true)}><Icon name="table" /> Paste a table</button>
+  <button class="btn" title="Paste cells from Excel or Google Sheets as a new table  {mod}V" onclick={() => readClipboard(true)}><Icon name="table" /> Paste a table</button>
   <button class="btn primary" onclick={() => (app.addOpen = true)}><Icon name="plus" /> Add data</button>
 </header>
 
@@ -321,13 +352,15 @@
       </button>
       <div class="sources-list">
       {#each sources as s (s.id)}
+        {@const live = liveOf(s)}
         <section>
           <div class="src">
             <Icon name={iconOf(s.kind)} size={15} />
             <span class="src-name" title={s.path ?? s.host}>{s.name}</span>
             <span class="kind">{kindLabel[s.kind]}</span>
-            <button class="btn plain icon tiny" title={s.kind === 'url' ? 'Fetch the link now' : 'Reload'} onclick={() => app.run(null, () => api.reloadSource(s.id))}><Icon name="refresh" size={13} /></button>
-            <button class="btn plain icon tiny" title="Remove" onclick={() => remove(s.id, s.name)}><Icon name="trash" size={13} /></button>
+            {#if live}<span class="live" class:on={live.on} class:bad={live.bad} title={live.words} role="img" aria-label={live.words}></span>{/if}
+            <button class="btn plain icon tiny" title={s.kind === 'url' ? 'Fetch the link now' : 'Reload'} aria-label={s.kind === 'url' ? 'Fetch the link now' : 'Reload'} onclick={() => app.run(null, () => api.reloadSource(s.id))}><Icon name="refresh" size={13} /></button>
+            <button class="btn plain icon tiny rm" title="Remove {s.name}" aria-label="Remove {s.name}" onclick={() => remove(s.id, s.name)}><Icon name="trash" size={13} /></button>
           </div>
           {#if s.kind === 'url'}
             <p class="srcline">
@@ -361,10 +394,9 @@
       {/each}
       {#if canCalc || measures.length}
         <section class="measures" aria-label="Measures">
-          <div class="src">
-            <Icon name="fx" size={15} />
-            <span class="src-name">Measures</span>
-            <span class="kind">{measures.length ? `${measures.length}` : ''}</span>
+          <div class="group">
+            <span>Measures{measures.length ? ` · ${measures.length}` : ''}</span>
+            <span class="adv" title="Measures are made with Advanced on">Advanced</span>
           </div>
           {#each measures as m (m.id)}
             {@const info = measureInfo[m.id]}
@@ -382,16 +414,15 @@
             <p class="srcline mhint">A measure is a formula of totals, like SUM([Sales].[amount]) / SUM([Targets].[target]). Any tile can use it.</p>
           {/each}
           {#if canCalc}
-            <button class="btn newm" onclick={() => (measureSheet = {})}><Icon name="plus" size={13} /> New measure</button>
+            <button class="newm" onclick={() => (measureSheet = {})}><Icon name="plus" size={13} /> New measure</button>
           {/if}
         </section>
       {/if}
       {#if canCalc || params.length}
         <section class="measures" aria-label="Parameters">
-          <div class="src">
-            <Icon name="param" size={15} />
-            <span class="src-name">Parameters</span>
-            <span class="kind">{params.length ? `${params.length}` : ''}</span>
+          <div class="group">
+            <span>Parameters{params.length ? ` · ${params.length}` : ''}</span>
+            <span class="adv" title="Parameters are made with Advanced on">Advanced</span>
           </div>
           {#each params as p (p.id)}
             <div class="msr">
@@ -405,7 +436,7 @@
             <p class="srcline mhint">A parameter is a number or a choice that a reader moves on a dashboard. A measure reads it, like SUM([amount]) * (1 + PARAM("Price rise")).</p>
           {/each}
           {#if canCalc}
-            <button class="btn newm" onclick={() => (paramSheet = {})}><Icon name="plus" size={13} /> New parameter</button>
+            <button class="newm" onclick={() => (paramSheet = {})}><Icon name="plus" size={13} /> New parameter</button>
           {/if}
         </section>
       {/if}
@@ -417,10 +448,10 @@
         <div class="head">
           <div class="title">
             <h1>{table.label}</h1>
-            <p class="muted">
+            <p class="muted meta">
               {kindLabel[sourceOf?.kind ?? ''] ?? ''} · {sourceOf?.name}
               · {table.rows === null ? 'queried live' : `${full(table.rows)} rows`}
-              · {table.columns.length} columns
+              · {table.columns.length} columns{#if table.columns.some((c) => c.hidden)} · {table.columns.filter((c) => c.hidden).length} hidden{/if}
             </p>
             {#if table.notes?.length || problems.length}
               <ul class="notes">
@@ -493,13 +524,6 @@
             <button class="btn" onclick={() => save(withoutUnpivot(setup))}>Put the columns back</button>
           </div>
         {/if}
-        <div class="cols">
-          {#each table.columns as c}
-            <span class="col" class:hid={c.hidden} class:calc={c.calc} class:err={!!c.error} title={tip(c)}>
-              <Icon name={typeIcon[c.dtype]} size={12} />{c.label ?? c.name}{#if c.calc}<span class="fx" aria-label="Calculated column"><Icon name="fx" size={11} /></span>{/if}{#if c.hidden}<em>hidden</em>{/if}
-            </span>
-          {/each}
-        </div>
         <div class="grid-wrap">
           {#if previewError}
             <p class="err pad">{previewError}</p>
@@ -509,19 +533,21 @@
             <table>
               <thead>
                 <tr>
+                  <th class="rn" aria-label="Row">#</th>
                   {#each preview.columns as c (c.name)}
                     {@const col = colOf(c.name)}
-                    <th class:num={c.dtype === 'number'} class:hid={col?.hidden}>
-                      <button class="hd" onclick={(e) => openMenu(e, c.name)} onmouseenter={(e) => enter(e, c.name)} onmouseleave={leave} title="">
-                        {#if col?.calc}<span class="fx" aria-label="Calculated column"><Icon name="fx" size={11} /></span>{/if}{col?.label ?? c.name}<Icon name="chevronDown" size={11} />
+                    <th class:num={c.dtype === 'number'} class:hid={col?.hidden} class:bad={!!col?.error || !!col?.failed}>
+                      <button class="hd" aria-label="{col?.label ?? c.name}, column menu" onclick={(e) => openMenu(e, c.name)} onmouseenter={(e) => enter(e, c.name)} onmouseleave={leave} title="">
+                        {#if col?.calc}<span class="fx" aria-label="Calculated column"><Icon name="fx" size={11} /></span>{:else}<span class="ty"><Icon name={typeIcon[c.dtype]} size={12} /></span>{/if}<span class="hn">{col?.label ?? c.name}</span>{#if col?.hidden}<em>hidden</em>{/if}<span class="chev"><Icon name="chevronDown" size={11} /></span>
                       </button>
                     </th>
                   {/each}
                 </tr>
               </thead>
               <tbody>
-                {#each preview.rows as r}
+                {#each preview.rows as r, ri}
                   <tr>
+                    <td class="rn">{ri + 1}</td>
                     {#each r as v, i}
                       <td class:num={preview.columns[i].dtype === 'number'} class:blank={v === null}>
                         {v === null ? '' : preview.columns[i].dtype === 'number' && !isId(preview.columns[i].name) ? cell(v, 'number') : String(v)}
@@ -531,11 +557,16 @@
                 {/each}
               </tbody>
             </table>
-            {#if table.rows !== null && table.rows > preview.rows.length}
-              <p class="muted pad small">Showing the first {preview.rows.length} of {full(table.rows)} rows.</p>
-            {/if}
           {/if}
         </div>
+        {#if preview}
+          <footer class="gridfoot">
+            <span class="num">
+              {#if table.rows !== null && table.rows > preview.rows.length}Showing the first {full(preview.rows.length)} of {full(table.rows)} rows{:else}{full(preview.rows.length)} {preview.rows.length === 1 ? 'row' : 'rows'}{/if}
+            </span>
+            {#if readFrom}<span>{readFrom}</span>{/if}
+          </footer>
+        {/if}
       {:else}
         <p class="muted pad">This source has no tables.</p>
       {/if}
@@ -650,68 +681,98 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 52px;
-    padding: 0 20px;
+    height: 48px;
+    padding: 0 12px 0 20px;
     border-bottom: 1px solid var(--sep);
     background: var(--surface);
     flex: none;
   }
+  .crumbs { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-2); }
+  .crumbs :global(svg) { flex: none; color: var(--text-3); }
+  .crumb { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crumb.ws { max-width: 180px; }
+  .crumb.link { border: 0; background: none; padding: 2px 4px; margin: 0 -4px; border-radius: 5px; color: var(--text-2); transition: background 120ms var(--spring), color 120ms var(--spring); }
+  .crumb.link:hover { background: var(--hover); color: var(--text); }
+  .crumb.now { font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: 0; min-width: 0; }
   .spacer { flex: 1; }
-  .split { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px 1fr; }
+  .split { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px 1fr; background: var(--surface); }
   .sources {
     overflow: auto;
-    padding: 12px 10px;
+    padding: 10px 8px 16px;
     border-right: 1px solid var(--sep);
     background: var(--surface);
   }
-  section + section { margin-top: 12px; }
+  section + section { margin-top: 10px; }
   .src {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 6px;
+    gap: 7px;
+    height: 30px;
+    padding: 0 4px 0 8px;
+    border-radius: var(--r-control);
     font-weight: 600;
   }
-  .src :global(svg) { color: var(--text-2); }
+  .src :global(svg) { color: var(--text-2); flex: none; }
   .src-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  .kind { font-size: 11px; font-weight: 500; color: var(--text-2); margin-right: auto; white-space: nowrap; }
-  .tiny { width: 22px; height: 22px; color: var(--text-2); }
+  .kind {
+    flex: none;
+    margin-right: auto;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--inset);
+    color: var(--text-2);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .live { flex: none; width: 7px; height: 7px; margin: 0 4px; border-radius: 50%; background: var(--text-3); }
+  .live.on { background: var(--success); }
+  .live.bad { background: var(--danger); }
+  .tiny { width: 24px; height: 24px; color: var(--text-2); flex: none; }
+  .tiny:hover { color: var(--text); }
+  .src .rm { opacity: 0; transition: opacity 120ms var(--spring); }
+  .src:hover .rm, .src .rm:focus-visible { opacity: 1; }
   .tbl {
     display: flex;
     align-items: center;
     gap: 8px;
     width: 100%;
-    height: 28px;
-    padding: 0 8px 0 24px;
+    height: 30px;
+    padding: 0 8px 0 30px;
     border: 0;
     border-radius: var(--r-control);
     background: none;
     text-align: left;
+    transition: background 120ms var(--spring);
   }
-  .tbl :global(svg) { color: var(--accent-text); }
+  .tbl :global(svg) { color: var(--text-2); flex: none; }
   .tbl:hover { background: var(--hover); }
-  .tbl.on { background: var(--selected); }
+  .tbl.on { background: var(--selected); color: var(--accent-text); font-weight: 600; }
+  .tbl.on :global(svg) { color: var(--accent-text); }
   .tname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .rows { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
-  .srcline { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 6px 4px 28px; color: var(--text-2); font-size: 11px; }
+  .rows { font-size: 11px; font-weight: 500; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .srcline { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0 6px 4px 30px; color: var(--text-2); font-size: 11px; }
   .every { height: 24px; max-width: 170px; padding: 0 6px; border: 1px solid var(--sep-strong); border-radius: 5px; background: var(--inset); color: var(--text); font-size: 11px; }
   .every:focus { outline: none; border-color: var(--focus); }
   .linkbtn { border: 0; background: none; padding: 0; color: var(--accent-text); font-size: 11px; cursor: pointer; }
   .from { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .linkbtn:hover { text-decoration: underline; }
   .err { display: flex; gap: 6px; margin: 4px 6px 6px; color: var(--danger); font-size: 12px; }
-  .detail { min-width: 0; display: flex; flex-direction: column; padding: 20px 24px; gap: 12px; overflow: hidden; }
-  .head { display: flex; align-items: flex-start; gap: 8px 16px; flex-wrap: wrap; }
+  .detail { min-width: 0; display: flex; flex-direction: column; padding: 20px 20px 12px; gap: 14px; overflow: hidden; }
+  .head { display: flex; align-items: flex-end; gap: 8px 16px; flex-wrap: wrap; }
   .title { flex: 1 1 240px; min-width: 0; }
-  .head h1 { font-size: 22px; }
+  .head h1 { font-size: 20px; font-weight: 650; letter-spacing: -0.015em; }
   .head p { margin: 4px 0 0; }
+  .meta { font-size: 12px; font-variant-numeric: tabular-nums; }
   .notes { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-2); }
   .notes li { display: flex; align-items: center; gap: 6px; }
   .notes li.bad { color: var(--danger); }
   .tools { display: flex; align-items: center; gap: 8px; flex: none; flex-wrap: wrap; }
   .hdr { display: flex; align-items: center; gap: 6px; }
   .hdr .label { white-space: nowrap; }
-  .num-box { width: 64px; height: 28px; padding: 0 8px; border-color: var(--sep-strong); }
+  .num-box { width: 56px; height: 28px; padding: 0 8px; border-color: var(--sep-strong); background: var(--surface); font-variant-numeric: tabular-nums; }
   .num-box:focus { border-color: var(--focus); }
   .prep { position: relative; }
   .pm {
@@ -738,23 +799,23 @@
   }
   .offer :global(svg) { color: var(--accent-text); }
   .offer span { flex: 1; }
-  .col.hid, th.hid .hd { opacity: 0.6; }
-  .col em { font-style: normal; font-size: 11px; color: var(--text-2); margin-left: 2px; }
-  .col.calc { background: var(--selected); }
-  .col.err { box-shadow: inset 0 0 0 1px var(--danger); }
+  th.hid .hd { opacity: 0.6; }
+  .hd em { font-style: normal; font-size: 10px; font-weight: 500; color: var(--text-2); }
+  th.bad .hn { color: var(--danger); }
   .fx { display: inline-flex; align-items: center; color: var(--accent-text); }
-  .hd .fx { margin-right: 4px; }
-  .col .fx :global(svg), .hd .fx :global(svg) { color: var(--accent-text); opacity: 1; }
-  .col .fx { margin-left: 1px; }
-  .measures { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--sep); }
-  .msr { display: flex; align-items: flex-start; gap: 2px; border-radius: var(--r-control); }
+  .hd .fx :global(svg) { color: var(--accent-text); }
+  .measures { margin-top: 14px; padding: 12px 0 0; border-top: 1px solid var(--sep); display: flex; flex-direction: column; gap: 6px; }
+  .group { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); }
+  .adv { padding: 1px 5px; border-radius: 4px; background: var(--inset); font-size: 10px; letter-spacing: 0.04em; }
+  .msr { display: flex; align-items: flex-start; gap: 2px; border: 1px solid var(--sep); border-radius: 8px; background: var(--surface); transition: border-color 120ms var(--spring), background 120ms var(--spring); }
   .msr:hover { background: var(--hover); }
+  .msr.bad { border-color: var(--danger); }
   .msr-main {
     flex: 1;
     min-width: 0;
     display: grid;
-    gap: 1px;
-    padding: 5px 8px 5px 28px;
+    gap: 2px;
+    padding: 8px 4px 8px 10px;
     border: 0;
     background: none;
     text-align: left;
@@ -762,13 +823,27 @@
     cursor: pointer;
   }
   .msr-main:disabled { cursor: default; }
-  .msr .tiny { margin-top: 5px; }
+  .msr .tiny { margin: 6px 4px 0 0; opacity: 0; transition: opacity 120ms var(--spring); }
+  .msr:hover .tiny, .msr .tiny:focus-visible { opacity: 1; }
   .mname { display: flex; align-items: center; gap: 5px; font-weight: 600; min-width: 0; }
   .msr.bad .mname { color: var(--danger); }
   .mformula { font: 11px/16px var(--mono); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .muse { font-size: 11px; color: var(--text-2); }
-  .mhint { margin: 2px 8px 6px 28px; display: block; }
-  .newm { margin: 6px 6px 0 28px; }
+  .mhint { margin: 0 8px 4px; display: block; line-height: 1.45; }
+  .newm {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 10px;
+    border: 1px dashed var(--sep-strong);
+    border-radius: 8px;
+    background: none;
+    color: var(--text-2);
+    font-size: 12px;
+    transition: background 120ms var(--spring), color 120ms var(--spring);
+  }
+  .newm:hover { background: var(--hover); color: var(--text); }
   .lead { margin: 0 0 10px; }
   .uses { margin: 0 0 10px; padding-left: 18px; font-size: 13px; }
   .uses li { margin: 2px 0; }
@@ -798,10 +873,12 @@
     .sources.open .sources-toggle :global(svg:last-child) { transform: rotate(180deg); }
     .sources-list { display: none; }
     .sources.open .sources-list { display: block; overflow: auto; margin-top: 8px; min-height: 0; }
-    .tbls { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 6px 4px 28px; }
+    .tbls { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 6px 4px 30px; }
     .tbl { width: auto; height: 26px; padding: 0 10px; border-radius: 13px; background: var(--window); }
     .tbl.on { background: var(--selected); }
-    .detail { padding: 14px 14px 0; }
+    .detail { padding: 14px 14px 8px; }
+    .crumb.ws { display: none; }
+    .crumbs > :global(svg:first-of-type) { display: none; }
     .title { flex: 1 1 100%; }
     .tools { flex: 1 1 100%; }
     .toolbar { padding: 0 14px; }
@@ -809,7 +886,7 @@
   .hd {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
     border: 0;
     background: none;
     padding: 0;
@@ -818,53 +895,46 @@
     color: inherit;
     cursor: pointer;
   }
-  .hd :global(svg) { color: var(--text-3); opacity: 0; }
-  .hd:hover :global(svg), .hd:focus-visible :global(svg) { opacity: 1; }
-  th.num .hd { flex-direction: row-reverse; }
-  .cols { display: flex; flex-wrap: wrap; gap: 6px; }
-  .col {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 24px;
-    padding: 0 9px;
-    border-radius: 12px;
-    background: var(--surface);
-    box-shadow: var(--shadow-tile);
-    font-size: 12px;
-  }
-  .col :global(svg) { color: var(--text-2); }
+  .hd .ty { display: inline-flex; color: var(--text-2); }
+  .hd .chev { display: inline-flex; color: var(--text-3); opacity: 0.6; transition: opacity 120ms var(--spring); }
+  .hd:hover .chev, .hd:focus-visible .chev { opacity: 1; }
+  th.num .hd { justify-content: flex-end; width: 100%; }
   .grid-wrap {
     flex: 1;
     min-height: 0;
     overflow: auto;
+    border: 1px solid var(--sep);
     border-radius: var(--r-card);
     background: var(--surface);
-    box-shadow: var(--shadow-tile);
   }
-  table { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+  table { border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 100%; font-variant-numeric: tabular-nums; }
   th {
     position: sticky;
     top: 0;
+    z-index: 1;
+    height: 36px;
     background: var(--surface);
     text-align: left;
     font-weight: 600;
-    padding: 8px 12px;
+    padding: 0 12px;
     border-bottom: 1px solid var(--sep);
     white-space: nowrap;
   }
   td {
-    padding: 6px 12px;
+    height: 32px;
+    padding: 0 12px;
     border-bottom: 1px solid var(--sep);
     white-space: nowrap;
     max-width: 320px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .rn { position: sticky; left: 0; width: 44px; min-width: 44px; padding: 0 10px; text-align: right; color: var(--text-2); font-weight: 400; background: var(--window); border-right: 1px solid var(--sep); }
+  th.rn { z-index: 2; font-size: 11px; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
-  tbody tr:hover td { background: var(--window); }
+  tbody tr:hover td { background: var(--hover); }
+  .gridfoot { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-2); }
   .pad { padding: 16px; margin: 0; }
-  .small { font-size: 12px; }
   .empty {
     flex: 1;
     display: flex;

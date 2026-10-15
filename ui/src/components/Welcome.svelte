@@ -40,9 +40,11 @@
   <ol class="steps">
     {#each steps as s, i}
       <li>
-        <span class="n">{i + 1}</span>
-        <Icon name={s.icon} size={20} />
-        <h3>{s.title}</h3>
+        <div class="st">
+          <span class="n" class:first={i === 0}>{i + 1}</span>
+          <h3>{s.title}</h3>
+          <span class="ic"><Icon name={s.icon} size={16} /></span>
+        </div>
         <p class="muted">{s.text}</p>
       </li>
     {/each}
@@ -68,11 +70,12 @@
     gap: 12px;
     max-width: 560px;
   }
-  .hero img { border-radius: 14px; margin-bottom: 8px; }
-  .hero h1 { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; }
+  .hero img { border-radius: 14px; margin-bottom: 8px; animation: rise 320ms var(--spring); }
+  .hero h1 { font-size: 30px; font-weight: 650; line-height: 1.15; letter-spacing: -0.02em; text-wrap: balance; }
+  @keyframes rise { from { opacity: 0; transform: translateY(4px) scale(0.98); } }
   .hero p { margin: 0; font-size: 15px; }
   .actions { display: flex; gap: 10px; margin-top: 12px; }
-  .big { height: 36px; padding: 0 18px; font-size: 14px; border-radius: 8px; }
+  .big { height: 36px; padding: 0 16px; font-size: 13px; border-radius: 8px; }
   .small { font-size: 13px !important; }
   .link { border: 0; background: none; color: var(--accent-text); padding: 0; font-weight: 500; }
   .steps {
@@ -80,28 +83,36 @@
     margin: 0;
     padding: 0;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 220px));
-    gap: 16px;
-  }
-  .steps li {
-    position: relative;
-    padding: 18px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: min(820px, 100%);
+    border: 1px solid var(--sep);
     border-radius: var(--r-card);
     background: var(--surface);
-    box-shadow: var(--shadow-tile);
   }
-  .steps li :global(svg) { color: var(--accent-text); margin-bottom: 10px; }
-  .steps h3 { font-size: 13px; margin-bottom: 4px; }
-  .steps p { margin: 0; font-size: 12px; }
+  .steps li { padding: 20px; min-width: 0; }
+  .steps li + li { border-left: 1px solid var(--sep); }
+  .st { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .st h3 { flex: 1; font-size: 13px; }
+  .ic { display: inline-flex; color: var(--text-3); }
+  .steps p { margin: 0; font-size: 12px; line-height: 1.5; }
   .n {
-    position: absolute;
-    top: 16px;
-    right: 16px;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--inset);
     font-size: 11px;
     font-weight: 600;
     color: var(--text-2);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
   }
+  .n.first { background: var(--selected); color: var(--accent-text); }
   @media (max-width: 900px) {
     .steps { grid-template-columns: 1fr; }
+    .steps li + li { border-left: 0; border-top: 1px solid var(--sep); }
+    .hero h1 { font-size: 24px; }
   }
 </style>

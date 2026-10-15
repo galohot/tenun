@@ -32,6 +32,7 @@
     onchange,
     onremove,
     onclose,
+    onduplicate,
   }: {
     tile: Tile;
     /** What the tile shows now, for the previews under "Also try". */
@@ -42,6 +43,8 @@
     onchange: (t: Tile) => void;
     onremove: () => void;
     onclose: () => void;
+    /** Duplicates the tile. The button shows only when the dashboard passes it. */
+    onduplicate?: () => void;
   } = $props();
 
   const types: { id: TileType; icon: IconName; label: string }[] = [
@@ -262,8 +265,27 @@
   const aggs = $derived(isSankey ? aggsOf(m).filter((a) => a === 'sum' || a === 'count') : aggsOf(m));
 
   function set(patch: Partial<Tile>) {
-    onchange({ ...tile, ...patch });
+    apply({ ...tile, ...patch });
   }
+
+  // Undo in the panel's footer: the tile as it was before each change made here. Changes that come
+  // quickly one after another (typing a title) are one step. The tile keeps its place on the page.
+  let history = $state<Tile[]>([]);
+  let lastStep = 0;
+  function apply(next: Tile) {
+    const now = Date.now();
+    if (now - lastStep > 700 || !history.length) history = [...history.slice(-49), $state.snapshot(tile) as Tile];
+    lastStep = now;
+    onchange(next);
+  }
+  function undoLast() {
+    const prev = history.at(-1);
+    if (!prev) return;
+    history = history.slice(0, -1);
+    lastStep = 0;
+    onchange({ ...prev, x: tile.x, y: tile.y, w: tile.w, h: tile.h });
+  }
+
 
   // "Top N" keeps the biggest groups and shows the rest as one Other bar.
   let customTop = $state(false);
@@ -274,6 +296,7 @@
       lastId = tile.id;
       customTop = false;
       dividing = null;
+      history = [];
     }
   });
   const topKind = $derived(tile.type === 'bar' || isBullet || tile.type === 'table' || tile.type === 'share' || tile.type === 'donut' || tile.type === 'pie' || tile.type === 'pivot' || isHeat);
@@ -494,6 +517,33 @@
     const w = Number(raw);
     set({ bins: raw.trim() !== '' && Number.isFinite(w) && w > 0 ? { width: w } : undefined });
   }
+  // The panel's tabs. "On click" shows only when a click on this tile has something to set.
+  type Tab = 'data' | 'style' | 'click';
+  let tab = $state<Tab>('data');
+  const otherPages = $derived((app.snap?.workspace.dashboards ?? []).filter((d) => !d.tiles.some((t) => t.id === tile.id)));
+  /** The tile's marks can be clicked: the same test as the tile's menu (a group, or a bin of a histogram). */
+  const clickable = $derived(tile.type === 'histogram' ? tile.measures.length > 0 : tile.type !== 'kpi' && tile.type !== 'cohort' && tile.type !== 'filter' && tile.dims.length > 0);
+  const actionOffered = $derived(!noFields && !lockedType && clickable && (otherPages.length > 0 || !!tile.action));
+  const reachShown = $derived((advanced || tile.reach !== undefined) && (clickable || isFilter));
+  const clickTab = $derived(actionOffered || reachShown || (advanced && !noFields && !lockedType && drillChoices.length > 0));
+  const tabList = $derived<{ id: Tab; label: string }[]>([
+    { id: 'data', label: 'Data' },
+    { id: 'style', label: 'Style' },
+    ...(clickTab ? [{ id: 'click' as Tab, label: 'On click' }] : []),
+  ]);
+  const tabNow = $derived<Tab>(tab === 'click' && !clickTab ? 'data' : tab);
+  const markWord = $derived(tile.type === 'line' || tile.type === 'area' ? 'a point' : tile.type === 'pie' || tile.type === 'donut' ? 'a slice' : tile.type === 'table' || tile.type === 'pivot' ? 'a row' : tile.type === 'map' ? 'a place' : tile.type === 'bar' || tile.type === 'histogram' || tile.type === 'waterfall' ? 'a bar' : 'a mark');
+  /** What a click on a mark does: filter this page, or open another page with only the clicked value (build 12). */
+  function setAction(page: string | null) {
+    const { action: _old, ...rest } = tile;
+    apply(page ? { ...rest, action: { page } } : rest);
+  }
+  const headTitle = $derived(tileTitle(tile, app.tables) || 'Untitled tile');
+  const typeLabel = $derived([...types, ...moreAll].find((t) => t.id === tile.type)?.label ?? '');
+  // "More charts" opens by itself when the tile is one of them.
+  let moreShown = $state<boolean | null>(null);
+  const moreOpen = $derived(moreShown ?? moreTypes.some((t) => t.id === tile.type));
+
   // ---- Advanced (build 13) ----
 
   /** A new type keeps the fields that suit it. A Gantt chart and a cohort grid read other kinds of fields than the rest. */
@@ -898,12 +948,33 @@
       {/if}
 {/snippet}
 
-<aside class="insp">
-  <header>
-    <h3>Tile</h3>
-    <button class="btn plain icon" aria-label="Close panel" onclick={onclose}><Icon name="x" /></button>
+<aside class="insp" aria-label="Edit tile">
+  <header class="ihead">
+    <div class="who">
+      <span class="eyebrow">Editing tile</span>
+      <span class="name" title={headTitle}>{headTitle}</span>
+    </div>
+    {#if onduplicate}
+      <button class="btn plain icon" title="Duplicate tile" aria-label="Duplicate tile" onclick={onduplicate}>
+        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5h10v10h-10zM3.5 13.5v-10h10" /></svg>
+      </button>
+    {/if}
+    <button class="btn plain icon" title="Remove tile" aria-label="Remove tile" onclick={onremove}><Icon name="trash" size={15} /></button>
+    <button class="btn plain icon" title="Close panel" aria-label="Close panel" onclick={onclose}><Icon name="x" /></button>
   </header>
+  <div class="tabs" role="tablist" aria-label="Tile settings">
+    {#each tabList as t (t.id)}
+      <button
+        role="tab"
+        id="insp-tab-{t.id}"
+        aria-selected={tabNow === t.id}
+        aria-controls="insp-panel"
+        class:on={tabNow === t.id}
+        onclick={() => (tab = t.id)}>{t.label}</button>
+    {/each}
+  </div>
 
+  <div class="body" id="insp-panel" role="tabpanel" aria-labelledby="insp-tab-{tabNow}">
   {#if advancedLocked(tile)}
     <!-- V3-D2: the tile still draws; only editing its Advanced parts waits for the switch. -->
     <div class="notice" role="note">
@@ -915,65 +986,39 @@
     </div>
   {/if}
 
+  {#if tabNow === 'data'}
   {#if !isParam}
   <div class="sec">
+    <div class="sh"><span>Chart</span><span class="now">{typeLabel}</span></div>
     <div class="types" role="radiogroup" aria-label="Tile type">
       {#each types as t}
         <button
           role="radio"
           aria-checked={tile.type === t.id}
+          aria-label={t.label}
           class:on={tile.type === t.id}
           class:soft={!!chipWhy(t.id)}
           title={chipWhy(t.id) ?? t.label}
           onclick={() => pickType(t.id)}>
           <Icon name={t.icon} size={18} />
-          <span>{t.label}</span>
         </button>
       {/each}
     </div>
     {#if refusedType}<p class="hint tight refusal" role="note">{refusedType}</p>{/if}
     {#if advanced && moreTypes.length}
-      <span class="label up">More charts</span>
-      <div class="types" role="radiogroup" aria-label="More chart types">
-        {#each moreTypes as t}
-          <button role="radio" aria-checked={tile.type === t.id} class:on={tile.type === t.id} class:soft={!!chipWhy(t.id)} title={chipWhy(t.id) ?? t.label} onclick={() => pickType(t.id)}>
-            <Icon name={t.icon} size={18} />
-            <span>{t.label}</span>
-          </button>
-        {/each}
-      </div>
-    {/if}
-    {#if tile.type === 'kpi' || tile.type === 'waterfall' || periodsMode}
-      <div class="better" role="radiogroup" aria-label="Which change is good">
-        <span class="label">A rise is</span>
-        <button role="radio" aria-checked={(tile.better ?? 'up') === 'up'} class:on={(tile.better ?? 'up') === 'up'} onclick={() => set({ better: 'up' })}>good</button>
-        <button role="radio" aria-checked={tile.better === 'down'} class:on={tile.better === 'down'} onclick={() => set({ better: 'down' })}>bad</button>
-      </div>
-    {/if}
-    {#if tile.type === 'kpi'}
-      <div class="target">
-        <span class="label">Target (optional)</span>
-        <span class="withunit">
-        <input
-          class="field"
-          type="number"
-          min="0"
-          step="any"
-          placeholder="No target"
-          aria-label="Target for this number{unit0.unit ? ` in ${unit0.unit}` : ''}"
-          value={typed(tile.target?.value, unit0.scale)}
-          disabled={!!tile.target?.param}
-          onchange={(e) => setTarget(e.currentTarget.value)} />
-        {#if unit0.unit}<span class="unit" aria-hidden="true">{unit0.unit}</span>{/if}
-        </span>
-        {#if (advanced && numberParams.length) || tile.target?.param}
-          <select class="field" aria-label="Where the target comes from" value={tile.target?.param ?? ''} onchange={(e) => setTargetParam(e.currentTarget.value)}>
-            <option value="">A number typed here</option>
-            {#each numberParams as p (p.id)}<option value={p.id}>The parameter {p.name}</option>{/each}
-            {#if tile.target?.param && !numberParams.some((p) => p.id === tile.target?.param)}<option value={tile.target.param}>A deleted parameter</option>{/if}
-          </select>
-        {/if}
-      </div>
+      <button class="disclose" aria-expanded={moreOpen} onclick={() => (moreShown = !moreOpen)}>
+        <span class="chev" class:open={moreOpen}><Icon name="chevronDown" size={12} /></span>
+        More charts (Advanced)
+      </button>
+      {#if moreOpen}
+        <div class="types" role="radiogroup" aria-label="More chart types">
+          {#each moreTypes as t}
+            <button role="radio" aria-checked={tile.type === t.id} aria-label={t.label} class:on={tile.type === t.id} class:soft={!!chipWhy(t.id)} title={chipWhy(t.id) ?? t.label} onclick={() => pickType(t.id)}>
+              <Icon name={t.icon} size={18} />
+            </button>
+          {/each}
+        </div>
+      {/if}
     {/if}
     {#if tile.type === 'bar'}
       <label class="check">
@@ -982,6 +1027,7 @@
       </label>
     {/if}
   </div>
+  <div class="rule" role="presentation"></div>
   {/if}
 
   {#if isText}
@@ -1307,130 +1353,6 @@
     </div>
   {/if}
 
-  {#if tile.type === 'kpi' && m}
-    <CardEditor {tile} kpi={current?.res.kpi ?? null} title={tileTitle(tile, app.tables)} colors={readColors()} {reach} base={baseTable} {set} />
-  {/if}
-
-  {#if canCompare}
-    <div class="sec">
-      <span class="label">Compare with</span>
-      <select class="field" aria-label="Compare with an earlier period" value={tile.compare ?? ''} onchange={(e) => set({ compare: (e.currentTarget.value || undefined) as Tile['compare'] })}>
-        <option value="">Nothing</option>
-        <option value="prev_year">Same period last year</option>
-        <option value="prev_period">Previous period</option>
-      </select>
-    </div>
-  {:else if tile.compare && compareType}
-    <p class="hint">Comparing needs one value, a date with a grain and no split.</p>
-  {/if}
-
-  {#if (advanced || tile.tooltip) && canTip}
-    <!-- More in the tooltip (v5 build 10, Advanced): up to 3 more values, and a trend of the first value. -->
-    <div class="sec">
-      <span class="label">Tooltip</span>
-      {#each tipExtra as x, i (i)}
-        <div class="tiprow">
-          <FieldPicker
-            mode="measure"
-            table={x.table || null}
-            column={x.column} via={x.via}
-            placeholder="A value"
-            reachable={reach} base={baseTable}
-            measures={namedList}
-            kinds={['number']}
-            named={x.named ?? null}
-            onnamed={(id) => setTip(i, namedMeasure(id))}
-            onchange={(t, c, v) => setTip(i, defaultMeasure(app.tables, t, c, v))}
-            onclear={() => setTip(i, null)} />
-          {#if !x.named && x.column}
-            <select class="field" aria-label="How the tooltip value adds up" value={x.agg} onchange={(e) => setTip(i, { ...x, agg: e.currentTarget.value as Agg })}>
-              {#each aggsOf(x).filter((a) => a !== 'closing' && a !== 'opening') as a (a)}<option value={a}>{aggNames[a]}</option>{/each}
-            </select>
-          {/if}
-        </div>
-      {/each}
-      {#if tipExtra.length < MAX_TIP_VALUES}
-        <FieldPicker
-          mode="measure"
-          table={null}
-          column={null}
-          placeholder={tipExtra.length ? 'Add another value' : 'Add a value to the tooltip'}
-          reachable={reach} base={baseTable}
-          measures={namedList}
-          kinds={['number']}
-          named={null}
-          onnamed={(id) => setTip(tipExtra.length, namedMeasure(id))}
-          onchange={(t, c, v) => setTip(tipExtra.length, defaultMeasure(app.tables, t, c, v))} />
-      {/if}
-      <span class="label up">Trend in the tooltip</span>
-      <div class="tiprow">
-        <select class="field" aria-label="The date the tooltip's trend runs over" value={tile.tooltip?.trend ? `${tile.tooltip.trend.table}\u0000${tile.tooltip.trend.column}` : ''} onchange={(e) => setTipTrend(e.currentTarget.value)}>
-          <option value="">No trend</option>
-          {#each tipDates as d (d.value)}<option value={d.value}>{d.label}</option>{/each}
-        </select>
-        {#if tile.tooltip?.trend}
-          <select class="field" aria-label="The periods of the trend" value={tile.tooltip.trend.grain ?? 'month'} onchange={(e) => set({ tooltip: { ...tile.tooltip, trend: { ...tile.tooltip!.trend!, grain: e.currentTarget.value as Grain } } })}>
-            <option value="day">Days</option>
-            <option value="week">Weeks</option>
-            <option value="month">Months</option>
-            <option value="quarter">Quarters</option>
-          </select>
-        {/if}
-      </div>
-      <p class="hint tight">The tooltip of each {tile.type === 'pie' || tile.type === 'donut' ? 'slice' : 'group'} shows these values too, and the last 12 periods of the first value.</p>
-    </div>
-  {/if}
-
-  {#if (advanced || tile.unusual) && canMarkUnusual}
-    <!-- Unusual values (v5 build 09, Advanced): a ring on a value far from the periods around it. -->
-    <div class="sec">
-      <label class="check">
-        <input type="checkbox" checked={!!tile.unusual} onchange={(e) => set({ unusual: e.currentTarget.checked ? {} : undefined })} />
-        Mark unusual values
-      </label>
-      {#if tile.unusual}
-        <div class="grains stack" role="radiogroup" aria-label="How many to mark">
-          {#each [['low', 'Fewer'], ['medium', 'Some'], ['high', 'More']] as [id, label] (id)}
-            <button role="radio" aria-checked={(tile.unusual.level ?? 'medium') === id} class:on={(tile.unusual.level ?? 'medium') === id} onclick={() => set({ unusual: id === 'medium' ? {} : { level: id as 'low' | 'high' } })}>{label}</button>
-          {/each}
-        </div>
-        <p class="hint tight">A value far from the 6 periods around it, measured in their usual spread. Unusual is not wrong: it is worth a look.</p>
-      {/if}
-    </div>
-  {/if}
-
-  {#if (advanced || tile.forecast) && canForecast}
-    <!-- A forecast (v5 build 08, Advanced): the periods ahead, and the 90 % range. -->
-    <div class="sec">
-      <label class="check">
-        <input type="checkbox" checked={!!tile.forecast} onchange={(e) => set({ forecast: e.currentTarget.checked ? {} : undefined })} />
-        Forecast
-      </label>
-      {#if tile.forecast}
-        <label class="ahead">
-          <span>Periods ahead</span>
-          <input
-            class="field"
-            type="number"
-            min="1"
-            max="36"
-            aria-label="Periods to forecast"
-            placeholder={String(FORECAST_AHEAD[tile.dims[0]?.grain ?? 'month'] ?? 3)}
-            value={tile.forecast.periods ?? ''}
-            onchange={(e) => {
-              const n = Math.round(Number(e.currentTarget.value));
-              set({ forecast: { ...tile.forecast, periods: e.currentTarget.value.trim() && n >= 1 ? Math.min(n, 36) : undefined } });
-            }} />
-        </label>
-        <label class="check">
-          <input type="checkbox" checked={tile.forecast.band !== false} onchange={(e) => set({ forecast: { ...tile.forecast, band: e.currentTarget.checked ? undefined : false } })} />
-          Show the likely range
-        </label>
-        <p class="hint tight">An estimate from the periods before: their level, trend and season. It needs two full years of months (or of quarters, weeks or days); the unfinished period is not used.</p>
-      {/if}
-    </div>
-  {/if}
-
   {#if isMap}
     <div class="sec">
       <span class="label">Map</span>
@@ -1615,88 +1537,6 @@
     </div>
   {/if}
 
-  {#if hasSeries}
-    <div class="sec">
-      <span class="label">Several series</span>
-      {#if stackAble}
-        <div class="grains stack" role="radiogroup" aria-label="How the series are drawn">
-          {#each stacks as o}
-            <button
-              role="radio"
-              aria-checked={stackNow === o.id}
-              class:on={stackNow === o.id}
-              onclick={() => set({ stack: o.id })}>
-              {o.label}
-            </button>
-          {/each}
-        </div>
-        {#if !tile.stack && stackDefault === 'side'}
-          <p class="hint tight">These values are not in one unit, so they sit side by side. Pick Stacked to pile them up.</p>
-        {/if}
-      {:else}
-        <p class="hint tight">{whyNotAdded(tile, 0, parts) ?? 'These values are not added up'}, so they cannot be stacked and sit side by side.</p>
-      {/if}
-    </div>
-  {/if}
-
-  {#if lineChart && m}
-    <div class="sec">
-      <span class="label">Lines</span>
-      {#each lines as l}
-        <div class="linerow">
-          <span>{lineWords(l)}</span>
-          <button class="btn plain icon" aria-label="Remove {lineWords(l)}" onclick={() => setLines(lines.filter((x) => x !== l))}><Icon name="x" size={12} /></button>
-        </div>
-      {/each}
-      {#if lines.length < MAX_LINES}
-        {#if isScatter}
-          <select class="field" aria-label="Which value the new line is for" bind:value={lineAxis}>
-            <option value="y">For Y (up)</option>
-            <option value="x">For X (across)</option>
-          </select>
-        {/if}
-        <select class="field" aria-label="Add line" value="" onchange={(e) => { pickLine(e.currentTarget.value); e.currentTarget.value = ''; }}>
-          <option value="">Add line…</option>
-          {#each menu as o}<option value={o.id}>{o.label}</option>{/each}
-        </select>
-        {#if askTarget}
-          <div class="targetform">
-            {#if advanced && numberParams.length}
-              <select class="field" aria-label="Where the target comes from" bind:value={targetParam}>
-                <option value="">A number typed here</option>
-                {#each numberParams as p (p.id)}<option value={p.id}>The parameter {p.name}</option>{/each}
-              </select>
-            {/if}
-            {#if !targetParam}
-              <span class="withunit"><input class="field" type="number" step="any" placeholder="Target value" aria-label="Target value{lineUnit.unit ? ` in ${lineUnit.unit}` : ''}" bind:value={targetValue} />{#if lineUnit.unit}<span class="unit" aria-hidden="true">{lineUnit.unit}</span>{/if}</span>
-            {/if}
-            <input class="field" placeholder="Name (optional)" aria-label="Name of the target" bind:value={targetLabel} />
-            <div class="row">
-              <button class="btn small" disabled={!targetParam && targetValue.trim() === ''} onclick={addTarget}>Add target</button>
-              <button class="link" onclick={() => (askTarget = false)}>Cancel</button>
-            </div>
-          </div>
-        {/if}
-      {:else}
-        <p class="hint tight">A tile can have up to {MAX_LINES} lines.</p>
-      {/if}
-      {#if !isScatter && tile.dims[1] && tile.measures.length < 2 && !addsUpHere(tile, 0, parts)}
-        <p class="hint tight">{whyNotAdded(tile, 0, parts)}, so on a split chart each line is read from every point drawn, and there is no trend.</p>
-      {/if}
-    </div>
-  {/if}
-
-  {#if valueChart}
-    <div class="sec">
-      <span class="label">Values on chart</span>
-      <select class="field" aria-label="Values written on the chart" value={tile.labels ?? 'auto'} onchange={(e) => set({ labels: e.currentTarget.value === 'auto' ? undefined : (e.currentTarget.value as Tile['labels']) })}>
-        <option value="auto">Auto</option>
-        <option value="all">All</option>
-        <option value="none">None</option>
-      </select>
-    </div>
-  {/if}
-
   {#if isHistogram}
     <div class="sec">
       <span class="label">Bin width</span>
@@ -1787,6 +1627,158 @@
     </div>
   {/if}
 
+  {#if canCompare}
+    <div class="sec">
+      <span class="label">Compare with</span>
+      <select class="field" aria-label="Compare with an earlier period" value={tile.compare ?? ''} onchange={(e) => set({ compare: (e.currentTarget.value || undefined) as Tile['compare'] })}>
+        <option value="">Nothing</option>
+        <option value="prev_year">Same period last year</option>
+        <option value="prev_period">Previous period</option>
+      </select>
+    </div>
+  {:else if tile.compare && compareType}
+    <p class="hint">Comparing needs one value, a date with a grain and no split.</p>
+  {/if}
+
+  <Suggestions {tile} {current} {filters} onapply={apply} />
+  {/if}
+  {/if}
+
+  {#if tabNow === 'style'}
+  <div class="sec">
+    <span class="label">Title</span>
+    <input
+      class="field"
+      placeholder={noFields ? 'Optional' : tileTitle({ ...tile, title: '' }, app.tables)}
+      value={tile.title}
+      oninput={(e) => set({ title: e.currentTarget.value })} />
+  </div>
+
+  {#if !isParam && (tile.type === 'kpi' || tile.type === 'waterfall' || periodsMode)}
+  <div class="sec">
+    <span class="label">Good and bad</span>
+    {#if tile.type === 'kpi' || tile.type === 'waterfall' || periodsMode}
+      <div class="better" role="radiogroup" aria-label="Which change is good">
+        <span class="label">A rise is</span>
+        <button role="radio" aria-checked={(tile.better ?? 'up') === 'up'} class:on={(tile.better ?? 'up') === 'up'} onclick={() => set({ better: 'up' })}>good</button>
+        <button role="radio" aria-checked={tile.better === 'down'} class:on={tile.better === 'down'} onclick={() => set({ better: 'down' })}>bad</button>
+      </div>
+    {/if}
+    {#if tile.type === 'kpi'}
+      <div class="target">
+        <span class="label">Target (optional)</span>
+        <span class="withunit">
+        <input
+          class="field"
+          type="number"
+          min="0"
+          step="any"
+          placeholder="No target"
+          aria-label="Target for this number{unit0.unit ? ` in ${unit0.unit}` : ''}"
+          value={typed(tile.target?.value, unit0.scale)}
+          disabled={!!tile.target?.param}
+          onchange={(e) => setTarget(e.currentTarget.value)} />
+        {#if unit0.unit}<span class="unit" aria-hidden="true">{unit0.unit}</span>{/if}
+        </span>
+        {#if (advanced && numberParams.length) || tile.target?.param}
+          <select class="field" aria-label="Where the target comes from" value={tile.target?.param ?? ''} onchange={(e) => setTargetParam(e.currentTarget.value)}>
+            <option value="">A number typed here</option>
+            {#each numberParams as p (p.id)}<option value={p.id}>The parameter {p.name}</option>{/each}
+            {#if tile.target?.param && !numberParams.some((p) => p.id === tile.target?.param)}<option value={tile.target.param}>A deleted parameter</option>{/if}
+          </select>
+        {/if}
+      </div>
+    {/if}
+  </div>
+  {/if}
+
+  {#if !noFields && !lockedType}
+  {#if tile.type === 'kpi' && m}
+    <CardEditor {tile} kpi={current?.res.kpi ?? null} title={tileTitle(tile, app.tables)} colors={readColors()} {reach} base={baseTable} {set} />
+  {/if}
+
+  {#if hasSeries}
+    <div class="sec">
+      <span class="label">Several series</span>
+      {#if stackAble}
+        <div class="grains stack" role="radiogroup" aria-label="How the series are drawn">
+          {#each stacks as o}
+            <button
+              role="radio"
+              aria-checked={stackNow === o.id}
+              class:on={stackNow === o.id}
+              onclick={() => set({ stack: o.id })}>
+              {o.label}
+            </button>
+          {/each}
+        </div>
+        {#if !tile.stack && stackDefault === 'side'}
+          <p class="hint tight">These values are not in one unit, so they sit side by side. Pick Stacked to pile them up.</p>
+        {/if}
+      {:else}
+        <p class="hint tight">{whyNotAdded(tile, 0, parts) ?? 'These values are not added up'}, so they cannot be stacked and sit side by side.</p>
+      {/if}
+    </div>
+  {/if}
+
+  {#if lineChart && m}
+    <div class="sec">
+      <span class="label">Lines</span>
+      {#each lines as l}
+        <div class="linerow">
+          <span>{lineWords(l)}</span>
+          <button class="btn plain icon" aria-label="Remove {lineWords(l)}" onclick={() => setLines(lines.filter((x) => x !== l))}><Icon name="x" size={12} /></button>
+        </div>
+      {/each}
+      {#if lines.length < MAX_LINES}
+        {#if isScatter}
+          <select class="field" aria-label="Which value the new line is for" bind:value={lineAxis}>
+            <option value="y">For Y (up)</option>
+            <option value="x">For X (across)</option>
+          </select>
+        {/if}
+        <select class="field" aria-label="Add line" value="" onchange={(e) => { pickLine(e.currentTarget.value); e.currentTarget.value = ''; }}>
+          <option value="">Add line…</option>
+          {#each menu as o}<option value={o.id}>{o.label}</option>{/each}
+        </select>
+        {#if askTarget}
+          <div class="targetform">
+            {#if advanced && numberParams.length}
+              <select class="field" aria-label="Where the target comes from" bind:value={targetParam}>
+                <option value="">A number typed here</option>
+                {#each numberParams as p (p.id)}<option value={p.id}>The parameter {p.name}</option>{/each}
+              </select>
+            {/if}
+            {#if !targetParam}
+              <span class="withunit"><input class="field" type="number" step="any" placeholder="Target value" aria-label="Target value{lineUnit.unit ? ` in ${lineUnit.unit}` : ''}" bind:value={targetValue} />{#if lineUnit.unit}<span class="unit" aria-hidden="true">{lineUnit.unit}</span>{/if}</span>
+            {/if}
+            <input class="field" placeholder="Name (optional)" aria-label="Name of the target" bind:value={targetLabel} />
+            <div class="row">
+              <button class="btn small" disabled={!targetParam && targetValue.trim() === ''} onclick={addTarget}>Add target</button>
+              <button class="link" onclick={() => (askTarget = false)}>Cancel</button>
+            </div>
+          </div>
+        {/if}
+      {:else}
+        <p class="hint tight">A tile can have up to {MAX_LINES} lines.</p>
+      {/if}
+      {#if !isScatter && tile.dims[1] && tile.measures.length < 2 && !addsUpHere(tile, 0, parts)}
+        <p class="hint tight">{whyNotAdded(tile, 0, parts)}, so on a split chart each line is read from every point drawn, and there is no trend.</p>
+      {/if}
+    </div>
+  {/if}
+
+  {#if valueChart}
+    <div class="sec">
+      <span class="label">Values on chart</span>
+      <select class="field" aria-label="Values written on the chart" value={tile.labels ?? 'auto'} onchange={(e) => set({ labels: e.currentTarget.value === 'auto' ? undefined : (e.currentTarget.value as Tile['labels']) })}>
+        <option value="auto">Auto</option>
+        <option value="all">All</option>
+        <option value="none">None</option>
+      </select>
+    </div>
+  {/if}
+
   {#if advanced && isBullet}
     <div class="sec adv">
       <span class="label">Advanced</span>
@@ -1858,7 +1850,147 @@
     </div>
   {/if}
 
-  {#if advanced && drillChoices.length}
+  {#if (advanced || tile.tooltip) && canTip}
+    <!-- More in the tooltip (v5 build 10, Advanced): up to 3 more values, and a trend of the first value. -->
+    <div class="sec">
+      <span class="label">Tooltip</span>
+      {#each tipExtra as x, i (i)}
+        <div class="tiprow">
+          <FieldPicker
+            mode="measure"
+            table={x.table || null}
+            column={x.column} via={x.via}
+            placeholder="A value"
+            reachable={reach} base={baseTable}
+            measures={namedList}
+            kinds={['number']}
+            named={x.named ?? null}
+            onnamed={(id) => setTip(i, namedMeasure(id))}
+            onchange={(t, c, v) => setTip(i, defaultMeasure(app.tables, t, c, v))}
+            onclear={() => setTip(i, null)} />
+          {#if !x.named && x.column}
+            <select class="field" aria-label="How the tooltip value adds up" value={x.agg} onchange={(e) => setTip(i, { ...x, agg: e.currentTarget.value as Agg })}>
+              {#each aggsOf(x).filter((a) => a !== 'closing' && a !== 'opening') as a (a)}<option value={a}>{aggNames[a]}</option>{/each}
+            </select>
+          {/if}
+        </div>
+      {/each}
+      {#if tipExtra.length < MAX_TIP_VALUES}
+        <FieldPicker
+          mode="measure"
+          table={null}
+          column={null}
+          placeholder={tipExtra.length ? 'Add another value' : 'Add a value to the tooltip'}
+          reachable={reach} base={baseTable}
+          measures={namedList}
+          kinds={['number']}
+          named={null}
+          onnamed={(id) => setTip(tipExtra.length, namedMeasure(id))}
+          onchange={(t, c, v) => setTip(tipExtra.length, defaultMeasure(app.tables, t, c, v))} />
+      {/if}
+      <span class="label up">Trend in the tooltip</span>
+      <div class="tiprow">
+        <select class="field" aria-label="The date the tooltip's trend runs over" value={tile.tooltip?.trend ? `${tile.tooltip.trend.table}\u0000${tile.tooltip.trend.column}` : ''} onchange={(e) => setTipTrend(e.currentTarget.value)}>
+          <option value="">No trend</option>
+          {#each tipDates as d (d.value)}<option value={d.value}>{d.label}</option>{/each}
+        </select>
+        {#if tile.tooltip?.trend}
+          <select class="field" aria-label="The periods of the trend" value={tile.tooltip.trend.grain ?? 'month'} onchange={(e) => set({ tooltip: { ...tile.tooltip, trend: { ...tile.tooltip!.trend!, grain: e.currentTarget.value as Grain } } })}>
+            <option value="day">Days</option>
+            <option value="week">Weeks</option>
+            <option value="month">Months</option>
+            <option value="quarter">Quarters</option>
+          </select>
+        {/if}
+      </div>
+      <p class="hint tight">The tooltip of each {tile.type === 'pie' || tile.type === 'donut' ? 'slice' : 'group'} shows these values too, and the last 12 periods of the first value.</p>
+    </div>
+  {/if}
+
+  {#if (advanced || tile.unusual) && canMarkUnusual}
+    <!-- Unusual values (v5 build 09, Advanced): a ring on a value far from the periods around it. -->
+    <div class="sec">
+      <label class="check">
+        <input type="checkbox" checked={!!tile.unusual} onchange={(e) => set({ unusual: e.currentTarget.checked ? {} : undefined })} />
+        Mark unusual values
+      </label>
+      {#if tile.unusual}
+        <div class="grains stack" role="radiogroup" aria-label="How many to mark">
+          {#each [['low', 'Fewer'], ['medium', 'Some'], ['high', 'More']] as [id, label] (id)}
+            <button role="radio" aria-checked={(tile.unusual.level ?? 'medium') === id} class:on={(tile.unusual.level ?? 'medium') === id} onclick={() => set({ unusual: id === 'medium' ? {} : { level: id as 'low' | 'high' } })}>{label}</button>
+          {/each}
+        </div>
+        <p class="hint tight">A value far from the 6 periods around it, measured in their usual spread. Unusual is not wrong: it is worth a look.</p>
+      {/if}
+    </div>
+  {/if}
+
+  {#if (advanced || tile.forecast) && canForecast}
+    <!-- A forecast (v5 build 08, Advanced): the periods ahead, and the 90 % range. -->
+    <div class="sec">
+      <label class="check">
+        <input type="checkbox" checked={!!tile.forecast} onchange={(e) => set({ forecast: e.currentTarget.checked ? {} : undefined })} />
+        Forecast
+      </label>
+      {#if tile.forecast}
+        <label class="ahead">
+          <span>Periods ahead</span>
+          <input
+            class="field"
+            type="number"
+            min="1"
+            max="36"
+            aria-label="Periods to forecast"
+            placeholder={String(FORECAST_AHEAD[tile.dims[0]?.grain ?? 'month'] ?? 3)}
+            value={tile.forecast.periods ?? ''}
+            onchange={(e) => {
+              const n = Math.round(Number(e.currentTarget.value));
+              set({ forecast: { ...tile.forecast, periods: e.currentTarget.value.trim() && n >= 1 ? Math.min(n, 36) : undefined } });
+            }} />
+        </label>
+        <label class="check">
+          <input type="checkbox" checked={tile.forecast.band !== false} onchange={(e) => set({ forecast: { ...tile.forecast, band: e.currentTarget.checked ? undefined : false } })} />
+          Show the likely range
+        </label>
+        <p class="hint tight">An estimate from the periods before: their level, trend and season. It needs two full years of months (or of quarters, weeks or days); the unfinished period is not used.</p>
+      {/if}
+    </div>
+  {/if}
+  {/if}
+  {/if}
+
+  {#if tabNow === 'click'}
+  {#if actionOffered}
+    <div class="sec">
+      <span class="label">A click on {markWord}</span>
+      <div class="choices" role="radiogroup" aria-label="What a click does">
+        <button role="radio" aria-checked={!tile.action} class:on={!tile.action} onclick={() => setAction(null)}>
+          <span class="dot" aria-hidden="true"></span>
+          <span><b>Filters this page</b><small>The other tiles show only the value clicked.</small></span>
+        </button>
+        {#each otherPages as d (d.id)}
+          <button role="radio" aria-checked={tile.action?.page === d.id} class:on={tile.action?.page === d.id} onclick={() => setAction(d.id)}>
+            <span class="dot" aria-hidden="true"></span>
+            <span><b>Opens {d.title || 'Untitled'}</b><small>That page keeps only the value clicked.</small></span>
+          </button>
+        {/each}
+        {#if tile.action && !otherPages.some((d) => d.id === tile.action?.page)}
+          <button role="radio" aria-checked="true" class="on" disabled>
+            <span class="dot" aria-hidden="true"></span>
+            <span><b>Opens a page that is gone</b><small>Pick another choice above.</small></span>
+          </button>
+        {/if}
+      </div>
+    </div>
+  {/if}
+  {#if reachShown}
+    <div class="sec">
+      <span class="label">Filters other tiles</span>
+      <p class="fact num">{tile.reach === undefined ? 'Every tile on this page' : tile.reach === 'none' ? 'No other tile' : `${tile.reach.length} ${tile.reach.length === 1 ? 'tile' : 'tiles'}`}</p>
+      <p class="hint tight">Pick the tiles in the tile's ⋯ menu, under "Filters other tiles".</p>
+    </div>
+  {/if}
+  {#if advanced && !noFields && !lockedType && drillChoices.length}
     <div class="sec adv">
       <span class="label">Drill down</span>
       <select class="field" aria-label="Drill down" value={drillSettingValue(tile.drill)} onchange={(e) => set({ drill: drillSetting(e.currentTarget.value) })}>
@@ -1869,22 +2001,14 @@
       </p>
     </div>
   {/if}
-
-  <Suggestions {tile} {current} {filters} onapply={onchange} />
   {/if}
-
-  <div class="sec">
-    <span class="label">Title</span>
-    <input
-      class="field"
-      placeholder={noFields ? 'Optional' : tileTitle({ ...tile, title: '' }, app.tables)}
-      value={tile.title}
-      oninput={(e) => set({ title: e.currentTarget.value })} />
   </div>
 
-  <div class="foot">
-    <button class="btn danger" onclick={onremove}><Icon name="trash" /> Remove tile</button>
-  </div>
+  <footer class="ifoot">
+    <span class="live">Changes apply as you edit</span>
+    <button class="btn" title="Undo the last change in this panel" aria-label="Undo the last change to this tile" disabled={!history.length} onclick={undoLast}>Undo</button>
+    <button class="btn primary" onclick={onclose}>Done</button>
+  </footer>
 </aside>
 
 {#if placesOpen}
@@ -1895,17 +2019,71 @@
   .linkbtn { border: 0; background: none; padding: 0; color: var(--accent-text); font: inherit; cursor: pointer; }
   .linkbtn:hover { text-decoration: underline; }
   .insp {
-    width: 332px;
+    width: 340px;
     flex: none;
     display: flex;
     flex-direction: column;
-    gap: 18px;
-    padding: 12px 16px 16px;
+    min-height: 0;
     border-left: 1px solid var(--sep);
     background: var(--surface);
-    overflow: auto;
   }
-  header { display: flex; align-items: center; justify-content: space-between; }
+  .ihead { display: flex; align-items: center; gap: 2px; padding: 10px 10px 10px 16px; border-bottom: 1px solid var(--sep); flex: none; }
+  .ihead .btn.icon { color: var(--text-2); }
+  .ihead .btn.icon:hover { color: var(--text); }
+  .who { display: flex; flex-direction: column; flex: 1; min-width: 0; margin-right: 6px; }
+  .eyebrow { font-size: 11px; color: var(--text-2); }
+  .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tabs { display: flex; gap: 18px; padding: 0 16px; border-bottom: 1px solid var(--sep); flex: none; }
+  .tabs button {
+    position: relative;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-2);
+    font-weight: 500;
+    transition: color 140ms var(--spring);
+  }
+  .tabs button:hover { color: var(--text); }
+  .tabs button.on { color: var(--text); font-weight: 600; }
+  .tabs button.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 1px; background: var(--accent); }
+  .body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 20px; padding: 16px; }
+  .body :global(.sec > .label:first-child) {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+  .sh { display: flex; align-items: baseline; justify-content: space-between; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); }
+  .sh .now { font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 12px; }
+  .rule { height: 1px; background: var(--sep); flex: none; }
+  .disclose { display: flex; align-items: center; gap: 6px; align-self: flex-start; height: 24px; padding: 0; border: 0; background: none; font-size: 12px; color: var(--accent-text); }
+  .disclose:hover { text-decoration: underline; }
+  .chev { display: inline-grid; transform: rotate(-90deg); transition: transform 160ms var(--spring); }
+  .chev.open { transform: none; }
+  .ifoot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--sep); flex: none; }
+  .ifoot .live { flex: 1; font-size: 11px; color: var(--text-2); }
+  .ifoot .btn { height: 30px; }
+  .choices { display: flex; flex-direction: column; gap: 6px; }
+  .choices button {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 9px 10px;
+    border: 1px solid var(--sep);
+    border-radius: 8px;
+    background: var(--surface);
+    text-align: left;
+    transition: background 120ms var(--spring), border-color 120ms var(--spring);
+  }
+  .choices button:hover { background: var(--hover); }
+  .choices button.on { border-color: var(--accent); background: var(--selected); }
+  .choices b { display: block; font-weight: 600; font-size: 12px; }
+  .choices small { display: block; font-size: 11px; color: var(--text-2); margin-top: 1px; }
+  .choices .dot { flex: none; width: 14px; height: 14px; margin-top: 1px; border-radius: 50%; border: 1.5px solid var(--sep-strong); background: var(--surface); }
+  .choices button.on .dot { border: 4px solid var(--accent); }
+  .fact { margin: 0; font-weight: 500; }
   .notice {
     display: grid;
     grid-template-columns: auto 1fr;
@@ -1921,24 +2099,22 @@
   .notice .btn { grid-column: 2; justify-self: start; height: 24px; font-size: 12px; }
   .sec { display: flex; flex-direction: column; gap: 6px; }
   .btn.flush { align-self: flex-start; padding-left: 0; }
-  .types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .types { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
   .types button {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    padding: 8px 4px 6px;
+    display: grid;
+    place-items: center;
+    height: 38px;
+    padding: 0;
     border: 1px solid var(--sep);
-    border-radius: 8px;
+    border-radius: 6px;
     background: var(--surface);
-    font-size: 11px;
     color: var(--text-2);
+    transition: background 120ms var(--spring), border-color 120ms var(--spring), transform 120ms var(--spring);
   }
-  .types button :global(svg) { color: var(--text-2); }
-  .types button:hover { background: var(--hover); }
+  .types button:hover { background: var(--hover); color: var(--text); }
+  .types button:active { transform: scale(0.96); }
   .types button.on { border-color: var(--accent); background: var(--selected); color: var(--accent-text); }
   .types button.soft:not(.on) { opacity: 0.55; }
-  .types button.on :global(svg) { color: var(--accent-text); }
   .better { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
   .better .label { margin-right: 4px; }
   .better button {
@@ -1951,8 +2127,22 @@
     color: var(--text-2);
   }
   .better button.on { border-color: var(--accent); background: var(--selected); color: var(--accent-text); }
-  .check { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-top: 4px; }
-  select.field { height: 30px; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 2px; }
+  select.field {
+    height: 32px;
+    appearance: none;
+    padding: 0 28px 0 10px;
+    border: 1px solid var(--sep-strong);
+    background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 20 20' fill='none' stroke='%238a8a8f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 8l5 5 5-5'/%3E%3C/svg%3E") no-repeat right 9px center / 12px 12px;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    transition: border-color 120ms var(--spring);
+  }
+  select.field:hover:not(:disabled) { border-color: var(--text-3); }
+  select.field:disabled { opacity: 0.55; }
+  input.field { height: 32px; font-size: 12px; }
+  .check input { margin: 0; accent-color: var(--accent); }
+  .num, input[type='number'] { font-variant-numeric: tabular-nums; }
   .grains { display: flex; padding: 2px; border-radius: 8px; background: var(--inset); }
   .grains button {
     flex: 1;
@@ -1980,7 +2170,6 @@
   .label.up { margin-top: 6px; }
   .check.first { margin-top: 0; }
   .grains.stack button { text-transform: none; padding: 0 4px; }
-  .foot { margin-top: auto; padding-top: 8px; }
   .cells { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
   .cells .label { font-size: 11px; }
   .linerow { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }

@@ -12,6 +12,8 @@
       table: Table;
       source: string;
       linked: Set<string>;
+      /** The columns of the relationship that is picked: they light up. */
+      hot?: Set<string>;
       warned: Set<string>;
       /** The table is marked as a link table: a tile may cross it (V4-D112). */
       linkTable?: boolean;
@@ -51,7 +53,7 @@
   {/if}
   <ul>
     {#each t.columns as c (c.name)}
-      <li class:linked={data.linked.has(c.name)}>
+      <li class:linked={data.linked.has(c.name)} class:hot={!!data.hot?.has(c.name)}>
         <Handle type="source" position={Position.Left} id={`L:${c.name}`} class="h" />
         <Icon name={typeIcon[c.dtype]} size={11} />
         <span class="c" title={c.label ? c.name : undefined}>{c.label ?? c.name}</span>
@@ -65,22 +67,27 @@
 
 <style>
   .node {
-    width: 220px;
+    width: 240px;
+    border: 1px solid var(--sep);
     border-radius: var(--r-card);
     background: var(--surface);
-    box-shadow: var(--shadow-float);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 6%);
     font-size: 12px;
     color: var(--text);
+    transition: border-color 140ms var(--spring), box-shadow 140ms var(--spring);
   }
+  :global(.svelte-flow__node.selected) .node, .node:hover { border-color: var(--sep-strong); }
+  :global(.svelte-flow__node.dragging) .node { box-shadow: var(--shadow-float); }
   header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 9px 12px;
+    gap: 8px;
+    height: 40px;
+    padding: 0 12px;
     border-bottom: 1px solid var(--sep);
     cursor: grab;
   }
-  .node.link { box-shadow: var(--shadow-float), 0 0 0 1.5px var(--accent); }
+  .node.link { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .tag { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--sep); font-size: 11px; }
   .chip { padding: 1px 8px; border-radius: 999px; background: var(--selected); color: var(--accent-text); font-weight: 600; }
   .tag.quiet { opacity: 0; height: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; border-bottom-width: 0; transition: opacity 120ms; }
@@ -95,7 +102,7 @@
   .mark { height: 22px; padding: 0 9px; border: 1px solid var(--accent); border-radius: 6px; background: none; color: var(--accent-text); font-size: 11px; font-weight: 600; }
   .mark:hover { background: var(--accent); color: #fff; }
   header :global(svg) { color: var(--accent-text); }
-  strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  strong { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   header span { margin-left: auto; font-size: 11px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px; }
   ul { list-style: none; margin: 0; padding: 4px 0; }
   li {
@@ -103,12 +110,15 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 24px;
+    height: 28px;
     padding: 0 12px;
+    transition: background 120ms var(--spring);
   }
   li :global(svg) { color: var(--text-2); }
   li:hover { background: var(--hover); }
   li.linked .c { font-weight: 600; }
+  li.hot { background: var(--selected); }
+  li.hot .c, li.hot :global(svg) { color: var(--accent-text); }
   .c { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .warn { margin-left: auto; display: inline-flex; }
   li .warn :global(svg) { color: #c47400; }
