@@ -20,6 +20,7 @@ pub mod labels;
 pub mod links;
 pub mod maptile;
 pub mod measures;
+pub mod numcode;
 pub mod numtext;
 pub mod params;
 pub mod paste;

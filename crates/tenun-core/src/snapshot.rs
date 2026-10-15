@@ -1995,6 +1995,15 @@ fn build_dash(
     if cal != crate::calendar::Calendar::default() {
         payload["calendar"] = json!(cal);
     }
+    // The digit style and the formats of the columns of the tables it carries: the viewer writes numbers and dates
+    // as the app does.
+    if let Some(d) = engine.digits() {
+        payload["digits"] = json!(d);
+    }
+    let column_formats = engine.column_formats(|t| used.contains(t));
+    if !column_formats.is_empty() {
+        payload["columnFormats"] = Value::Object(column_formats);
+    }
     // The parameters the page uses (its tiles name them, or its measures read them), with the values it shows, without
     // their descriptions (v5 build 05); the steps it holds.
     let named = crate::params::ids_named_by(std::slice::from_ref(&dash));

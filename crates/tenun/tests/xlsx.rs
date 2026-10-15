@@ -117,3 +117,34 @@ fn the_note_about_a_link_is_written_under_the_numbers() {
         Some("stores.csv has 2 rows with id 7. Tenun used the first.")
     );
 }
+
+#[test]
+fn a_duration_is_written_in_days_and_a_column_keeps_its_date_pattern() {
+    let e = engine("duration");
+    let tile = json!({
+        "id": "t", "type": "table",
+        "measures": [{ "table": "s1/sales", "column": "amount", "agg": "sum" }],
+        "dims": [{ "table": "s1/sales", "column": "date" }],
+        "formats": [{ "duration": "h" }],
+    });
+    let t: Tile = serde_json::from_value(tile.clone()).unwrap();
+    let res = run_tile(&e, &t, &[]).unwrap();
+    let asked = std::cell::RefCell::new(Vec::new());
+    let pattern_of = |table: &str, column: &str| {
+        asked.borrow_mut().push(format!("{table}/{column}"));
+        Some("d MMM yyyy".to_string())
+    };
+    let rows = read(xlsx::build_in(&tile, &res, &[], "Sales", &pattern_of).unwrap());
+    assert_eq!(asked.borrow().as_slice(), ["s1/sales/date"]);
+    assert!(matches!(rows[1][0], Data::DateTime(_)), "{:?}", rows[1][0]);
+    // 100 hours on 2026-09-05: Excel counts time in days.
+    let first = rows[1..]
+        .iter()
+        .find(|r| r[0].as_datetime().unwrap().format("%Y-%m-%d").to_string() == "2026-09-05")
+        .unwrap();
+    // The cell reads back as a time, since its format is `[h]:mm`.
+    let Data::DateTime(d) = &first[1] else {
+        panic!("{:?}", first[1]);
+    };
+    assert!((d.as_f64() - 100.0 / 24.0).abs() < 1e-9);
+}

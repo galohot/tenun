@@ -17,7 +17,7 @@ use std::time::Duration;
 use tenun_core::Engine;
 use tenun_core::numtext::{self, NumFormat};
 use tenun_core::secrets::Secrets;
-use tenun_core::workspace::{AlertOp, AlertRule, ChannelKind, Locale};
+use tenun_core::workspace::{AlertOp, AlertRule, ChannelKind, Digits, Locale};
 
 /// A message is tried this many times, once a cycle, before the rule shows the error and stops trying.
 pub const TRIES: u32 = 3;
@@ -129,24 +129,43 @@ pub struct Reading {
     /// The dashboard's tenun.cloud link when it is published.
     pub link: Option<String>,
     pub locale: Locale,
+    /// The workspace's digit style; `None` follows the locale.
+    pub digits: Option<Digits>,
     pub format: NumFormat,
 }
 
-/// The format a tile writes its value `i` in: its named measure's, with the tile's own over it, field by field.
-pub fn format_of(engine: &Engine, tile: &Value, i: usize) -> NumFormat {
-    let mut f = serde_json::Map::new();
-    if let Some(named) = tile
-        .pointer(&format!("/measures/{i}/named"))
-        .and_then(Value::as_str)
-        && let Some(base) = engine
+/// The format of a tile's value `i` before the tile's own: its column's, when the value is a plain total of one column
+/// (sum, average, min, max, median or p90, not a ratio), else its named measure's.
+fn base_format(engine: &Engine, tile: &Value, i: usize) -> Option<serde_json::Map<String, Value>> {
+    let m = tile.pointer(&format!("/measures/{i}"))?;
+    if let Some(named) = m.get("named").and_then(Value::as_str) {
+        return engine
             .measures()
             .iter()
-            .find(|m| m.id == named)
-            .and_then(|m| m.format.clone())
-            .and_then(|v| v.as_object().cloned())
-    {
-        f.extend(base);
+            .find(|x| x.id == named)
+            .and_then(|x| x.format.clone())
+            .and_then(|v| v.as_object().cloned());
     }
+    // A measure without `agg` sums, as the engine reads it.
+    let agg = m.get("agg").and_then(Value::as_str).unwrap_or("sum");
+    let plain = matches!(agg, "sum" | "avg" | "min" | "max" | "median" | "p90")
+        && m.get("per").is_none_or(Value::is_null);
+    if !plain {
+        return None;
+    }
+    let table = m.get("table").and_then(Value::as_str)?;
+    let column = m.get("column").and_then(Value::as_str)?;
+    engine
+        .column_setup(table, column)?
+        .format?
+        .as_object()
+        .cloned()
+}
+
+/// The format a tile writes its value `i` in: its column's or its named measure's, with the tile's own over it,
+/// field by field.
+pub fn format_of(engine: &Engine, tile: &Value, i: usize) -> NumFormat {
+    let mut f = base_format(engine, tile, i).unwrap_or_default();
     if let Some(own) = tile
         .pointer(&format!("/formats/{i}"))
         .and_then(Value::as_object)
@@ -214,6 +233,7 @@ pub fn read(engine: &Engine, rule: &AlertRule) -> anyhow::Result<Option<Reading>
         dashboard: dash["title"].as_str().unwrap_or("Untitled").to_string(),
         link,
         locale: engine.locale(),
+        digits: engine.digits(),
         format: format_of(engine, &raw, i),
     }))
 }
@@ -241,7 +261,7 @@ pub enum Event {
 
 /// The message in words: one sentence, the dashboard, and its link when it is published.
 pub fn message(event: Event, rule: &AlertRule, r: &Reading) -> String {
-    let n = |v: f64| numtext::short(v, r.locale, &r.format);
+    let n = |v: f64| numtext::short_in(v, r.locale, r.digits, &r.format);
     let what = if r.period.is_empty() {
         r.name.clone()
     } else {

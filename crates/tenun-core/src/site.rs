@@ -87,7 +87,14 @@ pub fn build_site(
         .filter(|t| !t.trim().is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| engine.workspace_name());
-    Ok(json!({
+    // The column formats of every page's tables, and the digit style, so the viewer writes numbers as the app does.
+    let mut column_formats = serde_json::Map::new();
+    for page in pages.values() {
+        if let Some(cf) = page.get("columnFormats").and_then(Value::as_object) {
+            column_formats.extend(cf.clone());
+        }
+    }
+    let mut out = json!({
         "version": 2,
         "kind": "site",
         "title": title,
@@ -103,7 +110,14 @@ pub fn build_site(
         "drill": drill,
         "every": every,
         "calendar": engine.calendar(),
-    }))
+    });
+    if let Some(d) = engine.digits() {
+        out["digits"] = json!(d);
+    }
+    if !column_formats.is_empty() {
+        out["columnFormats"] = Value::Object(column_formats);
+    }
+    Ok(out)
 }
 
 /// How many values of an every-page filter an exported site holds the other pages for (V5-D5).

@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tenun_core::Engine;
 use tenun_core::secrets::Secrets;
-use tenun_core::workspace::Locale;
+use tenun_core::workspace::{Digits, Locale};
 
 fn engine() -> Engine {
     // One folder per call: the tests run in parallel and must not share files.
@@ -156,6 +156,46 @@ fn the_locale_is_saved_with_the_workspace() {
     assert_eq!(saved["locale"], "id");
     e.open(&path).unwrap();
     assert_eq!(e.locale(), Locale::Id);
+}
+
+#[test]
+fn the_digit_style_and_column_formats_go_with_the_file_only_when_set() {
+    let e = engine();
+    let snap = tenun_core::snapshot::build(&e, "d1", &[]).unwrap();
+    assert!(snap.get("digits").is_none());
+    assert!(snap.get("columnFormats").is_none());
+
+    e.set_digits(Some(Digits::SpaceComma));
+    let mut setup = e
+        .snapshot()
+        .workspace
+        .tables
+        .get("s1/Orders")
+        .cloned()
+        .unwrap_or_default();
+    let amount = setup.columns.entry("amount".into()).or_default();
+    amount.format = Some(serde_json::json!({ "currency": "IDR", "decimals": 0 }));
+    amount.label = Some("Amount".into());
+    setup.columns.entry("date".into()).or_default().date_pattern = Some("d MMM yyyy".into());
+    e.set_table_setup("s1/Orders", Some(setup)).unwrap();
+
+    let snap = tenun_core::snapshot::build(&e, "d1", &[]).unwrap();
+    assert_eq!(snap["digits"], "space_comma");
+    // Only the format and the date pattern, keyed by table and column.
+    assert_eq!(
+        snap["columnFormats"],
+        serde_json::json!({
+            "s1/Orders/amount": { "format": { "currency": "IDR", "decimals": 0 } },
+            "s1/Orders/date": { "date_pattern": "d MMM yyyy" },
+        })
+    );
+    // The digit style is saved with the workspace, and cleared.
+    let path = e.workspace_path().unwrap();
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved["digits"], "space_comma");
+    e.set_digits(None);
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(saved.get("digits").is_none());
 }
 
 #[test]

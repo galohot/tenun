@@ -141,6 +141,26 @@ fn filter_schema() -> Value {
         "required": ["table", "column", "op", "values"] })
 }
 
+/// The fields of a number format, as a tile's `formats` holds them.
+fn format_properties() -> Value {
+    json!({
+        "decimals": { "type": "integer", "minimum": 0, "maximum": 6, "description": "Fixed decimals." },
+        "sig": { "type": "integer", "minimum": 1, "maximum": 6, "description": "Significant digits; wins over decimals." },
+        "currency": { "type": "string", "description": "An ISO 4217 code such as USD, IDR, EUR, GBP." },
+        "iso": { "type": "boolean", "description": "Write the code instead of the symbol: USD 1,234." },
+        "compact": { "type": "boolean", "description": "Short (1.2M) or every digit." },
+        "scale": { "type": "integer", "enum": [3, 6, 9, 12], "description": "A fixed unit: thousands, millions, billions, trillions (1.2M), in both forms." },
+        "percent": { "type": "boolean", "description": "Multiply by 100 and add %." },
+        "negative": { "type": "string", "enum": ["minus", "parens", "red", "parens_red"], "description": "How a negative is written: −1,234 or (1,234); red marks it." },
+        "prefix": { "type": "string", "maxLength": 16 },
+        "suffix": { "type": "string", "maxLength": 16 },
+        "duration": { "type": "string", "enum": ["s", "m", "h", "d"], "description": "The value counts seconds, minutes, hours or days: 26:03:04, 1d 2h." },
+        "zero": { "type": "string", "description": "Written for an exact 0." },
+        "blank": { "type": "string", "description": "Written for an empty cell." },
+        "code": { "type": "string", "description": "An Excel number format code such as #,##0.00;[Red](#,##0.00). When set, the other fields are ignored." }
+    })
+}
+
 /// The tools, in a fixed order.
 pub fn tools() -> Vec<Value> {
     let tile = json!({ "type": "object", "description": "A tile: type, title, measures, dims; options as the app writes them (sort, top, forecast, unusual, target, formats). A tile has no filter of its own: filters belong to the page. To limit a page, add a filter tile: {\"type\": \"filter\", \"dims\": [a field], \"filter\": {\"style\": \"dates\", \"range\": [\"2026-10-01\", \"2026-10-31\"]}} (or style list with values); it filters every tile of the page.",
@@ -151,7 +171,9 @@ pub fn tools() -> Vec<Value> {
           "top": { "type": "object", "description": "Only the first n groups, the rest as Other when other is true.",
             "properties": { "n": { "type": "integer", "minimum": 1 }, "other": { "type": "boolean" } }, "required": ["n"] },
           "forecast": { "type": "object", "description": "A line or area over time forecasts its next periods. A month needs 26 finished months of data, a day 16 days; with fewer the result says so.",
-            "properties": { "periods": { "type": "integer", "minimum": 1, "maximum": 24 }, "band": { "type": "boolean" } }, "required": ["periods"] } },
+            "properties": { "periods": { "type": "integer", "minimum": 1, "maximum": 24 }, "band": { "type": "boolean" } }, "required": ["periods"] },
+          "formats": { "type": "array", "description": "How each measure's value is written, in the order of measures (null: as its column or named measure says). Every field is optional.",
+            "items": { "type": ["object", "null"], "properties": format_properties() } } },
         "required": ["type"] });
     let read = json!({ "readOnlyHint": true });
     let write = json!({ "readOnlyHint": false, "destructiveHint": false });
