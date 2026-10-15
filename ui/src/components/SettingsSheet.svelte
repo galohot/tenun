@@ -159,7 +159,7 @@
   .row.center { align-items: center; }
   .text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-  .badge { padding: 1px 6px; border-radius: 4px; background: var(--inset); color: var(--text-2); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  .badge { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); border: 1px solid var(--sep-strong); border-radius: 4px; padding: 0 4px; line-height: 15px; background: none; }
   .where { font-size: 11px; font-weight: 400; color: var(--text-2); }
   .hint { font-size: 12px; line-height: 1.45; }
   .row.stack { flex-direction: column; align-items: stretch; gap: 10px; }

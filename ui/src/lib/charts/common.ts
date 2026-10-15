@@ -144,6 +144,15 @@ export function pivot(res: QueryResult, tile: Tile, tables: Named[] = []): Pivot
   return { categories, series };
 }
 
+/** A canvas does not inherit CSS, so ECharts falls back to "sans-serif" (Liberation Sans on Linux).
+    Every chart gets the page's own font, so its words match the tile around it. */
+export function withFont<T extends object>(o: T): T {
+  const fontFamily = typeof document === 'undefined' ? undefined : getComputedStyle(document.body).fontFamily;
+  if (!fontFamily) return o;
+  const own = (o as { textStyle?: object }).textStyle;
+  return { ...o, textStyle: { fontFamily, ...own } };
+}
+
 export function tooltipBase(c: Colors) {
   return {
     backgroundColor: c.raised,

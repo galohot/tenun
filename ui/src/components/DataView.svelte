@@ -714,19 +714,7 @@
   }
   .src :global(svg) { color: var(--text-2); flex: none; }
   .src-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  .kind {
-    flex: none;
-    margin-right: auto;
-    padding: 1px 5px;
-    border-radius: 4px;
-    background: var(--inset);
-    color: var(--text-2);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
+  .kind { flex: none; margin-right: auto; white-space: nowrap; font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); border: 1px solid var(--sep-strong); border-radius: 4px; padding: 0 4px; line-height: 15px; background: none; }
   .live { flex: none; width: 7px; height: 7px; margin: 0 4px; border-radius: 50%; background: var(--text-3); }
   .live.on { background: var(--success); }
   .live.bad { background: var(--danger); }
@@ -805,8 +793,8 @@
   .fx { display: inline-flex; align-items: center; color: var(--accent-text); }
   .hd .fx :global(svg) { color: var(--accent-text); }
   .measures { margin-top: 14px; padding: 12px 0 0; border-top: 1px solid var(--sep); display: flex; flex-direction: column; gap: 6px; }
-  .group { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); }
-  .adv { padding: 1px 5px; border-radius: 4px; background: var(--inset); font-size: 10px; letter-spacing: 0.04em; }
+  .group { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 2px; font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); }
+  .adv { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); border: 1px solid var(--sep-strong); border-radius: 4px; padding: 0 4px; line-height: 15px; background: none; }
   .msr { display: flex; align-items: flex-start; gap: 2px; border: 1px solid var(--sep); border-radius: 8px; background: var(--surface); transition: border-color 120ms var(--spring), background 120ms var(--spring); }
   .msr:hover { background: var(--hover); }
   .msr.bad { border-color: var(--danger); }
@@ -836,8 +824,8 @@
     gap: 6px;
     height: 30px;
     padding: 0 10px;
-    border: 1px dashed var(--sep-strong);
-    border-radius: 8px;
+    border: 1px solid transparent;
+    border-radius: var(--r-control);
     background: none;
     color: var(--text-2);
     font-size: 12px;

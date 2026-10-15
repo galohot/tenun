@@ -258,7 +258,7 @@
   .list, .range, .dates { height: 100%; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
   /* The tile's own buttons float over its top right corner. */
   .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none; min-height: 22px; padding-right: 60px; }
-  .name { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); }
+  .name { font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); }
   .link { border: 0; background: none; padding: 0; font-size: 12px; color: var(--accent-text); cursor: pointer; }
   .link:hover { text-decoration: underline; }
   .search { height: 26px; flex: none; }
@@ -285,7 +285,7 @@
     text-align: left;
   }
   .drop:hover { border-color: var(--accent); }
-  .dn { color: var(--text-2); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
+  .dn { color: var(--text-2); font-family: var(--mono); font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
   .dv { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
   .dv.all { font-weight: 400; color: var(--text-2); }
   .drop-pop {

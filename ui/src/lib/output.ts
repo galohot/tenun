@@ -6,6 +6,7 @@ import { toCanvas } from 'html-to-image';
 import { api, type DrillState, type QueryResult, type Tile } from './api';
 import { buildOption, CHART_TYPES, readColors, type Colors } from './chart';
 import { echarts } from './echarts';
+import { withFont } from './charts/common';
 import { columnHeads, measureLabel, type Named } from './format';
 import { saveBlob, saveBytes } from './download';
 import { motion } from './motion';
@@ -95,7 +96,7 @@ async function chartPicture(tile: Tile, res: QueryResult, tables: Named[], title
     // A picture leaves the computer: it says it with no key value and no file name.
     note = pictureNote(res, built.note, built.gateNote, partialNote(res, tile.dims[0]?.grain));
     const chart = echarts.init(holder, null, { renderer: 'canvas', width: w, height: h });
-    chart.setOption({ ...built.option, animation: false });
+    chart.setOption({ ...withFont(built.option), animation: false });
     url = chart.getDataURL({ pixelRatio: SCALE, backgroundColor: colors.surface });
     chart.dispose();
   } finally {

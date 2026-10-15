@@ -2,6 +2,7 @@
   import { api } from '../lib/api';
   import { app, go } from '../lib/state.svelte';
   import Icon from './Icon.svelte';
+  import { modKey } from './Palette.svelte';
 
   let { hasData }: { hasData: boolean } = $props();
 
@@ -12,107 +13,118 @@
     }
   }
 
+  const KIND: Record<string, string> = {
+    excel: 'Excel', csv: 'CSV', parquet: 'Parquet', sqlite: 'SQLite', duckdb: 'DuckDB', folder: 'Folder',
+    url: 'Web link', postgres: 'PostgreSQL', mysql: 'MySQL', derived: 'New table',
+  };
+  // The sources of this workspace, as the threads of the cloth: each keeps a series colour in the fixed order.
+  const threads = $derived((app.snap?.workspace.sources ?? []).slice(0, 8));
+
   const steps = [
-    { icon: 'sheet', title: 'Add your data', text: 'Excel files, CSV, SQLite, PostgreSQL or MySQL. Tenun reads them where they are.' },
-    { icon: 'model', title: 'Draw relationships', text: 'Link a column in one source to a column in another. Tenun suggests the likely ones.' },
-    { icon: 'dashboard', title: 'Build the dashboard', text: 'Pick a value and a group. Click any bar to filter every chart. Save the Excel file and it updates.' },
+    { title: 'Add your data', text: 'Excel, CSV, Parquet, SQLite, DuckDB, PostgreSQL, MySQL, a folder of files or a web link. Tenun reads them where they are.' },
+    { title: 'Draw relationships', text: 'Link a column in one source to a column in another. Tenun suggests the likely links and checks them against the data.' },
+    { title: 'Build the dashboard', text: 'Pick a value and a group. Click any bar to filter every chart. Save the Excel file and the dashboard updates.' },
   ] as const;
 </script>
 
 <div class="welcome">
-  <div class="hero">
-    <img src="/icon.svg" alt="" width="64" height="64" />
-    <h1>Weave your spreadsheets and databases into one dashboard</h1>
-    <p class="muted">Everything stays on this computer. Nothing to install, nothing to set up.</p>
+  <div class="selvedge" aria-hidden="true"></div>
+  <div class="inner">
+    <p class="mono">Welcome to Tenun</p>
+    <h1>Weave your spreadsheets and databases into one dashboard.</h1>
+    <p class="lede">Everything stays on this computer. There is no server to run and no account to make.</p>
     <div class="actions">
       <button class="btn primary big" onclick={sample} disabled={!!app.busy}>
         <Icon name="sparkles" /> {app.busy ?? 'Open the sample'}
       </button>
       <button class="btn big" onclick={() => (app.addOpen = true)}><Icon name="plus" /> Add data…</button>
+      <span class="hint"><kbd>{modKey}K</kbd> Search everything</span>
     </div>
-    {#if hasData}
-      <p class="muted small">
-        This workspace has {app.tables.length} table{app.tables.length === 1 ? '' : 's'}.
-        <button class="link" onclick={() => go({ view: 'data' })}>Go to Data</button>
-      </p>
-    {/if}
-  </div>
-  <ol class="steps">
-    {#each steps as s, i}
-      <li>
-        <div class="st">
-          <span class="n" class:first={i === 0}>{i + 1}</span>
-          <h3>{s.title}</h3>
-          <span class="ic"><Icon name={s.icon} size={16} /></span>
+
+    {#if hasData && threads.length}
+      <section class="threads" aria-label="Sources in this workspace">
+        <div class="th-head">
+          <p class="mono">In this workspace</p>
+          <button class="link" onclick={() => go({ view: 'data' })}>
+            {app.tables.length} table{app.tables.length === 1 ? '' : 's'} · Go to Data
+          </button>
         </div>
-        <p class="muted">{s.text}</p>
-      </li>
-    {/each}
-  </ol>
+        <ul>
+          {#each threads as s, i (s.id)}
+            <li style="--c: var(--s{i + 1})"><b>{s.name}</b><span>{KIND[s.kind] ?? s.kind}</span></li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+
+    <ol class="steps">
+      {#each steps as s, i}
+        <li>
+          <span class="mono n">0{i + 1}</span>
+          <h3>{s.title}</h3>
+          <p>{s.text}</p>
+        </li>
+      {/each}
+    </ol>
+  </div>
 </div>
 
 <style>
-  .welcome {
-    flex: 1;
-    overflow: auto;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 40px;
-    padding: 48px 32px;
-  }
-  .hero {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    gap: 12px;
-    max-width: 560px;
-  }
-  .hero img { border-radius: 14px; margin-bottom: 8px; animation: rise 320ms var(--spring); }
-  .hero h1 { font-size: 30px; font-weight: 650; line-height: 1.15; letter-spacing: -0.02em; text-wrap: balance; }
-  @keyframes rise { from { opacity: 0; transform: translateY(4px) scale(0.98); } }
-  .hero p { margin: 0; font-size: 15px; }
-  .actions { display: flex; gap: 10px; margin-top: 12px; }
-  .big { height: 36px; padding: 0 16px; font-size: 13px; border-radius: 8px; }
-  .small { font-size: 13px !important; }
-  .link { border: 0; background: none; color: var(--accent-text); padding: 0; font-weight: 500; }
-  .steps {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    width: min(820px, 100%);
-    border: 1px solid var(--sep);
-    border-radius: var(--r-card);
-    background: var(--surface);
-  }
-  .steps li { padding: 20px; min-width: 0; }
-  .steps li + li { border-left: 1px solid var(--sep); }
-  .st { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  .st h3 { flex: 1; font-size: 13px; }
-  .ic { display: inline-flex; color: var(--text-3); }
-  .steps p { margin: 0; font-size: 12px; line-height: 1.5; }
-  .n {
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
+  .welcome { flex: 1; overflow: auto; display: flex; flex-direction: column; }
+  /* The selvedge: the woven edge of a cloth, in the eight series colours of the fixed order. */
+  .selvedge {
+    height: 3px;
     flex: none;
-    border-radius: 50%;
-    background: var(--inset);
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-2);
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
+    background: repeating-linear-gradient(90deg,
+      var(--s1) 0 10px, var(--s2) 10px 20px, var(--s3) 20px 30px, var(--s4) 30px 40px,
+      var(--s5) 40px 50px, var(--s6) 50px 60px, var(--s7) 60px 70px, var(--s8) 70px 80px);
   }
-  .n.first { background: var(--selected); color: var(--accent-text); }
+  .inner { width: min(880px, 100%); margin: auto; padding: 56px 48px 64px; animation: rise 280ms var(--spring); }
+  @keyframes rise { from { opacity: 0; transform: translateY(4px); } }
+  .mono {
+    margin: 0 0 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+  h1 { max-width: 15em; font-size: 36px; font-weight: 700; line-height: 1.06; letter-spacing: -0.03em; text-wrap: balance; }
+  .lede { margin: 14px 0 0; max-width: 34em; font-size: 15px; line-height: 1.5; color: var(--text-2); }
+  .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+  .big { height: 36px; padding: 0 16px; font-size: 13px; }
+  .hint { display: inline-flex; align-items: center; gap: 8px; margin-left: 8px; font-size: 12px; color: var(--text-2); }
+  .link { border: 0; background: none; color: var(--accent-text); padding: 0; font-size: 12px; font-weight: 500; }
+
+  .threads { margin-top: 40px; }
+  .th-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .threads ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .threads li {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 12px 0 10px;
+    border: 1px solid var(--sep);
+    border-left: 3px solid var(--c);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .threads b { font-weight: 600; }
+  .threads span { color: var(--text-2); }
+
+  .steps { list-style: none; margin: 48px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
+  .steps li { min-width: 0; padding-top: 14px; border-top: 1px solid var(--sep-strong); }
+  .steps .n { display: block; margin-bottom: 8px; color: var(--accent-text); }
+  .steps h3 { margin-bottom: 6px; font-size: 14px; }
+  .steps p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text-2); }
   @media (max-width: 900px) {
-    .steps { grid-template-columns: 1fr; }
-    .steps li + li { border-left: 0; border-top: 1px solid var(--sep); }
-    .hero h1 { font-size: 24px; }
+    .inner { padding: 32px 20px 40px; }
+    h1 { font-size: 28px; }
+    .hint { display: none; }
+    .steps { grid-template-columns: 1fr; gap: 20px; }
   }
 </style>

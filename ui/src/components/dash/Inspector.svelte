@@ -2048,15 +2048,9 @@
   .tabs button.on { color: var(--text); font-weight: 600; }
   .tabs button.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 1px; background: var(--accent); }
   .body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 20px; padding: 16px; }
-  .body :global(.sec > .label:first-child) {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--text-2);
-  }
-  .sh { display: flex; align-items: baseline; justify-content: space-between; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); }
-  .sh .now { font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 12px; }
+  .body :global(.sec > .label:first-child) { font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); }
+  .sh { display: flex; align-items: baseline; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); }
+  .sh .now { font-family: var(--font); font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 12px; }
   .rule { height: 1px; background: var(--sep); flex: none; }
   .disclose { display: flex; align-items: center; gap: 6px; align-self: flex-start; height: 24px; padding: 0; border: 0; background: none; font-size: 12px; color: var(--accent-text); }
   .disclose:hover { text-decoration: underline; }

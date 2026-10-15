@@ -113,7 +113,7 @@
   .param { height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 6px; min-height: 0; }
   /* The tile's own buttons float over its top right corner. */
   .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-right: 60px; }
-  .name { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .name { font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .v { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .slider { width: 100%; margin: 4px 0 0; appearance: none; background: none; height: 18px; }
   .slider::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background: var(--sep-strong); }

@@ -420,7 +420,7 @@
   .spacer { flex: 1; }
   .body { flex: 1; min-height: 0; display: flex; }
   .rels { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--sep); background: var(--surface); }
-  .rh { display: flex; align-items: center; height: 40px; padding: 0 16px; flex: none; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); border-bottom: 1px solid var(--sep); }
+  .rh { display: flex; align-items: center; height: 40px; padding: 0 16px; flex: none; font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); border-bottom: 1px solid var(--sep); }
   .rh.sub { margin-top: 8px; border-top: 1px solid var(--sep); }
   .rlist { flex: 1; min-height: 0; overflow: auto; }
   .rel { display: flex; align-items: flex-start; gap: 2px; padding-right: 8px; border-bottom: 1px solid var(--sep); transition: background 120ms var(--spring); }

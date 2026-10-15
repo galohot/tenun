@@ -125,7 +125,7 @@
   .pages button { width: 100%; height: 30px; padding: 0 8px; border-radius: 6px; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pages button:hover { background: var(--hover); }
   .pages button.on { background: var(--selected); color: var(--accent-text); font-weight: 600; }
-  .gname { margin: 12px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); }
+  .gname { margin: 12px 8px 4px; font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); }
   .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   footer { margin-top: auto; padding: 16px 24px 20px; font-size: 12px; color: var(--text-2); text-align: center; }
   .scrim { position: fixed; inset: 0; z-index: 20; background: rgb(0 0 0 / 30%); }

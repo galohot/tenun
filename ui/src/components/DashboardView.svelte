@@ -1671,7 +1671,9 @@
   .fchip.saved { background: var(--inset); border-color: transparent; }
   .fchip.back { color: var(--accent-text); }
   .fchip.back :global(svg) { color: inherit; }
-  .fchip.add { border-style: dashed; background: none; color: var(--text-2); }
+  /* Dashed means "not finished" in a chart, so an add button is plain: no border until hover. */
+  .fchip.add { border-color: transparent; background: none; color: var(--text-2); }
+  .fchip.add:hover { background: var(--hover); color: var(--text); }
   .fchip.add:hover { color: var(--text); border-color: var(--text-3); background: none; }
   .fchip.ghostbtn { border-color: transparent; background: none; color: var(--text-2); }
   .hint { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

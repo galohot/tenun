@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { withFont } from '../../lib/charts/common';
   // One ECharts instance. Clicks anywhere in a category's band select it, not
   // only on the mark itself, so thin bars and lines are easy to hit. A scatter reports the dot that
   // was hit (`onitem`), and a histogram reports the number under the pointer (`onx`).
@@ -59,7 +60,10 @@
   };
 
   /** No animation when the person asked for less motion, or while a picture of the dashboard is made. */
-  const still = (o: EChartsCoreOption): EChartsCoreOption => (animates() ? o : { ...o, animation: false });
+  const still = (o: EChartsCoreOption): EChartsCoreOption => {
+    const t = withFont(o);
+    return animates() ? t : { ...t, animation: false };
+  };
 
   let el: HTMLDivElement;
   let chart: ReturnType<typeof echarts.init> | null = null;

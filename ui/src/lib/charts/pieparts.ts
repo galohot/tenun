@@ -29,7 +29,7 @@ export const DONUT_HOLE = 0.62;
  */
 export const INSIDE_CHARS = 14;
 /** The app's own font for text ECharts draws on the canvas (a CSS variable does not reach it). */
-const FONT = "-apple-system, BlinkMacSystemFont, 'Inter Variable', 'Segoe UI Variable', system-ui, sans-serif";
+const FONT = "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable', system-ui, sans-serif";
 
 export interface Slice {
   raw: Cell;
