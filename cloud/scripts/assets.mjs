@@ -9,7 +9,7 @@ const pub = join(root, 'public');
 const site = join(root, '..', 'site');
 const viewer = join(root, '..', 'ui', 'dist-viewer');
 
-for (const f of ['index.html', '404.html', 'style.css', 'icon.svg', 'favicon-32.png', 'apple-touch-icon.png', 'og.png', 'robots.txt', 'sitemap.xml']) {
+for (const f of ['index.html', '404.html', 'style.css', 'icon.svg', 'favicon-32.png', 'apple-touch-icon.png', 'og.png', 'robots.txt', 'sitemap.xml', 'site.js', 'inter.woff2', 'inter-LICENSE.txt']) {
   cpSync(join(site, f), join(pub, f));
 }
 // Every picture of the landing page, so a new one is never left out (a missing name once gave a 404).

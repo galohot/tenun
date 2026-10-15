@@ -5,336 +5,338 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0e0e10" media="(prefers-color-scheme: dark)">
-<title>Tenun — weave your spreadsheets and databases into one dashboard</title>
+<meta name="theme-color" content="#161618" media="(prefers-color-scheme: dark)">
+<title>Tenun — dashboards woven from your own files</title>
 <meta name="description" content="A free, open-source dashboard app that runs on your computer. Join Excel files, CSV files and databases, write formulas, map Indonesia down to every kabupaten, and export a dashboard or a whole site as one HTML file.">
 <link rel="canonical" href="https://tenun.cloud/">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/inter.woff2" as="font" type="font/woff2" crossorigin>
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://tenun.cloud/">
-<meta property="og:title" content="Tenun — weave your spreadsheets and databases into one dashboard">
+<meta property="og:title" content="Tenun — dashboards woven from your own files">
 <meta property="og:description" content="Local, free and open source. Excel, CSV, SQLite, PostgreSQL and MySQL in one dashboard. No server, no Docker, no account.">
 <meta property="og:image" content="https://tenun.cloud/og.png">
 <meta property="og:image:alt" content="A Tenun dashboard with number tiles, a stacked bar chart, a share strip and bar charts">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="stylesheet" href="/style.css">
+<script src="/site.js" defer></script>
 </head>
-<body>
+<body class="home">
 <a class="skip" href="#main">Skip to content</a>
+<div class="selvedge" aria-hidden="true"></div>
 <header class="nav">
-  <a class="brand" href="/"><img src="/icon.svg" alt="" width="28" height="28"> Tenun</a>
+  <a class="brand" href="/"><img src="/icon.svg" alt="" width="26" height="26"> Tenun <span class="ver" data-version>0.5.0</span></a>
   <nav aria-label="Main">
-    <a class="wide" href="#how">How it works</a>
-    <a class="wide" href="#features">Features</a>
-    <a href="#download">Download</a>
+    <a class="wide" href="#tour">Tour</a>
+    <a class="wide" href="#choices">Choices</a>
     <a class="wide" href="https://github.com/galohot/tenun">GitHub</a>
     <a href="/account">Sign in</a>
+    <a class="nav-cta" href="#download">Download</a>
   </nav>
 </header>
 
 <main id="main" class="landing">
   <section class="hero">
-    <p class="pill"><span class="dot" aria-hidden="true"></span><span>Version <span data-version>0.5.0</span> · drill-down, saved views, forecasts and alerts</span></p>
-    <h1>Weave your spreadsheets and databases into one dashboard.</h1>
-    <p class="lede">Tenun is a free dashboard app that runs on your computer. Draw a line between an Excel column and a database column, and every chart can use both.</p>
-    <div class="cta">
-      <a class="button primary" href="#download">Download</a>
-      <a class="button" href="https://github.com/galohot/tenun">View on GitHub</a>
+    <div class="hero-text">
+      <p class="mono-label">Free · Open source · Windows, macOS and Linux</p>
+      <h1>Dashboards woven from your own files.</h1>
+      <p class="lede">Tenun does the everyday work of Power BI, Tableau and Looker Studio. Join your sources, draw charts that filter each other, and share the result. It runs on your computer, and you can learn it in a minute.</p>
+      <div class="cta">
+        <a class="button primary" href="#download" data-os-label>Download</a>
+        <a class="button" href="https://github.com/galohot/tenun">Source on GitHub</a>
+      </div>
     </div>
-    <p class="fine">Windows, macOS and Linux · No server, no Docker, no account · MIT or Apache-2.0</p>
 
-    <div class="stage">
-      <ul class="chips" aria-label="Sources in this dashboard">
-        <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 7.5h12M4 11.5h12M8.5 3.5v13"/></svg><b>coffee.xlsx</b><span>Excel</span></li>
-        <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 7.5h12M4 11.5h12M8.5 3.5v13"/></svg><b>stores.csv</b><span>CSV</span></li>
-        <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 5.5c0-1.1 2.5-2 5.5-2s5.5.9 5.5 2-2.5 2-5.5 2-5.5-.9-5.5-2zM4.5 5.5v9c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-9M4.5 10c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2"/></svg><b>customers.sqlite</b><span>SQLite</span></li>
-        <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 11.5l3-3M7 9.5L5.2 11.3a2.5 2.5 0 0 0 3.5 3.5l1.8-1.8M13 10.5l1.8-1.8a2.5 2.5 0 0 0-3.5-3.5L9.5 7"/></svg><b>Store targets</b><span>Web link</span></li>
+    <figure class="loom" aria-label="Four sources woven into one dashboard">
+      <ul class="threads">
+        <li style="--c: var(--s1)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 7.5h12M4 11.5h12M8.5 3.5v13"/></svg><b>coffee.xlsx</b><span>Excel</span></li>
+        <li style="--c: var(--s2)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 7.5h12M4 11.5h12M8.5 3.5v13"/></svg><b>stores.csv</b><span>CSV</span></li>
+        <li style="--c: var(--s3)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 5.5c0-1.1 2.5-2 5.5-2s5.5.9 5.5 2-2.5 2-5.5 2-5.5-.9-5.5-2zM4.5 5.5v9c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-9M4.5 10c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2"/></svg><b>customers.sqlite</b><span>SQLite</span></li>
+        <li style="--c: var(--s4)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 11.5l3-3M7 9.5L5.2 11.3a2.5 2.5 0 0 0 3.5 3.5l1.8-1.8M13 10.5l1.8-1.8a2.5 2.5 0 0 0-3.5-3.5L9.5 7"/></svg><b>Store targets</b><span>Web link</span></li>
       </ul>
-      <picture class="shot">
-        <source srcset="/dashboard-dark.webp" media="(prefers-color-scheme: dark)">
-        <img src="/dashboard-light.webp" width="1440" height="900" fetchpriority="high" alt="A Tenun dashboard: four number tiles, a stacked bar chart by month and region, a share strip by category, and bar charts by store and customer segment">
-      </picture>
-    </div>
+      <svg class="weft" viewBox="0 0 100 200" preserveAspectRatio="none" aria-hidden="true">
+        <path style="stroke: var(--s1)" d="M0 25 C50 25 50 88 100 88"/>
+        <path style="stroke: var(--s2)" d="M0 75 C50 75 50 96 100 96"/>
+        <path style="stroke: var(--s3)" d="M0 125 C50 125 50 104 100 104"/>
+        <path style="stroke: var(--s4)" d="M0 175 C50 175 50 112 100 112"/>
+      </svg>
+      <div class="cloth">
+        <p class="cloth-title">Coffee overview</p>
+        <p class="cloth-sub">From 4 sources</p>
+        <dl>
+          <div><dt>Amount</dt><dd>18.4K</dd></div>
+          <div><dt>Orders</dt><dd>475</dd></div>
+        </dl>
+        <div class="bars" aria-hidden="true"><i style="--h:.42"></i><i style="--h:.58"></i><i style="--h:.5"></i><i style="--h:.71"></i><i style="--h:.64"></i><i style="--h:.86"></i><i style="--h:1"></i><i class="part" style="--h:.48"></i></div>
+      </div>
+    </figure>
   </section>
 
-  <section id="how" class="block">
-    <h2>Three steps, one minute</h2>
-    <p class="sub">Everything stays on this computer. There is no server to run and no account to make.</p>
+  <figure class="window">
+    <picture>
+      <source srcset="/dashboard-dark.webp" media="(prefers-color-scheme: dark)">
+      <img src="/dashboard-light.webp" width="1440" height="900" fetchpriority="high" alt="A Tenun dashboard: four number tiles, a stacked bar chart by month and region, a share strip by category, and bar charts by store and customer segment">
+    </picture>
+    <figcaption><span class="mono-label">Fig. 1</span> The Coffee overview. Sales from Excel, stores from a CSV export, customers from SQLite, targets from a web link. Click any bar and every tile filters. Demo data.</figcaption>
+  </figure>
+
+  <section class="numbers" aria-label="Tenun in four numbers">
+    <div><b>0</b><span>accounts to make. No licence, no seats, no trial.</span></div>
+    <div><b>0</b><span>servers to run. Tenun reads your files and databases where they are.</span></div>
+    <div><b>3</b><span>systems: Windows, macOS and Linux. Or run <code>tenun serve</code> and use a browser.</span></div>
+    <div><b>1</b><span>HTML file to send a whole dashboard. It opens offline, and the filters still work.</span></div>
+  </section>
+
+  <section class="how">
+    <h2>From a spreadsheet to a dashboard in three steps</h2>
     <ol class="steps">
-      <li>
-        <div class="step-head"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v11h-13zM3.5 8.5h13M3.5 12h13M8 8.5v7"/></svg><span>1</span></div>
-        <h3>Add your data</h3>
-        <p>Excel files, CSV, SQLite, PostgreSQL or MySQL. Tenun reads them where they are.</p>
-      </li>
-      <li>
-        <div class="step-head"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 6.5a2 2 0 1 0 0-.01M15 4.5a2 2 0 1 0 0-.01M15 15.5a2 2 0 1 0 0-.01M6.8 7.4l6.4 6.6M6.9 6l6.2-1"/></svg><span>2</span></div>
-        <h3>Draw relationships</h3>
-        <p>Link a column in one source to a column in another. Tenun suggests the likely ones.</p>
-      </li>
-      <li>
-        <div class="step-head"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 3.5h5.5v7h-5.5zM11 3.5h5.5v4h-5.5zM11 9.5h5.5v7h-5.5zM3.5 12.5h5.5v4h-5.5z"/></svg><span>3</span></div>
-        <h3>Build the dashboard</h3>
-        <p>Pick a value and a group. Click any bar to filter every chart. Save the Excel file and it updates.</p>
-      </li>
+      <li><span class="mono-label">01</span><h3>Add your data</h3><p>Excel, CSV, Parquet, SQLite, DuckDB, PostgreSQL, MySQL, a folder of files or a web link. Tenun reads them where they are.</p></li>
+      <li><span class="mono-label">02</span><h3>Draw relationships</h3><p>Link a column in one source to a column in another. Tenun suggests the likely links and checks them against the data.</p></li>
+      <li><span class="mono-label">03</span><h3>Build the dashboard</h3><p>Pick a value and a group. Click any bar to filter every chart. Save the Excel file and the dashboard updates.</p></li>
     </ol>
   </section>
 
-  <section class="block alt">
-    <div class="alt-text">
-      <p class="eyebrow">Why Tenun</p>
-      <h2>A fresh, calm alternative to Power BI, Tableau and Looker Studio.</h2>
-      <p class="sub">Tenun does the everyday part of their work: join your sources, draw charts that filter each other, and share the result. It does it on your own computer, for free.</p>
+  <section id="choices" class="choices">
+    <div class="choices-head">
+      <p class="mono-label">Choices</p>
+      <h2>The big tools give you every option. Tenun gives you a good chart.</h2>
+      <p class="sub">Power BI, Tableau and Looker Studio can draw anything, so most dashboards end up crowded and hard to read. Tenun leaves some things out on purpose. Each has a better answer.</p>
     </div>
-    <dl class="facts">
-      <div><dt>Your computer, not a cloud</dt><dd>Tenun reads your files and databases where they are. Nothing is copied to a server.</dd></div>
-      <div><dt>Free, with no account</dt><dd>No licence, no seats, no trial. The source is open under MIT or Apache-2.0.</dd></div>
-      <div><dt>A desktop app</dt><dd>For Windows, macOS and Linux. Or run <code>tenun serve</code> and use it in your browser.</dd></div>
-      <div><dt>Good-looking without effort</dt><dd>Charts follow one set of rules, so every dashboard is clear and easy to read.</dd></div>
+    <table class="nots">
+      <thead><tr><th scope="col">Left out</th><th scope="col">What you get instead</th></tr></thead>
+      <tbody>
+        <tr><td><s>Gauges</s></td><td>A number tile with a target.</td></tr>
+        <tr><td><s>Dual-axis charts</s></td><td>Separate panels, or indexed lines, so each value keeps an honest axis.</td></tr>
+        <tr><td><s>Treemaps and packed bubbles</s></td><td>A bar chart with the top 10 and Other.</td></tr>
+        <tr><td><s>Pareto charts</s></td><td>A sorted bar chart with a running total.</td></tr>
+        <tr><td><s>Radar, 3D, ribbon and word clouds</s></td><td>A bar, line or table.</td></tr>
+        <tr><td><s>Colour pickers, themes and fonts</s></td><td>One fixed palette, checked for colour blindness in light and dark mode. You cannot make it ugly.</td></tr>
+        <tr><td><s>Free-floating layout</s></td><td>The grid. Tiles snap into place and never overlap.</td></tr>
+        <tr><td><s>Third-party, R or Python visuals</s></td><td>The built-in charts. Everything is computed in one place, so every export agrees.</td></tr>
+        <tr><td><s>Roles and governance</s></td><td>Your own files and your own permissions.</td></tr>
+      </tbody>
+    </table>
+    <dl class="honest">
+      <div><dt>Fair comparisons</dt><dd>Half of October is compared with the first half of September, not with all of it.</dd></div>
+      <div><dt>Unfinished is marked</dt><dd>A period that is not over is drawn dashed and labelled.</dd></div>
+      <div><dt>Pies, kept small</dt><dd>Only for parts of a whole, six slices at most, largest first.</dd></div>
     </dl>
   </section>
 
-  <section id="features" class="block">
-    <h2 class="visually-hidden">Features</h2>
-    <div class="grid">
-      <article>
-        <h3>Join sources, not just tables</h3>
-        <p>Sales in Excel, stores in a CSV export, customers in PostgreSQL. Drag from a column to a column, and Tenun writes the joins. It suggests the likely links and checks them against the data.</p>
-      </article>
-      <article>
-        <h3>Click to filter everything</h3>
-        <p>Click a bar, a share or a row. Every other chart filters to it, even when its data comes from another source. Add a filter tile for a list, a dropdown or a date range.</p>
-      </article>
-      <article>
-        <h3>Live from your files</h3>
-        <p>Save the Excel file and the dashboard updates. Databases refresh on an interval you choose. Nothing is copied to a server.</p>
-      </article>
-      <article>
-        <h3>Honest numbers</h3>
-        <p>Half of October is compared with the first half of September, not with all of it. Unfinished periods are drawn dashed and labelled. Pies and donuts only for parts of a whole, six slices at most. No gauges.</p>
-      </article>
-      <article>
-        <h3>Good-looking by default</h3>
-        <p>No colour pickers, no font menus. A fixed palette checked for colour blindness, in light and dark mode. You cannot make it ugly.</p>
-      </article>
-      <article>
-        <h3>Export one HTML file</h3>
-        <p>Send a dashboard, or a whole site, as a single file. It opens offline in any browser, and click-to-filter still works. You can also save a picture or a PDF, or the numbers of one tile as CSV or Excel.</p>
-      </article>
+  <section id="tour" class="tour">
+    <div class="tour-head">
+      <p class="mono-label">Tour</p>
+      <h2>Simple to start. Deep when you need it.</h2>
     </div>
-  </section>
-
-  <section class="row">
-    <div class="row-text">
-      <p class="eyebrow">Model</p>
-      <h2>The model is a drawing</h2>
-      <p>Each table is a card. Each relationship is a line. The dot marks the side with unique values, like an ID. If neither side is unique, Tenun refuses the link, because the totals would be counted twice.</p>
+    <div class="tabs" role="tablist" aria-label="Features" hidden>
+      <span class="tab-group">Build</span>
+      <button role="tab" aria-controls="t-model">Model</button>
+      <button role="tab" aria-controls="t-measures">Measures</button>
+      <button role="tab" aria-controls="t-maps">Maps</button>
+      <button role="tab" aria-controls="t-cards">Number cards</button>
+      <button role="tab" aria-controls="t-stories">Stories</button>
+      <button role="tab" aria-controls="t-sites">Sites</button>
+      <span class="tab-group new">New in 0.5.0</span>
+      <button role="tab" aria-controls="t-views">Saved views</button>
+      <button role="tab" aria-controls="t-whatif">What if</button>
+      <button role="tab" aria-controls="t-forecast">Forecast</button>
+      <button role="tab" aria-controls="t-alerts">Alerts</button>
+      <button role="tab" aria-controls="t-ai">Your own AI</button>
     </div>
-    <picture class="shot">
-      <source srcset="/model-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/model-light.webp" width="1440" height="900" alt="The Model view: Orders from an Excel file linked to stores from a CSV file and customers from a SQLite file" loading="lazy">
-    </picture>
-  </section>
 
-  <section class="row flip">
-    <div class="row-text">
-      <p class="eyebrow">Measures</p>
-      <h2>One formula, three sources</h2>
-      <p>Sales come from an Excel file, targets from an API, stores from a CSV export. Write the formula once, name it Achievement, and use it in any tile.</p>
-      <code class="formula">SUM([sales].[amount]) / SUM([targets].[target])</code>
-      <p>Tenun adds up each table on its own, so a target is never counted once for each sale. Calculated columns use 64 functions with the names Excel uses.</p>
-    </div>
-    <picture class="shot">
-      <source srcset="/calc-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/calc-light.webp" width="1440" height="900" alt="The Data view with an Excel file, a CSV file and a web link, and the measure Achievement open: the sum of sales divided by the sum of targets" loading="lazy">
-    </picture>
-  </section>
-
-  <section class="row">
-    <div class="row-text">
-      <p class="eyebrow">Maps</p>
-      <h2>Down to every kabupaten</h2>
-      <p>Colour Indonesia's 38 provinces or 514 kabupaten and kota, or the countries of the world. Write places the way your data already does:</p>
-      <p class="tags"><code>Jawa Barat</code> <code>Jabar</code> <code>32</code> <code>Kab. Bandung</code></p>
-      <p>Tenun lists the names it could not place. The maps ship with the app and work offline.</p>
-    </div>
-    <picture class="shot">
-      <source srcset="/map-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/map-light.webp" width="1440" height="900" alt="A map of Indonesia with every kabupaten and kota coloured by a value, from demo data" loading="lazy">
-    </picture>
-  </section>
-
-  <section class="row flip">
-    <div class="row-text">
-      <p class="eyebrow">Number cards</p>
-      <h2>Number cards you design</h2>
-      <p>Choose the parts of a card, their order, their size and the background. Add a small chart, a target, or a rule that says "Below target" in words. Save a look as a card style and use it on every dashboard. The colours still come from the fixed palette, so it stays good-looking.</p>
-    </div>
-    <picture class="shot">
-      <source srcset="/cards-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/cards-light.webp" width="1440" height="900" alt="Six number cards in different looks, with the card editor open: presets, parts, size, alignment and background" loading="lazy">
-    </picture>
-  </section>
-
-  <section class="row">
-    <div class="row-text">
-      <p class="eyebrow">Stories</p>
-      <h2>Write the story next to the numbers</h2>
-      <p>Text tiles have headings, lists, quotes and callouts, and numbers that follow the filters: "Revenue is 18.4K in Oct 1–14, ≈ Same against the same days of September." A story page puts text, cards and charts in one column, and prints on A4 pages that never cut a chart.</p>
-    </div>
-    <picture class="shot">
-      <source srcset="/story-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/story-light.webp" width="1440" height="900" alt="A story page: a heading, a paragraph with live numbers, two cards side by side, a callout and a line chart" loading="lazy">
-    </picture>
-  </section>
-
-  <section class="row flip">
-    <div class="row-text">
-      <p class="eyebrow">Sites</p>
-      <h2>A website, not a stack of files</h2>
-      <p>Make a workspace a site, with a top bar or a sidebar, groups of pages and a home page. A click on a bar can open another page, kept to that bar. Export the whole site as one HTML file or a folder for any web host, or publish it at one link.</p>
-    </div>
-    <picture class="shot">
-      <source srcset="/site-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/site-light.webp" width="1440" height="900" alt="An exported site with a sidebar: the pages in two groups, Sales and More, and the Coffee overview page" loading="lazy">
-    </picture>
-  </section>
-
-  <div class="part">
-    <p class="eyebrow">New in version 0.5.0</p>
-    <h2>Read deeper, look ahead, hear when it changes.</h2>
-    <p class="sub">Five additions for people who read the same dashboard every week.</p>
-  </div>
-
-  <section class="row">
-    <div class="row-text">
-      <p class="eyebrow">Saved views and drill-down</p>
-      <h2>Save the way you read it</h2>
-      <p>A saved view remembers the clicks, the filter choices, the time grain and how far each chart is drilled. Keep one for the Monday meeting and one for each region. Drill down from years to months to days, or from a region to its stores, on the same chart.</p>
-    </div>
-    <picture class="shot">
-      <source srcset="/views-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/views-light.webp" width="1440" height="900" alt="The Drill down dashboard on the saved view &quot;Jawa, by store&quot;: revenue of the three stores of Jawa, with the list of views open. Demo data" loading="lazy">
-    </picture>
-  </section>
-
-  <section class="row flip">
-    <div class="row-text">
-      <p class="eyebrow">What if</p>
-      <h2>Ask "what if"</h2>
-      <p>Put a slider on the dashboard and let a measure read it: what if prices rise by 5 %? Every chart follows as you move it, and an exported file keeps each step.</p>
-      <p>A business year that starts in April, the stock on the last day of a month, a store's share of its region: each is one setting or one function.</p>
-    </div>
-    <picture class="shot">
-      <source srcset="/whatif-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/whatif-light.webp" width="1440" height="900" alt="The What if dashboard: a Price change slider at 5, revenue of 382M and 401M after the change, and both by month. Demo data" loading="lazy">
-    </picture>
-  </section>
-
-  <section class="row">
-    <div class="row-text">
-      <p class="eyebrow">Forecast</p>
-      <h2>See what comes next, and what stands out</h2>
-      <p>A line over time shows its next months with a 90 % range. Rings mark the months far from the ones around them, with a list under the chart. Both are worked out on your computer from the chart's own numbers, and say so in words when there are too few.</p>
-    </div>
-    <picture class="shot">
-      <source srcset="/forecast-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/forecast-light.webp" width="1440" height="900" alt="Revenue by month with a dashed forecast and its range, and the same as bars with three unusual months marked. Demo data" loading="lazy">
-    </picture>
-  </section>
-
-  <section class="row flip">
-    <div class="row-text">
-      <p class="eyebrow">Alerts</p>
-      <h2>Hear about it in your chat</h2>
-      <p>An alert watches a number. When revenue goes below what you set, Tenun sends one message to Slack, Microsoft Teams, Discord, Telegram or any web address, and one when it is back.</p>
-      <p>The app checks while it is open, and <code>tenun agent</code> checks on a computer that stays on. The address stays on your computer.</p>
-    </div>
-    <picture class="shot">
-      <source srcset="/alerts-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/alerts-light.webp" width="1440" height="900" alt="The Alert me sheet on the Revenue tile: below 350,000,000, sent to Slack, also when back to normal. Demo data" loading="lazy">
-    </picture>
-  </section>
-
-  <section class="row">
-    <div class="row-text">
-      <p class="eyebrow">Your own AI</p>
-      <h2>Bring your own AI</h2>
-      <p>Ask the AI app you already use, such as Claude, to build a dashboard. <code>tenun mcp</code> gives it Tenun's tools. Each change shows in the app at once, with Undo.</p>
-      <p>Tenun calls no AI and sends nothing anywhere. The AI app sends what it reads to its own company. It cannot run SQL, read your files, see a password or publish.</p>
-    </div>
-    <picture class="shot">
-      <source srcset="/ai-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/ai-light.webp" width="1440" height="900" alt="A dashboard an AI app built through tenun mcp: revenue, revenue by store and revenue by month with a forecast, and the notice &quot;An AI app added the tile&quot; with Undo. Demo data" loading="lazy">
-    </picture>
-  </section>
-
-  <section class="block">
-    <p class="eyebrow">Advanced features · one free switch</p>
-    <h2>Simple by default. Advanced when you want it.</h2>
-    <div class="modes">
-      <div>
-        <h3>Simple</h3>
-        <p>Tenun starts with the charts an Excel user knows: bars, lines, areas, scatter, histogram, waterfall and pivot tables with totals. Keep the top 5 and group the rest as Other. Show a value as a share, a running total or a change. Add a target and a trend line. Clean a messy sheet, turn months into rows, read a whole folder of files, or read a web link to CSV or JSON data.</p>
+    <article class="panel" id="t-model" role="tabpanel">
+      <div class="panel-text">
+        <p class="mono-label">Model</p>
+        <h3>The model is a drawing</h3>
+        <p>Each table is a card. Each relationship is a line. Drag from a column to a column, and Tenun writes the joins, even across sources. The dot marks the side with unique values, like an ID. If neither side is unique, Tenun refuses the link, because the totals would be counted twice.</p>
       </div>
-      <div>
-        <h3>Advanced</h3>
-        <p>Turn on <b>Advanced features</b> in Settings. It adds calculated columns, measures and new tables made by append, merge or group. It adds heat maps, funnels, box plots, bullet charts, Sankey, calendar, cohort and Gantt charts, and small multiples. Version 0.5.0 adds drill-down, views you save, parameters, forecasts, unusual values and alerts. Dashboards that use them still open when the switch is off.</p>
+      <picture>
+        <source srcset="/model-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="/model-light.webp" width="1440" height="900" alt="The Model view: Orders from an Excel file linked to stores from a CSV file and customers from a SQLite file" loading="lazy">
+      </picture>
+    </article>
+
+    <article class="panel" id="t-measures" role="tabpanel">
+      <div class="panel-text">
+        <p class="mono-label">Measures</p>
+        <h3>One formula, three sources</h3>
+        <p>Sales come from an Excel file, targets from an API, stores from a CSV export. Write the formula once, name it Achievement, and use it in any tile.</p>
+        <code class="formula">SUM([sales].[amount]) / SUM([targets].[target])</code>
+        <p>Tenun adds up each table on its own, so a target is never counted once for each sale. Calculated columns use 64 functions with the names Excel uses.</p>
       </div>
+      <picture>
+        <source srcset="/calc-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="/calc-light.webp" width="1440" height="900" alt="The Data view with an Excel file, a CSV file and a web link, and the measure Achievement open: the sum of sales divided by the sum of targets" loading="lazy">
+      </picture>
+    </article>
+
+    <article class="panel" id="t-maps" role="tabpanel">
+      <div class="panel-text">
+        <p class="mono-label">Maps</p>
+        <h3>Down to every kabupaten</h3>
+        <p>Colour Indonesia's 38 provinces or 514 kabupaten and kota, or the countries of the world. Write places the way your data already does:</p>
+        <p class="tags"><code>Jawa Barat</code> <code>Jabar</code> <code>32</code> <code>Kab. Bandung</code></p>
+        <p>Tenun lists the names it could not place. The maps ship with the app and work offline.</p>
+      </div>
+      <picture>
+        <source srcset="/map-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="/map-light.webp" width="1440" height="900" alt="A map of Indonesia with every kabupaten and kota coloured by a value, from demo data" loading="lazy">
+      </picture>
+    </article>
+
+    <article class="panel" id="t-cards" role="tabpanel">
+      <div class="panel-text">
+        <p class="mono-label">Number cards</p>
+        <h3>Number cards you design</h3>
+        <p>Choose the parts of a card, their order, their size and the background. Add a small chart, a target, or a rule that says "Below target" in words. Save a look as a card style and use it on every dashboard. The colours still come from the fixed palette.</p>
+      </div>
+      <picture>
+        <source srcset="/cards-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="/cards-light.webp" width="1440" height="900" alt="Six number cards in different looks, with the card editor open: presets, parts, size, alignment and background" loading="lazy">
+      </picture>
+    </article>
+
+    <article class="panel" id="t-stories" role="tabpanel">
+      <div class="panel-text">
+        <p class="mono-label">Stories</p>
+        <h3>Write the story next to the numbers</h3>
+        <p>Text tiles have headings, lists, quotes and callouts, and numbers that follow the filters: "Revenue is 18.4K in Oct 1–14, ≈ Same against the same days of September."</p>
+        <p>A story page puts text, cards and charts in one column, and prints on A4 pages that never cut a chart.</p>
+      </div>
+      <picture>
+        <source srcset="/story-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="/story-light.webp" width="1440" height="900" alt="A story page: a heading, a paragraph with live numbers, two cards side by side, a callout and a line chart" loading="lazy">
+      </picture>
+    </article>
+
+    <article class="panel" id="t-sites" role="tabpanel">
+      <div class="panel-text">
+        <p class="mono-label">Sites</p>
+        <h3>A website, not a stack of files</h3>
+        <p>Make a workspace a site, with a top bar or a sidebar, groups of pages and a home page. A click on a bar can open another page, kept to that bar.</p>
+        <p>Export the whole site as one HTML file or a folder for any web host, or publish it at one link. You can also save a picture or a PDF, or the numbers of one tile as CSV or Excel.</p>
+      </div>
+      <picture>
+        <source srcset="/site-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="/site-light.webp" width="1440" height="900" alt="An exported site with a sidebar: the pages in two groups, Sales and More, and the Coffee overview page" loading="lazy">
+      </picture>
+    </article>
+
+    <article class="panel" id="t-views" role="tabpanel">
+      <div class="panel-text">
+        <p class="mono-label">Saved views and drill-down · new</p>
+        <h3>Save the way you read it</h3>
+        <p>A saved view remembers the clicks, the filter choices, the time grain and how far each chart is drilled. Keep one for the Monday meeting and one for each region.</p>
+        <p>Drill down from years to months to days, or from a region to its stores, on the same chart.</p>
+      </div>
+      <picture>
+        <source srcset="/views-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="/views-light.webp" width="1440" height="900" alt="The Drill down dashboard on the saved view &quot;Jawa, by store&quot;: revenue of the three stores of Jawa, with the list of views open. Demo data" loading="lazy">
+      </picture>
+    </article>
+
+    <article class="panel" id="t-whatif" role="tabpanel">
+      <div class="panel-text">
+        <p class="mono-label">What if · new</p>
+        <h3>Ask "what if"</h3>
+        <p>Put a slider on the dashboard and let a measure read it: what if prices rise by 5 %? Every chart follows as you move it, and an exported file keeps each step.</p>
+        <p>A business year that starts in April, the stock on the last day of a month, a store's share of its region: each is one setting or one function.</p>
+      </div>
+      <picture>
+        <source srcset="/whatif-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="/whatif-light.webp" width="1440" height="900" alt="The What if dashboard: a Price change slider at 5, revenue of 382M and 401M after the change, and both by month. Demo data" loading="lazy">
+      </picture>
+    </article>
+
+    <article class="panel" id="t-forecast" role="tabpanel">
+      <div class="panel-text">
+        <p class="mono-label">Forecast · new</p>
+        <h3>See what comes next, and what stands out</h3>
+        <p>A line over time shows its next months with a 90 % range. Rings mark the months far from the ones around them, with a list under the chart.</p>
+        <p>Both are worked out on your computer from the chart's own numbers, and say so in words when there are too few.</p>
+      </div>
+      <picture>
+        <source srcset="/forecast-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="/forecast-light.webp" width="1440" height="900" alt="Revenue by month with a dashed forecast and its range, and the same as bars with three unusual months marked. Demo data" loading="lazy">
+      </picture>
+    </article>
+
+    <article class="panel" id="t-alerts" role="tabpanel">
+      <div class="panel-text">
+        <p class="mono-label">Alerts · new</p>
+        <h3>Hear about it in your chat</h3>
+        <p>An alert watches a number. When revenue goes below what you set, Tenun sends one message to Slack, Microsoft Teams, Discord, Telegram or any web address, and one when it is back.</p>
+        <p>The app checks while it is open, and <code>tenun agent</code> checks on a computer that stays on. The address stays on your computer.</p>
+      </div>
+      <picture>
+        <source srcset="/alerts-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="/alerts-light.webp" width="1440" height="900" alt="The Alert me sheet on the Revenue tile: below 350,000,000, sent to Slack, also when back to normal. Demo data" loading="lazy">
+      </picture>
+    </article>
+
+    <article class="panel" id="t-ai" role="tabpanel">
+      <div class="panel-text">
+        <p class="mono-label">Your own AI · new</p>
+        <h3>Bring your own AI</h3>
+        <p>Ask the AI app you already use, such as Claude, to build a dashboard. <code>tenun mcp</code> gives it Tenun's tools. Each change shows in the app at once, with Undo.</p>
+        <p>Tenun calls no AI and sends nothing anywhere. The AI app sends what it reads to its own company. It cannot run SQL, read your files, see a password or publish.</p>
+      </div>
+      <picture>
+        <source srcset="/ai-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="/ai-light.webp" width="1440" height="900" alt="A dashboard an AI app built through tenun mcp: revenue, revenue by store and revenue by month with a forecast, and the notice &quot;An AI app added the tile&quot; with Undo. Demo data" loading="lazy">
+      </picture>
+    </article>
+  </section>
+
+  <section class="modes">
+    <div class="mode">
+      <p class="mono-label">Simple · the default</p>
+      <h3>The charts an Excel user knows</h3>
+      <p>Bars, lines, areas, scatter, histogram, waterfall and pivot tables with totals. Keep the top 5 and group the rest as Other. Show a value as a share, a running total or a change. Add a target and a trend line. Clean a messy sheet, turn months into rows, read a whole folder of files, or read a web link to CSV or JSON data.</p>
     </div>
-    <picture class="shot">
-      <source srcset="/more-views-dark.webp" media="(prefers-color-scheme: dark)">
-      <img src="/more-views-light.webp" width="1440" height="900" alt="The More views dashboard: a region filter, a number with a target, a waterfall by month, a top 5 plus Other bar chart, a pivot table with totals, and a note" loading="lazy">
-    </picture>
+    <div class="mode">
+      <p class="mono-label">Advanced · one free switch</p>
+      <h3>Everything an analyst asks for</h3>
+      <p>Turn on <b>Advanced features</b> in Settings. It adds calculated columns, measures and new tables made by append, merge or group. It adds heat maps, funnels, box plots, bullet charts, Sankey, calendar, cohort and Gantt charts, and small multiples. Version 0.5.0 adds drill-down, saved views, parameters, forecasts, unusual values and alerts. Dashboards that use them still open when the switch is off.</p>
+    </div>
   </section>
 
-  <section class="block">
-    <h2>What Tenun does not do, on purpose</h2>
-    <p class="sub">Tenun aims to do a few things well. These are left out by choice. Each has an answer.</p>
-    <ul class="nots">
-      <li><s>Gauges</s><span>A number tile with a target.</span></li>
-      <li><s>Dual-axis charts</s><span>Separate panels, or indexed lines, so each value keeps an honest axis.</span></li>
-      <li><s>Treemaps and packed bubbles</s><span>A bar chart with the top 10 and Other.</span></li>
-      <li><s>Pareto charts</s><span>A sorted bar chart with a running total.</span></li>
-      <li><s>Radar, 3D, ribbon and word cloud charts</s><span>A bar, line or table.</span></li>
-      <li><s>Custom colours, themes and fonts</s><span>The fixed palette, checked for colour blindness in light and dark mode.</span></li>
-      <li><s>Free-floating layout</s><span>The grid. Tiles snap into place and never overlap.</span></li>
-      <li><s>Third-party, R or Python visuals</s><span>The built-in charts. Everything is computed in one place, so every export agrees.</span></li>
-      <li><s>Roles and governance</s><span>Your own files and your own permissions. Tenun runs on your computer.</span></li>
-    </ul>
-  </section>
-
-  <section class="block online">
+  <section class="online">
     <div>
-      <p class="eyebrow">tenun.cloud</p>
+      <p class="mono-label">tenun.cloud</p>
       <h2>Share it online, keep the data at home</h2>
       <p>Choose <b>Publish</b> and a dashboard, or a whole site, gets a private link on tenun.cloud. Tenun builds it on your computer and sends only the results. The cloud never connects to your files or databases, and never sees a password.</p>
       <p class="fine">The Publish button is hidden in this release. It comes back when tenun.cloud opens.</p>
     </div>
     <ul class="checks">
-      <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 10.5l3.5 3.5 7.5-8"/></svg><span><b>Anyone with the link</b>, <b>anyone with the link and a password</b>, or <b>only people you invite</b>. Put a dashboard inside your own website with one line of code.</span></li>
-      <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 10.5l3.5 3.5 7.5-8"/></svg><span><b>Updates by itself</b> when the data changes, hourly or daily. <code>tenun agent</code> keeps it going on a computer that stays on.</span></li>
-      <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 10.5l3.5 3.5 7.5-8"/></svg><span><b>Never silently stale:</b> every page says when it was updated, and warns when an update is late.</span></li>
-      <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 10.5l3.5 3.5 7.5-8"/></svg><span><b>Free</b> for up to 3 dashboards or sites. A site holds up to 10 pages.</span></li>
+      <li><b>Who can see it</b><span>Anyone with the link, anyone with the link and a password, or only people you invite. Put a dashboard inside your own website with one line of code.</span></li>
+      <li><b>Updates by itself</b><span>When the data changes, hourly or daily. <code>tenun agent</code> keeps it going on a computer that stays on.</span></li>
+      <li><b>Never silently stale</b><span>Every page says when it was updated, and warns when an update is late.</span></li>
+      <li><b>Free</b><span>For up to 3 dashboards or sites. A site holds up to 10 pages.</span></li>
     </ul>
-  </section>
-
-  <section id="download" class="download">
-    <h2>Download Tenun</h2>
-    <p>Version <span data-version>0.5.0</span>. Free and open source.</p>
-    <div class="platforms">
-      <a class="platform" href="https://github.com/galohot/tenun/releases/latest"><strong>Windows</strong><span>64-bit installer</span></a>
-      <a class="platform" href="https://github.com/galohot/tenun/releases/latest"><strong>macOS</strong><span>Apple silicon and Intel</span></a>
-      <a class="platform" href="https://github.com/galohot/tenun/releases/latest"><strong>Linux</strong><span>AppImage and .deb</span></a>
-    </div>
-    <p class="fine">The apps are not code-signed yet. On macOS, right-click the app and choose Open the first time. On Windows, choose More info, then Run anyway.</p>
-    <p class="fine">Prefer the browser? Download the <code>tenun</code> command and run <code>tenun serve</code>.</p>
   </section>
 </main>
 
+<section id="download" class="download">
+  <div class="selvedge" aria-hidden="true"></div>
+  <div class="download-in">
+    <h2>Download Tenun</h2>
+    <p>Version <span data-version>0.5.0</span>. Free and open source, under MIT or Apache-2.0.</p>
+    <div class="platforms">
+      <a class="platform" data-os="windows" href="https://github.com/galohot/tenun/releases/latest"><strong>Windows</strong><span>64-bit installer</span></a>
+      <a class="platform" data-os="mac" href="https://github.com/galohot/tenun/releases/latest"><strong>macOS</strong><span>Apple silicon and Intel</span></a>
+      <a class="platform" data-os="linux" href="https://github.com/galohot/tenun/releases/latest"><strong>Linux</strong><span>AppImage and .deb</span></a>
+    </div>
+    <p class="fine">The apps are not code-signed yet. On macOS, right-click the app and choose Open the first time. On Windows, choose More info, then Run anyway.</p>
+    <p class="fine">Prefer the browser? Download the <code>tenun</code> command and run <code>tenun serve</code>.</p>
+  </div>
+</section>
+
 <footer>
-  <p><em>Tenun</em> is Indonesian for woven cloth. · <a href="https://github.com/galohot/tenun">Source code</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · MIT or Apache-2.0</p>
+  <p><em>Tenun</em> is Indonesian for woven cloth.</p>
+  <p><a href="https://github.com/galohot/tenun">Source code</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · MIT or Apache-2.0</p>
 </footer>
 </body>
 </html>
