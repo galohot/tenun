@@ -35,7 +35,7 @@
     const rows = all.filter((r) => r !== topOther).sort((a, b) => b.value - a.value);
     const total = all.reduce((s, r) => s + r.value, 0);
     // As many rows as fit; the rest become one "Other" row.
-    const fit = Math.max(3, Math.min(8, Math.floor((h - 64) / 36)));
+    const fit = Math.max(3, Math.min(8, Math.floor((h - 112) / 36)));
     const kept = !res.other && rows.length > fit ? rows.slice(0, fit - 1) : rows;
     const rest = rows.slice(kept.length);
     const byName = [...kept].sort((a, b) => String(a.raw).localeCompare(String(b.raw), undefined, { numeric: true }));
@@ -59,12 +59,16 @@
     return { list, total, top };
   });
   // Rows grow to use the tile's height when there are only a few of them.
-  const rowH = $derived(Math.max(34, Math.min(48, (h - 64) / Math.max(items.list.length, 1))));
+  const rowH = $derived(Math.max(34, Math.min(44, (h - 112) / Math.max(items.list.length, 1))));
 
   const isSel = (v: Cell, folded: boolean) => !selected || (!folded && selected.some((s) => key(s) === key(v)));
 </script>
 
 <div class="share" bind:clientHeight={h}>
+  <div class="total">
+    <span class="sum" title={tip(items.total, fmt)}>{full(items.total, fmt)}</span>
+    <span class="cap">Total</span>
+  </div>
   <div class="strip" role="img" aria-label="Share of the total">
     {#each items.list as it}
       <span
@@ -89,55 +93,44 @@
           title="{it.label}: {tip(it.value, fmt)}">
           <i style:background={it.color}></i>
           <span class="name">{it.label}</span>
-          <span class="pct">{pct(it.share)}</span>
           <span class="val">{compact(it.value, fmt)}</span>
-          <span class="track"><span style:width="{(it.share / items.top) * 100}%" style:background={it.color}></span></span>
+          <span class="pct">{pct(it.share)}</span>
         </button>
       </li>
     {/each}
   </ol>
-  <div class="total"><span>Total</span><span>{full(items.total, fmt)}</span></div>
 </div>
 
 <style>
-  .share { height: 100%; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+  .share { height: 100%; display: flex; flex-direction: column; gap: 14px; min-height: 0; padding-top: 2px; }
+  .total { display: flex; flex-direction: column; gap: 2px; flex: none; }
+  .sum { font-size: 24px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cap { font-size: 12px; color: var(--text-2); }
   .strip { display: flex; gap: 2px; height: 10px; flex: none; border-radius: 5px; overflow: hidden; }
   .strip span { min-width: 2px; flex-basis: 0; transition: opacity 200ms; }
-  ol { list-style: none; margin: 0 -6px; padding: 0; overflow: auto; display: flex; flex-direction: column; }
+  ol { list-style: none; margin: 0 -6px; padding: 0; overflow: auto; display: flex; flex-direction: column; min-height: 0; }
   li { transition: opacity 200ms; }
-  .total {
-    display: flex;
-    justify-content: space-between;
-    margin-top: auto;
-    padding-top: 8px;
-    border-top: 1px solid var(--sep);
-    font-size: 12px;
-    color: var(--text-2);
-    font-variant-numeric: tabular-nums;
-  }
+  li { border-bottom: 1px solid var(--sep); }
+  li:last-child { border-bottom: 0; }
   li.dim { opacity: 0.4; }
   button {
     width: 100%;
     display: grid;
-    grid-template-columns: 8px 1fr auto minmax(52px, max-content);
-    grid-template-rows: auto 4px;
-    align-content: center;
+    grid-template-columns: 8px 1fr auto 48px;
     align-items: center;
     column-gap: 10px;
-    row-gap: 5px;
     padding: 0 6px;
     border: 0;
     border-radius: 6px;
     background: none;
     text-align: left;
     font-size: 12px;
+    transition: background 120ms var(--spring);
   }
-  button:not(:disabled):hover { background: var(--window); }
+  button:not(:disabled):hover { background: var(--hover); }
   button:disabled { cursor: default; }
   i { width: 8px; height: 8px; border-radius: 2px; }
-  .track { grid-column: 2 / 5; height: 4px; border-radius: 2px; background: var(--inset); overflow: hidden; }
-  .track span { display: block; height: 100%; border-radius: 2px; opacity: 0.85; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pct { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pct { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
   .val { white-space: nowrap; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
 </style>

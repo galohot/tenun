@@ -118,6 +118,8 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     splitLine: { show: false },
     axisLabel: {
       ...axisCommon(c).axisLabel,
+      // Names down the side read as the rows of a list, in the text colour.
+      ...(horizontal ? { color: c.text, fontSize: 12 } : {}),
       width: horizontal ? 120 : undefined,
       overflow: 'truncate' as const,
       // A few categories all get their label; hideOverlap still drops any that truly collide.
@@ -129,6 +131,8 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   };
 
   const radius = horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0];
+  /** One series of bars on their side, with nothing behind: drawn as a ranked list (thin bars in a track). */
+  const ranked = horizontal && !multi && !hasCompare && !combo;
   // Values written on the chart. Auto: a bar chart that has room labels every bar, and a line labels
   // its last, lowest and highest point. All: every bar or point, where it fits. None: no values.
   const labelMode = tile.labels ?? 'auto';
@@ -206,7 +210,10 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       itemStyle: isOther(categories[ci])
         ? { opacity: isSel(OTHER_KEY) ? 1 : 0.28, ...(multi ? {} : { color: c.text2 }) }
         : categories[ci] === FOLDED
-          ? { opacity: selected ? 0.28 : 1, color: c.grid }
+          ? // In a track the grid colour would vanish, so the folded bar is a quiet grey there.
+            ranked
+            ? { opacity: selected ? 0.2 : 0.5, color: c.text2 }
+            : { opacity: selected ? 0.28 : 1, color: c.grid }
           : { opacity: (isSel(categories[ci]) ? 1 : 0.28) * (categories[ci] === partialKey ? 0.45 : 1) },
     }));
     if (drawnAs(si) === 'bar') {
@@ -216,7 +223,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         stack: stacked ? 'total' : undefined,
         z: 3,
         // With a comparison, the grey bar behind is the wide one and this bar sits inside it (centred on its own axis).
-        barMaxWidth: hasCompare ? 12 : 24,
+        barMaxWidth: hasCompare ? 12 : ranked ? 12 : 24,
         barCategoryGap: '30%',
         itemStyle: {
           color,
@@ -224,12 +231,14 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
           borderColor: stacked ? c.surface : undefined,
           borderWidth: stacked ? 1 : 0,
         },
+        // Bars of one series on their side read as a ranked list: each bar runs in a quiet track (look v3).
+        ...(ranked ? { showBackground: true, backgroundStyle: { color: c.inset, borderRadius: radius, opacity: 0.9 } } : {}),
         // A value at the bar's end when there is one series and room for it.
         label: {
           show: barLabels && !topLabels,
           // A pile of segments carries its numbers inside; the end of the bar is for the whole.
           position: stacked ? 'inside' : horizontal ? 'right' : 'top',
-          color: c.text2,
+          color: ranked ? c.text : c.text2,
           fontSize: 11,
           formatter: (p: { value: number }) => (percent ? pctShare(p.value) : fmt.short(p.value)),
         },

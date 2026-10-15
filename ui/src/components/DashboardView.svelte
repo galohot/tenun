@@ -2,7 +2,9 @@
   import { onMount, tick as nextTick, untrack } from 'svelte';
   import { api, MeasureRefused, type Bins, type Cell, type Dashboard, type DashFilter, type DrillState, type Filter, type Grain, type SavedView, type NamedMeasure, type QueryResult, type RowsBehind, type Tile, type TileFilter, type TileType } from '../lib/api';
   import { app, go } from '../lib/state.svelte';
-  import { cell, dateTimeMedium, stampLabel, tileTitle } from '../lib/format';
+  import { cell, dateTimeMedium, dimLabel, pretty, stampLabel, tileTitle } from '../lib/format';
+  import { portal } from '../lib/portal';
+  import FilterView from './dash/FilterView.svelte';
   import { filterText } from '../lib/filterText';
   import { canExclude, colFilter, everyPageFilters, everySource, hasPeriod, markFilter, newPinId, PERIODS, pinFilter, reachOf, sameFilter, tileFilters, withGrain } from '../lib/filters';
   import ReachSheet from './dash/ReachSheet.svelte';
@@ -284,6 +286,10 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && filterPop) {
+      filterPop = null;
+      return;
+    }
     if (e.key === 'Escape') {
       // A sheet or a menu closes itself first; Esc must not also clear the filters behind it.
       if (chipMenu || focusId || rowsReq || document.querySelector('[role="dialog"]')) return;
@@ -306,20 +312,66 @@
     }
   }
 
-  // The sources this dashboard reads, for the freshness stamp and the failed-refresh banner.
+  /** The sources one tile reads. */
+  function sourceIdsOf(t: Tile): Set<string> {
+    const ids = new Set<string>();
+    // A named measure reads the tables of its formula.
+    const named = t.measures.filter((m) => m.named).flatMap((m) => app.snap!.measure_info?.[m.named!]?.tables ?? []);
+    const refs = [...t.measures.filter((m) => !m.named).map((m) => m.table), ...named, ...t.dims.map((d) => d.table), ...(t.cols ? [t.cols.table] : []), ...(t.repeat ? [t.repeat.table] : [])];
+    for (const table of refs) {
+      // A source that failed to load has no tables left, so fall back to the id prefix.
+      if (table) ids.add(app.table(table)?.source_id ?? table.split('/')[0]);
+    }
+    return ids;
+  }
+  // The sources this dashboard reads: the chips under the title, the freshness stamp and the failed-refresh banner.
   const usedSources = $derived.by(() => {
     const ids = new Set<string>();
-    for (const t of dash?.tiles ?? []) {
-      // A named measure reads the tables of its formula.
-      const named = t.measures.filter((m) => m.named).flatMap((m) => app.snap!.measure_info?.[m.named!]?.tables ?? []);
-      const refs = [...t.measures.filter((m) => !m.named).map((m) => m.table), ...named, ...t.dims.map((d) => d.table), ...(t.cols ? [t.cols.table] : []), ...(t.repeat ? [t.repeat.table] : [])];
-      for (const table of refs) {
-        // A source that failed to load has no tables left, so fall back to the id prefix.
-        ids.add(app.table(table)?.source_id ?? table.split('/')[0]);
-      }
-    }
+    for (const t of dash?.tiles ?? []) for (const id of sourceIdsOf(t)) ids.add(id);
     return app.snap!.workspace.sources.filter((s) => ids.has(s.id));
   });
+  /** A tile's subtitle: the sources it reads, when the dashboard reads more than one (so it tells something). */
+  function subtitleOf(t: Tile): string {
+    if (usedSources.length < 2 || ['kpi', 'text', 'image', 'filter', 'param'].includes(t.type)) return '';
+    const ids = sourceIdsOf(t);
+    const names = usedSources.filter((s) => ids.has(s.id)).map((s) => s.name);
+    return names.length ? `From ${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]}` : '';
+  }
+  const DB_KINDS = new Set(['sqlite', 'duckdb', 'postgres', 'mysql']);
+  /** Undo and redo name their keys the way this computer writes them. */
+  const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+  const KEYS = { undo: MAC ? '⌘Z' : 'Ctrl+Z', redo: MAC ? '⇧⌘Z' : 'Ctrl+Shift+Z' };
+
+  // ---- the filter bar: the dashboard's own filters, shown in one row (look v3) ----
+  /** The filter tiles of this page, each one a button in the filter bar that opens its control. */
+  const filterTiles = $derived((dash?.tiles ?? []).filter((t) => t.type === 'filter' && t.dims[0]));
+  function filterChip(t: Tile) {
+    const d = t.dims[0];
+    const sel = selections.find((f) => f.fromTile === t.id);
+    const dtype = app.table(d.table)?.columns.find((c) => c.name === d.column)?.dtype;
+    const name = t.title?.trim() || pretty(dimLabel({ table: d.table, column: d.column, via: d.via }, app.tables));
+    const text = sel ? filterText(sel, app.tables) : '';
+    return { name, value: sel ? text.slice(text.indexOf(': ') + 2) || text : 'All', on: !!sel, date: dtype === 'date' || dtype === 'datetime' };
+  }
+  /** The filter tile whose control is open under its button in the filter bar. */
+  let filterPop = $state<{ id: string; x: number; y: number } | null>(null);
+  function openFilter(t: Tile, e: MouseEvent) {
+    if (filterPop?.id === t.id) return void (filterPop = null);
+    // Before the tile has its values there is nothing to show, so the tile itself is shown.
+    if (!results[t.id]?.res) {
+      const el = document.querySelector<HTMLElement>(`[data-tile="${CSS.escape(t.id)}"]`);
+      el?.scrollIntoView({ block: 'nearest' });
+      el?.focus({ preventScroll: true });
+      return;
+    }
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    filterPop = { id: t.id, x: Math.max(8, Math.min(r.left, innerWidth - 288)), y: r.bottom + 4 };
+  }
+  function clearFilterTile(t: Tile) {
+    setFilter(t.id, { style: t.filter?.style ?? 'list', ...(t.filter?.single ? { single: true } : {}) });
+  }
+  /** A chart whose marks can be clicked: the hint at the end of the filter bar only says what is true. */
+  const clickable = $derived((dash?.tiles ?? []).some((t) => !['kpi', 'text', 'image', 'filter', 'param', 'cohort'].includes(t.type) && t.dims.length > 0 && !t.action));
   const loadedAt = $derived(app.snap!.loaded_at ?? {});
   const newestLoad = $derived(
     usedSources.map((s) => loadedAt[s.id]).filter(Boolean).sort().at(-1) ?? null,
@@ -945,97 +997,38 @@
   const sel = $derived(dash?.tiles.find((t) => t.id === selectedTile));
 </script>
 
-<svelte:window onkeydown={onKeydown} oncopy={onCopy} onpaste={onPaste} />
+<svelte:window
+  onkeydown={onKeydown}
+  oncopy={onCopy}
+  onpaste={onPaste}
+  onpointerdown={(e) => filterPop && !(e.target as HTMLElement).closest('.fpop, .fchip') && (filterPop = null)} />
 
 {#if dash && publishing}
   <PublishSheet {dash} onclose={() => (publishing = false)} />
 {/if}
 
 {#if dash}
+  <!-- The toolbar: where you are, how fresh the data is, and what you can do (look v3). -->
   <header class="toolbar" class:phone>
-    {#if editingTitle && !phone}
-      <!-- svelte-ignore a11y_autofocus -->
-      <input
-        class="field title-input"
-        value={dash.title}
-        autofocus
-        onblur={(e) => {
-          const next = e.currentTarget.value.trim() || dash.title;
-          if (next !== dash.title) {
-            record();
-            dash.title = next;
-          }
-          editingTitle = false;
-          app.saveDashboards();
-        }}
-        onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
-    {:else}
-      <button class="title" title={phone ? undefined : 'Rename'} disabled={phone} onclick={() => (editingTitle = true)}>{dash.title}</button>
+    {#if !phone}
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <button class="crumb" title="Home of this workspace" onclick={() => go({ view: 'home' })}>{app.snap?.workspace.name || 'Workspace'}</button>
+        <svg class="sep" width="12" height="12" viewBox="0 0 20 20" aria-hidden="true"><path d="M8 5l5 5-5 5" /></svg>
+        <span class="crumb plain">{story ? 'Stories' : 'Dashboards'}</span>
+        <svg class="sep" width="12" height="12" viewBox="0 0 20 20" aria-hidden="true"><path d="M8 5l5 5-5 5" /></svg>
+        <span class="crumb here" aria-current="page">{dash.title}</span>
+      </nav>
     {/if}
-    <ViewsMenu
-      {views}
-      open={openView}
-      changed={viewChanged}
-      defaultView={dash.defaultView}
-      editing={advancedOn() && !phone}
-      onopen={(id) => {
-        const v = views.find((x) => x.id === id);
-        if (v) applyView(v);
-      }}
-      onsave={saveView}
-      onupdate={updateView}
-      onrename={(id, name) => saveViews(views.map((v) => (v.id === id ? { ...v, name } : v)))}
-      ondelete={deleteView}
-      ondefault={(id) => saveViews(views, { defaultView: id ?? undefined })} />
-    <div class="chips">
-      {#each pins as f (f.fromTile)}
-        <span class="chip pinned" title="Saved with the dashboard">
-          <Icon name="pin" size={12} />
-          {filterText(f, app.tables)}
-          <button aria-label="Remove saved filter" onclick={() => unpin(f)}><Icon name="x" size={11} /></button>
-        </span>
-      {/each}
-      {#each everyPage as f (f.fromTile)}
-        <span class="chip pinned" title="Chosen on {pageTitle(f.fromTile)}; it filters every page">
-          <Icon name="filter" size={12} />
-          Every page: {filterText(f, app.tables)}
-          <button aria-label="Clear the filter on every page" onclick={() => clearEvery(f.fromTile)}><Icon name="x" size={11} /></button>
-        </span>
-      {/each}
-      {#each filters as f (f.fromTile)}
-        <span class="chip" data-chip={f.fromTile}>
-          <Icon name="filter" size={12} />
-          <button
-            class="say"
-            aria-haspopup="menu"
-            title="Keep only or exclude"
-            onclick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              chipMenu = chipMenu?.id === f.fromTile ? null : { id: f.fromTile, x: r.left, y: r.bottom + 4 };
-            }}>
-            {f.fromTile === DRILL && drillFrom ? `From ${drillFrom.title}: ` : ''}{filterText(f, app.tables)}
-          </button>
-          <button aria-label="Clear filter" onclick={() => (filters = filters.filter((x) => x !== f))}><Icon name="x" size={11} /></button>
-        </span>
-      {/each}
-      {#if drillFrom}
-        <button class="btn plain small" title="Back to {drillFrom.title}" onclick={() => drillFrom && go({ view: 'dashboard', id: drillFrom.id })}><Icon name="chevronLeft" size={12} /> Back</button>
-      {/if}
-      {#if filters.length > 1}
-        <button class="btn plain small" onclick={() => (filters = [])}>Clear all</button>
-      {/if}
-    </div>
     <span class="spacer"></span>
-    {#if grainOn}
-      <div class="seg" role="radiogroup" aria-label="Time grain for every chart over time">
-        <button role="radio" aria-checked={!dash.grain} class:on={!dash.grain} title="Each tile uses its own grain" onclick={() => setGrain(null)}>Auto</button>
-        {#each PERIODS as g}
-          <button role="radio" aria-checked={dash.grain === g} class:on={dash.grain === g} onclick={() => setGrain(g)}>{g}</button>
-        {/each}
-      </div>
-    {/if}
-    {#if newestLoad}
-      <span class="stamp" title={stampTitle}>Updated {stampLabel(newestLoad)}</span>
+    {#if newestLoad || failed.length}
+      <span class="status" class:bad={failed.length > 0} title={stampTitle}>
+        <i aria-hidden="true"></i>
+        {#if failed.length}
+          {failed.length === 1 ? '1 source failed' : `${failed.length} sources failed`}{newestLoad ? ` · updated ${stampLabel(newestLoad)}` : ''}
+        {:else}
+          {hasLive && dash.refresh ? 'Live · updated' : 'Updated'} {stampLabel(newestLoad!)}
+        {/if}
+      </span>
     {/if}
     {#if hasLive}
       <label class="refresh" title="How often database data is refreshed">
@@ -1053,11 +1046,14 @@
         </select>
       </label>
     {/if}
-    {#if !phone}
-      <button class="btn plain icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo} onclick={undo}><Icon name="undo" /></button>
-      <button class="btn plain icon" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!canRedo} onclick={redo}><Icon name="redo" /></button>
-    {/if}
-    <button class="btn plain icon" title="Refresh now" aria-label="Refresh now" onclick={() => tick++}><Icon name="refresh" /></button>
+    <span class="vsep" aria-hidden="true"></span>
+    <div class="group" role="group" aria-label="History and refresh">
+      {#if !phone}
+        <button class="tb" aria-label="Undo" disabled={!canUndo} onclick={undo}><Icon name="undo" size={16} /><span class="tip" role="tooltip">Undo <kbd>{KEYS.undo}</kbd></span></button>
+        <button class="tb" aria-label="Redo" disabled={!canRedo} onclick={redo}><Icon name="redo" size={16} /><span class="tip" role="tooltip">Redo <kbd>{KEYS.redo}</kbd></span></button>
+      {/if}
+      <button class="tb" aria-label="Refresh now" onclick={() => tick++}><Icon name="refresh" size={16} /><span class="tip" role="tooltip">Refresh now</span></button>
+    </div>
     {#if !phone && CLOUD_ON}
     <button
       class="btn"
@@ -1095,18 +1091,165 @@
       {/if}
     </div>
     <button
-      class="btn plain icon"
-      title="More"
+      class="btn icon more"
       aria-label="More for this dashboard"
       aria-haspopup="menu"
       aria-expanded={!!dashMenu}
       onclick={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
-        dashMenu = dashMenu ? null : { x: r.right - 220, y: r.bottom + 4 };
-      }}><Icon name="more" /></button>
-    <button class="btn plain icon" title="Delete dashboard" aria-label="Delete dashboard" onclick={removeDashboard}><Icon name="trash" /></button>
+        dashMenu = dashMenu ? null : { x: r.right - 200, y: r.bottom + 4 };
+      }}><Icon name="more" /><span class="tip end" role="tooltip">More</span></button>
     {/if}
   </header>
+
+  {#snippet pageTop()}
+  <!-- The page header: the title, the sources it reads, the saved views and the grain. -->
+  <div class="pagehead" class:phone>
+    <div class="titles">
+      {#if editingTitle && !phone}
+        <!-- svelte-ignore a11y_autofocus -->
+        <input
+          class="field title-input"
+          value={dash.title}
+          aria-label="Name of the dashboard"
+          autofocus
+          onblur={(e) => {
+            const next = e.currentTarget.value.trim() || dash.title;
+            if (next !== dash.title) {
+              record();
+              dash.title = next;
+            }
+            editingTitle = false;
+            app.saveDashboards();
+          }}
+          onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
+      {:else}
+        <h1><button class="title" title={phone ? undefined : 'Rename'} disabled={phone} onclick={() => (editingTitle = true)}>{dash.title}</button></h1>
+      {/if}
+      {#if usedSources.length}
+        <div class="sources">
+          <span>{usedSources.length === 1 ? 'From' : `From ${usedSources.length} sources`}</span>
+          {#each usedSources as src (src.id)}
+            {@const bad = !!app.snap!.errors[src.id]}
+            <span class="src" class:bad title={bad ? `${src.name} could not be read` : loadedAt[src.id] ? `${src.name}: ${stampLabel(loadedAt[src.id])}` : src.name}>
+              {#if bad}
+                <Icon name="warning" size={12} />
+              {:else if DB_KINDS.has(src.kind)}
+                <svg width="12" height="12" viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 5.5c0-1.1 2.5-2 5.5-2s5.5.9 5.5 2-2.5 2-5.5 2-5.5-.9-5.5-2zM4.5 5.5v9c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-9M4.5 10c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2" /></svg>
+              {:else}
+                <svg width="12" height="12" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM4 7.5h12M4 11.5h12M8.5 3.5v13" /></svg>
+              {/if}
+              {src.name}
+            </span>
+          {/each}
+        </div>
+      {/if}
+    </div>
+    <div class="headtools">
+      <ViewsMenu
+        {views}
+        open={openView}
+        changed={viewChanged}
+        defaultView={dash.defaultView}
+        editing={advancedOn() && !phone}
+        onopen={(id) => {
+          const v = views.find((x) => x.id === id);
+          if (v) applyView(v);
+        }}
+        onsave={saveView}
+        onupdate={updateView}
+        onrename={(id, name) => saveViews(views.map((v) => (v.id === id ? { ...v, name } : v)))}
+        ondelete={deleteView}
+        ondefault={(id) => saveViews(views, { defaultView: id ?? undefined })} />
+      {#if grainOn}
+        <div class="seg" role="radiogroup" aria-label="Time grain for every chart over time">
+          <button role="radio" aria-checked={!dash.grain} class:on={!dash.grain} title="Each tile uses its own grain" onclick={() => setGrain(null)}>Auto</button>
+          {#each PERIODS as g}
+            <button role="radio" aria-checked={dash.grain === g} class:on={dash.grain === g} onclick={() => setGrain(g)}>{g}</button>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  </div>
+
+  <!-- The filter bar: every filter this page has now, from its filter tiles, other pages, saved filters and clicks. -->
+  {#if !phone || drillFrom || filterTiles.length || pins.length || everyPage.length || filters.length}
+    <div class="filterbar" class:phone role="toolbar" aria-label="Filters">
+      {#if drillFrom}
+        <button class="fchip back" title="Back to {drillFrom.title}" onclick={() => drillFrom && go({ view: 'dashboard', id: drillFrom.id })}><Icon name="chevronLeft" size={12} /> {drillFrom.title}</button>
+        <span class="vsep" aria-hidden="true"></span>
+      {/if}
+      {#each filterTiles as t (t.id)}
+        {@const c = filterChip(t)}
+        <span class="fchip" class:on={c.on} class:open={filterPop?.id === t.id}>
+          <button class="say" aria-haspopup="dialog" aria-expanded={filterPop?.id === t.id} title="Filter by {c.name}" onclick={(e) => openFilter(t, e)}>
+            {#if c.date}<Icon name="calendar" size={13} />{/if}
+            <span class="fname">{c.name}</span>
+            <b>{c.value}</b>
+            {#if !c.on}<Icon name="chevronDown" size={11} />{/if}
+          </button>
+          {#if c.on}
+            <button class="x" aria-label="Clear the filter {c.name}" onclick={() => clearFilterTile(t)}><Icon name="x" size={11} /></button>
+          {/if}
+        </span>
+      {/each}
+      {#each everyPage as f (f.fromTile)}
+        <span class="fchip saved" title="Chosen on {pageTitle(f.fromTile)}; it filters every page">
+          <Icon name="filter" size={12} />
+          <span class="say static">Every page: {filterText(f, app.tables)}</span>
+          <button class="x" aria-label="Clear the filter on every page" onclick={() => clearEvery(f.fromTile)}><Icon name="x" size={11} /></button>
+        </span>
+      {/each}
+      {#each pins as f (f.fromTile)}
+        <span class="fchip saved" title="Saved with the dashboard">
+          <Icon name="pin" size={12} />
+          <span class="say static">{filterText(f, app.tables)}</span>
+          <button class="x" aria-label="Remove saved filter" onclick={() => unpin(f)}><Icon name="x" size={11} /></button>
+        </span>
+      {/each}
+      {#each filters as f (f.fromTile)}
+        <span class="fchip click" data-chip={f.fromTile}>
+          <button
+            class="say"
+            aria-haspopup="menu"
+            title="Keep only or exclude"
+            onclick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              chipMenu = chipMenu?.id === f.fromTile ? null : { id: f.fromTile, x: r.left, y: r.bottom + 4 };
+            }}>
+            <Icon name="filter" size={12} />
+            {f.fromTile === DRILL && drillFrom ? `From ${drillFrom.title}: ` : ''}{filterText(f, app.tables)}
+          </button>
+          <button class="x" aria-label="Clear filter" onclick={() => (filters = filters.filter((x) => x !== f))}><Icon name="x" size={11} /></button>
+        </span>
+      {/each}
+      {#if filters.length > 1}
+        <button class="fchip ghostbtn" onclick={() => (filters = [])}>Clear all</button>
+      {/if}
+      {#if !phone && app.tables.length}
+        <button class="fchip add" title="Add a filter tile to this page" onclick={() => addTile('filter')}><Icon name="plus" size={12} /> Filter</button>
+      {/if}
+      {#if !phone && clickable && !filters.length}
+        <span class="spacer"></span>
+        <span class="hint">Click a bar, a slice or a row to filter the other tiles</span>
+      {/if}
+    </div>
+  {/if}
+  {/snippet}
+  <!-- On a phone the page header scrolls with the tiles, so the tiles get the screen. -->
+  {#if !phone}{@render pageTop()}{/if}
+  {#if filterPop}
+    {@const ft = dash.tiles.find((x) => x.id === filterPop?.id)}
+    {#if ft && results[ft.id]?.res}
+      <div class="fpop {ft.filter?.style ?? 'list'}" role="dialog" aria-label="Filter" use:portal style:left="{filterPop.x}px" style:top="{filterPop.y}px">
+        <FilterView
+          tile={ft.filter?.style === 'dropdown' ? { ...ft, filter: { ...ft.filter, style: 'list' } } : ft}
+          res={results[ft.id]!.res}
+          tables={app.tables}
+          onchange={(f) => setFilter(ft.id, { ...f, style: ft.filter?.style ?? f.style })} />
+      </div>
+    {/if}
+  {/if}
 
   {#each failed as src (src.id)}
     <div class="banner" role="alert">
@@ -1129,6 +1272,7 @@
         { label: 'Card styles…', run: () => (stylesOpen = true) },
         ...(app.snap?.workspace.site?.on ? [{ label: 'Preview site', run: () => (app.preview = dash!.id) }] : [{ label: 'Site…', run: () => (app.siteOpen = true) }]),
         { label: 'Layout', sub: [{ label: story ? 'Grid' : 'Grid  ✓', run: () => setLayout('grid') }, { label: story ? 'Story  ✓' : 'Story', run: () => setLayout('flow') }] },
+        { label: 'Delete dashboard…', run: removeDashboard },
       ]}
       onclose={() => (dashMenu = null)} />
   {/if}
@@ -1205,6 +1349,7 @@
 
   <div class="body">
     <div class="scroll" class:paper={story} onpointerdown={(e) => e.target === e.currentTarget && (selectedTile = null)} role="presentation">
+      {#if phone}<div class="phonetop">{@render pageTop()}</div>{/if}
       {#if !dash.tiles.length}
         <div class="empty">
           <Icon name="dashboard" size={32} />
@@ -1251,6 +1396,7 @@
             const tiles = picked.includes(t.id) ? copyTargets() : dash.tiles.filter((x) => x.id === t.id);
             copyToClipboard(clipOf(tiles), copiedWords(tiles.length));
           }}
+          subtitle={subtitleOf(t)}
           onremove={() => removeTile(t.id)}
           onnav={(step) => navTile(t.id, step)}
           onopen={() => openTile(t.id)}
@@ -1317,76 +1463,234 @@
 {/if}
 
 <style>
+  /* ---- toolbar: 48 px, the surface, a hairline under it (look v3) ---- */
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-height: 52px;
-    padding: 6px 12px 6px 16px;
+    gap: 6px;
+    height: 48px;
+    padding: 0 12px 0 16px;
     border-bottom: 1px solid var(--sep);
     background: var(--surface);
     flex: none;
+    position: relative;
+    z-index: 5;
   }
-  .toolbar.phone { min-height: 44px; flex-wrap: wrap; padding: 6px 10px; }
-  .toolbar.phone .spacer { display: none; }
-  .toolbar.phone .chips { flex-wrap: wrap; overflow: visible; }
+  .toolbar.phone { height: auto; min-height: 44px; flex-wrap: wrap; padding: 6px 10px; }
+  .crumbs { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--text-2); white-space: nowrap; }
+  .crumbs .sep { flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--text-3); }
+  .crumb { border: 0; background: none; padding: 2px 4px; border-radius: 4px; font-size: 12px; color: var(--text-2); }
+  button.crumb:hover { background: var(--hover); color: var(--text); }
+  .crumb.here { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .status i { width: 6px; height: 6px; border-radius: 3px; background: var(--success); flex: none; }
+  .status.bad { color: var(--danger); }
+  .status.bad i { background: var(--danger); }
+  .vsep { width: 1px; height: 18px; background: var(--sep); margin: 0 4px; flex: none; }
+  .group { display: flex; align-items: center; gap: 0; }
+  .tb {
+    position: relative;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-control);
+    background: none;
+    color: var(--text);
+    transition: background 120ms var(--spring), transform 120ms var(--spring);
+  }
+  .tb:hover:not(:disabled) { background: var(--hover); }
+  .tb:active:not(:disabled) { transform: scale(0.94); }
+  .tb:disabled { opacity: 0.4; cursor: default; }
+  .more { position: relative; }
+  /* A tooltip that names the key, under the button, after a short wait. */
+  .tip {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    z-index: 40;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: var(--raised);
+    box-shadow: var(--shadow-float);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 400;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, -2px);
+    transition: opacity 120ms var(--spring), transform 120ms var(--spring);
+  }
+  .tip.end { left: auto; right: 0; transform: translate(0, -2px); }
+  .tip kbd { font: inherit; font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  :is(.tb, .more):hover .tip, :is(.tb, .more):focus-visible .tip { opacity: 1; transform: translate(-50%, 0); transition-delay: 400ms; }
+  .more:hover .tip.end, .more:focus-visible .tip.end { transform: translate(0, 0); }
+  .tb:disabled .tip { display: none; }
+  .btn:active:not(:disabled) { transform: scale(0.98); }
+
+  /* ---- page header: title, sources, views and grain ---- */
+  .pagehead {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 8px 16px;
+    flex-wrap: wrap;
+    padding: 14px 16px 10px;
+    background: var(--surface);
+    flex: none;
+  }
+  .pagehead.phone { padding: 10px 10px 8px; }
+  .titles { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  h1 { margin: 0; font-size: 20px; line-height: 1.2; }
   .title:disabled { color: var(--text); cursor: default; }
   .title {
     border: 0;
     background: none;
-    font-size: 17px;
-    font-weight: 600;
-    padding: 2px 6px;
+    font: inherit;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    padding: 1px 6px;
+    margin-left: -6px;
     border-radius: var(--r-control);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
+    text-align: left;
   }
-  .title:hover { background: var(--hover); }
-  .title-input { width: 240px; font-size: 15px; font-weight: 600; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
-  .chip {
+  .title:hover:not(:disabled) { background: var(--hover); }
+  .phone h1 { font-size: 17px; }
+  .title-input { width: 320px; height: 30px; font-size: 18px; font-weight: 600; }
+  .sources { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); }
+  .src {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    height: 24px;
-    padding: 0 4px 0 9px;
-    border-radius: 12px;
-    background: var(--selected);
-    color: var(--accent-text);
-    font-size: 12px;
-    font-weight: 500;
+    gap: 4px;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 4px;
+    background: var(--inset);
+    color: var(--text);
     white-space: nowrap;
-    flex: none;
   }
-  .chip button {
-    width: 18px;
-    height: 18px;
-    border: 0;
-    border-radius: 9px;
-    background: none;
-    color: inherit;
-    display: grid;
-    place-items: center;
-    padding: 0;
-  }
-  .chip button:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
-  .chip button.say { width: auto; height: 22px; padding: 0 3px; border-radius: 4px; font: inherit; }
-  .chip.pinned { background: var(--inset); color: var(--text); padding-left: 9px; }
-  .chip.pinned :global(svg:first-child) { color: var(--text-2); }
+  .src svg { fill: none; stroke: var(--accent-text); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .src.bad { color: var(--danger); }
+  .headtools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .seg { display: flex; padding: 2px; border-radius: 8px; background: var(--inset); }
   .seg button {
-    height: 24px;
-    padding: 0 9px;
+    height: 26px;
+    padding: 0 10px;
     border: 0;
     border-radius: 6px;
     background: none;
     color: var(--text-2);
     font-size: 12px;
+    font-weight: 500;
     text-transform: capitalize;
+    transition: background 150ms var(--spring), color 150ms var(--spring);
   }
-  .seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
-  .small { height: 24px; font-size: 12px; }
+  .seg button:hover:not(.on) { color: var(--text); }
+  .seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%), 0 0 0 0.5px rgb(0 0 0 / 4%); }
+  .phone .seg button { padding: 0 7px; }
+
+  /* ---- filter bar ---- */
+  .filterbar {
+    display: flex;
+    align-items: center;
+    gap: 6px 8px;
+    flex-wrap: wrap;
+    padding: 0 16px 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--sep);
+    flex: none;
+  }
+  .filterbar.phone { padding: 0 10px 8px; }
+  .fchip {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    border-radius: var(--r-control);
+    border: 1px solid var(--sep-strong);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12px;
+    white-space: nowrap;
+    max-width: 100%;
+    min-width: 0;
+    transition: background 120ms var(--spring), border-color 120ms var(--spring);
+  }
+  button.fchip { gap: 5px; padding: 0 10px; }
+  button.fchip:hover { background: var(--hover); }
+  .fchip .say {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 100%;
+    min-width: 0;
+    padding: 0 8px 0 10px;
+    border: 0;
+    border-radius: inherit;
+    background: none;
+    color: inherit;
+    font: inherit;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fchip .say.static { padding-left: 4px; display: inline-block; line-height: 26px; }
+  .fchip > :global(svg:first-child) { margin-left: 9px; flex: none; color: var(--text-2); }
+  .fchip button.say:hover { background: var(--hover); }
+  .fchip .fname { color: var(--text-2); }
+  .fchip b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  .fchip .say :global(svg) { color: var(--text-2); flex: none; }
+  .fchip .x {
+    width: 22px;
+    height: 22px;
+    margin-right: 3px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: inherit;
+    flex: none;
+  }
+  .fchip .x:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
+  /* A filter that is on: the selected ground, the accent ink. */
+  .fchip.on, .fchip.click { border-color: transparent; background: var(--selected); color: var(--accent-text); }
+  .fchip.on .fname, .fchip.on .say :global(svg), .fchip.click .say :global(svg) { color: inherit; }
+  .fchip.on .say:hover, .fchip.click .say:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .fchip.open { border-color: var(--accent); }
+  .fchip.saved { background: var(--inset); border-color: transparent; }
+  .fchip.back { color: var(--accent-text); }
+  .fchip.back :global(svg) { color: inherit; }
+  .fchip.add { border-style: dashed; background: none; color: var(--text-2); }
+  .fchip.add:hover { color: var(--text); border-color: var(--text-3); background: none; }
+  .fchip.ghostbtn { border-color: transparent; background: none; color: var(--text-2); }
+  .hint { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .fpop {
+    position: fixed;
+    z-index: 70;
+    width: 280px;
+    display: flex;
+    flex-direction: column;
+    padding: 10px 10px 8px;
+    border-radius: var(--r-card);
+    background: var(--raised);
+    box-shadow: var(--shadow-float);
+    animation: pop 160ms var(--spring);
+    transform-origin: top left;
+  }
+  .fpop.list, .fpop.dropdown { max-height: 320px; }
+  .fpop.range { height: 190px; }
+
   .spacer { flex: 1; }
-  .stamp { font-size: 12px; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .banner {
     display: flex;
     align-items: center;
@@ -1400,8 +1704,8 @@
   .banner :global(svg) { color: var(--danger); }
   .btn.live :global(svg) { color: var(--success); }
   .btn.warn :global(svg) { color: var(--danger); }
-  .refresh { display: flex; align-items: center; gap: 4px; color: var(--text-2); }
-  .refresh select { border: 0; background: none; color: var(--text); padding: 2px; }
+  .refresh { display: flex; align-items: center; gap: 4px; color: var(--text-2); font-size: 12px; }
+  .refresh select { border: 0; background: none; color: var(--text); padding: 2px; font-size: 12px; }
   .add { position: relative; }
   .menu {
     position: absolute;
@@ -1413,8 +1717,10 @@
     border-radius: var(--r-card);
     background: var(--raised);
     box-shadow: var(--shadow-float);
-    animation: pop 200ms var(--spring);
+    animation: pop 160ms var(--spring);
     transform-origin: top right;
+    max-height: calc(100vh - 80px);
+    overflow: auto;
   }
   .menu button {
     display: flex;
@@ -1428,12 +1734,14 @@
     background: none;
     text-align: left;
   }
-  .menu button :global(svg) { color: var(--accent-text); }
-  .menu button:hover { background: var(--accent); color: #fff; }
-  .menu button:hover :global(svg) { color: #fff; }
+  .menu button :global(svg) { color: var(--text-2); }
+  .menu button:hover, .menu button:focus-visible { background: color-mix(in srgb, var(--text) 8%, var(--raised)); outline: none; }
+  .menu button:hover :global(svg) { color: var(--accent-text); }
   .body { flex: 1; min-height: 0; display: flex; }
-  .scroll { flex: 1; min-width: 0; overflow: auto; padding: 16px; }
+  .scroll { flex: 1; min-width: 0; overflow: auto; padding: 16px; font-variant-numeric: tabular-nums; }
   @media (max-width: 699px) { .scroll { padding: 10px; } }
+  .phonetop { margin: -10px -10px 10px; border-bottom: 1px solid var(--sep); }
+  .phonetop .filterbar { border-bottom: 0; }
   .grid { position: relative; min-height: 100%; }
   /* A story is a page: its tiles sit on the surface, in a column (build 11). */
   .scroll.paper { background: var(--surface); }

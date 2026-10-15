@@ -132,11 +132,12 @@
     background: none;
     text-align: left;
     font-size: 13px;
+    transition: background 120ms var(--spring);
   }
   button.sub { padding-left: 22px; }
   button :global(svg) { color: var(--text-2); }
-  button:hover:not(:disabled), button:focus-visible { background: var(--accent); color: #fff; outline: none; }
-  button:hover:not(:disabled) :global(svg), button:focus-visible :global(svg) { color: #fff; }
+  button:hover:not(:disabled), button:focus-visible { background: color-mix(in srgb, var(--text) 8%, var(--raised)); outline: none; }
+  button:hover:not(:disabled) :global(svg), button:focus-visible :global(svg) { color: var(--text); }
   button:disabled { color: var(--text-3); cursor: default; }
   @keyframes pop { from { opacity: 0; transform: scale(0.98); } }
 </style>

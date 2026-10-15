@@ -116,17 +116,20 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    height: 26px;
-    padding: 0 8px;
-    border: 1px solid var(--sep);
-    border-radius: 13px;
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--sep-strong);
+    border-radius: var(--r-control);
     background: var(--surface);
     color: var(--text);
     font-size: 12px;
+    font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
+    transition: background 120ms var(--spring);
   }
   .views:hover { background: var(--hover); }
+  .views :global(svg) { color: var(--text-2); }
   .mark { padding: 0 5px; border-radius: 8px; background: var(--inset); color: var(--text-2); font-size: 11px; }
   .name { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
   .hint { margin: 10px 0 0; font-size: 12px; color: var(--text-2); }
