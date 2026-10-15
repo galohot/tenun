@@ -994,6 +994,39 @@
 "short": "",
 "full": "",
 "note": "an empty section writes nothing, as in Excel"
+},
+{
+"n": -5,
+"loc": "en",
+"f": {
+"code": "[>=1000]0.0,\"K\";[>=1]0"
+},
+"short": "−5",
+"full": "−5",
+"note": "no condition holds: the last part, signed"
+},
+{
+"n": 1234,
+"loc": "en",
+"f": {
+"code": "\"abc",
+"currency": "USD"
+},
+"short": "$1,234",
+"full": "$1,234",
+"note": "a code that cannot be read: the other fields"
+},
+{
+"n": -3725,
+"loc": "en",
+"f": {
+"duration": "s",
+"negative": "parens",
+"currency": "USD"
+},
+"short": "(1h 2m)",
+"full": "(1:02:05)",
+"note": "a duration ignores the currency"
 }
 ]
 }

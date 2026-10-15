@@ -55,7 +55,8 @@ export function runCode(
   let signed: boolean;
   if (sections.some((s) => s.cond)) {
     // Conditions: the first section whose condition holds; the first one without a condition is the rest.
-    sec = sections.find((s) => s.cond?.(n)) ?? sections.find((s) => !s.cond);
+    // No condition holds and every part has one: the last part, as Excel does.
+    sec = sections.find((s) => s.cond?.(n)) ?? sections.find((s) => !s.cond) ?? sections[sections.length - 1];
     signed = true;
   } else if (sections.length === 1) {
     sec = sections[0];
