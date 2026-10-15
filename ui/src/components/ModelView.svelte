@@ -6,6 +6,7 @@
   import { app } from '../lib/state.svelte';
   import { advancedOn } from '../lib/tiers';
   import { firstLinks, kindWords, linkLabel, siblings, unnamedPairs } from '../lib/links';
+  import { go } from '../lib/state.svelte';
   import { canMarkLinkTable, notLinkTablesOf, suggestLinkTables } from '../lib/linktables';
   import { isEmptySetup, withLinkTable, withNotLinkTable } from '../lib/prep';
   import TableNode from './model/TableNode.svelte';
@@ -74,7 +75,7 @@
       const col = linked.has(t.id) ? level.get(t.id)! : last + 1;
       const y = nextY.get(col) ?? 0;
       out[t.id] = { x: col * 400, y };
-      nextY.set(col, y + 64 + t.columns.length * 24 + 48);
+      nextY.set(col, y + 72 + t.columns.length * 28 + 48);
     }
     return out;
   }
@@ -89,6 +90,10 @@
     nodes = nodes.map((n) => ({ ...n, position: pos[n.id] ?? n.position }));
     fitKey++;
   }
+
+  /** The relationship picked on the canvas or in the panel: its line and its two columns light up. */
+  const picked = $derived(edges.find((e) => e.selected && !e.id.startsWith('s:'))?.id ?? null);
+  const pickedRel = $derived(ws.relationships.find((r) => r.id === picked) ?? null);
 
   // Rebuild nodes when the tables change; keep positions the user dragged.
   $effect(() => {
@@ -119,6 +124,7 @@
         table: t,
         source: names.get(t.source_id) ?? '',
         linked: linked.get(t.id) ?? new Set(),
+        hot: new Set([pickedRel?.from, pickedRel?.to].filter((f): f is FieldRef => !!f && f.table === t.id).map((f) => f.column)),
         warned: warned.get(t.id) ?? new Set(),
         linkTable: app.linkTables.has(t.id),
         suggestion: linkSuggestions.find((s) => s.table === t.id)?.why ?? null,
@@ -139,9 +145,10 @@
     return pa < pb ? ['R', 'L'] : ['L', 'R'];
   }
 
-  function edgeFor(id: string, from: FieldRef, to: FieldRef, data: Record<string, unknown>): Edge {
+  function edgeFor(id: string, from: FieldRef, to: FieldRef, data: Record<string, unknown>, selected = false): Edge {
     const [sa, sb] = sides(from.table, to.table);
     return {
+      selected,
       id,
       type: 'rel',
       source: from.table,
@@ -155,6 +162,8 @@
 
   $effect(() => {
     void nodes;
+    // A rebuild keeps the line that is picked.
+    const was = new Set(untrack(() => edges).filter((e) => e.selected).map((e) => e.id));
     const toName = new Set(unnamedPairs(ws.relationships).flat().map((r) => r.id));
     const rels = ws.relationships.map((r) => {
       const h = app.linkHealth?.[r.id];
@@ -170,7 +179,7 @@
         note: h?.note ?? app.snap?.link_clashes?.[r.id],
         unusable: h?.unusable,
         needsName: toName.has(r.id),
-      });
+      }, was.has(r.id));
     });
     const sugg = suggestions
       .filter((s) => !dismissed.includes(sk(s)))
@@ -253,19 +262,35 @@
   });
   /** The hierarchies sheet (v5 build 01, Advanced). */
   let hierarchies = $state(false);
+
+  /** Picks a relationship from the panel: its line is selected on the canvas, as a click on it does. */
+  function pick(id: string) {
+    edges = edges.map((e) => ({ ...e, selected: e.id === id && e.id !== picked }));
+  }
+  /** Opens the sheet of a link; two unnamed links between the same tables open together, to be named. */
+  function openRel(r: Relationship) {
+    const toName = new Set(unnamedPairs(ws.relationships).flat().map((x) => x.id));
+    sheet = toName.has(r.id) ? siblings(r, ws.relationships).map((x) => x.id) : [r.id];
+  }
+  const tableName = (id: string) => app.table(id)?.label ?? id;
+  const shownSuggestions = $derived(suggestions.filter((s) => !dismissed.includes(sk(s))));
 </script>
 
 <header class="toolbar">
-  <h2>Model</h2>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <button class="crumb link ws" onclick={() => go({ view: 'data' })} title="Open Data">{ws.name || 'Workspace'}</button>
+    <Icon name="chevronRight" size={12} />
+    <h2 class="crumb now">Model</h2>
+  </nav>
   <span class="hint muted">Drag from a column to a column in another table to relate them. Click the label of a line to open it.</span>
   <span class="spacer"></span>
   {#if advancedOn() || (app.snap?.workspace.hierarchies ?? []).length}
-    <button class="btn" onclick={() => (hierarchies = true)} disabled={!app.tables.length}>
-      <Icon name="drill" /> Hierarchies
+    <button class="btn" aria-label="Hierarchies" title="Hierarchies, such as Region › Store, for drill-down" onclick={() => (hierarchies = true)} disabled={!app.tables.length}>
+      <Icon name="drill" /> <span class="bl">Hierarchies</span>
     </button>
   {/if}
-  <button class="btn" onclick={findSuggestions} disabled={looking || app.tables.length < 2}>
-    <Icon name="sparkles" /> {looking ? 'Looking…' : 'Suggest relationships'}
+  <button class="btn" aria-label={looking ? 'Looking…' : 'Suggest relationships'} title="Find the columns that likely join your tables" onclick={findSuggestions} disabled={looking || app.tables.length < 2}>
+    <Icon name="sparkles" /> <span class="bl">{looking ? 'Looking…' : 'Suggest relationships'}</span>
   </button>
 </header>
 
@@ -281,6 +306,7 @@
     <button class="btn primary" onclick={() => (app.addOpen = true)}><Icon name="plus" /> Add data</button>
   </div>
 {:else}
+  <div class="body">
   <div class="canvas">
     <svg width="0" height="0" style="position:absolute">
       <defs>
@@ -313,11 +339,6 @@
       <Controls showLock={false} />
     </SvelteFlow>
     {/key}
-    <div class="legend">
-      <span><i class="solid"></i> relationship (the dot marks the side with unique values)</span>
-      <span><i class="warn-line"></i> a column repeats values</span>
-      <span><i class="dash"></i> suggestion</span>
-    </div>
     {#if ways.length}
       <div class="ways" role="note">
         <strong>More than one way</strong>
@@ -326,6 +347,51 @@
         <span class="muted">The field list offers these tables once for each way.</span>
       </div>
     {/if}
+  </div>
+  <aside class="rels" aria-label="Relationships">
+    <div class="rh"><span>Relationships · <span class="num">{ws.relationships.length}</span></span></div>
+    <div class="rlist">
+      {#each ws.relationships as r (r.id)}
+        {@const h = app.linkHealth?.[r.id]}
+        {@const note = h?.note ?? app.snap?.link_clashes?.[r.id]}
+        <div class="rel" class:on={picked === r.id}>
+          <button class="rmain" aria-pressed={picked === r.id} onclick={() => pick(r.id)} title="Show it on the canvas">
+            {#if r.name}<span class="rname">{r.name}</span>{/if}
+            <span class="path">{tableName(r.from.table)}.{r.from.column} <span class="arrow">→</span> {tableName(r.to.table)}.{r.to.column}</span>
+            <span class="state">
+              <i class="dot" class:warn={!!note} class:off={h?.unusable}></i>
+              <span>{kindWords(h)}</span>
+              {#if h?.unusable}<span>· Not used</span>{/if}
+            </span>
+            {#if note}<span class="note">{note}</span>{/if}
+          </button>
+          <button class="btn plain icon tiny" title="Open {linkLabel(r, app.tables)}" aria-label="Open {linkLabel(r, app.tables)}" onclick={() => openRel(r)}><Icon name="chevronRight" size={13} /></button>
+        </div>
+      {:else}
+        <p class="empty-note">No relationships yet. Drag from a column to a column in another table, or ask for suggestions.</p>
+      {/each}
+      {#if shownSuggestions.length}
+        <div class="rh sub"><span>Suggested · <span class="num">{shownSuggestions.length}</span></span></div>
+        {#each shownSuggestions as sg (sk(sg))}
+          <div class="rel sug">
+            <div class="rmain static">
+              <span class="path">{tableName(sg.from.table)}.{sg.from.column} <span class="arrow">→</span> {tableName(sg.to.table)}.{sg.to.column}</span>
+              {#if sg.reason}<span class="note">{sg.reason}</span>{/if}
+              <span class="acts">
+                <button class="btn primary small" onclick={() => accept(sg)}><Icon name="check" size={12} /> Link</button>
+                <button class="btn plain small" onclick={() => (dismissed = [...dismissed, sk(sg)])}>Dismiss</button>
+              </span>
+            </div>
+          </div>
+        {/each}
+      {/if}
+    </div>
+    <div class="legend">
+      <span><i></i> Relationship · the dot marks the unique side</span>
+      <span><i class="warn-line"></i> A column repeats values</span>
+      <span><i class="dash"></i> Suggestion</span>
+    </div>
+  </aside>
   </div>
 {/if}
 
@@ -338,15 +404,48 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    height: 52px;
-    padding: 0 20px;
+    height: 48px;
+    padding: 0 12px 0 20px;
     border-bottom: 1px solid var(--sep);
     background: var(--surface);
     flex: none;
   }
-  .hint { font-size: 12px; }
+  .crumbs { display: flex; align-items: center; gap: 6px; min-width: 0; flex: none; color: var(--text-2); }
+  .crumbs :global(svg) { flex: none; color: var(--text-3); }
+  .crumb { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crumb.link { max-width: 180px; border: 0; background: none; padding: 2px 4px; margin: 0 -4px; border-radius: 5px; color: var(--text-2); transition: background 120ms var(--spring), color 120ms var(--spring); }
+  .crumb.link:hover { background: var(--hover); color: var(--text); }
+  .crumb.now { font-weight: 600; color: var(--text); letter-spacing: 0; }
+  .hint { font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .spacer { flex: 1; }
-  .canvas { position: relative; flex: 1; min-height: 0; }
+  .body { flex: 1; min-height: 0; display: flex; }
+  .rels { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--sep); background: var(--surface); }
+  .rh { display: flex; align-items: center; height: 40px; padding: 0 16px; flex: none; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); border-bottom: 1px solid var(--sep); }
+  .rh.sub { margin-top: 8px; border-top: 1px solid var(--sep); }
+  .rlist { flex: 1; min-height: 0; overflow: auto; }
+  .rel { display: flex; align-items: flex-start; gap: 2px; padding-right: 8px; border-bottom: 1px solid var(--sep); transition: background 120ms var(--spring); }
+  .rel:hover { background: var(--hover); }
+  .rel.on { background: var(--selected); }
+  .rmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 11px 6px 11px 16px; border: 0; background: none; text-align: left; color: inherit; }
+  .rmain.static { padding-right: 8px; }
+  .rel .tiny { width: 26px; height: 26px; margin-top: 8px; color: var(--text-2); flex: none; }
+  .rname { font-weight: 600; font-size: 12px; }
+  .path { font: 12px/1.35 var(--mono); color: var(--text); overflow-wrap: anywhere; }
+  .arrow { color: var(--text-3); }
+  .state { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); flex: none; }
+  .dot.warn { background: var(--warn); }
+  .dot.off { background: var(--text-3); }
+  .note { font-size: 11px; color: var(--text-2); line-height: 1.4; }
+  .acts { display: flex; gap: 6px; margin-top: 2px; }
+  .btn.small { height: 24px; padding: 0 9px; font-size: 12px; }
+  .empty-note { margin: 0; padding: 14px 16px; font-size: 12px; color: var(--text-2); line-height: 1.45; }
+  .legend { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; border-top: 1px solid var(--sep); flex: none; font-size: 11px; color: var(--text-2); }
+  .legend span { display: flex; align-items: center; gap: 8px; }
+  .legend i { display: inline-block; width: 16px; height: 0; flex: none; border-top: 1.6px solid var(--text-2); }
+  .legend i.dash { border-top: 1.6px dashed var(--accent); }
+  .legend i.warn-line { border-top-color: #c47400; }
+  .canvas { position: relative; flex: 1; min-width: 0; min-height: 0; }
   .canvas :global(.svelte-flow) {
     --xy-background-color: var(--window);
     --xy-background-pattern-color: var(--sep-strong);
@@ -362,24 +461,9 @@
     --xy-edge-stroke: var(--text-2);
   }
   .canvas :global(.svelte-flow__node) { padding: 0; border: 0; background: none; box-shadow: none; }
-  .canvas :global(.svelte-flow__controls) { box-shadow: var(--shadow-float); border-radius: 8px; overflow: hidden; }
-  .legend {
-    position: absolute;
-    right: 16px;
-    bottom: 16px;
-    display: flex;
-    gap: 16px;
-    padding: 6px 12px;
-    border-radius: 8px;
-    background: var(--surface);
-    box-shadow: var(--shadow-tile);
-    font-size: 11px;
-    color: var(--text-2);
-  }
-  .legend span { display: flex; align-items: center; gap: 6px; }
-  .legend i { display: inline-block; width: 18px; height: 0; border-top: 1.6px solid var(--text-2); }
-  .legend i.dash { border-top: 1.6px dashed var(--accent); }
-  .legend i.warn-line { border-top-color: #c47400; }
+  .canvas :global(.svelte-flow__controls) { box-shadow: none; border: 1px solid var(--sep); border-radius: 8px; overflow: hidden; background: var(--surface); }
+  .canvas :global(.svelte-flow__controls-button) { width: 30px; height: 30px; border-bottom: 1px solid var(--sep); transition: background 120ms var(--spring); }
+  .canvas :global(.svelte-flow__controls-button:last-child) { border-bottom: 0; }
   .ways {
     position: absolute;
     left: 72px;
@@ -404,7 +488,11 @@
   @media (max-width: 760px) {
     .hint { display: none; }
     /* A narrow screen has no room for two boxes at the bottom: the note about two ways goes to the top. */
-    .legend { display: none; }
+    .rels { display: none; }
+    .toolbar { padding: 0 10px 0 14px; gap: 8px; }
+    .crumb.link, .crumbs > :global(svg) { display: none; }
+    .bl { display: none; }
+    .toolbar .btn { width: 32px; padding: 0; justify-content: center; }
     .ways { left: 12px; right: 12px; top: 12px; bottom: auto; max-width: none; }
   }
 </style>

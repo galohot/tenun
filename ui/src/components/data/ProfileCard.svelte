@@ -16,7 +16,8 @@
 </script>
 
 <div class="card" style:left="{x}px" style:top="{y}px" role="tooltip">
-  <div class="name">{column.label ?? column.name}</div>
+  <div class="name">{column.label ?? column.name}{#if column.raw_type && !column.calc}<span class="raw">{column.raw_type}</span>{/if}</div>
+  {#if column.description}<p class="desc">{column.description}</p>{/if}
   {#if column.calc}
     <p class="calc">
       {#if column.error}Could not be computed. Its values are blank.{:else}Calculated column{/if}{#if column.as_of}, as of {column.as_of}{/if}
@@ -60,10 +61,13 @@
     box-shadow: var(--shadow-float);
     font-size: 12px;
     pointer-events: none;
-    animation: pop 160ms var(--spring);
+    animation: pop 140ms var(--spring);
   }
   .name { font-weight: 600; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .raw { margin-left: 6px; font: 500 10px/1 var(--mono); color: var(--text-2); }
+  .desc { color: var(--text-2); white-space: normal; }
   p { margin: 2px 0; }
+  .line { font-variant-numeric: tabular-nums; }
   .line { color: var(--text); }
   .calc { color: var(--text-2); }
   .mixed { color: var(--text); font-weight: 500; }
@@ -73,5 +77,5 @@
   .top li { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
   .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .n { color: var(--text-2); font-variant-numeric: tabular-nums; }
-  @keyframes pop { from { opacity: 0; transform: translateY(-2px); } }
+  @keyframes pop { from { opacity: 0; transform: translateY(-2px) scale(0.98); } }
 </style>

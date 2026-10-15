@@ -2,13 +2,27 @@
   import type { Snippet } from 'svelte';
   import Icon from './Icon.svelte';
 
+  // Every sheet has the same parts: a header (title, an optional line under it, Close), the body, and a
+  // footer with its actions on the right.
   let {
     title,
+    subtitle,
     width = 520,
+    flush = false,
     onclose,
     children,
     footer,
-  }: { title: string; width?: number; onclose: () => void; children: Snippet; footer?: Snippet } = $props();
+  }: {
+    title: string;
+    /** One line under the title: what the sheet is for. */
+    subtitle?: string;
+    width?: number;
+    /** The body has no padding of its own: its rows run edge to edge. */
+    flush?: boolean;
+    onclose: () => void;
+    children: Snippet;
+    footer?: Snippet;
+  } = $props();
 
   let dialog: HTMLDivElement;
 
@@ -28,11 +42,14 @@
 
 <div class="scrim" role="presentation" onclick={(e) => e.target === e.currentTarget && onclose()}>
   <div class="sheet" role="dialog" aria-modal="true" aria-label={title} style:width="{width}px" bind:this={dialog}>
-    <header>
-      <h2>{title}</h2>
-      <button class="btn plain icon" aria-label="Close" onclick={onclose}><Icon name="x" /></button>
+    <header class:rule={flush}>
+      <div class="titles">
+        <h2>{title}</h2>
+        {#if subtitle}<p>{subtitle}</p>{/if}
+      </div>
+      <button class="btn plain icon close" title="Close  Esc" aria-label="Close" onclick={onclose}><Icon name="x" /></button>
     </header>
-    <div class="content">{@render children()}</div>
+    <div class="content" class:flush>{@render children()}</div>
     {#if footer}
       <footer>{@render footer()}</footer>
     {/if}
@@ -43,11 +60,12 @@
   .scrim {
     position: fixed;
     inset: 0;
-    background: rgb(0 0 0 / 28%);
+    background: rgb(0 0 0 / 32%);
     display: grid;
     place-items: center;
+    padding: 24px;
     z-index: 50;
-    animation: fade 180ms ease-out;
+    animation: fade 160ms ease-out;
   }
   .sheet {
     max-width: calc(100vw - 32px);
@@ -56,16 +74,24 @@
     flex-direction: column;
     background: var(--surface);
     border-radius: var(--r-sheet);
-    box-shadow: var(--shadow-float);
-    animation: pop 250ms var(--spring);
+    box-shadow: 0 20px 60px rgb(0 0 0 / 22%), 0 0 0 1px rgb(0 0 0 / 6%);
+    animation: pop 180ms var(--spring);
   }
   header {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 14px 10px 20px;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px 14px 12px 20px;
+    flex: none;
   }
-  .content { padding: 0 20px 16px; overflow: auto; }
+  header.rule { border-bottom: 1px solid var(--sep); }
+  .titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding-top: 3px; }
+  .titles h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .titles p { margin: 0; font-size: 12px; color: var(--text-2); line-height: 1.45; }
+  .close { flex: none; color: var(--text-2); }
+  .close:hover { color: var(--text); }
+  .content { padding: 4px 20px 18px; overflow: auto; min-height: 0; }
+  .content.flush { padding: 0; }
   footer {
     display: flex;
     align-items: center;
@@ -73,7 +99,12 @@
     gap: 8px;
     padding: 12px 20px;
     border-top: 1px solid var(--sep);
+    flex: none;
   }
+  footer :global(.btn) { height: 30px; }
   @keyframes fade { from { opacity: 0; } }
   @keyframes pop { from { opacity: 0; transform: scale(0.98); } }
+  @media (prefers-reduced-motion: reduce) {
+    .scrim, .sheet { animation: none; }
+  }
 </style>

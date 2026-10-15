@@ -3,7 +3,7 @@
   import { LinkForm } from '../lib/linkform.svelte';
   import { DEFAULT_PATTERN } from '../lib/sources';
   import { app, go } from '../lib/state.svelte';
-  import Icon from './Icon.svelte';
+  import Icon, { type IconName } from './Icon.svelte';
   import LinkFields from './LinkFields.svelte';
   import Modal from './Modal.svelte';
   import FileBrowser from './FileBrowser.svelte';
@@ -32,6 +32,15 @@
   let pattern = $state(DEFAULT_PATTERN);
   // A web link to CSV or JSON data.
   const link = new LinkForm();
+
+  type Kind = 'file' | 'folder' | 'link' | 'database' | 'new';
+  const kinds = $derived<{ id: Kind; icon: IconName; label: string; words: string }[]>([
+    { id: 'file', icon: 'sheet', label: 'File', words: 'Excel, CSV, Parquet' },
+    { id: 'folder', icon: 'folder', label: 'Folder', words: 'Many files, one table' },
+    { id: 'link', icon: 'link', label: 'Link', words: 'Sheet, CSV or API' },
+    { id: 'database', icon: 'database', label: 'Database', words: 'PostgreSQL, MySQL' },
+    ...(canMake ? [{ id: 'new' as Kind, icon: 'newtable' as IconName, label: 'New table', words: 'From your tables' }] : []),
+  ]);
 
   async function addFiles(paths: string[]) {
     let last: string | undefined;
@@ -134,37 +143,26 @@
       go({ view: 'data', table: t });
     }} />
 {:else}
-<Modal title="Add data" onclose={onclose} width={560}>
-  <div class="tabs" role="tablist">
-    <button role="tab" aria-selected={tab === 'file'} class:on={tab === 'file'} onclick={() => (tab = 'file')}>
-      <Icon name="sheet" size={14} /> File
-    </button>
-    <button role="tab" aria-selected={tab === 'folder'} class:on={tab === 'folder'} onclick={() => (tab = 'folder')}>
-      <Icon name="folder" size={14} /> Folder
-    </button>
-    <button role="tab" aria-selected={tab === 'link'} class:on={tab === 'link'} onclick={() => (tab = 'link')}>
-      <Icon name="link" size={14} /> Link
-    </button>
-    <button role="tab" aria-selected={tab === 'database'} class:on={tab === 'database'} onclick={() => (tab = 'database')}>
-      <Icon name="database" size={14} /> Database
-    </button>
-    {#if canMake}
-      <button role="tab" aria-selected={tab === 'new'} class:on={tab === 'new'} onclick={() => (tab = 'new')}>
-        <Icon name="newtable" size={14} /> New table
+<Modal title="Add data" subtitle="Tenun reads your data where it is and never writes to it." onclose={onclose} width={canMake ? 680 : 600}>
+  <div class="kinds" role="tablist" aria-label="Kind of data" style:--n={kinds.length}>
+    {#each kinds as k (k.id)}
+      <button role="tab" aria-selected={tab === k.id} class:on={tab === k.id} onclick={() => (tab = k.id)}>
+        <Icon name={k.icon} size={16} />
+        <strong>{k.label}</strong>
+        <span>{k.words}</span>
       </button>
-    {/if}
+    {/each}
   </div>
 
   {#if tab === 'file'}
     <button class="drop" onclick={chooseFiles} disabled={!!app.busy}>
-      <Icon name="sheet" size={28} />
+      <svg class="up" width="24" height="24" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13V3.5M6.5 7 10 3.5 13.5 7M4 11.5v4h12v-4" /></svg>
       <strong>{app.busy ?? 'Choose files…'}</strong>
       <span>Excel, CSV, Parquet, SQLite or DuckDB.{app.health?.native ? ' You can also drop files on the window.' : ''}</span>
       <span>Tenun reads the file where it is and updates when you save it.</span>
     </button>
-    <form class="paste" onsubmit={(e) => { e.preventDefault(); if (path.trim()) addFiles([path.trim()]); }}>
-      <input class="field" placeholder="Or paste a full file path" bind:value={path} />
-      <button class="btn" disabled={!path.trim()}>Add</button>
+    <form class="paste" id="pathform" onsubmit={(e) => { e.preventDefault(); if (path.trim()) addFiles([path.trim()]); }}>
+      <input class="field" placeholder="Or paste a full file path" aria-label="Full path of a file" bind:value={path} />
     </form>
   {:else if tab === 'folder'}
     <form class="db" id="folderform" onsubmit={addFolder}>
@@ -236,6 +234,9 @@
     {:else if tab === 'link'}
       <button class="btn" onclick={onclose}>Cancel</button>
       <button class="btn primary" type="submit" form="linkform" disabled={!!app.busy || !link.url.trim() || !!link.problem}>{app.busy ?? 'Add link'}</button>
+    {:else if tab === 'file'}
+      <button class="btn" onclick={onclose}>Cancel</button>
+      <button class="btn primary" type="submit" form="pathform" title={path.trim() ? undefined : 'Paste a file path first, or choose files above'} disabled={!!app.busy || !path.trim()}>{app.busy ?? 'Add'}</button>
     {:else}
       <button class="btn" onclick={onclose}>Close</button>
     {/if}
@@ -253,16 +254,29 @@
 {/if}
 
 <style>
-  .tabs {
+  .kinds { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .kinds button {
     display: flex;
-    gap: 4px;
-    margin-bottom: 14px;
-    padding: 2px;
-    border-radius: 8px;
-    background: var(--inset);
-    width: max-content;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--sep);
+    border-radius: var(--r-card);
+    background: var(--surface);
+    color: var(--text-2);
+    text-align: left;
+    transition: background 120ms var(--spring), border-color 120ms var(--spring), transform 120ms var(--spring);
   }
-  .tabs button, .seg button {
+  .kinds button :global(svg) { color: var(--text); margin-bottom: 5px; }
+  .kinds button strong { color: var(--text); font-weight: 600; }
+  .kinds button span { font-size: 11.5px; line-height: 1.35; }
+  .kinds button:hover { background: var(--hover); }
+  .kinds button:active { transform: scale(0.98); }
+  .kinds button.on { border-color: var(--accent); background: var(--selected); box-shadow: 0 0 0 1px var(--accent); }
+  .kinds button.on strong, .kinds button.on :global(svg) { color: var(--accent-text); }
+  .seg button {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -274,23 +288,26 @@
     color: var(--text-2);
     font-weight: 500;
   }
-  .tabs button.on, .seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
+  .seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
   .drop {
     width: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 6px;
-    padding: 28px 16px;
+    padding: 32px 16px;
     border: 1.5px dashed var(--sep-strong);
     border-radius: var(--r-card);
     background: var(--window);
     color: var(--text-2);
+    font-size: 12px;
+    transition: border-color 140ms var(--spring), background 140ms var(--spring);
   }
-  .drop :global(svg) { color: var(--accent-text); margin-bottom: 4px; }
-  .drop strong { color: var(--text); font-size: 15px; font-weight: 600; }
-  .drop:hover { border-color: var(--accent); }
+  .drop :global(svg), .drop .up { color: var(--accent-text); margin-bottom: 6px; }
+  .drop strong { color: var(--accent-text); font-size: 14px; font-weight: 600; }
+  .drop:hover { border-color: var(--accent); background: var(--selected); }
   .paste { display: flex; gap: 8px; margin-top: 12px; }
+  .paste .field { height: 32px; }
   .ops { display: flex; flex-direction: column; gap: 8px; }
   .op {
     display: grid;
