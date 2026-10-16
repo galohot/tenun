@@ -1,6 +1,7 @@
 // App-wide state: the workspace snapshot, the route, the theme, live events.
 
 import { guessLocale } from './locale';
+import { setLang, type Lang } from './i18n';
 import { PHONE_MAX } from './layout';
 import { linkTablesOf, setLinkLabels } from './links';
 import { columnFormatsOf, setColumnFormats, setKnownMeasures } from './measures';
@@ -114,6 +115,16 @@ class App {
   setTheme(p: ThemePref) {
     this.themePref = p;
     localStorage.setItem('tenun-theme', p);
+  }
+
+  /**
+   * The language of the screens: this computer's choice, else the browser's. Reading it also sets it for
+   * `t()`, so App.svelte, which keys its whole tree on it, draws every text in the new language.
+   */
+  get lang(): Lang {
+    const l: Lang = this.settings?.language ?? guessLocale(typeof navigator === 'undefined' ? null : navigator.language);
+    setLang(l);
+    return l;
   }
 
   /** Saves a change to this computer's settings; the switch moves at once. */

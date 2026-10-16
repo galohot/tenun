@@ -13,6 +13,12 @@ use tenun_core::secrets::Secrets;
 pub struct Settings {
     /// Show the editing controls for Advanced features (V3-D1). Off by default.
     pub advanced: bool,
+    /// The language of the app's screens, `en` or `id` (0.7 build 02). None: the computer's language.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// Look for a new version once a day (0.7 build 01). None: on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updates: Option<bool>,
 }
 
 impl Settings {
@@ -71,7 +77,12 @@ mod tests {
     #[test]
     fn saved_settings_come_back() {
         let p = scratch("round").join("nested").join("settings.json");
-        Settings { advanced: true }.save(&p).unwrap();
+        Settings {
+            advanced: true,
+            ..Default::default()
+        }
+        .save(&p)
+        .unwrap();
         assert!(Settings::load(&p).advanced);
     }
 

@@ -766,6 +766,10 @@ export interface Tile {
 export interface Settings {
   /** Show the editing controls for Advanced features. */
   advanced: boolean;
+  /** The language of the app's screens. Absent: the computer's language. */
+  language?: 'en' | 'id';
+  /** Look for a new version once a day (desktop app). Absent: on. */
+  updates?: boolean;
 }
 
 export interface PublishSettings {

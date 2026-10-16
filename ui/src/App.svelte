@@ -41,6 +41,7 @@
   const hasData = $derived((app.snap?.workspace.sources.length ?? 0) > 0);
 </script>
 
+{#key app.lang}
 {#if app.snap}
   <div class="shell" class:phone={app.phone}>
     {#if app.phone}
@@ -92,6 +93,7 @@
   <div class="boot">Starting Tenun…</div>
 {/if}
 <Toasts />
+{/key}
 
 <style>
   .shell {
