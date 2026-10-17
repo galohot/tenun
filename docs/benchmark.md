@@ -10,61 +10,61 @@ The data: orders (a date over three years, a store, a customer, a product, an am
 
 | Step | ms |
 |---|---:|
-| Load the orders (CSV) | 151 |
-| Load the orders (Parquet) | 35.2 |
-| Load the orders (Excel) | 502 |
-| Suggest relationships | 7.9 |
-| Number with a comparison | 24.7 |
-| Bar by store, top 10 and Other | 17.1 |
-| Line by month | 19.7 |
-| Pivot: store by month | 68.4 |
-| Measure over two tables, by region | 6.5 |
-| Targets by region and month | 1.7 |
-| Line by month, filtered by a click on a store | 3.3 |
-| Add a calculated column (the table reloads) | 2.4 |
-| Bar of the calculated column by region | 5.3 |
-| Export a dashboard of six tiles | 2,844 |
+| Load the orders (CSV) | 183 |
+| Load the orders (Parquet) | 42.0 |
+| Load the orders (Excel) | 554 |
+| Suggest relationships | 8.6 |
+| Number with a comparison | 25.3 |
+| Bar by store, top 10 and Other | 17.9 |
+| Line by month | 15.3 |
+| Pivot: store by month | 69.7 |
+| Measure over two tables, by region | 6.8 |
+| Targets by region and month | 1.6 |
+| Line by month, filtered by a click on a store | 3.2 |
+| Add a calculated column (the table reloads) | 3.0 |
+| Bar of the calculated column by region | 5.2 |
+| Export a dashboard of six tiles | 2,628 |
 
-The export is 603 KB. Peak memory of the run so far: 171 MB.
+The export is 603 KB. Peak memory of the run so far: 174 MB.
 
 ## 1,000,000 rows
 
 | Step | ms |
 |---|---:|
-| Load the orders (CSV) | 1,791 |
-| Load the orders (Parquet) | 68.3 |
-| Load the orders (Excel) | 6,569 |
-| Suggest relationships | 40.2 |
-| Number with a comparison | 140 |
-| Bar by store, top 10 and Other | 81.6 |
-| Line by month | 82.3 |
-| Pivot: store by month | 338 |
-| Measure over two tables, by region | 28.9 |
-| Targets by region and month | 4.0 |
-| Line by month, filtered by a click on a store | 9.4 |
-| Add a calculated column (the table reloads) | 5.3 |
-| Bar of the calculated column by region | 25.5 |
-| Export a dashboard of six tiles | 15,385 |
+| Load the orders (CSV) | 998 |
+| Load the orders (Parquet) | 32.7 |
+| Load the orders (Excel) | 5,731 |
+| Suggest relationships | 23.8 |
+| Number with a comparison | 102 |
+| Bar by store, top 10 and Other | 56.4 |
+| Line by month | 58.3 |
+| Pivot: store by month | 246 |
+| Measure over two tables, by region | 18.4 |
+| Targets by region and month | 2.0 |
+| Line by month, filtered by a click on a store | 6.6 |
+| Add a calculated column (the table reloads) | 3.9 |
+| Bar of the calculated column by region | 18.6 |
+| Export a dashboard of six tiles | 14,063 |
 
-The export is 596 KB. Peak memory of the run so far: 1254 MB.
+The export is 595 KB. Peak memory of the run so far: 1220 MB.
 
 ## 10,000,000 rows
 
 | Step | ms |
 |---|---:|
-| Load the orders (CSV) | 11,144 |
-| Load the orders (Parquet) | 55.3 |
-| Suggest relationships | 159 |
-| Number with a comparison | 1,104 |
-| Bar by store, top 10 and Other | 534 |
-| Line by month | 709 |
-| Pivot: store by month | 2,162 |
-| Measure over two tables, by region | 153 |
-| Targets by region and month | 2.9 |
-| Line by month, filtered by a click on a store | 38.5 |
-| Add a calculated column (the table reloads) | 14.8 |
-| Bar of the calculated column by region | 158 |
-| Export a dashboard of six tiles | 172,043 |
+| Load the orders (CSV) | 10,163 |
+| Load the orders (Parquet) | 51.9 |
+| Suggest relationships | 111 |
+| Number with a comparison | 764 |
+| Bar by store, top 10 and Other | 364 |
+| Line by month | 426 |
+| Pivot: store by month | 2,015 |
+| Measure over two tables, by region | 127 |
+| Targets by region and month | 2.1 |
+| Line by month, filtered by a click on a store | 28.5 |
+| Add a calculated column (the table reloads) | 10.3 |
+| Bar of the calculated column by region | 149 |
+| Export a dashboard of six tiles | 138,399 |
 
-The export is 616 KB. Peak memory of the run so far: 1338 MB.
+The export is 617 KB. Peak memory of the run so far: 1221 MB.
 
