@@ -220,6 +220,29 @@ tenun serve sales.tenun     # opens or creates a workspace file
 With your own data: **Data → Add data**, then **Model → Suggest relationships**, then a new
 dashboard and **Add tile**.
 
+### Start from a starter
+
+The home screen has five dashboards made for common kinds of data. Each one asks for a few
+**roles** instead of columns:
+
+| Starter | Needs | Uses if it is there |
+|---|---|---|
+| Sales | date, amount, product | quantity, region |
+| Budget against actual | account, budget, actual | date, unit |
+| Stock | item, quantity | warehouse, category, value |
+| Attendance | date, person, status | unit |
+| Survey | question, score (such as 1 to 5) | group, respondent, date |
+
+1. Pick a starter, then **Use the sample** or **Use my file**. The samples are small made-up files.
+   They go to `Documents/Tenun Sample/Starters`.
+2. Tenun guesses the column for each role from the column names (in English or Indonesian, such as
+   `amount`, `nilai` or `tanggal`) and from the type of the data. Each role shows the column it
+   guessed and three of its values.
+3. Change any guess that is wrong, then **Make the dashboard**. The button waits until every role it
+   needs has a column. A role it can do without, left empty, leaves out the tiles that need it.
+
+A starter only uses Simple features, so the dashboard is a normal dashboard: edit it as you like.
+
 ## How it works
 
 ```

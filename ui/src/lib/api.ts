@@ -794,6 +794,32 @@ export interface PublishSettings {
   source: string;
 }
 
+/** A role of a starter dashboard (0.7 build 04): where a column goes. The words are English; `starterWord` translates. */
+export interface StarterRole {
+  name: string;
+  label: string;
+  kind: 'date' | 'number' | 'text';
+  required: boolean;
+  description: string;
+  shape?: 'few' | 'many';
+}
+
+export interface Starter {
+  id: string;
+  name: string;
+  description: string;
+  /** The file name of its sample. */
+  sample: string;
+  roles: StarterRole[];
+}
+
+/** The column the engine guessed for a role, and how sure it is (0–1). */
+export interface StarterGuess {
+  role: string;
+  column: string | null;
+  score: number;
+}
+
 export interface Dashboard {
   id: string;
   title: string;
@@ -1096,6 +1122,13 @@ export const api = {
   save: (path?: string) => call<Snapshot>('POST', '/workspace/save', { path: path ?? null }),
   rename: (name: string) => call<Snapshot>('POST', '/workspace/rename', { name }),
   sample: () => call<Snapshot>('POST', '/sample'),
+  starters: () => call<Starter[]>('GET', '/starters'),
+  /** Adds the sample CSV of a starter as a source. `table` is its table. */
+  starterSample: (starter: string) => call<Snapshot & { added: string; table: string | null }>('POST', '/starters/sample', { starter }),
+  starterGuess: (starter: string, table: string) => call<StarterGuess[]>('POST', '/starters/guess', { starter, table }),
+  /** Makes the dashboard of a starter with a column for each role (role → column). Fails in words when a required role has none. */
+  applyStarter: (starter: string, table: string, mapping: Record<string, string>, title: string) =>
+    call<Snapshot & { dashboard: string }>('POST', '/starters/apply', { starter, table, mapping, title }),
   addFile: (path: string) => call<Snapshot & { added: string }>('POST', '/sources', { kind: 'file', path }),
   addFolder: (path: string, pattern?: string) =>
     call<Snapshot & { added: string }>('POST', '/sources', { kind: 'folder', path, pattern: pattern || null }),

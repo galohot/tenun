@@ -31,6 +31,7 @@ pub mod shape;
 pub mod site;
 pub mod snapshot;
 pub mod sqlite;
+pub mod starter;
 pub mod suggest;
 pub mod watch;
 pub mod workspace;

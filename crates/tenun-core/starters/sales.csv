@@ -1,0 +1,421 @@
+date,product,city,qty,amount
+2026-01-01,Gula Aren 500 g,Bandung,7,266000
+2026-01-01,Kecap Manis 600 ml,Jakarta,5,120000
+2026-01-01,Kopi Gayo 250 g,Jakarta,7,595000
+2026-01-02,Gula Aren 500 g,Jakarta,12,456000
+2026-01-02,Keripik Singkong,Jakarta,2,30000
+2026-01-02,Kopi Gayo 250 g,Surabaya,10,850000
+2026-01-03,Sambal Bawang,Yogyakarta,5,135000
+2026-01-04,Kopi Toraja 250 g,Jakarta,3,276000
+2026-01-04,Madu Hutan 350 g,Medan,2,192000
+2026-01-05,Gula Aren 500 g,Jakarta,9,342000
+2026-01-05,Madu Hutan 350 g,Surabaya,12,1152000
+2026-01-05,Rendang Kaleng,Jakarta,1,55000
+2026-01-05,Sambal Bawang,Makassar,9,243000
+2026-01-05,Sambal Bawang,Medan,8,216000
+2026-01-06,Gula Aren 500 g,Surabaya,2,76000
+2026-01-06,Gula Aren 500 g,Yogyakarta,1,38000
+2026-01-06,Teh Melati 100 g,Yogyakarta,6,132000
+2026-01-07,Kopi Gayo 250 g,Yogyakarta,11,935000
+2026-01-07,Rendang Kaleng,Jakarta,1,55000
+2026-01-08,Kopi Gayo 250 g,Medan,11,935000
+2026-01-08,Kopi Gayo 250 g,Surabaya,2,170000
+2026-01-08,Madu Hutan 350 g,Jakarta,9,864000
+2026-01-08,Madu Hutan 350 g,Surabaya,4,384000
+2026-01-09,Gula Aren 500 g,Bandung,3,114000
+2026-01-09,Kopi Gayo 250 g,Makassar,7,595000
+2026-01-09,Kopi Gayo 250 g,Makassar,11,935000
+2026-01-10,Kecap Manis 600 ml,Bandung,7,168000
+2026-01-10,Kopi Gayo 250 g,Yogyakarta,12,1020000
+2026-01-11,Kecap Manis 600 ml,Medan,2,48000
+2026-01-12,Keripik Singkong,Jakarta,2,30000
+2026-01-12,Kopi Gayo 250 g,Jakarta,6,510000
+2026-01-12,Madu Hutan 350 g,Medan,9,864000
+2026-01-12,Teh Melati 100 g,Jakarta,10,220000
+2026-01-12,Teh Melati 100 g,Medan,6,132000
+2026-01-13,Kopi Gayo 250 g,Jakarta,11,935000
+2026-01-13,Sambal Bawang,Bandung,8,216000
+2026-01-13,Teh Melati 100 g,Jakarta,11,242000
+2026-01-13,Teh Melati 100 g,Yogyakarta,10,220000
+2026-01-14,Kopi Gayo 250 g,Surabaya,9,765000
+2026-01-15,Kecap Manis 600 ml,Surabaya,6,144000
+2026-01-15,Kopi Toraja 250 g,Jakarta,2,184000
+2026-01-15,Madu Hutan 350 g,Jakarta,2,192000
+2026-01-15,Teh Melati 100 g,Jakarta,2,44000
+2026-01-16,Keripik Singkong,Yogyakarta,2,30000
+2026-01-16,Sambal Bawang,Bandung,4,108000
+2026-01-16,Sambal Bawang,Surabaya,9,243000
+2026-01-16,Teh Melati 100 g,Bandung,12,264000
+2026-01-16,Teh Melati 100 g,Medan,10,220000
+2026-01-17,Kecap Manis 600 ml,Surabaya,2,48000
+2026-01-18,Kopi Gayo 250 g,Surabaya,4,340000
+2026-01-19,Gula Aren 500 g,Yogyakarta,4,152000
+2026-01-19,Kecap Manis 600 ml,Bandung,4,96000
+2026-01-19,Madu Hutan 350 g,Jakarta,10,960000
+2026-01-20,Kecap Manis 600 ml,Surabaya,6,144000
+2026-01-20,Keripik Singkong,Medan,1,15000
+2026-01-20,Sambal Bawang,Jakarta,9,243000
+2026-01-20,Teh Melati 100 g,Makassar,9,198000
+2026-01-21,Keripik Singkong,Yogyakarta,9,135000
+2026-01-21,Kopi Gayo 250 g,Bandung,5,425000
+2026-01-22,Beras Pandan Wangi 5 kg,Jakarta,5,390000
+2026-01-22,Beras Pandan Wangi 5 kg,Jakarta,7,546000
+2026-01-22,Keripik Singkong,Surabaya,4,60000
+2026-01-22,Sambal Bawang,Jakarta,5,135000
+2026-01-23,Beras Pandan Wangi 5 kg,Surabaya,3,234000
+2026-01-23,Kopi Gayo 250 g,Surabaya,6,510000
+2026-01-23,Kopi Gayo 250 g,Surabaya,7,595000
+2026-01-23,Madu Hutan 350 g,Surabaya,5,480000
+2026-01-24,Keripik Singkong,Yogyakarta,8,120000
+2026-01-24,Teh Melati 100 g,Jakarta,7,154000
+2026-01-26,Gula Aren 500 g,Medan,9,342000
+2026-01-26,Kopi Toraja 250 g,Surabaya,2,184000
+2026-01-27,Kopi Gayo 250 g,Jakarta,3,255000
+2026-01-27,Kopi Gayo 250 g,Surabaya,4,340000
+2026-01-27,Rendang Kaleng,Jakarta,2,110000
+2026-01-27,Sambal Bawang,Bandung,7,189000
+2026-01-27,Teh Melati 100 g,Jakarta,4,88000
+2026-01-28,Keripik Singkong,Yogyakarta,7,105000
+2026-01-28,Kopi Gayo 250 g,Surabaya,3,255000
+2026-01-28,Kopi Toraja 250 g,Medan,11,1012000
+2026-01-28,Kopi Toraja 250 g,Surabaya,3,276000
+2026-01-28,Teh Melati 100 g,Yogyakarta,8,176000
+2026-01-31,Keripik Singkong,Jakarta,6,90000
+2026-01-31,Kopi Toraja 250 g,Jakarta,1,92000
+2026-02-01,Keripik Singkong,Bandung,9,135000
+2026-02-01,Sambal Bawang,Medan,7,189000
+2026-02-02,Gula Aren 500 g,Bandung,8,304000
+2026-02-02,Kopi Gayo 250 g,Medan,8,680000
+2026-02-02,Teh Melati 100 g,Bandung,5,110000
+2026-02-02,Teh Melati 100 g,Yogyakarta,11,242000
+2026-02-03,Kecap Manis 600 ml,Bandung,8,192000
+2026-02-03,Kopi Gayo 250 g,Medan,12,1020000
+2026-02-03,Kopi Gayo 250 g,Surabaya,5,425000
+2026-02-03,Rendang Kaleng,Surabaya,3,165000
+2026-02-05,Keripik Singkong,Bandung,6,90000
+2026-02-05,Kopi Toraja 250 g,Medan,10,920000
+2026-02-05,Madu Hutan 350 g,Makassar,5,480000
+2026-02-07,Gula Aren 500 g,Jakarta,3,114000
+2026-02-07,Gula Aren 500 g,Medan,8,304000
+2026-02-07,Gula Aren 500 g,Surabaya,12,456000
+2026-02-07,Kecap Manis 600 ml,Yogyakarta,9,216000
+2026-02-07,Kopi Gayo 250 g,Jakarta,10,850000
+2026-02-08,Gula Aren 500 g,Surabaya,3,114000
+2026-02-08,Kopi Toraja 250 g,Bandung,11,1012000
+2026-02-10,Keripik Singkong,Jakarta,4,60000
+2026-02-10,Kopi Gayo 250 g,Medan,1,85000
+2026-02-10,Teh Melati 100 g,Jakarta,3,66000
+2026-02-11,Gula Aren 500 g,Jakarta,1,38000
+2026-02-11,Kecap Manis 600 ml,Yogyakarta,7,168000
+2026-02-11,Kopi Gayo 250 g,Jakarta,3,255000
+2026-02-11,Kopi Gayo 250 g,Surabaya,8,680000
+2026-02-11,Teh Melati 100 g,Jakarta,5,110000
+2026-02-13,Madu Hutan 350 g,Jakarta,9,864000
+2026-02-14,Gula Aren 500 g,Jakarta,4,152000
+2026-02-14,Kopi Gayo 250 g,Surabaya,2,170000
+2026-02-15,Kopi Gayo 250 g,Surabaya,8,680000
+2026-02-15,Madu Hutan 350 g,Bandung,2,192000
+2026-02-16,Kopi Gayo 250 g,Surabaya,4,340000
+2026-02-16,Sambal Bawang,Medan,3,81000
+2026-02-16,Teh Melati 100 g,Jakarta,7,154000
+2026-02-17,Rendang Kaleng,Surabaya,9,495000
+2026-02-18,Gula Aren 500 g,Bandung,4,152000
+2026-02-19,Kopi Gayo 250 g,Surabaya,11,935000
+2026-02-19,Kopi Toraja 250 g,Bandung,3,276000
+2026-02-21,Keripik Singkong,Bandung,1,15000
+2026-02-21,Keripik Singkong,Jakarta,10,150000
+2026-02-21,Keripik Singkong,Jakarta,11,165000
+2026-02-22,Gula Aren 500 g,Bandung,5,190000
+2026-02-22,Kecap Manis 600 ml,Jakarta,12,288000
+2026-02-23,Keripik Singkong,Jakarta,10,150000
+2026-02-23,Kopi Gayo 250 g,Surabaya,12,1020000
+2026-02-23,Sambal Bawang,Jakarta,5,135000
+2026-02-24,Kopi Gayo 250 g,Jakarta,9,765000
+2026-02-25,Gula Aren 500 g,Jakarta,7,266000
+2026-02-27,Keripik Singkong,Yogyakarta,1,15000
+2026-02-27,Kopi Gayo 250 g,Surabaya,11,935000
+2026-02-27,Madu Hutan 350 g,Jakarta,11,1056000
+2026-02-27,Rendang Kaleng,Jakarta,11,605000
+2026-02-27,Sambal Bawang,Medan,6,162000
+2026-02-28,Kecap Manis 600 ml,Surabaya,11,264000
+2026-02-28,Keripik Singkong,Medan,12,180000
+2026-02-28,Teh Melati 100 g,Medan,1,22000
+2026-03-01,Keripik Singkong,Jakarta,5,75000
+2026-03-01,Keripik Singkong,Makassar,7,105000
+2026-03-01,Kopi Gayo 250 g,Bandung,12,1020000
+2026-03-01,Kopi Gayo 250 g,Jakarta,4,340000
+2026-03-01,Sambal Bawang,Bandung,4,108000
+2026-03-02,Beras Pandan Wangi 5 kg,Jakarta,3,234000
+2026-03-02,Gula Aren 500 g,Bandung,6,228000
+2026-03-02,Keripik Singkong,Jakarta,12,180000
+2026-03-02,Kopi Gayo 250 g,Yogyakarta,10,850000
+2026-03-03,Kecap Manis 600 ml,Bandung,9,216000
+2026-03-03,Keripik Singkong,Makassar,12,180000
+2026-03-03,Madu Hutan 350 g,Medan,4,384000
+2026-03-04,Kopi Gayo 250 g,Bandung,8,680000
+2026-03-04,Kopi Toraja 250 g,Jakarta,11,1012000
+2026-03-05,Keripik Singkong,Jakarta,5,75000
+2026-03-05,Keripik Singkong,Surabaya,8,120000
+2026-03-06,Kopi Toraja 250 g,Makassar,3,276000
+2026-03-06,Rendang Kaleng,Surabaya,7,385000
+2026-03-07,Keripik Singkong,Yogyakarta,4,60000
+2026-03-07,Teh Melati 100 g,Bandung,6,132000
+2026-03-08,Keripik Singkong,Jakarta,8,120000
+2026-03-08,Keripik Singkong,Surabaya,9,135000
+2026-03-08,Keripik Singkong,Yogyakarta,6,90000
+2026-03-08,Sambal Bawang,Jakarta,4,108000
+2026-03-08,Teh Melati 100 g,Jakarta,4,88000
+2026-03-09,Gula Aren 500 g,Yogyakarta,4,152000
+2026-03-09,Kecap Manis 600 ml,Jakarta,9,216000
+2026-03-09,Keripik Singkong,Medan,9,135000
+2026-03-09,Kopi Gayo 250 g,Bandung,7,595000
+2026-03-09,Kopi Gayo 250 g,Makassar,12,1020000
+2026-03-09,Kopi Toraja 250 g,Jakarta,11,1012000
+2026-03-09,Teh Melati 100 g,Medan,4,88000
+2026-03-10,Keripik Singkong,Jakarta,6,90000
+2026-03-10,Kopi Toraja 250 g,Surabaya,5,460000
+2026-03-11,Kecap Manis 600 ml,Makassar,11,264000
+2026-03-11,Keripik Singkong,Jakarta,1,15000
+2026-03-12,Gula Aren 500 g,Medan,10,380000
+2026-03-13,Sambal Bawang,Bandung,11,297000
+2026-03-14,Kecap Manis 600 ml,Bandung,1,24000
+2026-03-15,Keripik Singkong,Yogyakarta,9,135000
+2026-03-15,Sambal Bawang,Jakarta,5,135000
+2026-03-16,Kecap Manis 600 ml,Surabaya,4,96000
+2026-03-16,Teh Melati 100 g,Jakarta,7,154000
+2026-03-17,Keripik Singkong,Jakarta,4,60000
+2026-03-17,Madu Hutan 350 g,Jakarta,11,1056000
+2026-03-17,Teh Melati 100 g,Jakarta,5,110000
+2026-03-18,Keripik Singkong,Jakarta,11,165000
+2026-03-18,Rendang Kaleng,Makassar,12,660000
+2026-03-18,Teh Melati 100 g,Medan,11,242000
+2026-03-19,Kopi Gayo 250 g,Bandung,4,340000
+2026-03-19,Kopi Gayo 250 g,Yogyakarta,8,680000
+2026-03-19,Madu Hutan 350 g,Medan,10,960000
+2026-03-19,Rendang Kaleng,Surabaya,9,495000
+2026-03-19,Sambal Bawang,Jakarta,8,216000
+2026-03-21,Kecap Manis 600 ml,Yogyakarta,7,168000
+2026-03-21,Kopi Gayo 250 g,Jakarta,6,510000
+2026-03-22,Kecap Manis 600 ml,Yogyakarta,3,72000
+2026-03-22,Kecap Manis 600 ml,Yogyakarta,8,192000
+2026-03-22,Kopi Gayo 250 g,Yogyakarta,7,595000
+2026-03-24,Kopi Toraja 250 g,Bandung,1,92000
+2026-03-25,Kopi Toraja 250 g,Jakarta,12,1104000
+2026-03-25,Sambal Bawang,Bandung,4,108000
+2026-03-25,Teh Melati 100 g,Bandung,10,220000
+2026-03-26,Teh Melati 100 g,Surabaya,9,198000
+2026-03-27,Kopi Gayo 250 g,Yogyakarta,12,1020000
+2026-03-28,Gula Aren 500 g,Bandung,10,380000
+2026-03-28,Keripik Singkong,Bandung,2,30000
+2026-03-29,Kecap Manis 600 ml,Jakarta,2,48000
+2026-03-29,Kecap Manis 600 ml,Surabaya,10,240000
+2026-03-29,Keripik Singkong,Yogyakarta,4,60000
+2026-03-29,Teh Melati 100 g,Makassar,12,264000
+2026-03-30,Gula Aren 500 g,Jakarta,6,228000
+2026-03-30,Kopi Gayo 250 g,Bandung,3,255000
+2026-03-30,Sambal Bawang,Surabaya,2,54000
+2026-03-31,Kopi Gayo 250 g,Surabaya,1,85000
+2026-03-31,Kopi Toraja 250 g,Bandung,4,368000
+2026-03-31,Sambal Bawang,Jakarta,6,162000
+2026-03-31,Teh Melati 100 g,Bandung,3,66000
+2026-04-01,Beras Pandan Wangi 5 kg,Surabaya,9,702000
+2026-04-02,Kecap Manis 600 ml,Bandung,7,168000
+2026-04-03,Gula Aren 500 g,Makassar,12,456000
+2026-04-04,Kopi Gayo 250 g,Surabaya,8,680000
+2026-04-04,Sambal Bawang,Surabaya,3,81000
+2026-04-05,Kopi Toraja 250 g,Medan,10,920000
+2026-04-05,Teh Melati 100 g,Surabaya,1,22000
+2026-04-06,Kopi Gayo 250 g,Jakarta,2,170000
+2026-04-06,Kopi Gayo 250 g,Jakarta,3,255000
+2026-04-06,Kopi Gayo 250 g,Medan,10,850000
+2026-04-06,Rendang Kaleng,Bandung,2,110000
+2026-04-06,Teh Melati 100 g,Yogyakarta,10,220000
+2026-04-07,Beras Pandan Wangi 5 kg,Surabaya,11,858000
+2026-04-07,Teh Melati 100 g,Medan,8,176000
+2026-04-08,Keripik Singkong,Jakarta,7,105000
+2026-04-09,Kopi Gayo 250 g,Jakarta,2,170000
+2026-04-09,Kopi Gayo 250 g,Jakarta,5,425000
+2026-04-10,Kecap Manis 600 ml,Bandung,8,192000
+2026-04-10,Kecap Manis 600 ml,Medan,8,192000
+2026-04-10,Teh Melati 100 g,Medan,1,22000
+2026-04-11,Sambal Bawang,Jakarta,3,81000
+2026-04-12,Beras Pandan Wangi 5 kg,Medan,7,546000
+2026-04-12,Keripik Singkong,Medan,2,30000
+2026-04-13,Kecap Manis 600 ml,Surabaya,5,120000
+2026-04-13,Kopi Toraja 250 g,Yogyakarta,9,828000
+2026-04-14,Kopi Gayo 250 g,Jakarta,2,170000
+2026-04-14,Kopi Gayo 250 g,Jakarta,7,595000
+2026-04-15,Kecap Manis 600 ml,Jakarta,5,120000
+2026-04-16,Keripik Singkong,Medan,4,60000
+2026-04-16,Keripik Singkong,Medan,11,165000
+2026-04-16,Sambal Bawang,Surabaya,4,108000
+2026-04-16,Teh Melati 100 g,Surabaya,9,198000
+2026-04-17,Kopi Gayo 250 g,Medan,6,510000
+2026-04-17,Kopi Toraja 250 g,Jakarta,3,276000
+2026-04-18,Beras Pandan Wangi 5 kg,Jakarta,12,936000
+2026-04-18,Gula Aren 500 g,Bandung,1,38000
+2026-04-18,Madu Hutan 350 g,Makassar,3,288000
+2026-04-18,Sambal Bawang,Surabaya,10,270000
+2026-04-19,Keripik Singkong,Jakarta,7,105000
+2026-04-19,Kopi Gayo 250 g,Surabaya,4,340000
+2026-04-20,Beras Pandan Wangi 5 kg,Makassar,11,858000
+2026-04-20,Beras Pandan Wangi 5 kg,Surabaya,7,546000
+2026-04-20,Kopi Gayo 250 g,Jakarta,2,170000
+2026-04-20,Madu Hutan 350 g,Bandung,8,768000
+2026-04-21,Kecap Manis 600 ml,Surabaya,7,168000
+2026-04-21,Kopi Gayo 250 g,Jakarta,7,595000
+2026-04-22,Keripik Singkong,Jakarta,6,90000
+2026-04-22,Keripik Singkong,Jakarta,9,135000
+2026-04-24,Gula Aren 500 g,Yogyakarta,10,380000
+2026-04-25,Gula Aren 500 g,Bandung,11,418000
+2026-04-25,Keripik Singkong,Jakarta,6,90000
+2026-04-25,Sambal Bawang,Medan,11,297000
+2026-04-25,Teh Melati 100 g,Jakarta,8,176000
+2026-04-26,Kecap Manis 600 ml,Medan,3,72000
+2026-04-26,Keripik Singkong,Medan,7,105000
+2026-04-26,Kopi Gayo 250 g,Surabaya,11,935000
+2026-04-26,Rendang Kaleng,Bandung,4,220000
+2026-04-27,Kopi Gayo 250 g,Jakarta,5,425000
+2026-04-27,Sambal Bawang,Medan,9,243000
+2026-04-28,Kopi Gayo 250 g,Medan,1,85000
+2026-04-29,Keripik Singkong,Medan,10,150000
+2026-04-29,Kopi Gayo 250 g,Jakarta,12,1020000
+2026-04-29,Teh Melati 100 g,Jakarta,2,44000
+2026-04-30,Kopi Gayo 250 g,Surabaya,3,255000
+2026-04-30,Kopi Gayo 250 g,Surabaya,7,595000
+2026-04-30,Rendang Kaleng,Jakarta,2,110000
+2026-04-30,Rendang Kaleng,Medan,11,605000
+2026-04-30,Teh Melati 100 g,Medan,8,176000
+2026-04-30,Teh Melati 100 g,Yogyakarta,7,154000
+2026-05-02,Beras Pandan Wangi 5 kg,Jakarta,8,624000
+2026-05-02,Kecap Manis 600 ml,Jakarta,12,288000
+2026-05-02,Kopi Gayo 250 g,Bandung,11,935000
+2026-05-03,Kecap Manis 600 ml,Jakarta,7,168000
+2026-05-03,Kopi Gayo 250 g,Jakarta,11,935000
+2026-05-03,Kopi Toraja 250 g,Bandung,11,1012000
+2026-05-04,Kopi Gayo 250 g,Jakarta,7,595000
+2026-05-04,Sambal Bawang,Jakarta,2,54000
+2026-05-04,Sambal Bawang,Yogyakarta,1,27000
+2026-05-05,Kopi Gayo 250 g,Surabaya,4,340000
+2026-05-05,Rendang Kaleng,Bandung,8,440000
+2026-05-07,Rendang Kaleng,Bandung,4,220000
+2026-05-07,Teh Melati 100 g,Yogyakarta,1,22000
+2026-05-08,Beras Pandan Wangi 5 kg,Surabaya,2,156000
+2026-05-08,Teh Melati 100 g,Makassar,12,264000
+2026-05-09,Beras Pandan Wangi 5 kg,Jakarta,9,702000
+2026-05-09,Keripik Singkong,Jakarta,12,180000
+2026-05-09,Sambal Bawang,Medan,4,108000
+2026-05-10,Gula Aren 500 g,Jakarta,4,152000
+2026-05-10,Kecap Manis 600 ml,Jakarta,4,96000
+2026-05-10,Keripik Singkong,Jakarta,2,30000
+2026-05-10,Keripik Singkong,Jakarta,11,165000
+2026-05-10,Keripik Singkong,Surabaya,2,30000
+2026-05-10,Sambal Bawang,Jakarta,8,216000
+2026-05-11,Gula Aren 500 g,Bandung,1,38000
+2026-05-11,Kopi Gayo 250 g,Medan,7,595000
+2026-05-11,Teh Melati 100 g,Jakarta,6,132000
+2026-05-12,Teh Melati 100 g,Jakarta,9,198000
+2026-05-13,Gula Aren 500 g,Bandung,2,76000
+2026-05-13,Kecap Manis 600 ml,Yogyakarta,3,72000
+2026-05-15,Kecap Manis 600 ml,Jakarta,4,96000
+2026-05-15,Rendang Kaleng,Yogyakarta,7,385000
+2026-05-15,Teh Melati 100 g,Jakarta,7,154000
+2026-05-15,Teh Melati 100 g,Medan,1,22000
+2026-05-16,Kecap Manis 600 ml,Makassar,7,168000
+2026-05-17,Gula Aren 500 g,Surabaya,3,114000
+2026-05-17,Kopi Gayo 250 g,Surabaya,8,680000
+2026-05-17,Madu Hutan 350 g,Surabaya,4,384000
+2026-05-19,Kopi Gayo 250 g,Bandung,11,935000
+2026-05-19,Kopi Toraja 250 g,Jakarta,6,552000
+2026-05-21,Gula Aren 500 g,Jakarta,5,190000
+2026-05-21,Teh Melati 100 g,Yogyakarta,8,176000
+2026-05-21,Teh Melati 100 g,Yogyakarta,8,176000
+2026-05-22,Sambal Bawang,Jakarta,7,189000
+2026-05-23,Beras Pandan Wangi 5 kg,Jakarta,3,234000
+2026-05-23,Kecap Manis 600 ml,Jakarta,11,264000
+2026-05-23,Keripik Singkong,Medan,2,30000
+2026-05-23,Keripik Singkong,Medan,9,135000
+2026-05-23,Kopi Gayo 250 g,Medan,9,765000
+2026-05-24,Beras Pandan Wangi 5 kg,Jakarta,8,624000
+2026-05-24,Keripik Singkong,Bandung,2,30000
+2026-05-25,Teh Melati 100 g,Bandung,9,198000
+2026-05-25,Teh Melati 100 g,Makassar,2,44000
+2026-05-27,Keripik Singkong,Bandung,5,75000
+2026-05-28,Madu Hutan 350 g,Jakarta,1,96000
+2026-05-30,Keripik Singkong,Yogyakarta,1,15000
+2026-05-30,Kopi Toraja 250 g,Makassar,3,276000
+2026-05-30,Kopi Toraja 250 g,Yogyakarta,12,1104000
+2026-05-31,Keripik Singkong,Jakarta,9,135000
+2026-05-31,Kopi Gayo 250 g,Yogyakarta,5,425000
+2026-06-01,Beras Pandan Wangi 5 kg,Makassar,3,234000
+2026-06-01,Kecap Manis 600 ml,Jakarta,9,216000
+2026-06-01,Teh Melati 100 g,Surabaya,6,132000
+2026-06-02,Kecap Manis 600 ml,Bandung,9,216000
+2026-06-02,Kecap Manis 600 ml,Medan,11,264000
+2026-06-02,Kopi Gayo 250 g,Bandung,4,340000
+2026-06-02,Kopi Gayo 250 g,Jakarta,3,255000
+2026-06-03,Keripik Singkong,Makassar,5,75000
+2026-06-06,Kopi Gayo 250 g,Jakarta,5,425000
+2026-06-06,Madu Hutan 350 g,Yogyakarta,11,1056000
+2026-06-06,Sambal Bawang,Yogyakarta,3,81000
+2026-06-07,Beras Pandan Wangi 5 kg,Makassar,3,234000
+2026-06-07,Gula Aren 500 g,Jakarta,5,190000
+2026-06-07,Kecap Manis 600 ml,Makassar,4,96000
+2026-06-07,Sambal Bawang,Bandung,6,162000
+2026-06-07,Sambal Bawang,Jakarta,10,270000
+2026-06-07,Teh Melati 100 g,Makassar,3,66000
+2026-06-08,Beras Pandan Wangi 5 kg,Jakarta,9,702000
+2026-06-08,Kopi Gayo 250 g,Jakarta,4,340000
+2026-06-09,Kopi Toraja 250 g,Medan,3,276000
+2026-06-10,Gula Aren 500 g,Medan,5,190000
+2026-06-10,Kecap Manis 600 ml,Yogyakarta,4,96000
+2026-06-10,Keripik Singkong,Medan,9,135000
+2026-06-11,Sambal Bawang,Yogyakarta,10,270000
+2026-06-11,Teh Melati 100 g,Bandung,9,198000
+2026-06-12,Keripik Singkong,Medan,2,30000
+2026-06-12,Kopi Gayo 250 g,Yogyakarta,1,85000
+2026-06-12,Kopi Toraja 250 g,Jakarta,4,368000
+2026-06-12,Kopi Toraja 250 g,Medan,7,644000
+2026-06-12,Teh Melati 100 g,Makassar,4,88000
+2026-06-12,Teh Melati 100 g,Surabaya,12,264000
+2026-06-13,Beras Pandan Wangi 5 kg,Makassar,7,546000
+2026-06-13,Madu Hutan 350 g,Jakarta,7,672000
+2026-06-14,Kecap Manis 600 ml,Jakarta,3,72000
+2026-06-14,Kopi Gayo 250 g,Bandung,5,425000
+2026-06-14,Madu Hutan 350 g,Bandung,10,960000
+2026-06-14,Teh Melati 100 g,Medan,4,88000
+2026-06-15,Kecap Manis 600 ml,Makassar,3,72000
+2026-06-15,Keripik Singkong,Yogyakarta,1,15000
+2026-06-15,Kopi Gayo 250 g,Jakarta,5,425000
+2026-06-16,Keripik Singkong,Surabaya,7,105000
+2026-06-16,Kopi Toraja 250 g,Makassar,6,552000
+2026-06-16,Rendang Kaleng,Surabaya,7,385000
+2026-06-17,Gula Aren 500 g,Jakarta,8,304000
+2026-06-17,Keripik Singkong,Jakarta,1,15000
+2026-06-17,Kopi Gayo 250 g,Medan,7,595000
+2026-06-17,Kopi Toraja 250 g,Jakarta,2,184000
+2026-06-18,Beras Pandan Wangi 5 kg,Medan,10,780000
+2026-06-18,Teh Melati 100 g,Surabaya,10,220000
+2026-06-19,Sambal Bawang,Surabaya,2,54000
+2026-06-20,Beras Pandan Wangi 5 kg,Surabaya,8,624000
+2026-06-20,Kecap Manis 600 ml,Medan,5,120000
+2026-06-20,Kopi Gayo 250 g,Makassar,12,1020000
+2026-06-21,Gula Aren 500 g,Jakarta,3,114000
+2026-06-23,Kecap Manis 600 ml,Bandung,11,264000
+2026-06-23,Keripik Singkong,Medan,9,135000
+2026-06-24,Kopi Toraja 250 g,Surabaya,2,184000
+2026-06-25,Madu Hutan 350 g,Yogyakarta,2,192000
+2026-06-25,Teh Melati 100 g,Surabaya,2,44000
+2026-06-26,Beras Pandan Wangi 5 kg,Yogyakarta,11,858000
+2026-06-27,Gula Aren 500 g,Bandung,3,114000
+2026-06-27,Sambal Bawang,Bandung,12,324000
+2026-06-27,Teh Melati 100 g,Surabaya,12,264000
+2026-06-27,Teh Melati 100 g,Yogyakarta,5,110000
+2026-06-28,Keripik Singkong,Makassar,5,75000
+2026-06-29,Gula Aren 500 g,Surabaya,11,418000
+2026-06-29,Sambal Bawang,Jakarta,3,81000
+2026-06-29,Sambal Bawang,Medan,7,189000
+2026-06-29,Teh Melati 100 g,Jakarta,11,242000
+2026-06-30,Kecap Manis 600 ml,Jakarta,4,96000
+2026-06-30,Keripik Singkong,Bandung,7,105000
+2026-06-30,Kopi Gayo 250 g,Bandung,10,850000

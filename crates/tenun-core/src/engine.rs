@@ -13,6 +13,7 @@ use crate::paste;
 use crate::prep::{self, ColInfo};
 use crate::query::{self, Param, SemanticQuery};
 use crate::secrets::Secrets;
+use crate::starter;
 use crate::suggest::{self, Suggestion};
 use crate::workspace::{
     CalcColumn, DEFAULT_PATTERN, DbConn, DerivedSpec, Every, FieldRef, KeyPlace, LinkKey, Locale,
@@ -3177,7 +3178,70 @@ impl Engine {
         })
     }
 
-    /// Runs one statement for the export, which needs every tile's data.
+    /// Guesses which column of `table` plays each role of a starter (0.7 build 04).
+    pub fn starter_guess(&self, starter: &str, table: &str) -> anyhow::Result<Vec<starter::Guess>> {
+        let s = starter::get(starter).ok_or_else(|| anyhow::anyhow!("unknown starter {starter}"))?;
+        let t = self
+            .catalog()
+            .table(table)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("unknown table {table}"))?;
+        let conn = self.conn()?;
+        Ok(starter::guess(&s.roles, &t, &|sql| {
+            let rows = run(&conn, sql, &[])?;
+            Ok(rows
+                .first()
+                .and_then(|r| r.first())
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0))
+        }))
+    }
+
+    /// Adds the dashboard of a starter on `table`, with the column of each role from `mapping`, and
+    /// returns its id. Fails, in words, and adds nothing, when a required role has no column. The title
+    /// is the starter's name in the app's language; a second dashboard of the same name gets a number.
+    pub fn apply_starter(
+        &self,
+        starter: &str,
+        table: &str,
+        mapping: &BTreeMap<String, String>,
+        title: Option<&str>,
+    ) -> anyhow::Result<String> {
+        let s = starter::get(starter).ok_or_else(|| anyhow::anyhow!("unknown starter {starter}"))?;
+        let t = self
+            .catalog()
+            .table(table)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("unknown table {table}"))?;
+        let mut list = self.dashboards();
+        let has = |key: &str, v: &str| {
+            list.iter()
+                .any(|d| d.get(key).and_then(|x| x.as_str()) == Some(v))
+        };
+        let id = (1..)
+            .map(|n| format!("d{n}"))
+            .find(|id| !has("id", id))
+            .expect("infinite range");
+        let base = title
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+            .unwrap_or(&s.name);
+        let title = (1..)
+            .map(|n| {
+                if n == 1 {
+                    base.to_string()
+                } else {
+                    format!("{base} {n}")
+                }
+            })
+            .find(|x| !has("title", x))
+            .expect("infinite range");
+        let dash = starter::apply(&s, &t, mapping, &id, &title)?;
+        list.push(dash);
+        self.set_dashboards(list);
+        Ok(id)
+    }
+
     /// The type of one column, if the table and column exist.
     pub fn column_dtype(&self, table: &str, column: &str) -> Option<DType> {
         let s = self.state.read().unwrap();

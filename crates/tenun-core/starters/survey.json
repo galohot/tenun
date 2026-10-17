@@ -1,0 +1,52 @@
+{
+  "id": "survey",
+  "name": "Survey",
+  "description": "The average score of each question and each group, and how the scores spread.",
+  "sample": "survey.csv",
+  "roles": [
+    { "name": "question", "label": "Question", "kind": "text", "required": true, "shape": "few",
+      "description": "What was asked: a question, an aspect or an indicator.",
+      "names": ["question", "item", "aspect", "indicator", "topic", "criterion", "pertanyaan", "aspek", "unsur", "indikator", "butir"] },
+    { "name": "score", "label": "Score", "kind": "number", "required": true,
+      "description": "The answer as a number, such as 1 to 5.",
+      "names": ["score", "rating", "answer", "value", "points", "grade", "skor", "nilai", "jawaban", "rating", "poin"] },
+    { "name": "group", "label": "Group", "kind": "text", "required": false, "shape": "few",
+      "description": "A group to compare: an outlet, a service or a region.",
+      "names": ["group", "outlet", "service", "region", "location", "branch", "segment", "unit", "kelompok", "layanan", "wilayah", "lokasi", "cabang", "unit", "characteristiclabel"] },
+    { "name": "respondent", "label": "Respondent", "kind": "text", "required": false, "shape": "many",
+      "description": "Who answered: a name or a number.",
+      "names": ["respondent", "respondentid", "responseid", "participant", "responden", "peserta", "nama"] },
+    { "name": "date", "label": "Date", "kind": "date", "required": false,
+      "description": "When the answer was given.",
+      "names": ["date", "submitted", "timestamp", "time", "tanggal", "tgl", "waktu"] }
+  ],
+  "dashboard": {
+    "title": "Survey",
+    "refresh": 0,
+    "tiles": [
+      { "id": "t1", "type": "kpi", "title": "", "x": 0, "y": 0, "w": 4, "h": 2,
+        "measures": [{ "table": "@table", "column": "@score", "agg": "avg" }], "dims": [], "formats": [{ "decimals": 2 }] },
+      { "id": "t2", "type": "kpi", "title": "", "x": 4, "y": 0, "w": 4, "h": 2,
+        "measures": [{ "table": "@table", "column": null, "agg": "count" }], "dims": [] },
+      { "id": "t3", "type": "kpi", "title": "", "x": 8, "y": 0, "w": 4, "h": 2,
+        "measures": [{ "table": "@table", "column": "@respondent", "agg": "count_distinct" }], "dims": [] },
+      { "id": "t4", "type": "bar", "title": "", "x": 0, "y": 2, "w": 7, "h": 5, "horizontal": true,
+        "measures": [{ "table": "@table", "column": "@score", "agg": "avg" }],
+        "dims": [{ "table": "@table", "column": "@question" }],
+        "sort": { "by": "value", "desc": true }, "formats": [{ "decimals": 2 }] },
+      { "id": "t5", "type": "histogram", "title": "", "x": 7, "y": 2, "w": 5, "h": 5,
+        "measures": [{ "table": "@table", "column": "@score", "agg": "sum" }], "dims": [], "bins": { "width": 1 } },
+      { "id": "t6", "type": "bar", "title": "", "x": 0, "y": 7, "w": 6, "h": 4,
+        "measures": [{ "table": "@table", "column": "@score", "agg": "avg" }],
+        "dims": [{ "table": "@table", "column": "@group" }],
+        "sort": { "by": "value", "desc": true }, "formats": [{ "decimals": 2 }] },
+      { "id": "t7", "type": "line", "title": "", "x": 6, "y": 7, "w": 6, "h": 4,
+        "measures": [{ "table": "@table", "column": "@score", "agg": "avg" }],
+        "dims": [{ "table": "@table", "column": "@date", "grain": "month" }], "formats": [{ "decimals": 2 }] },
+      { "id": "t8", "type": "pivot", "title": "", "x": 0, "y": 11, "w": 12, "h": 5, "totals": true,
+        "measures": [{ "table": "@table", "column": "@score", "agg": "avg" }],
+        "dims": [{ "table": "@table", "column": "@question" }],
+        "cols": { "table": "@table", "column": "@group" }, "formats": [{ "decimals": 2 }] }
+    ]
+  }
+}

@@ -20,14 +20,14 @@ pub struct Suggestion {
 
 const MIN_OVERLAP: f64 = 0.9;
 
-fn norm(s: &str) -> String {
+pub(crate) fn norm(s: &str) -> String {
     s.chars()
         .filter(|c| c.is_alphanumeric())
         .flat_map(|c| c.to_lowercase())
         .collect()
 }
 
-fn singular(s: &str) -> String {
+pub(crate) fn singular(s: &str) -> String {
     if let Some(x) = s.strip_suffix("ies") {
         format!("{x}y")
     } else if let Some(x) = s.strip_suffix("ses") {
