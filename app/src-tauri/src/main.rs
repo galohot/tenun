@@ -32,10 +32,13 @@ fn main() {
             }))?;
             let url = running.url.parse()?;
             app.manage(running.state.clone());
-            running.state.set_updater(Arc::new(AppUpdater {
-                app: app.handle().clone(),
-                found: Mutex::new(None),
-            }));
+            // The Microsoft Store updates its own copy, so that copy has no updater of its own.
+            if !from_store() {
+                running.state.set_updater(Arc::new(AppUpdater {
+                    app: app.handle().clone(),
+                    found: Mutex::new(None),
+                }));
+            }
             // Keep this server in the list `tenun mcp` reads for as long as the app runs (v5 build 14).
             if let Some(r) = running.registration {
                 app.manage(r);
@@ -84,6 +87,16 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("Tenun failed to start");
+}
+
+/// True when Windows runs this copy from an MSIX package, which is how the Microsoft Store installs
+/// it. Windows keeps every package under a `WindowsApps` folder.
+fn from_store() -> bool {
+    cfg!(windows)
+        && std::env::current_exe().is_ok_and(|p| {
+            p.components()
+                .any(|c| c.as_os_str().eq_ignore_ascii_case("WindowsApps"))
+        })
 }
 
 /// New versions from the GitHub release's `latest.json` (0.7 build 01). The signature of what it

@@ -194,8 +194,7 @@ Tenun aims to do a few things well. These are left out by choice. Each has an an
 | macOS (Intel) | `Tenun_x.y.z_x64.dmg` |
 | Linux | `.AppImage` or `.deb` |
 
-The apps are not code-signed yet (Windows signing is on the way, see the
-[code signing policy](#code-signing-policy)):
+The apps are not code-signed (see the [code signing policy](#code-signing-policy)):
 
 - **macOS:** open the app once and close the warning. Then open **System Settings → Privacy &
   Security**, scroll down, and choose **Open Anyway**. You do this once. Or, in Terminal:
@@ -374,18 +373,19 @@ never part of it. **Copy instead** copies the same text, for someone who has no 
 
 ## Code signing policy
 
-Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
-[SignPath Foundation](https://signpath.org).
+The downloads on [Releases](https://github.com/galohot/tenun/releases) are not code-signed. Windows
+shows a SmartScreen warning and macOS shows a Gatekeeper warning the first time
+([Install](#install) says what to do). `SHA256SUMS.txt` on each release lists the checksum of every file.
 
-The Windows installers (`.msi` and `-setup.exe`) are signed once the project is approved. Until then,
-they are not signed, and Windows shows a SmartScreen warning.
+Every update that the desktop app installs is signed with the Tenun update key. The app checks that
+signature against the public key it carries before it installs anything.
 
-- **What is signed:** only files that the [release workflow](.github/workflows/release.yml) of this
-  repository builds on GitHub Actions from a release tag. Nothing built on a personal computer is signed.
+- **What is released:** only files that the [release workflow](.github/workflows/release.yml) of this
+  repository builds on GitHub Actions from a release tag. Nothing built on a personal computer is released.
 - **Committers and reviewers:** [@galohot](https://github.com/galohot), the maintainer. A change from
   anyone else comes as a pull request, and the maintainer reviews it before it is merged.
-- **Approvers:** [@galohot](https://github.com/galohot) approves every signing request.
-- **Accounts:** every account that can change this repository or approve a signature uses
+- **Approvers:** [@galohot](https://github.com/galohot) approves every release.
+- **Accounts:** every account that can change this repository or approve a release uses
   multi-factor authentication.
 - **Privacy:** Tenun has no telemetry and sends nothing about you or your data anywhere. It uses the
   network only for what [Privacy and security](#privacy-and-security) lists: a connector or map
