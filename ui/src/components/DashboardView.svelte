@@ -32,7 +32,7 @@
   import { buildClip, clipText, dashboardCopy, freeName, withReach, joinMeasures, joinStyles, landTiles, measureIds, placeBelow, readClip, renamesFor, rewriteFormula, sameWorkspace, type Clip, type Matches } from '../lib/clipboard';
   import MatchFields from './dash/MatchFields.svelte';
   import CardStyles from './dash/CardStyles.svelte';
-  import { t, tn } from '../lib/i18n';
+  import { fixedWord, t, tn } from '../lib/i18n';
   // tenun.cloud is not live yet; build with VITE_TENUN_CLOUD=1 to show Publish.
   const CLOUD_ON = import.meta.env.VITE_TENUN_CLOUD === '1';
 
@@ -729,7 +729,7 @@
     for (const t of shown) rs[t.id] = results[t.id]?.res ?? null;
     return {
       title: dash!.title,
-      subtitle: `${app.snap!.workspace.name} · ${dateTimeMedium(new Date())}`,
+      subtitle: `${fixedWord(app.snap!.workspace.name)} · ${dateTimeMedium(new Date())}`,
       filters: allFilters.map((f) => filterText(f, app.tables)),
       tiles: shown,
       results: rs,
@@ -1016,7 +1016,7 @@
   <header class="toolbar" class:phone>
     {#if !phone}
       <nav class="crumbs" aria-label={t('Breadcrumb')}>
-        <button class="crumb" title={t('Home of this workspace')} onclick={() => go({ view: 'home' })}>{app.snap?.workspace.name || t('Workspace')}</button>
+        <button class="crumb" title={t('Home of this workspace')} onclick={() => go({ view: 'home' })}>{fixedWord(app.snap?.workspace.name ?? '') || t('Workspace')}</button>
         <svg class="sep" width="12" height="12" viewBox="0 0 20 20" aria-hidden="true"><path d="M8 5l5 5-5 5" /></svg>
         <span class="crumb plain">{story ? t('Stories') : t('Dashboards')}</span>
         <svg class="sep" width="12" height="12" viewBox="0 0 20 20" aria-hidden="true"><path d="M8 5l5 5-5 5" /></svg>

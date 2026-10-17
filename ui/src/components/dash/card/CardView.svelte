@@ -11,7 +11,7 @@
   import RuleChip from './RuleChip.svelte';
   import Spark from './Spark.svelte';
   import Target from './Target.svelte';
-  import { t, tn } from '../../../lib/i18n';
+  import { fixedWord, t, tn } from '../../../lib/i18n';
 
   let {
     kpi,
@@ -67,7 +67,7 @@
             {#if rule}<RuleChip tone={rule.tone} words={ruleWords(rule, (v) => compact(v, fmt), tile.target?.value)} />{/if}
           </div>
         {:else if p.kind === 'period'}
-          <div class="period">{kpi.partial ? t('{period} · so far', { period: kpi.period }) : kpi.period}</div>
+          <div class="period">{kpi.partial ? t('{period} · so far', { period: fixedWord(kpi.period) }) : fixedWord(kpi.period)}</div>
         {:else if p.kind === 'compare'}
           <Compare {kpi} better={tile.better ?? 'up'} />
         {:else if p.kind === 'target'}

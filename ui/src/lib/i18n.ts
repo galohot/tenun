@@ -41,6 +41,12 @@ export function tn(one: string, many: string, n: number, vars?: Record<string, s
  */
 export const tk = (text: string): string => text;
 
+/**
+ * Two English words that the engine stores as data: the name of a new workspace and the period of a tile that
+ * covers all the data. The screen translates them where it shows them.
+ */
+export const fixedWord = (s: string): string => (s === 'Untitled' || s === 'All data' ? t(s) : s);
+
 const plain = (text: string) => {
   const i = text.indexOf('@@');
   return i < 0 ? text : text.slice(0, i);

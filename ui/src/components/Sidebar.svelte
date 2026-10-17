@@ -5,7 +5,7 @@
   import { newStory } from '../lib/flow';
   import Menu from './dash/Menu.svelte';
   import Icon from './Icon.svelte';
-  import { t } from '../lib/i18n';
+  import { fixedWord, t } from '../lib/i18n';
   import FileBrowser from './FileBrowser.svelte';
   import { palette, modKey } from './Palette.svelte';
 
@@ -17,14 +17,14 @@
   const route = $derived(app.route);
 
   function startRename() {
-    nameDraft = ws.name;
+    nameDraft = fixedWord(ws.name);
     renaming = true;
   }
 
   async function commitRename() {
     renaming = false;
     const name = nameDraft.trim();
-    if (name && name !== ws.name) await app.run(null, () => api.rename(name));
+    if (name && name !== fixedWord(ws.name)) await app.run(null, () => api.rename(name));
   }
 
   /** A new page: a grid of tiles, or a story that reads like a document (build 11). */
@@ -49,7 +49,7 @@
 
   async function saveAs() {
     if (app.health?.native) {
-      const { paths } = await api.pick({ kind: 'save_workspace', name: ws.name });
+      const { paths } = await api.pick({ kind: 'save_workspace', name: fixedWord(ws.name) });
       if (paths[0] && (await app.run(t('Saving…'), () => api.save(paths[0])))) app.toast(t('Saved'));
     } else {
       browser = 'save';
@@ -116,7 +116,7 @@
       }}>
       <img src="/icon.svg" alt="" width="28" height="28" />
       <span class="ws-text">
-        <span class="ws-name">{ws.name}</span>
+        <span class="ws-name">{fixedWord(ws.name)}</span>
         <span class="state" class:unsaved={app.snap!.dirty}>
           {#if app.snap!.path}{app.snap!.dirty ? t('Unsaved changes') : t('Saved automatically')}{:else}{t('Not saved yet')}{/if}
         </span>
@@ -224,7 +224,7 @@
 {#if browser}
   <FileBrowser
     mode={browser}
-    suggestedName={ws.name}
+    suggestedName={fixedWord(ws.name)}
     onclose={() => (browser = null)}
     onpick={async (paths) => {
       const mode = browser;

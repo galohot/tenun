@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, type Cell, type Column, type NamedMeasure, type Param, type Profile, type Source, type TableSetup, type Tile, type TileRef, type UnpivotPlan, type UrlEvery } from '../lib/api';
   import { typeIcon } from '../lib/ui';
-  import { t, tn } from '../lib/i18n';
+  import { fixedWord, t, tn } from '../lib/i18n';
   import { app, go } from '../lib/state.svelte';
   import { cell, full, numberFormatter, tileTitle } from '../lib/format';
   import { readersOf, tilesUsing, useWords } from '../lib/formula';
@@ -337,7 +337,7 @@
 
 <header class="toolbar">
   <nav class="crumbs" aria-label={t('Breadcrumb')}>
-    <span class="crumb ws">{app.snap?.workspace.name || t('Workspace')}</span>
+    <span class="crumb ws">{fixedWord(app.snap?.workspace.name ?? '') || t('Workspace')}</span>
     <Icon name="chevronRight" size={12} />
     {#if table && sources.length}
       <button class="crumb link" onclick={() => go({ view: 'data' })}>{t('Data')}</button>

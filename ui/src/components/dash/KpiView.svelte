@@ -7,7 +7,7 @@
   import { targetInfo, targetWords } from '../../lib/kpi';
   import { barBoxes, changeTone } from '../../lib/card';
   import { paceElapsed, whyNotAdded, type Parts } from '../../lib/measures';
-  import { t } from '../../lib/i18n';
+  import { fixedWord, t } from '../../lib/i18n';
   import Icon from '../Icon.svelte';
 
   let {
@@ -75,7 +75,7 @@
       class="value"
       style:font-size="{size}px"
       style:color={kpi.value === null ? undefined : TONE_INK[toneFor(kpi.value, fmt) ?? '']}
-      title={kpi.value === null ? '' : `${tip(kpi.value, fmt)}${mini ? ` · ${kpi.period}${soFar}` : ''}`}>
+      title={kpi.value === null ? '' : `${tip(kpi.value, fmt)}${mini ? ` · ${fixedWord(kpi.period)}${soFar}` : ''}`}>
       {kpi.value === null ? '–' : compact(kpi.value, fmt)}
     </span>
     {#if kpi.versus}
@@ -125,7 +125,7 @@
   {#if !mini}
     <div class="foot">
       {#if showBars && w >= 200}<span>{t('Last {n} periods', { n: kpi.bars.length })}</span>{/if}
-      <span class="period">{kpi.period}{soFar}</span>
+      <span class="period">{fixedWord(kpi.period)}{soFar}</span>
     </div>
   {/if}
 </div>

@@ -14,7 +14,7 @@
   import LinkSheet from './model/LinkSheet.svelte';
   import HierarchySheet from './model/HierarchySheet.svelte';
   import Icon from './Icon.svelte';
-  import { t } from '../lib/i18n';
+  import { fixedWord, t } from '../lib/i18n';
 
   const nodeTypes = { table: TableNode };
   const edgeTypes = { rel: RelEdge };
@@ -280,7 +280,7 @@
 
 <header class="toolbar">
   <nav class="crumbs" aria-label={t('Breadcrumb')}>
-    <button class="crumb link ws" onclick={() => go({ view: 'data' })} title={t('Open Data')}>{ws.name || t('Workspace')}</button>
+    <button class="crumb link ws" onclick={() => go({ view: 'data' })} title={t('Open Data')}>{fixedWord(ws.name) || t('Workspace')}</button>
     <Icon name="chevronRight" size={12} />
     <h2 class="crumb now">{t('Model')}</h2>
   </nav>

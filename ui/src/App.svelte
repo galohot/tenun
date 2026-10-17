@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { app } from './lib/state.svelte';
-  import { t } from './lib/i18n';
+  import { fixedWord, t } from './lib/i18n';
   import { setDigits, setLocale } from './lib/format';
   import { setCalendar } from './lib/locale';
   import Sidebar from './components/Sidebar.svelte';
@@ -51,7 +51,7 @@
       <header class="phonebar">
         <button class="btn plain icon" aria-label={t('Menu')} aria-expanded={app.navOpen} onclick={() => (app.navOpen = !app.navOpen)}><Icon name="rows" /></button>
         <img src="/icon.svg" alt="" width="20" height="20" />
-        <span>{app.snap.workspace.name}</span>
+        <span>{fixedWord(app.snap.workspace.name)}</span>
       </header>
       {#if app.navOpen}
         <div class="scrim" role="presentation" onclick={() => (app.navOpen = false)}></div>
