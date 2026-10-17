@@ -5,6 +5,7 @@
   import type { Cell, Param } from '../../lib/api';
   import { cell, numberFormatter } from '../../lib/format';
   import { controlOf, snap } from '../../lib/params';
+  import { t } from '../../lib/i18n';
 
   let {
     param,
@@ -62,7 +63,7 @@
 
 <div class="param" class:fixed>
   {#if !param}
-    <div class="gone">The parameter of this tile was deleted. Pick another in the tile's options.</div>
+    <div class="gone">{t("The parameter of this tile was deleted. Pick another in the tile's options.")}</div>
   {:else}
     <div class="head">
       <span class="name">{named ? name : ''}</span>

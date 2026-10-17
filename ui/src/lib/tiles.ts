@@ -2,6 +2,7 @@
 
 import type { Dashboard, Dim, DashFilter, DType, Measure, QueryResult, SemanticQuery, Table, Tile, TileType } from './api';
 import { liveNumbers } from './markdown.ts';
+import { t } from './i18n.ts';
 
 export const COLS = 12;
 
@@ -253,5 +254,5 @@ export function place(tiles: Tile[], w: number, h: number): { x: number; y: numb
 }
 
 export function newDashboard(n: number): Dashboard {
-  return { id: newId('d'), title: n ? `Dashboard ${n + 1}` : 'Overview', refresh: 60, tiles: [] };
+  return { id: newId('d'), title: n ? t('Dashboard {n}', { n: n + 1 }) : t('Overview'), refresh: 60, tiles: [] };
 }

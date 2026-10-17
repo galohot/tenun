@@ -8,6 +8,7 @@
   import { saveBlob } from '../lib/download';
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
+  import { t, tn } from '../lib/i18n';
 
   let { level: start = 'regency', onclose }: { level?: PlaceLevel; onclose: () => void } = $props();
 
@@ -33,29 +34,27 @@
 
   function download() {
     const csv = toCsv(placesTable(shown));
-    saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), fileName(`Place names - ${list.title}`, 'csv'));
+    saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), fileName(t('Place names - {name}', { name: list.title }), 'csv'));
   }
 </script>
 
-<Modal title="Place names" width={640} {onclose}>
+<Modal title={t('Place names')} width={640} {onclose}>
   <div class="intro">
     <p>
-      A map reads a column of place names or codes. Write them the standard way and every row finds its place. Case,
-      extra spaces and dots do not matter, and "Kab." is "Kabupaten". A bare name that is a kabupaten and a kota, like
-      "Bandung", needs "Kabupaten" or "Kota" in front.
+      {t('A map reads a column of place names or codes. Write them the standard way and every row finds its place. Case, extra spaces and dots do not matter, and "Kab." is "Kabupaten". A bare name that is a kabupaten and a kota, like "Bandung", needs "Kabupaten" or "Kota" in front.')}
     </p>
   </div>
   <div class="bar">
-    <div class="seg" role="radiogroup" aria-label="Which list">
+    <div class="seg" role="radiogroup" aria-label={t('Which list')}>
       {#each PLACE_LISTS as l (l.level)}
         <button type="button" role="radio" aria-checked={level === l.level} class:on={level === l.level} onclick={() => (level = l.level)}>{l.title}</button>
       {/each}
     </div>
-    <input class="field search" type="search" placeholder="Search a name or a code" bind:value={q} aria-label="Search" />
+    <input class="field search" type="search" placeholder={t('Search a name or a code')} bind:value={q} aria-label={t('Search')} />
   </div>
-  <p class="codes">Codes: {list.codeWords}.</p>
+  <p class="codes">{t('Codes: {codes}.', { codes: list.codeWords })}</p>
   <div class="grid" role="table" aria-label={list.title} aria-busy={loading}>
-    <div class="row head" role="row"><span role="columnheader">Code</span><span role="columnheader">Name</span><span role="columnheader">Also read as</span></div>
+    <div class="row head" role="row"><span role="columnheader">{t('Code')}</span><span role="columnheader">{t('Name')}</span><span role="columnheader">{t('Also read as')}</span></div>
     {#each shown.slice(0, 600) as r (r.code)}
       <div class="row" role="row">
         <span role="cell" class="code">{r.code}</span>
@@ -63,14 +62,14 @@
         <span role="cell" class="dim">{r.aliases.join(', ')}</span>
       </div>
     {:else}
-      <p class="none">{loading ? 'Loading…' : `No place matches “${q}”.`}</p>
+      <p class="none">{loading ? t('Loading…') : t('No place matches “{q}”.', { q })}</p>
     {/each}
   </div>
-  <p class="credit">Boundaries: Natural Earth (public domain) and geoBoundaries (CC BY 3.0 IGO). Codes and names of Indonesia: Kepmendagri 2025, by way of cahyadsn/wilayah (MIT).</p>
+  <p class="credit">{t('Boundaries: Natural Earth (public domain) and geoBoundaries (CC BY 3.0 IGO). Codes and names of Indonesia: Kepmendagri 2025, by way of cahyadsn/wilayah (MIT).')}</p>
   {#snippet footer()}
-    <span class="count">{shown.length.toLocaleString('en-US')} {shown.length === 1 ? 'place' : 'places'}</span>
-    <button type="button" class="btn" onclick={download} disabled={!shown.length}><Icon name="export" size={14} /> Download CSV</button>
-    <button type="button" class="btn primary" onclick={onclose}>Done</button>
+    <span class="count">{tn('{n} place', '{n} places', shown.length, { n: shown.length.toLocaleString('en-US') })}</span>
+    <button type="button" class="btn" onclick={download} disabled={!shown.length}><Icon name="export" size={14} /> {t('Download CSV')}</button>
+    <button type="button" class="btn primary" onclick={onclose}>{t('Done')}</button>
   {/snippet}
 </Modal>
 

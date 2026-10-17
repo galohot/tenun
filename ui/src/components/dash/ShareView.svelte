@@ -4,6 +4,7 @@
   import type { Cell, QueryResult, Tile } from '../../lib/api';
   import { key, type Colors } from '../../lib/chart';
   import { cell, compact, full, OTHER_KEY, pctShare as pct, tip } from '../../lib/format';
+  import { t } from '../../lib/i18n';
 
   let {
     res,
@@ -49,11 +50,11 @@
       color: colorOf.get(key(r.raw))!,
     }));
     if (topOther) {
-      list.push({ raw: OTHER_KEY, folded: false, label: 'Other', value: topOther.value, share: total ? topOther.value / total : 0, color: colors.text2 });
+      list.push({ raw: OTHER_KEY, folded: false, label: t('Other'), value: topOther.value, share: total ? topOther.value / total : 0, color: colors.text2 });
     }
     if (rest.length) {
       const v = rest.reduce((s, r) => s + r.value, 0);
-      list.push({ raw: null, folded: true, label: `Other (${rest.length})`, value: v, share: total ? v / total : 0, color: colors.text2 });
+      list.push({ raw: null, folded: true, label: t('Other ({n})', { n: rest.length }), value: v, share: total ? v / total : 0, color: colors.text2 });
     }
     const top = Math.max(...list.map((r) => r.share), 0.0001);
     return { list, total, top };
@@ -67,9 +68,9 @@
 <div class="share" bind:clientHeight={h}>
   <div class="total">
     <span class="sum" title={tip(items.total, fmt)}>{full(items.total, fmt)}</span>
-    <span class="cap">Total</span>
+    <span class="cap">{t('Total')}</span>
   </div>
-  <div class="strip" role="img" aria-label="Share of the total">
+  <div class="strip" role="img" aria-label={t('Share of the total')}>
     {#each items.list as it}
       <span
         style:flex-grow={it.share}

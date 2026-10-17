@@ -8,6 +8,7 @@
   import { buildFilled, buildPoints, rampOf, STEPS, type Ramp } from '../../lib/charts/map';
   import { outlineFor, shapesFor, type Shapes } from '../../lib/geoassets';
   import { cell, measureLabel, type Named } from '../../lib/format';
+  import { t, tn } from '../../lib/i18n';
   import ChartView from './ChartView.svelte';
   import Icon from '../Icon.svelte';
 
@@ -66,7 +67,7 @@
 
   const fmt = $derived(tile.formats?.[0] ?? null);
   const format = (v: number) => cell(v, 'number', null, false, fmt);
-  const valueName = $derived(tile.measures[0] ? measureLabel(tile.measures[0], tables) : 'Rows');
+  const valueName = $derived(tile.measures[0] ? measureLabel(tile.measures[0], tables) : t('Rows'));
 
   // The places picked: a code, or the names of a place in the data.
   const pickedCodes = $derived.by(() => {
@@ -100,11 +101,11 @@
   {#if failed}
     <p class="msg"><Icon name="warning" size={14} /> {failed}</p>
   {:else if downloading}
-    <p class="msg"><Icon name="clock" size={14} /> Downloading the map of {countryName[country] ?? country} once…</p>
+    <p class="msg"><Icon name="clock" size={14} /> {t('Downloading the map of {country} once…', { country: countryName[country] ?? country })}</p>
   {:else if !points && !res.rows.length && !unmatchedCount}
-    <p class="msg">No places to show.</p>
+    <p class="msg">{t('No places to show.')}</p>
   {:else if built}
-    <div class="chart" role="img" aria-label="{tile.title || valueName} on a map: {res.rows.length} places">
+    <div class="chart" role="img" aria-label={t('{name} on a map: {n} places', { name: tile.title || valueName, n: res.rows.length })}>
       <ChartView
         option={built.option}
         onitem={onpick && !points ? (_s, i) => {
@@ -114,36 +115,36 @@
         } : undefined} />
     </div>
   {:else}
-    <p class="msg">Loading the map…</p>
+    <p class="msg">{t('Loading the map…')}</p>
   {/if}
   <footer>
     {#if ramp && !points && res.rows.length}
-      <div class="legend" aria-label="Colour scale from {format(ramp.min)} to {format(ramp.max)}">
+      <div class="legend" aria-label={t('Colour scale from {from} to {to}', { from: format(ramp.min), to: format(ramp.max) })}>
         <div class="bar">{#each { length: STEPS } as _, i (i)}<span style:background={steps[i]}></span>{/each}</div>
         <div class="ends"><span>{format(ramp.min)}</span>{#if ramp.kind === 'diverging'}<span>0</span>{/if}<span>{format(ramp.max)}</span></div>
       </div>
-      <span class="nodata"><span class="hatch"></span> No data</span>
+      <span class="nodata"><span class="hatch"></span> {t('No data')}</span>
     {/if}
     {#if unmatchedCount}
       <span class="chip-wrap">
         <button type="button" class="chip" aria-expanded={showUnmatched} onclick={() => (showUnmatched = !showUnmatched)}>
-          <Icon name="warning" size={11} /> {unmatchedCount} {unmatchedCount === 1 ? 'name' : 'names'} not on the map
+          <Icon name="warning" size={11} /> {tn('{n} name not on the map', '{n} names not on the map', unmatchedCount)}
         </button>
         {#if showUnmatched}
-          <div class="pop" role="dialog" aria-label="Names not on the map">
+          <div class="pop" role="dialog" aria-label={t('Names not on the map')}>
             <ul>
               {#each unmatched as u (u.name)}
                 <li><strong>{u.name}</strong>{#if u.hint}<span> {u.hint}</span>{/if}</li>
               {/each}
             </ul>
-            {#if unmatchedCount > unmatched.length}<p>And {unmatchedCount - unmatched.length} more.</p>{/if}
-            {#if onplaces}<button type="button" class="linkbtn" onclick={onplaces}>See the place names Tenun reads</button>{/if}
+            {#if unmatchedCount > unmatched.length}<p>{t('And {n} more.', { n: unmatchedCount - unmatched.length })}</p>{/if}
+            {#if onplaces}<button type="button" class="linkbtn" onclick={onplaces}>{t('See the place names Tenun reads')}</button>{/if}
           </div>
         {/if}
       </span>
     {/if}
     {#if res.geo?.dropped}
-      <span class="muted">{res.geo.dropped} {res.geo.dropped === 1 ? 'row has' : 'rows have'} no place on the earth</span>
+      <span class="muted">{tn('{n} row has no place on the earth', '{n} rows have no place on the earth', res.geo.dropped)}</span>
     {/if}
     {#if shapes}<span class="credit">{shapes.credit}</span>{/if}
   </footer>

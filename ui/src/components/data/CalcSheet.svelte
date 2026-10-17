@@ -4,6 +4,7 @@
   // and the first values. Nothing is saved until the formula is good.
   import { api, SetupRefused, type CalcColumn, type FormulaCheck, type FormulaError, type Table, type TableSetup } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
+  import { t } from '../../lib/i18n';
   import { cell } from '../../lib/format';
   import { nameProblem, typeWords } from '../../lib/formula';
   import { scopeFor } from '../../lib/formulaScope';
@@ -76,7 +77,7 @@
   });
 
   const show = (v: unknown) => {
-    if (v === null || v === undefined || v === '') return 'blank';
+    if (v === null || v === undefined || v === '') return t('blank');
     return check.reply?.dtype === 'number' ? cell(v as number, 'number') : String(v);
   };
 
@@ -90,7 +91,7 @@
     if (at < 0) list.push(col);
     else list[at] = col;
     saving = true;
-    app.busy = 'Saving';
+    app.busy = t('Saving');
     try {
       app.snap = await api.setTableSetup(table.id, withCalc(setup, list));
       onclose();
@@ -104,7 +105,7 @@
   }
 </script>
 
-<Modal title={editing === undefined ? `Add a column to ${table.label}` : `Formula of ${editing}`} width={560} {onclose}>
+<Modal title={editing === undefined ? t('Add a column to {table}', { table: table.label }) : t('Formula of {name}', { name: editing })} width={560} {onclose}>
   <form
     id="calc-form"
     onsubmit={(e) => {
@@ -112,40 +113,40 @@
       save();
     }}>
     <label class="row">
-      <span class="label">Name</span>
-      <input class="field" bind:value={name} disabled={editing !== undefined} placeholder="Revenue incl. tax" autocomplete="off" />
+      <span class="label">{t('Name')}</span>
+      <input class="field" bind:value={name} disabled={editing !== undefined} placeholder={t('Revenue incl. tax')} autocomplete="off" />
     </label>
     {#if editing !== undefined}
-      <p class="note">The name stays, so the tiles that use it keep working. To show another name, choose Rename in the column menu.</p>
+      <p class="note">{t('The name stays, so the tiles that use it keep working. To show another name, choose Rename in the column menu.')}</p>
     {:else if problem && name.trim()}
       <p class="bad">{problem}</p>
     {/if}
 
     <div class="row">
       <div class="head">
-        <span class="label" id="calc-formula-label">{sql ? 'SQL expression' : 'Formula'}</span>
+        <span class="label" id="calc-formula-label">{sql ? t('SQL expression') : t('Formula')}</span>
         {#if app.settings?.advanced}
-          <button type="button" class="linkbtn" onclick={() => (sql = !sql)}>{sql ? 'Use a formula instead' : 'Use SQL instead'}</button>
+          <button type="button" class="linkbtn" onclick={() => (sql = !sql)}>{sql ? t('Use a formula instead') : t('Use SQL instead')}</button>
         {/if}
       </div>
       <FormulaField
         bind:value={formula}
         {scope}
         {error}
-        label={sql ? 'SQL expression' : 'Formula'}
+        label={sql ? t('SQL expression') : t('Formula')}
         placeholder={sql ? '"Total sales" / 2' : '[amount] * 1.11'}
         oninput={() => (refused = null)} />
       <div class="result" aria-live="polite">
         {#if check.state === 'idle'}
           <p class="note">
             {#if sql}
-              One DuckDB expression over the columns of this table. Put a name with spaces in double quotes. It cannot read other tables or files.
+              {t('One DuckDB expression over the columns of this table. Put a name with spaces in double quotes. It cannot read other tables or files.')}
             {:else}
-              Write it as in Excel. A column is in square brackets, like [amount]. Type [ to see the columns and related tables.
+              {t('Write it as in Excel. A column is in square brackets, like [amount]. Type [ to see the columns and related tables.')}
             {/if}
           </p>
         {:else if check.state === 'checking'}
-          <p class="note">Checking…</p>
+          <p class="note">{t('Checking…')}</p>
         {:else if error}
           <p class="bad"><Icon name="warning" size={13} /> {error.message}</p>
         {:else if check.reply?.ok}
@@ -156,20 +157,20 @@
             </span>
           </div>
           {#if usesToday}
-            <p class="note">This column uses today's date. It is as of the day the table was loaded or refreshed.</p>
+            <p class="note">{t("This column uses today's date. It is as of the day the table was loaded or refreshed.")}</p>
           {/if}
         {/if}
       </div>
     </div>
 
     <label class="row">
-      <span class="label">Description <em>(optional)</em></span>
-      <input class="field" bind:value={description} placeholder="What does this column hold?" autocomplete="off" />
+      <span class="label">{t('Description')} <em>{t('(optional)')}</em></span>
+      <input class="field" bind:value={description} placeholder={t('What does this column hold?')} autocomplete="off" />
     </label>
   </form>
   {#snippet footer()}
-    <button type="button" class="btn" onclick={onclose}>Cancel</button>
-    <button type="submit" form="calc-form" class="btn primary" disabled={!valid}>{editing === undefined ? 'Add column' : 'Save formula'}</button>
+    <button type="button" class="btn" onclick={onclose}>{t('Cancel')}</button>
+    <button type="submit" form="calc-form" class="btn primary" disabled={!valid}>{editing === undefined ? t('Add column') : t('Save formula')}</button>
   {/snippet}
 </Modal>
 

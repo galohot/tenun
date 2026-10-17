@@ -6,6 +6,7 @@ import type { Cell } from '../api';
 import { getLocale, numberFormatter } from '../format';
 import { axisCommon, esc, key, makeLabel, tooltipBase, type BuildArgs, type Built } from './common';
 import { farFromZero } from './math';
+import { t, tn } from '../i18n';
 
 type Api = {
   value: (i: number) => number;
@@ -38,7 +39,7 @@ export function buildBox({ res, tile, colors: c, selected, width }: BuildArgs): 
 
   const box = {
     type: 'custom',
-    name: 'Spread',
+    name: t('Spread'),
     z: 3,
     // The data is [place, lower whisker, q1, median, q3, upper whisker]; the axis takes its range from them.
     encode: { x: [1, 2, 3, 4, 5], y: 0 },
@@ -70,7 +71,7 @@ export function buildBox({ res, tile, colors: c, selected, width }: BuildArgs): 
   };
   const outliers = {
     type: 'scatter',
-    name: 'Outliers',
+    name: t('Outliers'),
     z: 4,
     symbol: 'circle',
     symbolSize: 7,
@@ -84,10 +85,10 @@ export function buildBox({ res, tile, colors: c, selected, width }: BuildArgs): 
     const shown = dots.filter((d) => key(d[0]) === key(r[0])).length;
     const row = (name: string, v: Cell | undefined) => `${esc(name)} <b>${esc(fmt.tip(num(v)))}</b>`;
     return (
-      `<b>${esc(names[i])}</b> · ${esc(String(num(r[8])))} values<br/>` +
-      [row('Lowest', r[1]), row('Lower quartile', r[2]), row('Median', r[3]), row('Upper quartile', r[4]), row('Highest', r[5])].join('<br/>') +
-      `<br/>Half of the values lie between ${esc(fmt.tip(num(r[2])))} and ${esc(fmt.tip(num(r[4])))}.` +
-      (shown ? `<br/>${shown} ${shown === 1 ? 'value is' : 'values are'} far from the rest.` : '')
+      `<b>${esc(names[i])}</b> · ${esc(t('{n} values', { n: String(num(r[8])) }))}<br/>` +
+      [row(t('Lowest'), r[1]), row(t('Lower quartile'), r[2]), row(t('Median'), r[3]), row(t('Upper quartile'), r[4]), row(t('Highest'), r[5])].join('<br/>') +
+      `<br/>${esc(t('Half of the values lie between {low} and {high}.', { low: fmt.tip(num(r[2])), high: fmt.tip(num(r[4])) }))}` +
+      (shown ? `<br/>${esc(tn('{n} value is far from the rest.', '{n} values are far from the rest.', shown))}` : '')
     );
   };
 
@@ -100,7 +101,7 @@ export function buildBox({ res, tile, colors: c, selected, width }: BuildArgs): 
       formatter: (p: { seriesType: string; dataIndex: number; data: { group?: Cell; value: number[] } }) => {
         if (p.seriesType === 'scatter') {
           const g = p.data.group;
-          return `<b>${esc(label(g as Cell))}</b><br/>${esc(fmt.tip(p.data.value[0]))}<br/>Far from the rest of this group`;
+          return `<b>${esc(label(g as Cell))}</b><br/>${esc(fmt.tip(p.data.value[0]))}<br/>${esc(t('Far from the rest of this group'))}`;
         }
         return words(res.rows[p.dataIndex], p.dataIndex);
       },
@@ -124,5 +125,5 @@ export function buildBox({ res, tile, colors: c, selected, width }: BuildArgs): 
     },
     series: [box, ...(dots.length ? [outliers] : [])],
   };
-  return { option, categories: groups, horizontal: true, note: far ? 'The axis does not start at zero.' : null };
+  return { option, categories: groups, horizontal: true, note: far ? t('The axis does not start at zero.') : null };
 }

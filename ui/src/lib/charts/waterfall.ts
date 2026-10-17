@@ -6,6 +6,7 @@ import { isPart, type Cell } from '../api';
 import { getLocale, numberFormatter } from '../format';
 import { axisCommon, esc, key, makeLabel, tooltipBase, type BuildArgs, type Built } from './common';
 import { labelledSteps, waterfallSteps, type Step } from './math';
+import { t } from '../i18n';
 
 // How the bars read: ink for levels, the good colour for a step that helps and the bad colour for a
 // step that hurts. Which way is good follows `tile.better`, like a number tile.
@@ -56,7 +57,7 @@ export function buildWaterfall({ res, tile, colors: c, selected, width }: BuildA
   const values = res.rows.map((r) => (typeof r[nd] === 'number' ? (r[nd] as number) : null));
   const steps = waterfallSteps(values, byDate);
   const cats: (Cell | undefined)[] = steps.map((s) => (s.row === null ? undefined : res.rows[s.row][0]));
-  const names = steps.map((s, i) => (s.row === null ? (byDate ? 'End' : 'Total') : label(cats[i] as Cell)));
+  const names = steps.map((s, i) => (s.row === null ? (byDate ? t('End') : t('Total')) : label(cats[i] as Cell)));
   // Auto: the start, end and total bars and the biggest steps. All: every bar, where its number fits
   // (the layout leaves out a number with no free place). None: no numbers.
   const showNumber =
@@ -145,9 +146,11 @@ export function buildWaterfall({ res, tile, colors: c, selected, width }: BuildA
             const s = own[p.dataIndex];
             const head = `<b>${esc(names[s.index])}</b><br/>`;
             if (s.kind === 'up' || s.kind === 'down') {
-              return `${head}${s.kind === 'up' ? 'Up' : 'Down'} ${esc(fmt.tip(Math.abs(s.value)))}<br/>From ${esc(fmt.tip(s.from))} to ${esc(fmt.tip(s.to))}`;
+              const amount = fmt.tip(Math.abs(s.value));
+              const move = s.kind === 'up' ? t('Up {amount}', { amount }) : t('Down {amount}', { amount });
+              return `${head}${esc(move)}<br/>${esc(t('From {from} to {to}', { from: fmt.tip(s.from), to: fmt.tip(s.to) }))}`;
             }
-            return `${head}${s.kind === 'flat' ? 'No change' : esc(fmt.tip(s.value))}`;
+            return `${head}${s.kind === 'flat' ? esc(t('No change')) : esc(fmt.tip(s.value))}`;
           },
         },
         renderItem: (params: { dataIndex: number; coordSys: Coord }, api: Api) => {
@@ -188,9 +191,9 @@ export function buildWaterfall({ res, tile, colors: c, selected, width }: BuildA
     };
   };
 
-  const up = series('Increase', ['up']);
-  const down = series('Decrease', ['down']);
-  const ink = series(byDate ? 'Start and end' : 'Total', ['start', 'end', 'total', 'flat']);
+  const up = series(t('Increase'), ['up']);
+  const down = series(t('Decrease'), ['down']);
+  const ink = series(byDate ? t('Start and end') : t('Total'), ['start', 'end', 'total', 'flat']);
   const present = [
     { s: ink, color: c.text, opacity: INK_OPACITY },
     { s: up, color: good === 'up' ? c.good : c.bad },

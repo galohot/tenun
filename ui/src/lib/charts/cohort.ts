@@ -1,6 +1,8 @@
 // The grid of a cohort table from the engine's rows `[cohort, periods since the start, value, size]`:
 // one row for each cohort, one column for each period since it started. A cell the cohort has not
-// reached yet stays empty. Pure code with no imports at run time.
+// reached yet stays empty. Pure code; its only import at run time is the words.
+
+import { t } from '../i18n.ts';
 
 export interface CohortRow {
   /** The first period of the cohort, as the engine writes it ("2026-01-01"). */
@@ -52,14 +54,14 @@ export function cohortRange(grid: CohortGrid): { lo: number; hi: number } | null
 export function periodWord(grain: string | null | undefined): string {
   switch (grain) {
     case 'year':
-      return 'Year';
+      return t('Year');
     case 'quarter':
-      return 'Quarter';
+      return t('Quarter');
     case 'week':
-      return 'Week';
+      return t('Week');
     case 'day':
-      return 'Day';
+      return t('Day');
     default:
-      return 'Month';
+      return t('Month');
   }
 }

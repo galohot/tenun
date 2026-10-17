@@ -11,6 +11,7 @@
   import { advancedOn } from '../../lib/tiers';
   import Icon from '../Icon.svelte';
   import Modal from '../Modal.svelte';
+  import { parts, t, tn } from '../../lib/i18n';
 
   let { dash, onclose }: { dash: Dashboard; onclose: () => void } = $props();
 
@@ -93,18 +94,18 @@
     await new Promise((r) => setTimeout(r, 400)); // let the settings save first
     app.snap = await api.cloudPassword(forSite ? { site: true } : { dashboard: dash.id }, password);
     password = '';
-    if (!quiet) app.toast(published ? 'Password set. Publish to use it.' : 'Password set');
+    if (!quiet) app.toast(published ? t('Password set. Publish to use it.') : t('Password set'));
   }
 
   async function publish() {
-    busy = 'Publishing…';
+    busy = t('Publishing…');
     try {
       if (ps.access === 'password' && password) await setPassword(true);
       save();
       await new Promise((r) => setTimeout(r, 400)); // let the settings save first
       const r = forSite ? await api.publishSite() : await api.publish(dash.id);
       app.snap = r.snapshot;
-      app.toast(forSite ? 'Site published' : 'Published');
+      app.toast(forSite ? t('Site published') : t('Published'));
     } catch (e) {
       app.error(e);
       app.refresh();
@@ -114,13 +115,13 @@
   }
 
   async function unpublish() {
-    if (!confirm(`Remove this ${forSite ? 'site' : 'dashboard'} from tenun.cloud? Its link stops working.`)) return;
-    busy = 'Removing…';
+    if (!confirm(forSite ? t('Remove this site from tenun.cloud? Its link stops working.') : t('Remove this dashboard from tenun.cloud? Its link stops working.'))) return;
+    busy = t('Removing…');
     try {
       app.snap = forSite ? await api.unpublishSite() : await api.unpublish(dash.id);
       ps = { ...defaults };
       invitesText = '';
-      app.toast('Removed from tenun.cloud');
+      app.toast(t('Removed from tenun.cloud'));
     } catch (e) {
       app.error(e);
     } finally {
@@ -131,66 +132,65 @@
   async function copy() {
     if (!current?.url) return;
     await navigator.clipboard.writeText(current.url);
-    app.toast('Link copied');
+    app.toast(t('Link copied'));
   }
 
   /** The code another site puts in its page to show this one. */
   const iframe = $derived(current?.url ? `<iframe src="${current.url}" width="100%" height="720" style="border:0"></iframe>` : '');
   async function copyEmbed() {
     await navigator.clipboard.writeText(iframe);
-    app.toast('Code copied');
+    app.toast(t('Code copied'));
   }
 
   const when = (iso?: string) => {
     if (!iso) return '';
     const s = (Date.now() - Date.parse(iso)) / 1000;
-    if (s < 90) return 'just now';
-    if (s < 5400) return `${Math.round(s / 60)} minutes ago`;
+    if (s < 90) return t('just now');
+    if (s < 5400) return t('{n} minutes ago', { n: Math.round(s / 60) });
     return dateTimeMedium(iso);
   };
 
   const everyText: Record<PublishSettings['every'], string> = {
-    manual: 'Only when you click Publish',
-    change: 'When the data changes (at most hourly)',
-    hour: 'Every hour',
-    day: 'Every day',
+    manual: t('Only when you click Publish'),
+    change: t('When the data changes (at most hourly)'),
+    hour: t('Every hour'),
+    day: t('Every day'),
   };
 </script>
 
-<Modal title="Publish to tenun.cloud" {onclose} width={560}>
+<Modal title={t('Publish to tenun.cloud')} {onclose} width={560}>
   {#if !cloud?.connected}
     <div class="connect">
       <Icon name="globe" size={28} />
       {#if app.connecting}
-        <h3>Approve in your browser</h3>
-        <p class="muted">A page opened at tenun.cloud. Sign in and approve this code:</p>
+        <h3>{t('Approve in your browser')}</h3>
+        <p class="muted">{t('A page opened at tenun.cloud. Sign in and approve this code:')}</p>
         <p class="code">{app.connecting.code}</p>
-        <p class="muted small">Not open? <a href={app.connecting.url} target="_blank" rel="noopener">Open it here</a>. This window updates by itself.</p>
+        <p class="muted small">{#each parts(t('Not open? {link}. This window updates by itself.')) as p}{#if p.slot === 'link'}<a href={app.connecting.url} target="_blank" rel="noopener">{t('Open it here')}</a>{:else}{p.text}{/if}{/each}</p>
       {:else}
-        <h3>Share dashboards online</h3>
+        <h3>{t('Share dashboards online')}</h3>
         <p class="muted">
-          tenun.cloud gives this dashboard a private link. Tenun builds it on this computer and sends only the
-          results — not your files, and never your database passwords.
+          {t('tenun.cloud gives this dashboard a private link. Tenun builds it on this computer and sends only the results — not your files, and never your database passwords.')}
         </p>
-        <button class="btn primary" onclick={connect}>Connect to tenun.cloud</button>
-        <p class="muted small">Free: up to 3 published dashboards and sites.</p>
+        <button class="btn primary" onclick={connect}>{t('Connect to tenun.cloud')}</button>
+        <p class="muted small">{t('Free: up to 3 published dashboards and sites.')}</p>
       {/if}
     </div>
   {:else}
     {#if site.on}
-      <div class="targets" role="radiogroup" aria-label="What to publish">
+      <div class="targets" role="radiogroup" aria-label={t('What to publish')}>
         <label class="target" class:on={target === 'site'}>
           <input type="radio" name="target" checked={target === 'site'} onchange={() => choose('site')} />
           <span>
-            <b>Publish the whole site</b>
-            <span class="muted small">{site.title} · {pageCount === 1 ? '1 page' : `${pageCount} pages`}, with its navigation{site.publish?.url ? ' · published' : ''}</span>
+            <b>{t('Publish the whole site')}</b>
+            <span class="muted small">{site.title} · {tn('{n} page, with its navigation', '{n} pages, with its navigation', pageCount)}{site.publish?.url ? ` · ${t('published')}` : ''}</span>
           </span>
         </label>
         <label class="target" class:on={target === 'page'}>
           <input type="radio" name="target" checked={target === 'page'} onchange={() => choose('page')} />
           <span>
-            <b>Publish this page</b>
-            <span class="muted small">{dash.title || 'Untitled'} on its own{dash.publish?.url ? ' · published' : ''}</span>
+            <b>{t('Publish this page')}</b>
+            <span class="muted small">{t('{page} on its own', { page: dash.title || t('Untitled') })}{dash.publish?.url ? ` · ${t('published')}` : ''}</span>
           </span>
         </label>
       </div>
@@ -200,49 +200,48 @@
         <Icon name="globe" />
         <div>
           <a href={current.url} target="_blank" rel="noopener">{current.url.replace(/^https?:\/\//, '')}</a>
-          <p class="muted small">Published {when(current.last)}</p>
+          <p class="muted small">{t('Published {when}', { when: when(current.last) })}</p>
         </div>
-        <button class="btn" onclick={copy}><Icon name="link" size={14} /> Copy link</button>
+        <button class="btn" onclick={copy}><Icon name="link" size={14} /> {t('Copy link')}</button>
       </div>
     {/if}
     {#if tooBig}
-      <p class="err"><Icon name="warning" size={14} /> A site on tenun.cloud holds up to {CLOUD_SITE_PAGES} pages; this one has {pageCount}. Leave some pages out of the workspace, or export the site instead.</p>
+      <p class="err"><Icon name="warning" size={14} /> {t('A site on tenun.cloud holds up to {max} pages; this one has {n}. Leave some pages out of the workspace, or export the site instead.', { max: CLOUD_SITE_PAGES, n: pageCount })}</p>
     {:else if current?.error}
       <p class="err"><Icon name="warning" size={14} /> {current.error}</p>
     {/if}
 
     <div class="sec">
-      <span class="label">Who can see it</span>
-      <label class="radio"><input type="radio" bind:group={ps.access} value="link" onchange={save} /> Anyone with the link</label>
-      <label class="radio"><input type="radio" bind:group={ps.access} value="password" onchange={save} /> Anyone with the link and the password</label>
+      <span class="label">{t('Who can see it')}</span>
+      <label class="radio"><input type="radio" bind:group={ps.access} value="link" onchange={save} /> {t('Anyone with the link')}</label>
+      <label class="radio"><input type="radio" bind:group={ps.access} value="password" onchange={save} /> {t('Anyone with the link and the password')}</label>
       {#if ps.access === 'password'}
         <div class="pw">
           <input
             class="field"
             type="password"
-            aria-label="Password"
-            placeholder={hasPassword ? 'Type a new password to change it' : 'Password, 4 characters or more'}
+            aria-label={t('Password')}
+            placeholder={hasPassword ? t('Type a new password to change it') : t('Password, 4 characters or more')}
             autocomplete="new-password"
             maxlength="200"
             bind:value={password}
             onkeydown={(e) => e.key === 'Enter' && setPassword().catch((err) => app.error(err))}
           />
-          <button class="btn" onclick={() => setPassword().catch((err) => app.error(err))} disabled={!passwordOk || !!busy}>{hasPassword ? 'Change' : 'Set password'}</button>
+          <button class="btn" onclick={() => setPassword().catch((err) => app.error(err))} disabled={!passwordOk || !!busy}>{hasPassword ? t('Change') : t('Set password')}</button>
         </div>
         <p class="muted small">
-          {hasPassword ? 'A password is set. ' : ''}Tenun keeps it on this computer, not in the .tenun file. tenun.cloud keeps only a
-          hash of it (a form it cannot turn back into the password). Give the password to the people who may see it.
+          {hasPassword ? `${t('A password is set.')} ` : ''}{t('Tenun keeps it on this computer, not in the .tenun file. tenun.cloud keeps only a hash of it (a form it cannot turn back into the password). Give the password to the people who may see it.')}
         </p>
       {/if}
-      <label class="radio"><input type="radio" bind:group={ps.access} value="invited" onchange={save} /> Only people I invite (they sign in with Google)</label>
+      <label class="radio"><input type="radio" bind:group={ps.access} value="invited" onchange={save} /> {t('Only people I invite (they sign in with Google)')}</label>
       {#if ps.access === 'invited'}
-        <textarea class="field area" rows="3" placeholder="Email addresses, one per line" bind:value={invitesText} onblur={save}></textarea>
+        <textarea class="field area" rows="3" placeholder={t('Email addresses, one per line')} bind:value={invitesText} onblur={save}></textarea>
       {/if}
     </div>
 
     {#if advancedOn() || ps.embed}
       <div class="sec">
-        <span class="label">Embed</span>
+        <span class="label">{t('Embed')}</span>
         <label class="radio">
           <input
             type="checkbox"
@@ -253,19 +252,19 @@
               save();
             }}
           />
-          Allow embedding in other sites
+          {t('Allow embedding in other sites')}
         </label>
         {#if ps.access === 'invited'}
-          <p class="muted small">A {forSite ? 'site' : 'dashboard'} for invited people cannot be embedded: their Google sign-in does not work inside another site.</p>
+          <p class="muted small">{forSite ? t('A site for invited people cannot be embedded: their Google sign-in does not work inside another site.') : t('A dashboard for invited people cannot be embedded: their Google sign-in does not work inside another site.')}</p>
         {:else if ps.embed}
           {#if iframe}
             <div class="embed">
               <code>{iframe}</code>
-              <button class="btn" onclick={copyEmbed}>Copy code</button>
+              <button class="btn" onclick={copyEmbed}>{t('Copy code')}</button>
             </div>
-            {#if ps.access === 'password'}<p class="muted small">Inside the other site, people type the password first.</p>{/if}
+            {#if ps.access === 'password'}<p class="muted small">{t('Inside the other site, people type the password first.')}</p>{/if}
           {:else}
-            <p class="muted small">Publish first. The code to put in the other site's page shows here.</p>
+            <p class="muted small">{t("Publish first. The code to put in the other site's page shows here.")}</p>
           {/if}
         {/if}
       </div>
@@ -273,52 +272,52 @@
 
     {#if advancedOn() || (ps.updates ?? 'off') !== 'off'}
       <div class="sec">
-        <span class="label">Email updates</span>
+        <span class="label">{t('Email updates')}</span>
         <select class="field" value={ps.updates ?? 'off'} onchange={(e) => ((ps.updates = e.currentTarget.value as PublishSettings['updates']), save())}>
-          <option value="off">Off</option>
-          <option value="each">After each update</option>
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly, on Monday</option>
+          <option value="off">{t('Off')}</option>
+          <option value="each">{t('After each update')}</option>
+          <option value="daily">{t('Daily')}</option>
+          <option value="weekly">{t('Weekly, on Monday')}</option>
         </select>
         {#if (ps.updates ?? 'off') !== 'off'}
           <p class="muted small">
-            The values of the number tiles and the link go to you{ps.access === 'invited' ? ', and to invited people who ask for them on the page' : ''}:
-            at most one email a day for each person, each with a link to stop them.{cloud?.emailUpdates
+            {ps.access === 'invited'
+              ? t('The values of the number tiles and the link go to you, and to invited people who ask for them on the page: at most one email a day for each person, each with a link to stop them.')
+              : t('The values of the number tiles and the link go to you: at most one email a day for each person, each with a link to stop them.')}{cloud?.emailUpdates
               ? ''
-              : ' tenun.cloud does not send emails yet. Your choice is kept, and the emails start when it does.'}
+              : ` ${t('tenun.cloud does not send emails yet. Your choice is kept, and the emails start when it does.')}`}
           </p>
         {/if}
       </div>
     {/if}
 
     <div class="sec">
-      <span class="label">Keep it updated</span>
+      <span class="label">{t('Keep it updated')}</span>
       <select class="field" bind:value={ps.every} onchange={save}>
-        {#each Object.entries(everyText) as [k, t]}<option value={k}>{t}</option>{/each}
+        {#each Object.entries(everyText) as [k, label]}<option value={k}>{label}</option>{/each}
       </select>
       {#if ps.every !== 'manual'}
         <p class="muted small">
-          Updates run while Tenun is open on this computer. To keep updating when it is closed, run
-          <code>tenun agent "{app.snap?.path ?? 'your.tenun'}"</code> on a computer that stays on.
+          {#each parts(t('Updates run while Tenun is open on this computer. To keep updating when it is closed, run {command} on a computer that stays on.')) as p}{#if p.slot === 'command'}<code>tenun agent "{app.snap?.path ?? 'your.tenun'}"</code>{:else}{p.text}{/if}{/each}
         </p>
       {/if}
     </div>
 
     <p class="muted small who">
-      Signed in as {cloud.email}{cloud.usage ? ` · ${cloud.usage.dashboards} of ${cloud.usage.limit} free dashboards and sites used` : ''}.
-      Updates are labelled “from {ps.source || cloud.source}”.
-      <button class="linkbtn" onclick={async () => { await api.cloudDisconnect(); app.cloud = await api.cloud(); }}>Disconnect</button>
+      {t('Signed in as {email}', { email: cloud.email ?? '' })}{cloud.usage ? ` · ${t('{used} of {limit} free dashboards and sites used', { used: cloud.usage.dashboards, limit: cloud.usage.limit })}` : ''}.
+      {t('Updates are labelled “from {source}”.', { source: ps.source || cloud.source })}
+      <button class="linkbtn" onclick={async () => { await api.cloudDisconnect(); app.cloud = await api.cloud(); }}>{t('Disconnect')}</button>
     </p>
   {/if}
 
   {#snippet footer()}
     {#if published}
-      <button class="btn danger" onclick={unpublish} disabled={!!busy}>Remove</button>
+      <button class="btn danger" onclick={unpublish} disabled={!!busy}>{t('Remove')}</button>
     {/if}
     <span class="spacer"></span>
-    <button class="btn" onclick={onclose}>Close</button>
+    <button class="btn" onclick={onclose}>{t('Close')}</button>
     {#if cloud?.connected}
-      <button class="btn primary" onclick={publish} disabled={!!busy || tooBig || needsPassword} title={needsPassword ? 'Type a password first' : undefined}>{busy ?? (published ? 'Publish now' : forSite ? 'Publish site' : 'Publish')}</button>
+      <button class="btn primary" onclick={publish} disabled={!!busy || tooBig || needsPassword} title={needsPassword ? t('Type a password first') : undefined}>{busy ?? (published ? t('Publish now') : forSite ? t('Publish site') : t('Publish'))}</button>
     {/if}
   {/snippet}
 </Modal>

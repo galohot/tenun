@@ -4,7 +4,8 @@
 import { cell, getLocale, measureLabel, numberFormatter, OTHER_KEY } from '../format';
 import { formatOf } from '../measures';
 import { tipHtml, tipKey } from '../tips';
-import { esc, key, slotsFor, type BuildArgs, type Built } from './common';
+import { esc, key, lastTwelve, slotsFor, type BuildArgs, type Built } from './common';
+import { t } from '../i18n';
 import { pieOption, slicesOf, type Slice } from './pieparts';
 
 export { DONUT_HOLE, INSIDE_AT, LIST_BELOW, LIST_TILE, centre, hiddenLabels, labelInside, shareText, type Slice } from './pieparts';
@@ -22,7 +23,7 @@ export function buildPie(a: PieArgs): Built & { slices: Slice[] } {
   const fmt = tile.formats?.[0] ?? null;
   const format = (v: number) => cell(v, 'number', null, false, fmt);
   const short = (v: number) => cell(v, 'number', null, true, fmt);
-  const slices = slicesOf(res.rows, (v) => (v === OTHER_KEY ? 'Other' : cell(v, dtype, tile.dims[0]?.grain ?? null)), (keys) => slotsFor(tile, keys));
+  const slices = slicesOf(res.rows, (v) => (v === OTHER_KEY ? t('Other') : cell(v, dtype, tile.dims[0]?.grain ?? null)), (keys) => slotsFor(tile, keys));
   const option = pieOption({
     slices,
     colors,
@@ -31,7 +32,7 @@ export function buildPie(a: PieArgs): Built & { slices: Slice[] } {
     picked: a.selected?.length ? new Set(a.selected.map((v) => key(v))) : null,
     format,
     short,
-    measure: tile.measures[0] ? measureLabel(tile.measures[0], a.tables ?? []) : 'Rows',
+    measure: tile.measures[0] ? measureLabel(tile.measures[0], a.tables ?? []) : t('Rows'),
     hovered: a.hovered ?? null,
     loc: getLocale(),
     esc,
@@ -43,7 +44,7 @@ export function buildPie(a: PieArgs): Built & { slices: Slice[] } {
             res.tips?.[tipKey([raw])],
             (tile.tooltip?.extra ?? []).map((m) => measureLabel(m, a.tables ?? [])),
             (tile.tooltip?.extra ?? []).map((m) => numberFormatter(formatOf({ measures: [m] }, 0)).tip),
-            tile.tooltip?.trend ? `Last 12 ${tile.tooltip.trend.grain === 'week' ? 'weeks' : tile.tooltip.trend.grain === 'quarter' ? 'quarters' : tile.tooltip.trend.grain === 'day' ? 'days' : 'months'}` : '',
+            lastTwelve(tile.tooltip?.trend),
             color,
             colors.text2,
             esc,

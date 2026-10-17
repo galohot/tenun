@@ -4,7 +4,8 @@
 import type { Cell } from '../api';
 import { cell, getLocale, measureLabel, numberFormatter } from '../format';
 import { bubbleSamples, bubbleSize } from './bubble';
-import { axisCommon, esc, key, OTHER, slotsFor, tooltipBase, type BuildArgs, type Built } from './common';
+import { axisCommon, esc, key, lastTwelve, slotsFor, tooltipBase, type BuildArgs, type Built } from './common';
+import { t } from '../i18n';
 import { axisSpan, levelMarkLine, NAME_ROW, needsSecondRow, resolveLevels, wantsTrend, type Level } from './guides';
 import { fitAt, trendFit, trendSentence } from './lines';
 import { farFromZero } from './math';
@@ -60,7 +61,7 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
     ? kept.map(([, g], i) => ({ name: colourLabel(g.raw), color: c.series[slots[i] % c.series.length] }))
     : [{ name: '', color: c.series[0] }];
   const hasOther = ranked.length > kept.length;
-  if (hasOther) groups.push({ name: OTHER, color: c.text2 });
+  if (hasOther) groups.push({ name: t('Other'), color: c.text2 });
 
   // More in the tooltip (v5 build 10): each dot's group key, as the engine keys its tips (the first `nd` values).
   type Dot = { value: [number, number]; name: string; group: string; size: number | null; symbolSize?: number; itemStyle: { opacity: number }; tip: string };
@@ -112,7 +113,7 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
   const markLine = across || up ? { ...(up ?? across!), data: [...(up?.data ?? []), ...(across?.data ?? [])] } : null;
   // The trend line is a straight line through the dots (least squares on across and up).
   const fit = wantsTrend(tile.lines) ? trendFit(ys, xs) : null;
-  const trendTip = fit ? trendSentence(fit, fy.short(Math.abs(fit.slope)), `for each 1 more of ${xName}`) : '';
+  const trendTip = fit ? trendSentence(fit, fy.short(Math.abs(fit.slope)), t('for each 1 more of {name}', { name: xName })) : '';
   const [x0, x1] = [Math.min(...xs), Math.max(...xs)];
   // Unseen series carry the lines. Their points keep both axes wide enough for every line.
   const reach: number[][] = [
@@ -135,8 +136,8 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
               tooltip: { trigger: 'item', formatter: () => esc(trendTip) },
               data: [
                 [
-                  { coord: [x0, fitAt(fit, x0)], name: 'Trend' },
-                  { coord: [x1, fitAt(fit, x1)], name: 'Trend', label: { show: true, formatter: 'Trend', position: 'end', color: c.text2, fontSize: 11, backgroundColor: c.surface, padding: [1, 4], borderRadius: 3 } },
+                  { coord: [x0, fitAt(fit, x0)], name: t('Trend') },
+                  { coord: [x1, fitAt(fit, x1)], name: t('Trend'), label: { show: true, formatter: t('Trend'), position: 'end', color: c.text2, fontSize: 11, backgroundColor: c.surface, padding: [1, 4], borderRadius: 3 } },
                 ],
               ],
             },
@@ -171,7 +172,7 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
           res.tips?.[p.data.tip],
           (tile.tooltip?.extra ?? []).map((m) => measureLabel(m, tables)),
           (tile.tooltip?.extra ?? []).map((m) => numberFormatter(formatOf({ measures: [m] }, 0)).tip),
-          tile.tooltip?.trend ? `Last 12 ${tile.tooltip.trend.grain === 'week' ? 'weeks' : tile.tooltip.trend.grain === 'quarter' ? 'quarters' : tile.tooltip.trend.grain === 'day' ? 'days' : 'months'}` : '',
+          lastTwelve(tile.tooltip?.trend),
           c.series[0],
           c.text2,
           esc,
@@ -198,8 +199,8 @@ export function buildScatter({ res, tile, colors: c, selected, width, height, ta
   };
 
   const notes = [];
-  if (xFar || yFar) notes.push('Axes do not start at zero.');
-  if (res.rows.length >= DOT_LIMIT) notes.push(`Only the first ${DOT_LIMIT.toLocaleString('en-US')} dots are shown.`);
+  if (xFar || yFar) notes.push(t('Axes do not start at zero.'));
+  if (res.rows.length >= DOT_LIMIT) notes.push(t('Only the first {n} dots are shown.', { n: DOT_LIMIT.toLocaleString('en-US') }));
   const samples = bubbleSamples(sizeMax);
   return {
     option,

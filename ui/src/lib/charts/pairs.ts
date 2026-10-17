@@ -1,5 +1,7 @@
 // The numbers behind a compare chart: which way a pair moved, by how much, and in what words. Used
-// for the tooltips and for the colour of a slope line. Pure code with no imports at run time.
+// for the tooltips and for the colour of a slope line. Pure code; its only import at run time is the words.
+
+import { t } from '../i18n.ts';
 
 export type Move = 'up' | 'down' | 'flat' | 'unknown';
 
@@ -21,13 +23,13 @@ export function isGood(move: Move, better: 'up' | 'down' | undefined): boolean |
 export function moveWords(move: Move): { glyph: string; word: string } {
   switch (move) {
     case 'up':
-      return { glyph: '▲', word: 'rose' };
+      return { glyph: '▲', word: t('rose') };
     case 'down':
-      return { glyph: '▼', word: 'fell' };
+      return { glyph: '▼', word: t('fell') };
     case 'flat':
-      return { glyph: '–', word: 'did not change' };
+      return { glyph: '–', word: t('did not change') };
     default:
-      return { glyph: '', word: 'has no value for one side' };
+      return { glyph: '', word: t('has no value for one side') };
   }
 }
 

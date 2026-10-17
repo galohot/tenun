@@ -3,6 +3,7 @@
 
 import { api, type DrillState, type Grain, type QueryResult, type Tile } from './api';
 import { dayMonth, periodName } from './format';
+import { t } from './i18n';
 import type { DashFilter } from './tiles';
 
 /** One tile; `drill` is where the reader drilled to (v5 build 01). */
@@ -18,5 +19,5 @@ function parse(s: string): Date {
 /** "* October 2026 has data up to Oct 14." for a chart whose last period is unfinished. */
 export function partialNote(res: QueryResult, grain: Grain | null | undefined): string | null {
   if (!res.partial || !grain) return null;
-  return `* ${periodName(parse(res.partial.key), grain)} has data up to ${dayMonth(parse(res.partial.until))}.`;
+  return t('* {period} has data up to {day}.', { period: periodName(parse(res.partial.key), grain), day: dayMonth(parse(res.partial.until)) });
 }

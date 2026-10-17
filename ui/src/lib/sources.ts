@@ -2,62 +2,64 @@
 // node tests can load them.
 
 import type { KeyPlace, LinkLook, Paging, UrlEvery } from './api';
+import { t, tn } from './i18n.ts';
 
 /** The patterns a new folder source reads. */
 export const DEFAULT_PATTERN = '*.csv;*.xlsx';
 
 export const EVERY_CHOICES: { value: UrlEvery; label: string }[] = [
-  { value: '15min', label: 'Every 15 minutes' },
-  { value: 'hourly', label: 'Every hour' },
-  { value: 'daily', label: 'Every day' },
-  { value: 'manual', label: 'Only when I press Refresh' },
+  { value: '15min', get label() { return t('Every 15 minutes'); } },
+  { value: 'hourly', get label() { return t('Every hour'); } },
+  { value: 'daily', get label() { return t('Every day'); } },
+  { value: 'manual', get label() { return t('Only when I press Refresh'); } },
 ];
 
 export const everyLabel = (e: UrlEvery | undefined): string =>
-  EVERY_CHOICES.find((c) => c.value === (e ?? 'hourly'))?.label ?? 'Every hour';
+  EVERY_CHOICES.find((c) => c.value === (e ?? 'hourly'))?.label ?? t('Every hour');
 
 /**
  * True when clipboard text may be a table. A tab or a line break is enough: the engine reads it
  * and says if it is not a table. One plain line is left to the browser.
  */
 export function looksTabular(text: string | null | undefined): boolean {
-  const t = (text ?? '').replace(/^﻿/, '').trim();
-  if (!t) return false;
-  return t.includes('\t') || /\r?\n/.test(t);
+  const s = (text ?? '').replace(/^﻿/, '').trim();
+  if (!s) return false;
+  return s.includes('\t') || /\r?\n/.test(s);
 }
 
 /** Why a link cannot be used, in words, or an empty string when it can. Local addresses may use http. */
 export function linkProblem(url: string): string {
-  const t = url.trim();
-  if (!t) return '';
+  const s = url.trim();
+  if (!s) return '';
   let u: URL;
   try {
-    u = new URL(t);
+    u = new URL(s);
   } catch {
-    return 'That does not look like a web link.';
+    return t('That does not look like a web link.');
   }
   if (u.protocol === 'https:') return '';
   if (u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) return '';
-  return 'The link must start with https://.';
+  return t('The link must start with https://.');
 }
 
 /** A short name for a table made from a pasted text: "Pasted table", "Pasted table 2". */
 export function pastedName(taken: string[]): string {
   const have = new Set(taken.map((n) => n.toLowerCase()));
-  if (!have.has('pasted table')) return 'Pasted table';
-  for (let n = 2; ; n++) if (!have.has(`pasted table ${n}`)) return `Pasted table ${n}`;
+  const base = t('Pasted table');
+  if (!have.has(base.toLowerCase())) return base;
+  for (let n = 2; ; n++) if (!have.has(`${base} ${n}`.toLowerCase())) return `${base} ${n}`;
 }
 
 /** "3 min ago", "2 h ago", "yesterday": when a link was last fetched. */
 export function sinceWords(iso: string | undefined, now = Date.now()): string {
   if (!iso) return '';
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return '';
-  const s = Math.max(0, Math.round((now - t) / 1000));
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.round(s / 60)} min ago`;
-  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
-  return `${Math.round(s / 86400)} d ago`;
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return '';
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s < 60) return t('just now');
+  if (s < 3600) return t('{n} min ago', { n: Math.round(s / 60) });
+  if (s < 86400) return t('{n} h ago', { n: Math.round(s / 3600) });
+  return t('{n} d ago', { n: Math.round(s / 86400) });
 }
 
 // --- A key in a link, records and pages (build 15) --------------------------------------------
@@ -130,11 +132,11 @@ export interface PagesForm {
 export const NO_PAGES: PagesForm = { by: 'none', path: '', param: '' };
 
 export const PAGES_CHOICES: { value: PagesBy; label: string }[] = [
-  { value: 'none', label: 'One page' },
-  { value: 'link', label: 'Follow the Link header' },
-  { value: 'field', label: 'A field with the next link' },
-  { value: 'cursor', label: 'A cursor field' },
-  { value: 'page', label: 'A page number' },
+  { value: 'none', get label() { return t('One page'); } },
+  { value: 'link', get label() { return t('Follow the Link header'); } },
+  { value: 'field', get label() { return t('A field with the next link'); } },
+  { value: 'cursor', get label() { return t('A cursor field'); } },
+  { value: 'page', get label() { return t('A page number'); } },
 ];
 
 /** The link parameter a cursor field usually goes back in. */
@@ -182,9 +184,9 @@ export function pagesFromApi(p: Paging | undefined): PagesForm {
 
 /** "data.items — 120 rows", or "The whole answer — 120 rows". */
 export function listLabel(l: { path: string; rows: number }, locale = 'en'): string {
-  const where = l.path === '.' ? 'The whole answer' : l.path;
+  const where = l.path === '.' ? t('The whole answer') : l.path;
   if (l.rows < 0) return where;
-  return `${where} — ${l.rows.toLocaleString(locale)} ${l.rows === 1 ? 'row' : 'rows'}`;
+  return tn('{where} — {n} row', '{where} — {n} rows', l.rows, { where, n: l.rows.toLocaleString(locale) });
 }
 
 /** The lists to offer in the Records choice: the ones found, and the chosen one if it is not among them (rows -1). */

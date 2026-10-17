@@ -7,6 +7,7 @@
   import Icon from '../Icon.svelte';
   import Menu from './Menu.svelte';
   import Modal from '../Modal.svelte';
+  import { t } from '../../lib/i18n';
 
   let {
     views,
@@ -45,21 +46,21 @@
 
   const items = $derived([
     ...views.map((v) => ({
-      label: `${v.name}${v.id === defaultView ? ' (first)' : ''}${v.id === open ? '  ✓' : ''}`,
+      label: `${v.name}${v.id === defaultView ? ` ${t('(first)')}` : ''}${v.id === open ? '  ✓' : ''}`,
       run: () => onopen(v.id),
     })),
     ...(editing
       ? [
-          ...(views.length < MAX_VIEWS ? [{ label: 'Save as a new view…', run: () => (naming = { id: '', name: '' }) }] : []),
+          ...(views.length < MAX_VIEWS ? [{ label: t('Save as a new view…'), run: () => (naming = { id: '', name: '' }) }] : []),
           ...(current
             ? [
-                { label: 'Update this view', run: () => onupdate(current.id), disabled: !changed },
-                { label: 'Rename…', run: () => (naming = { id: current.id, name: current.name }) },
+                { label: t('Update this view'), run: () => onupdate(current.id), disabled: !changed },
+                { label: t('Rename…'), run: () => (naming = { id: current.id, name: current.name }) },
                 {
-                  label: current.id === defaultView ? 'Do not open on this view' : 'Open on this view first',
+                  label: current.id === defaultView ? t('Do not open on this view') : t('Open on this view first'),
                   run: () => ondefault(current.id === defaultView ? null : current.id),
                 },
-                { label: 'Delete this view', run: () => ondelete(current.id) },
+                { label: t('Delete this view'), run: () => ondelete(current.id) },
               ]
             : []),
         ]
@@ -81,13 +82,13 @@
     class="views"
     class:changed={!!current && changed}
     aria-haspopup="menu"
-    title={views.length ? 'Saved views' : 'Save how this dashboard reads now'}
+    title={views.length ? t('Saved views') : t('Save how this dashboard reads now')}
     onclick={(e) => {
       const r = e.currentTarget.getBoundingClientRect();
       menu = menu ? null : { x: r.left, y: r.bottom + 4 };
     }}>
     <Icon name="bookmark" size={13} />
-    {#if current}{current.name}{#if changed}<span class="mark">changed</span>{/if}{:else}Views{/if}
+    {#if current}{current.name}{#if changed}<span class="mark">{t('changed')}</span>{/if}{:else}{t('Views')}{/if}
     <Icon name="chevronDown" size={11} />
   </button>
 {/if}
@@ -95,18 +96,18 @@
   <Menu x={menu.x} y={menu.y} {items} onclose={() => (menu = null)} />
 {/if}
 {#if naming}
-  <Modal title={naming.id ? 'Rename the view' : 'Save as a new view'} width={380} onclose={() => (naming = null)}>
+  <Modal title={naming.id ? t('Rename the view') : t('Save as a new view')} width={380} onclose={() => (naming = null)}>
     <label class="name">
-      <span>Name</span>
+      <span>{t('Name')}</span>
       <!-- svelte-ignore a11y_autofocus -->
-      <input class="field" maxlength="60" bind:value={naming.name} autofocus onkeydown={(e) => e.key === 'Enter' && save()} placeholder="Java, this quarter" />
+      <input class="field" maxlength="60" bind:value={naming.name} autofocus onkeydown={(e) => e.key === 'Enter' && save()} placeholder={t('Java, this quarter')} />
     </label>
     {#if !naming.id}
-      <p class="hint">The view keeps the clicks, the filters' choices, the grain and the drill-downs of this dashboard now.</p>
+      <p class="hint">{t("The view keeps the clicks, the filters' choices, the grain and the drill-downs of this dashboard now.")}</p>
     {/if}
     {#snippet footer()}
-      <button class="btn plain" onclick={() => (naming = null)}>Cancel</button>
-      <button class="btn primary" disabled={!naming?.name.trim()} onclick={save}>Save</button>
+      <button class="btn plain" onclick={() => (naming = null)}>{t('Cancel')}</button>
+      <button class="btn primary" disabled={!naming?.name.trim()} onclick={save}>{t('Save')}</button>
     {/snippet}
   </Modal>
 {/if}

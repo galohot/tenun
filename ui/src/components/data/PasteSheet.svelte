@@ -4,6 +4,7 @@
   import { api, type PastePreview } from '../../lib/api';
   import { app, go } from '../../lib/state.svelte';
   import { pastedName } from '../../lib/sources';
+  import { t, tn } from '../../lib/i18n';
   import Modal from '../Modal.svelte';
 
   let { text, onclose }: { text: string; onclose: () => void } = $props();
@@ -28,33 +29,32 @@
 
   async function create() {
     let added = '';
-    const ok = await app.run('Adding the table…', async () => {
-      const r = await api.paste(name.trim() || 'Pasted table', text, header);
+    const ok = await app.run(t('Adding the table…'), async () => {
+      const r = await api.paste(name.trim() || t('Pasted table'), text, header);
       added = r.added;
       return r;
     });
     if (!ok) return;
     onclose();
-    const t = app.tables.find((x) => x.source_id === added);
-    go({ view: 'data', table: t?.id });
-    app.toast('Added the pasted table');
+    const tb = app.tables.find((x) => x.source_id === added);
+    go({ view: 'data', table: tb?.id });
+    app.toast(t('Added the pasted table'));
   }
 </script>
 
-<Modal title="Paste as a new table" {onclose} width={620}>
+<Modal title={t('Paste as a new table')} {onclose} width={620}>
   {#if !saved}
     <p class="warn">
-      Save your workspace first. Tenun keeps a pasted table as a file in a folder next to the workspace file. Use the
-      save button in the sidebar, then paste again.
+      {t('Save your workspace first. Tenun keeps a pasted table as a file in a folder next to the workspace file. Use the save button in the sidebar, then paste again.')}
     </p>
   {/if}
   <label class="stack">
-    <span class="label">Name</span>
+    <span class="label">{t('Name')}</span>
     <input class="field" bind:value={name} onkeydown={(e) => e.key === 'Enter' && saved && preview && create()} />
   </label>
   <label class="check">
     <input type="checkbox" bind:checked={header} />
-    <span>First row is the header</span>
+    <span>{t('First row is the header')}</span>
   </label>
   {#if problem}
     <p class="warn">{problem}</p>
@@ -72,16 +72,17 @@
       </table>
     </div>
     <p class="muted small">
-      {preview.total.toLocaleString(app.locale)}
-      {preview.total === 1 ? 'row' : 'rows'}{preview.total > preview.rows.length ? `. The first ${preview.rows.length} are shown.` : '.'}
-      The table is saved as a CSV file, so you can edit it later.
+      {preview.total > preview.rows.length
+        ? tn('{n} row. The first {k} are shown.', '{n} rows. The first {k} are shown.', preview.total, { n: preview.total.toLocaleString(app.locale), k: preview.rows.length })
+        : tn('{n} row.', '{n} rows.', preview.total, { n: preview.total.toLocaleString(app.locale) })}
+      {t('The table is saved as a CSV file, so you can edit it later.')}
     </p>
   {:else}
-    <p class="muted">Reading…</p>
+    <p class="muted">{t('Reading…')}</p>
   {/if}
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>Cancel</button>
-    <button class="btn primary" disabled={!saved || !preview || !!app.busy} onclick={create}>{app.busy ?? 'Add table'}</button>
+    <button class="btn" onclick={onclose}>{t('Cancel')}</button>
+    <button class="btn primary" disabled={!saved || !preview || !!app.busy} onclick={create}>{app.busy ?? t('Add table')}</button>
   {/snippet}
 </Modal>
 

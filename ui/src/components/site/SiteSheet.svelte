@@ -6,6 +6,7 @@
   import { app } from '../../lib/state.svelte';
   import { moveGroup, navOf, normaliseSite, setGroup } from '../../lib/site';
   import Icon from '../Icon.svelte';
+  import { t, tn } from '../../lib/i18n';
   import Modal from '../Modal.svelte';
   import SiteFrame from './SiteFrame.svelte';
 
@@ -31,7 +32,7 @@
   }
 </script>
 
-<Modal title="Site" width={620} {onclose}>
+<Modal title={t('Site')} width={620} {onclose}>
   <div class="mini">
     <SiteFrame {site} {nav} current={site.home ?? null} onnavigate={() => {}} mini />
   </div>
@@ -39,67 +40,67 @@
   <label class="switch">
     <input type="checkbox" checked={site.on} onchange={(e) => save({ on: e.currentTarget.checked })} />
     <span>
-      <b>Make this workspace a site</b>
-      <span class="muted">An export and a publish then hold every page in the navigation, with links between them.</span>
+      <b>{t('Make this workspace a site')}</b>
+      <span class="muted">{t('An export and a publish then hold every page in the navigation, with links between them.')}</span>
     </span>
   </label>
 
   <div class="grid" class:off={!site.on}>
     <label class="field-row">
-      <span class="label">Title</span>
+      <span class="label">{t('Title')}</span>
       <input class="field" maxlength="80" value={site.title} onchange={(e) => save({ title: e.currentTarget.value })} />
     </label>
     <div class="field-row">
-      <span class="label">Navigation</span>
-      <div class="seg" role="radiogroup" aria-label="Navigation">
-        {#each [['top', 'Top bar'], ['side', 'Sidebar']] as [id, label]}
+      <span class="label">{t('Navigation')}</span>
+      <div class="seg" role="radiogroup" aria-label={t('Navigation')}>
+        {#each [['top', t('Top bar')], ['side', t('Sidebar')]] as [id, label]}
           <button role="radio" aria-checked={site.nav === id} class:on={site.nav === id} onclick={() => save({ nav: id as 'top' | 'side' })}>{label}</button>
         {/each}
       </div>
     </div>
     <label class="field-row">
-      <span class="label">Home page</span>
+      <span class="label">{t('Home page')}</span>
       <select class="field" value={site.home ?? ''} onchange={(e) => save({ home: e.currentTarget.value })}>
-        {#each dashboards.filter((d) => !d.hidden) as d (d.id)}<option value={d.id}>{d.title || 'Untitled'}</option>{/each}
+        {#each dashboards.filter((d) => !d.hidden) as d (d.id)}<option value={d.id}>{d.title || t('Untitled')}</option>{/each}
       </select>
     </label>
 
-    <span class="label up">Pages</span>
+    <span class="label up">{t('Pages')}</span>
     <ul class="pages">
       {#each dashboards as d (d.id)}
         <li>
-          <span class="pname" title={d.title}>{d.title || 'Untitled'}</span>
-          <label class="check"><input type="checkbox" checked={!d.hidden} onchange={(e) => setShown(d.id, e.currentTarget.checked)} /> In the navigation</label>
-          <select class="field small" aria-label="Group of {d.title}" value={String(groupOf(d.id))} onchange={(e) => save(setGroup(site, d.id, Number(e.currentTarget.value) < 0 ? null : Number(e.currentTarget.value)))}>
-            <option value="-1">No group</option>
+          <span class="pname" title={d.title}>{d.title || t('Untitled')}</span>
+          <label class="check"><input type="checkbox" checked={!d.hidden} onchange={(e) => setShown(d.id, e.currentTarget.checked)} /> {t('In the navigation')}</label>
+          <select class="field small" aria-label={t('Group of {name}', { name: d.title })} value={String(groupOf(d.id))} onchange={(e) => save(setGroup(site, d.id, Number(e.currentTarget.value) < 0 ? null : Number(e.currentTarget.value)))}>
+            <option value="-1">{t('No group')}</option>
             {#each site.groups ?? [] as g, i (i)}<option value={String(i)}>{g.name}</option>{/each}
           </select>
         </li>
       {/each}
     </ul>
-    <p class="hint">A page left out of the navigation is still reached by a link in a text, or by a click that opens it.</p>
+    <p class="hint">{t('A page left out of the navigation is still reached by a link in a text, or by a click that opens it.')}</p>
 
-    <span class="label up">Groups</span>
+    <span class="label up">{t('Groups')}</span>
     {#each site.groups ?? [] as g, i (i)}
       <div class="grow">
-        <input class="field" aria-label="Name of the group" maxlength="40" value={g.name} onchange={(e) => save({ groups: (site.groups ?? []).map((x, j) => (j === i ? { ...x, name: e.currentTarget.value } : x)) })} />
-        <span class="muted count">{g.pages.length === 1 ? '1 page' : `${g.pages.length} pages`}</span>
-        <button class="btn plain icon" aria-label="Move {g.name} up" disabled={i === 0} onclick={() => save(moveGroup(site, i, i - 1))}><Icon name="chevronDown" size={12} class="flip" /></button>
-        <button class="btn plain icon" aria-label="Move {g.name} down" disabled={i === (site.groups ?? []).length - 1} onclick={() => save(moveGroup(site, i, i + 1))}><Icon name="chevronDown" size={12} /></button>
-        <button class="btn plain icon" aria-label="Remove {g.name}" onclick={() => save({ groups: (site.groups ?? []).filter((_, j) => j !== i) })}><Icon name="x" size={12} /></button>
+        <input class="field" aria-label={t('Name of the group')} maxlength="40" value={g.name} onchange={(e) => save({ groups: (site.groups ?? []).map((x, j) => (j === i ? { ...x, name: e.currentTarget.value } : x)) })} />
+        <span class="muted count">{tn('{n} page', '{n} pages', g.pages.length)}</span>
+        <button class="btn plain icon" aria-label={t('Move {name} up', { name: g.name })} disabled={i === 0} onclick={() => save(moveGroup(site, i, i - 1))}><Icon name="chevronDown" size={12} class="flip" /></button>
+        <button class="btn plain icon" aria-label={t('Move {name} down', { name: g.name })} disabled={i === (site.groups ?? []).length - 1} onclick={() => save(moveGroup(site, i, i + 1))}><Icon name="chevronDown" size={12} /></button>
+        <button class="btn plain icon" aria-label={t('Remove {name}', { name: g.name })} onclick={() => save({ groups: (site.groups ?? []).filter((_, j) => j !== i) })}><Icon name="x" size={12} /></button>
       </div>
     {/each}
-    <button class="link" onclick={() => save({ groups: [...(site.groups ?? []), { name: `Group ${(site.groups ?? []).length + 1}`, pages: [] }] })}>Add a group</button>
+    <button class="link" onclick={() => save({ groups: [...(site.groups ?? []), { name: t('Group {n}', { n: (site.groups ?? []).length + 1 }), pages: [] }] })}>{t('Add a group')}</button>
 
     <label class="field-row up">
-      <span class="label">Footer</span>
-      <input class="field" maxlength="160" placeholder="One line under every page" value={site.footer ?? ''} onchange={(e) => save({ footer: e.currentTarget.value })} />
+      <span class="label">{t('Footer')}</span>
+      <input class="field" maxlength="160" placeholder={t('One line under every page')} value={site.footer ?? ''} onchange={(e) => save({ footer: e.currentTarget.value })} />
     </label>
   </div>
 
   {#snippet footer()}
-    <button class="btn plain" onclick={onclose}>Done</button>
-    <button class="btn primary" disabled={!site.on} onclick={preview}><Icon name="expand" size={14} /> Preview site</button>
+    <button class="btn plain" onclick={onclose}>{t('Done')}</button>
+    <button class="btn primary" disabled={!site.on} onclick={preview}><Icon name="expand" size={14} /> {t('Preview site')}</button>
   {/snippet}
 </Modal>
 

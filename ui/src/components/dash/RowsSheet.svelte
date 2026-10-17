@@ -6,6 +6,7 @@
   import { portal } from '../../lib/portal';
   import { csvCell, fileName } from '../../lib/tabular';
   import Icon from '../Icon.svelte';
+  import { t, tn } from '../../lib/i18n';
 
   let {
     title,
@@ -62,27 +63,27 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
 <div class="scrim" role="presentation" use:portal onclick={(e) => e.target === e.currentTarget && onclose()}>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="Rows behind {title}">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label={t('Rows behind {title}', { title })}>
     <header>
       <div class="t">
-        <h2>Rows</h2>
+        <h2>{t('Rows')}</h2>
         <p class="muted">{title}</p>
       </div>
-      <button class="btn" onclick={download} disabled={!data || !data.rows.length}><Icon name="export" /> Download CSV</button>
-      <button class="btn plain icon" aria-label="Close" onclick={onclose}><Icon name="x" /></button>
+      <button class="btn" onclick={download} disabled={!data || !data.rows.length}><Icon name="export" /> {t('Download CSV')}</button>
+      <button class="btn plain icon" aria-label={t('Close')} onclick={onclose}><Icon name="x" /></button>
     </header>
     {#if error}
       <p class="msg error"><Icon name="warning" size={14} /> {error}</p>
     {:else if !data}
-      <p class="msg muted">Loading rows…</p>
+      <p class="msg muted">{t('Loading rows…')}</p>
     {:else if !data.rows.length}
-      <p class="msg muted">No rows match.</p>
+      <p class="msg muted">{t('No rows match.')}</p>
     {:else}
       <p class="count muted">
         {#if data.total > data.rows.length}
-          Showing the first {data.rows.length.toLocaleString('en-US')} of {data.total.toLocaleString('en-US')} rows.
+          {t('Showing the first {shown} of {total} rows.', { shown: data.rows.length.toLocaleString('en-US'), total: data.total.toLocaleString('en-US') })}
         {:else}
-          {data.total.toLocaleString('en-US')} {data.total === 1 ? 'row' : 'rows'}.
+          {tn('{n} row.', '{n} rows.', data.total, { n: data.total.toLocaleString('en-US') })}
         {/if}
       </p>
       <div class="wrap">

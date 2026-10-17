@@ -8,6 +8,7 @@
   import Modal from '../Modal.svelte';
   import TileBody from './TileBody.svelte';
   import { cardGround } from '../../lib/card';
+  import { t } from '../../lib/i18n';
 
   let {
     tile,
@@ -32,12 +33,12 @@
   const ground = $derived(asTable ? null : cardGround(tile));
 </script>
 
-<Modal title={title || 'Tile'} width={1000} {onclose}>
+<Modal title={title || t('Tile')} width={1000} {onclose}>
   {#if canTable}
     <div class="bar">
       <button class="switch" role="switch" aria-checked={asTable} class:on={asTable} onclick={() => (asTable = !asTable)}>
         <span class="knob"></span>
-        Table
+        {t('Table')}
       </button>
     </div>
   {/if}

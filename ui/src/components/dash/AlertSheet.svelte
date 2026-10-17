@@ -9,6 +9,7 @@
   import { formatOf } from '../../lib/measures';
   import { app } from '../../lib/state.svelte';
   import Modal from '../Modal.svelte';
+  import { parts, t } from '../../lib/i18n';
 
   let { dash, tile, title, onclose }: { dash: Dashboard; tile: Tile; title: string; onclose: () => void } = $props();
 
@@ -55,7 +56,7 @@
   /** Saves the rule, then its address when one was typed, then checks it once. */
   async function save(): Promise<string | null> {
     if (problem) return null;
-    busy = 'Saving…';
+    busy = t('Saving…');
     try {
       const id = saved?.id ?? newAlertId();
       const rule: AlertRule = {
@@ -88,7 +89,7 @@
 
   async function done() {
     if (await save()) {
-      app.toast('Alert saved');
+      app.toast(t('Alert saved'));
       onclose();
     }
   }
@@ -96,10 +97,10 @@
   async function test() {
     const id = await save();
     if (!id) return;
-    busy = 'Sending…';
+    busy = t('Sending…');
     try {
       await api.alertTest(id);
-      app.toast('Test sent');
+      app.toast(t('Test sent'));
     } catch (e) {
       app.error(e);
     } finally {
@@ -108,10 +109,10 @@
   }
 
   async function remove() {
-    if (!saved || !confirm('Remove this alert?')) return;
+    if (!saved || !confirm(t('Remove this alert?'))) return;
     try {
       app.snap = await api.setAlerts(all.filter((a) => a.id !== saved.id));
-      app.toast('Alert removed');
+      app.toast(t('Alert removed'));
       onclose();
     } catch (e) {
       app.error(e);
@@ -122,15 +123,14 @@
   const line = $derived(saved ? stateText({ on }, st, fmt, (iso) => timeShort(iso)) : null);
 </script>
 
-<Modal title="Alert me" width={500} {onclose}>
+<Modal title={t('Alert me')} width={500} {onclose}>
   <p class="intro">
-    Tenun sends a message when <b>{shownName}</b> on <b>{dash.title || 'Untitled'}</b> goes below, above or outside the
-    numbers you set. It reads the page as it opens: its saved filters and its default view, never someone's clicks.
+    {#each parts(t("Tenun sends a message when {value} on {page} goes below, above or outside the numbers you set. It reads the page as it opens: its saved filters and its default view, never someone's clicks.")) as p}{#if p.slot === 'value'}<b>{shownName}</b>{:else if p.slot === 'page'}<b>{dash.title || t('Untitled')}</b>{:else}{p.text}{/if}{/each}
   </p>
 
   {#if tile.measures.length > 1}
     <label class="row">
-      <span class="label">Value</span>
+      <span class="label">{t('Value')}</span>
       <select class="field" bind:value={measure}>
         {#each names as n, i (i)}<option value={i}>{n}</option>{/each}
       </select>
@@ -138,23 +138,23 @@
   {/if}
 
   <div class="row">
-    <span class="label">When it is</span>
+    <span class="label">{t('When it is')}</span>
     <div class="cond">
-      <select class="field op" bind:value={op} aria-label="Condition">
-        <option value="below">below</option>
-        <option value="above">above</option>
-        <option value="outside">outside</option>
+      <select class="field op" bind:value={op} aria-label={t('Condition')}>
+        <option value="below">{t('below')}</option>
+        <option value="above">{t('above')}</option>
+        <option value="outside">{t('outside')}</option>
       </select>
-      <input class="field num" type="number" step="any" bind:value aria-label={op === 'outside' ? 'Bottom' : 'Number'} placeholder="Number" />
+      <input class="field num" type="number" step="any" bind:value aria-label={op === 'outside' ? t('Bottom') : t('Number')} placeholder={t('Number')} />
       {#if op === 'outside'}
-        <span class="muted">to</span>
-        <input class="field num" type="number" step="any" bind:value={to} aria-label="Top" placeholder="Number" />
+        <span class="muted">{t('to')}</span>
+        <input class="field num" type="number" step="any" bind:value={to} aria-label={t('Top@@edge')} placeholder={t('Number')} />
       {/if}
     </div>
   </div>
 
   <div class="row">
-    <span class="label">Send to</span>
+    <span class="label">{t('Send to')}</span>
     <select class="field" bind:value={kind}>
       {#each CHANNELS as c (c.kind)}<option value={c.kind}>{c.name}</option>{/each}
     </select>
@@ -165,36 +165,35 @@
         class="field"
         type="password"
         autocomplete="off"
-        aria-label="Web address"
-        placeholder={hasAddress ? 'An address is set on this computer. Paste a new one to change it.' : 'https://…'}
+        aria-label={t('Web address')}
+        placeholder={hasAddress ? t('An address is set on this computer. Paste a new one to change it.') : 'https://…'}
         bind:value={url} />
     {:else}
-      <input class="field" type="password" autocomplete="off" aria-label="Bot token" placeholder={hasAddress ? 'A token is set on this computer. Type a new one to change it.' : 'Bot token, 123456789:AA…'} bind:value={token} />
-      <input class="field" autocomplete="off" aria-label="Chat id" placeholder="Chat id, -1001234567890 or @channel" bind:value={chat} />
+      <input class="field" type="password" autocomplete="off" aria-label={t('Bot token')} placeholder={hasAddress ? t('A token is set on this computer. Type a new one to change it.') : t('Bot token, 123456789:AA…')} bind:value={token} />
+      <input class="field" autocomplete="off" aria-label={t('Chat id')} placeholder={t('Chat id, -1001234567890 or @channel')} bind:value={chat} />
     {/if}
-    <p class="hint">{channel.hint} It is kept on this computer only, not in the .tenun file.</p>
+    <p class="hint">{t('{hint} It is kept on this computer only, not in the .tenun file.', { hint: channel.hint })}</p>
   </div>
 
-  <label class="check"><input type="checkbox" bind:checked={back} /> Also tell me when it is back to normal</label>
-  <label class="check"><input type="checkbox" bind:checked={on} /> On</label>
+  <label class="check"><input type="checkbox" bind:checked={back} /> {t('Also tell me when it is back to normal')}</label>
+  <label class="check"><input type="checkbox" bind:checked={on} /> {t('On')}</label>
 
   {#if line}
     <p class="state {line.tone}">{line.text}</p>
   {/if}
   <p class="hint">
-    The message holds the value, its period and the tile's name, nothing else. If the alert holds when you save it, the
-    first message goes at once. Tenun checks while it is open; <code>tenun agent</code> checks on a computer that stays on.
+    {#each parts(t("The message holds the value, its period and the tile's name, nothing else. If the alert holds when you save it, the first message goes at once. Tenun checks while it is open; {agent} checks on a computer that stays on.")) as p}{#if p.slot === 'agent'}<code>tenun agent</code>{:else}{p.text}{/if}{/each}
   </p>
   {#if problem && (value !== null || url || token)}
     <p class="err">{problem}</p>
   {/if}
 
   {#snippet footer()}
-    {#if saved}<button class="btn danger" onclick={remove} disabled={!!busy}>Remove</button>{/if}
+    {#if saved}<button class="btn danger" onclick={remove} disabled={!!busy}>{t('Remove')}</button>{/if}
     <span class="spacer"></span>
-    <button class="btn" onclick={test} disabled={!!busy || !!problem}>Send a test</button>
-    <button class="btn plain" onclick={onclose}>Cancel</button>
-    <button class="btn primary" onclick={done} disabled={!!busy || !!problem}>{busy ?? 'Save'}</button>
+    <button class="btn" onclick={test} disabled={!!busy || !!problem}>{t('Send a test')}</button>
+    <button class="btn plain" onclick={onclose}>{t('Cancel')}</button>
+    <button class="btn primary" onclick={done} disabled={!!busy || !!problem}>{busy ?? t('Save')}</button>
   {/snippet}
 </Modal>
 

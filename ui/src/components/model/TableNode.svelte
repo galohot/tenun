@@ -3,6 +3,7 @@
   import type { Table } from '../../lib/api';
   import { typeIcon } from '../../lib/ui';
   import Icon from '../Icon.svelte';
+  import { t } from '../../lib/i18n';
   import { LINK_TABLE_LABEL } from '../../lib/linktables';
 
   let {
@@ -26,39 +27,39 @@
       ondismiss?: () => void;
     };
   } = $props();
-  const t = $derived(data.table);
+  const tb = $derived(data.table);
 </script>
 
 <div class="node" class:link={data.linkTable}>
   <header>
     <Icon name="table" size={14} />
-    <strong>{t.label}</strong>
+    <strong>{tb.label}</strong>
     <span>{data.source}</span>
   </header>
   {#if data.linkTable}
     <div class="tag nodrag">
-      <span class="chip" title="A chart can group by a table on one side of this table, through the other. A row that has two of them is under both, and the total counts it once.">{LINK_TABLE_LABEL}</span>
-      <button class="x" aria-label="Unmark {t.label} as a link table" title="Unmark" onclick={() => data.onunmark?.()}><Icon name="x" size={11} /></button>
+      <span class="chip" title={t('A chart can group by a table on one side of this table, through the other. A row that has two of them is under both, and the total counts it once.')}>{t(LINK_TABLE_LABEL)}</span>
+      <button class="x" aria-label={t('Unmark {name} as a link table', { name: tb.label })} title={t('Unmark')} onclick={() => data.onunmark?.()}><Icon name="x" size={11} /></button>
     </div>
   {:else if data.canMark && !data.suggestion}
     <div class="tag quiet nodrag">
-      <button class="mark" onclick={() => data.onmark?.()} title="Mark this table as a link table: a chart can then group by one table on one side through the other.">Mark as link table</button>
+      <button class="mark" onclick={() => data.onmark?.()} title={t('Mark this table as a link table: a chart can then group by one table on one side through the other.')}>{t('Mark as link table')}</button>
     </div>
   {:else if data.suggestion}
     <div class="tag suggest nodrag" title={data.suggestion}>
-      <span class="why">Looks like a link table</span>
-      <button class="mark" onclick={() => data.onmark?.()}>Mark it</button>
-      <button class="x" aria-label="Not a link table" title="Not a link table" onclick={() => data.ondismiss?.()}><Icon name="x" size={11} /></button>
+      <span class="why">{t('Looks like a link table')}</span>
+      <button class="mark" onclick={() => data.onmark?.()}>{t('Mark it')}</button>
+      <button class="x" aria-label={t('Not a link table')} title={t('Not a link table')} onclick={() => data.ondismiss?.()}><Icon name="x" size={11} /></button>
     </div>
   {/if}
   <ul>
-    {#each t.columns as c (c.name)}
+    {#each tb.columns as c (c.name)}
       <li class:linked={data.linked.has(c.name)} class:hot={!!data.hot?.has(c.name)}>
         <Handle type="source" position={Position.Left} id={`L:${c.name}`} class="h" />
         <Icon name={typeIcon[c.dtype]} size={11} />
         <span class="c" title={c.label ? c.name : undefined}>{c.label ?? c.name}</span>
-        {#if c.calc}<span class="fx" title="A calculated column"><Icon name="fx" size={11} /></span>{/if}
-        {#if data.warned.has(c.name)}<span class="warn" title="This column repeats values. See the line."><Icon name="warning" size={11} /></span>{/if}
+        {#if c.calc}<span class="fx" title={t('A calculated column')}><Icon name="fx" size={11} /></span>{/if}
+        {#if data.warned.has(c.name)}<span class="warn" title={t('This column repeats values. See the line.')}><Icon name="warning" size={11} /></span>{/if}
         <Handle type="source" position={Position.Right} id={`R:${c.name}`} class="h" />
       </li>
     {/each}

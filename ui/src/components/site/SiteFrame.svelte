@@ -7,6 +7,7 @@
   import type { SiteSettings } from '../../lib/api';
   import type { Nav } from '../../lib/site';
   import Icon from '../Icon.svelte';
+  import { t } from '../../lib/i18n';
 
   let {
     site,
@@ -59,7 +60,7 @@
 
 <div class="site" class:side class:mini bind:clientWidth={width}>
   {#if side}
-    <nav class="sidebar" aria-label="Pages of {site.title}">
+    <nav class="sidebar" aria-label={t('Pages of {name}', { name: site.title })}>
       <button class="title" onclick={() => site.home && go(site.home)}>{site.title}</button>
       {@render list()}
     </nav>
@@ -67,9 +68,9 @@
     <header class="topbar">
       <button class="title" onclick={() => site.home && go(site.home)}>{site.title}</button>
       {#if narrow}
-        <button class="menubtn" aria-label="Pages" aria-expanded={menu} onclick={() => (menu = !menu)}><Icon name="rows" size={16} /> Pages</button>
+        <button class="menubtn" aria-label={t('Pages')} aria-expanded={menu} onclick={() => (menu = !menu)}><Icon name="rows" size={16} /> {t('Pages')}</button>
       {:else}
-        <nav class="links" aria-label="Pages of {site.title}">
+        <nav class="links" aria-label={t('Pages of {name}', { name: site.title })}>
           {#each nav.pages as p (p.id)}
             <button class:on={p.id === current} aria-current={p.id === current ? 'page' : undefined} onclick={() => go(p.id)}>{p.title}</button>
           {/each}
@@ -99,7 +100,7 @@
   </div>
   {#if menu && narrow}
     <div class="scrim" role="presentation" onclick={() => (menu = false)}></div>
-    <nav class="sheet" aria-label="Pages of {site.title}">
+    <nav class="sheet" aria-label={t('Pages of {name}', { name: site.title })}>
       {@render list()}
     </nav>
   {/if}

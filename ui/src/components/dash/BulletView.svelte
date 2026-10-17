@@ -5,6 +5,7 @@
   import type { Cell, QueryResult, Tile } from '../../lib/api';
   import { at, bandsOf, bulletDomain, bulletTicks, shareOfTarget } from '../../lib/charts/bullet';
   import { cell, measureLabel, numberFormatter, getLocale, pctOfTarget, type Named } from '../../lib/format';
+  import { t } from '../../lib/i18n';
 
   let {
     res,
@@ -45,11 +46,11 @@
   /** The words for a row, which also name it for a screen reader. */
   function words(r: (typeof rows)[number]): string {
     const share = shareOfTarget(r.value, r.target);
-    const v = r.value === null ? 'no value' : fmt.long(r.value);
+    const v = r.value === null ? t('no value') : fmt.long(r.value);
     if (r.target === null) return v;
-    return share === null ? `${v}, target ${tfmt.long(r.target)}` : `${v}, ${pctOfTarget(share)} of target`;
+    return share === null ? t('{value}, target {target}', { value: v, target: tfmt.long(r.target) }) : t('{value}, {share} of target', { value: v, share: pctOfTarget(share) });
   }
-  const bandWords = $derived(bands.map((b) => `${b.label || 'Band'} ${tfmt.short(b.from)} to ${tfmt.short(b.to)}`).join('; '));
+  const bandWords = $derived(bands.map((b) => t('{band} {from} to {to}', { band: b.label || t('Band'), from: tfmt.short(b.from), to: tfmt.short(b.to) })).join('; '));
 </script>
 
 <div class="bullet">
@@ -59,7 +60,7 @@
       <li class:dim={dim(r.raw)}>
         {#if hasGroup}
           {#if onpick}
-            <button class="name pick" onclick={() => onpick?.(r.raw)} title="Filter the other tiles to {name(r.raw)}">{name(r.raw)}</button>
+            <button class="name pick" onclick={() => onpick?.(r.raw)} title={t('Filter the other tiles to {name}', { name: name(r.raw) })}>{name(r.raw)}</button>
           {:else}
             <div class="name" title={name(r.raw)}>{name(r.raw)}</div>
           {/if}
@@ -73,12 +74,12 @@
             <span class="bar" style:left="{Math.min(zero, at(r.value, domain) * 100)}%" style:width="{Math.abs(at(r.value, domain) * 100 - zero)}%"></span>
           {/if}
           {#if r.target !== null}
-            <span class="tick" style:left={pos(r.target)} title="Target {tfmt.long(r.target)}"></span>
+            <span class="tick" style:left={pos(r.target)} title={t('Target {value}', { value: tfmt.long(r.target) })}></span>
           {/if}
         </div>
         <span class="words">
           <b>{r.value === null ? '–' : fmt.short(r.value)}</b>
-          {#if share !== null}<span class="share">{pctOfTarget(share)} of target</span>{/if}
+          {#if share !== null}<span class="share">{t('{share} of target', { share: pctOfTarget(share) })}</span>{/if}
         </span>
       </li>
     {/each}
@@ -86,7 +87,7 @@
   <div class="axis" aria-hidden="true">
     {#if hasGroup}<span class="spacer"></span>{/if}
     <span class="scale">
-      {#each ticks as t, i}<span style:left="{(i / (ticks.length - 1)) * 100}%">{fmt.short(t)}</span>{/each}
+      {#each ticks as tk, i}<span style:left="{(i / (ticks.length - 1)) * 100}%">{fmt.short(tk)}</span>{/each}
     </span>
     <span class="spacer end"></span>
   </div>

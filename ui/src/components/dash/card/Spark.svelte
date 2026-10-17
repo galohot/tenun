@@ -5,6 +5,7 @@
   import type { KpiInfo, NumFormat } from '../../../lib/api';
   import { tip } from '../../../lib/format';
   import { barBoxes, linePoints } from '../../../lib/card';
+  import { t } from '../../../lib/i18n';
 
   let { kpi, kind = 'bars', fmt = null }: { kpi: KpiInfo; kind?: 'bars' | 'line'; fmt?: NumFormat | null } = $props();
 
@@ -35,7 +36,7 @@
 
 <div class="spark" bind:clientWidth={w} bind:clientHeight={h}>
   {#if kind === 'line'}
-    <svg width={w} height={h} role="img" aria-label="The last {kpi.bars.length} periods">
+    <svg width={w} height={h} role="img" aria-label={t('The last {n} periods', { n: kpi.bars.length })}>
       <path d={solid} fill="none" stroke="var(--ink-mark)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
       {#if dashed}<path d={dashed} fill="none" stroke="var(--ink-mark)" stroke-width="1.5" stroke-dasharray="3 3" stroke-linecap="round" />{/if}
       {#if last && !Number.isNaN(last.y)}<circle cx={last.x} cy={last.y} r="3" fill="var(--ink-mark)" />{/if}
@@ -44,7 +45,7 @@
       {/each}
     </svg>
   {:else}
-    <svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="The last {kpi.bars.length} periods">
+    <svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label={t('The last {n} periods', { n: kpi.bars.length })}>
       {#each boxes as b, i (i)}
         {@const lastBar = i === boxes.length - 1}
         {@const prev = i === boxes.length - 2 && !!kpi.versus}

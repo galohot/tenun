@@ -6,6 +6,7 @@
   import type { Colors } from '../../lib/chart';
   import { funnelShape } from '../../lib/charts/funnel';
   import { cell, numberFormatter, getLocale, pctChange } from '../../lib/format';
+  import { t } from '../../lib/i18n';
 
   let {
     res,
@@ -36,13 +37,13 @@
   <ol>
     {#each res.rows as r, i}
       {#if i > 0}
-        <li class="between" aria-label="{shape.steps[i] === null ? 'No share' : pctChange(shape.steps[i]!)} of {name(res.rows[i - 1][0])} went on to {name(r[0])}">
+        <li class="between" aria-label={t('{share} of {from} went on to {to}', { share: shape.steps[i] === null ? t('No share') : pctChange(shape.steps[i]!), from: name(res.rows[i - 1][0]), to: name(r[0]) })}>
           <span class="step">{shape.steps[i] === null ? '–' : `↓ ${pctChange(shape.steps[i]!)}`}</span>
         </li>
       {/if}
       <li class="stage" class:dim={dim(r[0])}>
         {#if onpick}
-          <button class="line pick" onclick={() => onpick?.(r[0])} title="Filter the other tiles to this stage">
+          <button class="line pick" onclick={() => onpick?.(r[0])} title={t('Filter the other tiles to this stage')}>
           <span class="label" title={name(r[0])}>{name(r[0])}</span>
           <span class="track"><span class="bar" style:width="{Math.max(shape.widths[i] * 100, values[i] ? 1.5 : 0)}%" style:background={colors.series[0]}></span></span>
           <span class="value">{values[i] === null ? '–' : fmt.long(values[i]!)}</span>
@@ -58,7 +59,7 @@
     {/each}
   </ol>
   {#if shape.overall !== null}
-    <p class="overall">Overall: {pctChange(shape.overall)} of {first} got through to {last}.</p>
+    <p class="overall">{t('Overall: {share} of {first} got through to {last}.', { share: pctChange(shape.overall), first, last })}</p>
   {/if}
 </div>
 

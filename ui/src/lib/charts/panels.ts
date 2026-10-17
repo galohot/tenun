@@ -6,6 +6,7 @@ import type { Cell } from '../api';
 import { getLocale, measureLabel, numberFormatter, resultDim0 } from '../format';
 import { effectiveShowAs } from '../showas';
 import { axisCommon, esc, key, makeLabel, pivot, tooltipBase, type BuildArgs, type Built } from './common';
+import { t } from '../i18n';
 
 export const MAX_PANELS = 4;
 const GAP = 12;
@@ -143,6 +144,6 @@ export function buildPanels({ res, tile, colors: c, selected, height, tables = [
     categories,
     grids: n,
     horizontal: false,
-    note: all.length > MAX_PANELS ? `Panels show the first ${MAX_PANELS} values.` : null,
+    note: all.length > MAX_PANELS ? t('Panels show the first {n} values.', { n: MAX_PANELS }) : null,
   };
 }

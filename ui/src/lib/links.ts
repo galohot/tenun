@@ -3,6 +3,7 @@
 // tests can load them. The engine decides what a link means; this file only follows its answers.
 
 import type { LinkHealth, Relationship, Table } from './api';
+import { t } from './i18n.ts';
 
 type Health = Record<string, LinkHealth> | undefined;
 type Named = Pick<Table, 'id' | 'label'> & { columns?: { name: string; label?: string }[] };
@@ -21,10 +22,10 @@ const backwardOk = (h?: LinkHealth) => !!h && h.fromUnique;
 
 /** The words on the line between two tables, read from the one side to the many side. */
 export const KIND_WORDS: Record<LinkHealth['kind'], string> = {
-  'one-many': '1 – many',
+  get 'one-many'() { return t('1 – many'); },
   'one-one': '1 – 1',
-  'many-one': 'many – 1',
-  'many-many': 'many – many',
+  get 'many-one'() { return t('many – 1'); },
+  get 'many-many'() { return t('many – many'); },
 };
 
 export const kindWords = (h: LinkHealth | undefined): string => KIND_WORDS[h?.kind ?? 'one-many'];
@@ -232,13 +233,13 @@ export function nameProblem(
 ): string | null {
   const n = cleanName(name);
   if (!n) {
-    return siblings(rel, rels).length > 1 ? 'Give this link a name. Two links join these tables.' : null;
+    return siblings(rel, rels).length > 1 ? t('Give this link a name. Two links join these tables.') : null;
   }
-  if (n.length > MAX_NAME) return `Keep the name to ${MAX_NAME} letters or fewer.`;
+  if (n.length > MAX_NAME) return t('Keep the name to {n} letters or fewer.', { n: MAX_NAME });
   const same = (a: string) => a.trim().toLowerCase() === n.toLowerCase();
-  if (tables.some((t) => same(t.label))) return `A table is called ${n}. Give the link another name.`;
+  if (tables.some((x) => same(x.label))) return t('A table is called {name}. Give the link another name.', { name: n });
   const other = rels.find((r) => r.id !== rel.id && same(cleanName(pending[r.id] ?? r.name ?? '')));
-  if (other) return `Another link is called ${n}. Give this one another name.`;
+  if (other) return t('Another link is called {name}. Give this one another name.', { name: n });
   return null;
 }
 

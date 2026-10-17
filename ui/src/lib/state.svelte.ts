@@ -1,7 +1,7 @@
 // App-wide state: the workspace snapshot, the route, the theme, live events.
 
 import { guessLocale } from './locale';
-import { setLang, type Lang } from './i18n';
+import { setLang, t, tn, type Lang } from './i18n';
 import { PHONE_MAX } from './layout';
 import { linkTablesOf, setLinkLabels } from './links';
 import { columnFormatsOf, setColumnFormats, setKnownMeasures } from './measures';
@@ -206,7 +206,7 @@ class App {
   async undoAi() {
     try {
       const r = await api.mcpCall('undo');
-      if (!r.ok) this.toast(r.error ?? 'That change could not be taken back.', 'error');
+      if (!r.ok) this.toast(r.error ?? t('That change could not be taken back.'), 'error');
     } catch (e) {
       this.error(e);
     }
@@ -317,8 +317,8 @@ class App {
         // Undo takes back the newest change only, so only the newest notice offers it.
         this.toasts = this.toasts.map((t) => (t.action ? { ...t, action: undefined } : t));
         // Undo in this app goes through the same record: then the notice says what was taken back.
-        if (what.startsWith('took back: ')) this.toast(`Taken back: ${what.slice(11)}.`);
-        else this.toast(`An AI app ${what}.`, 'info', { label: 'Undo', run: () => this.undoAi() });
+        if (what.startsWith('took back: ')) this.toast(t('Taken back: {what}.', { what: what.slice(11) }));
+        else this.toast(t('An AI app {what}.', { what }), 'info', { label: t('Undo'), run: () => this.undoAi() });
       } else if (ev.type === 'dashboards-changed') {
         // Our own save echoes back; only other windows need to reload.
         if (Date.now() - this.#lastLocalSave > 1500) {
@@ -328,8 +328,8 @@ class App {
       } else if (ev.type === 'cloud-connected') {
         this.connecting = null;
         api.cloud().then((c) => (this.cloud = c));
-        if ((ev as { ok?: boolean }).ok) this.toast('Connected to tenun.cloud');
-        else this.toast('The connection was not approved in time. Try again.', 'error');
+        if ((ev as { ok?: boolean }).ok) this.toast(t('Connected to tenun.cloud'));
+        else this.toast(t('The connection was not approved in time. Try again.'), 'error');
       } else if (ev.type === 'site-progress') {
         const p = ev as unknown as { done: number; total: number };
         this.siteProgress = { done: p.done, total: p.total };
@@ -337,8 +337,8 @@ class App {
         this.refresh();
       } else if (ev.type === 'alerts') {
         // An alert went, or could not (v5 build 12): the list in Settings says why.
-        if (ev.failed) this.toast('An alert could not be sent. Settings › Alerts says why.', 'error');
-        else if (ev.sent) this.toast(ev.sent === 1 ? 'An alert was sent' : `${ev.sent} alerts were sent`);
+        if (ev.failed) this.toast(t('An alert could not be sent. Settings › Alerts says why.'), 'error');
+        else if (ev.sent) this.toast(tn('An alert was sent', '{n} alerts were sent', ev.sent));
       } else if (ev.type === 'error' && ev.message) {
         this.toast(ev.message, 'error');
       }

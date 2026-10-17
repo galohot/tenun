@@ -4,6 +4,7 @@
 
 import type { Cell, Dashboard, Measure, MeasureInfo, NamedMeasure, NumFormat, TableSetup, Tile } from './api';
 import type { ColumnFormat } from './export';
+import { t } from './i18n.ts';
 
 /** A workspace uses this many measures. Same as the engine. */
 export const MAX_MEASURES = 200;
@@ -39,7 +40,7 @@ export const isKnown = (id: string): boolean => known.some((m) => m.id === id);
 
 /** The name of a named measure. One that is gone reads as "A deleted measure", so a title never breaks. */
 export function nameOf(id: string): string {
-  return known.find((m) => m.id === id)?.name ?? 'A deleted measure';
+  return known.find((m) => m.id === id)?.name ?? t('A deleted measure');
 }
 
 /**
@@ -93,16 +94,21 @@ export const ALONG_WAYS: readonly string[] = ['running', 'ytd'];
 /** The first value of the tile adds up here (or the tile has none, and counts rows). */
 export const addsUp = (tile: Pick<Tile, 'measures'>, parts?: Parts): boolean => addsUpHere(tile, 0, parts);
 
-const KIND_WORDS: Record<string, string> = {
-  avg: 'Averages',
-  min: 'Lowest values',
-  max: 'Highest values',
-  median: 'Medians',
-  p90: '90th percentiles',
-  count_distinct: 'Unique counts',
-  stdev: 'Spreads',
-  variance: 'Variances',
-};
+/** Values of one way of adding up, in words: "Averages". Ratios and the other ways read "Ratios", "These values". */
+function kindWords(m: Measure): string {
+  if (m.per) return t('Ratios');
+  switch (m.agg) {
+    case 'avg': return t('Averages');
+    case 'min': return t('Lowest values');
+    case 'max': return t('Highest values');
+    case 'median': return t('Medians');
+    case 'p90': return t('90th percentiles');
+    case 'count_distinct': return t('Unique counts');
+    case 'stdev': return t('Spreads');
+    case 'variance': return t('Variances');
+    default: return t('These values');
+  }
+}
 
 /**
  * Why value `i` is not added up, as the start of a sentence ("Averages are not added up"), or null when it adds
@@ -113,11 +119,11 @@ export function whyNotAdded(tile: Pick<Tile, 'measures'>, i: number, parts?: Par
   if (!m || addsUpHere(tile, i, parts)) return null;
   const name = m.named ? nameOf(m.named) : null;
   if (additive(m)) {
-    if (overlapsAt(parts, i)) return `${name ?? 'This value'} is not added up here, because one row can be in two groups`;
-    return `${name ?? 'This value'} is not added up here, because a table it reads is the same for every group`;
+    if (overlapsAt(parts, i)) return t('{name} is not added up here, because one row can be in two groups', { name: name ?? t('This value') });
+    return t('{name} is not added up here, because a table it reads is the same for every group', { name: name ?? t('This value') });
   }
-  if (name) return `${name} is not added up`;
-  return `${m.per ? 'Ratios' : (KIND_WORDS[m.agg] ?? 'These values')} are not added up`;
+  if (name) return t('{name} is not added up', { name });
+  return t('{kinds} are not added up', { kinds: kindWords(m) });
 }
 
 /** The ways of showing a value that add values up. */
@@ -143,32 +149,36 @@ const SHARE_TYPES: readonly string[] = ['share', 'donut', 'pie'];
 export function tileProblem(tile: Pick<Tile, 'type' | 'measures'>, parts?: Parts, byDate = false, rows?: readonly Cell[][] | null): string | null {
   if (tile.type === 'waterfall' && !byDate) {
     const why = whyNotAdded(tile, 0, parts);
-    return why ? `A waterfall adds one category to the next. ${why}, so there are no steps to draw.` : null;
+    return why ? t('A waterfall adds one category to the next. {why}, so there are no steps to draw.', { why }) : null;
   }
   if (tile.type === 'pie' || tile.type === 'donut') {
     // Slices are the parts of a whole (V4-D7): a value that does not add up, or one below 0, makes none.
     const m = tile.measures[0];
-    const a = tile.type === 'pie' ? 'A pie' : 'A donut';
+    const pie = tile.type === 'pie';
     if (m && additive(m) && overlapsAt(parts, 0) && !repeatsAt(parts, 0)) {
-      return 'These shares would add up to more than 100 %, because one row can be in two groups.';
+      return t('These shares would add up to more than 100 %, because one row can be in two groups.');
     }
     if (m && !addsUpHere(tile, 0, parts)) {
-      const what = m.named ? `${nameOf(m.named)} does not` : `${m.per ? 'Ratios' : (KIND_WORDS[m.agg] ?? 'These values')} do not`;
-      return `${a} needs parts that add up to a whole. ${what}. Try a bar chart.`;
+      const what = m.named ? t('{name} does not', { name: nameOf(m.named) }) : t('{kinds} do not', { kinds: kindWords(m) });
+      return pie
+        ? t('A pie needs parts that add up to a whole. {what}. Try a bar chart.', { what })
+        : t('A donut needs parts that add up to a whole. {what}. Try a bar chart.', { what });
     }
     const value = (r: Cell[]) => r[r.length - 1];
     if (rows?.some((r) => typeof value(r) === 'number' && (value(r) as number) < 0)) {
-      return `${a} needs parts that add up to a whole. Some values are below 0. Try a bar chart.`;
+      return pie
+        ? t('A pie needs parts that add up to a whole. Some values are below 0. Try a bar chart.')
+        : t('A donut needs parts that add up to a whole. Some values are below 0. Try a bar chart.');
     }
     return null;
   }
   if (SHARE_TYPES.includes(tile.type)) {
     // Shares of a whole: the parts must add up to it. Rows in two groups would pass 100 % (V4-D112).
     if (tile.measures[0] && additive(tile.measures[0]) && overlapsAt(parts, 0) && !repeatsAt(parts, 0)) {
-      return 'These shares would add up to more than 100 %, because one row can be in two groups.';
+      return t('These shares would add up to more than 100 %, because one row can be in two groups.');
     }
     const why = whyNotAdded(tile, 0, parts);
-    return why ? `${why}, so it has no shares. A share chart needs a sum or a count.` : null;
+    return why ? t('{why}, so it has no shares. A share chart needs a sum or a count.', { why }) : null;
   }
   return null;
 }
@@ -281,17 +291,17 @@ const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLow
 /** Why a name cannot be used for a measure, in words, or null. The same rules as the engine. `except` is the measure being edited. */
 export function nameProblem(name: string, all: readonly NamedMeasure[], except?: string): string | null {
   const n = name.trim().replace(/\s+/g, ' ');
-  if (!n) return 'Give the measure a name.';
-  if ([...n].length > MAX_MEASURE_NAME) return `Keep the name to ${MAX_MEASURE_NAME} letters or fewer.`;
+  if (!n) return t('Give the measure a name.');
+  if ([...n].length > MAX_MEASURE_NAME) return t('Keep the name to {n} letters or fewer.', { n: MAX_MEASURE_NAME });
   const clash = all.find((m) => m.id !== except && same(m.name, n));
-  if (clash) return `Another measure is called ${clash.name}. Choose another name.`;
+  if (clash) return t('Another measure is called {name}. Choose another name.', { name: clash.name });
   return null;
 }
 
 /** Why a formula cannot be saved before the engine is asked, or null. */
 export function formulaProblem(formula: string): string | null {
-  if (!formula.trim()) return 'Write a formula, such as SUM([Sales].[amount]).';
-  if ([...formula].length > MAX_FORMULA) return `Keep a formula to ${MAX_FORMULA.toLocaleString('en-US')} characters or fewer.`;
+  if (!formula.trim()) return t('Write a formula, such as SUM([Sales].[amount]).');
+  if ([...formula].length > MAX_FORMULA) return t('Keep a formula to {n} characters or fewer.', { n: MAX_FORMULA.toLocaleString('en-US') });
   return null;
 }
 

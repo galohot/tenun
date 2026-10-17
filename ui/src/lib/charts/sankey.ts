@@ -6,6 +6,7 @@ import type { Cell } from '../api';
 import { cell, getLocale, numberFormatter, pctShare } from '../format';
 import { esc, tooltipBase, type BuildArgs, type Built } from './common';
 import { flowModel, type FlowNode } from './flow';
+import { t } from '../i18n';
 
 const OTHER_KEY = '\u0000other';
 
@@ -55,10 +56,10 @@ export function buildSankey({ res, tile, colors: c, selected, selectedStage, wid
           const [a, b] = [byId.get(p.data.source!), byId.get(p.data.target!)];
           const l = flow.links.find((x) => x.source === p.data.source && x.target === p.data.target);
           if (!a || !b) return '';
-          return `<b>${esc(name(a.stage, a.raw))} → ${esc(name(b.stage, b.raw))}</b><br/>${esc(fmt.tip(p.data.value))}${l ? ` · ${esc(pctShare(l.share, loc))} of the total` : ''}`;
+          return `<b>${esc(name(a.stage, a.raw))} → ${esc(name(b.stage, b.raw))}</b><br/>${esc(fmt.tip(p.data.value))}${l ? ` · ${esc(t('{share} of the total', { share: pctShare(l.share, loc) }))}` : ''}`;
         }
         const n = byId.get(p.data.name ?? '');
-        return n ? `<b>${esc(name(n.stage, n.raw))}</b><br/>${esc(fmt.tip(n.value))} · ${esc(pctShare(n.share, loc))} of its stage` : '';
+        return n ? `<b>${esc(name(n.stage, n.raw))}</b><br/>${esc(fmt.tip(n.value))} · ${esc(t('{share} of its stage', { share: pctShare(n.share, loc) }))}` : '';
       },
     },
     series: [
@@ -83,7 +84,7 @@ export function buildSankey({ res, tile, colors: c, selected, selectedStage, wid
       },
     ],
   };
-  const note = res.other ? 'The smallest nodes of a stage are added up as Other.' : null;
+  const note = res.other ? t('The smallest nodes of a stage are added up as Other.') : null;
   return {
     option,
     categories: [],

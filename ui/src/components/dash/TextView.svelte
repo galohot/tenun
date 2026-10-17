@@ -8,6 +8,7 @@
   import { formatOf, isKnown, nameOf, namedMeasure } from '../../lib/measures';
   import { changeTone } from '../../lib/card';
   import Icon, { type IconName } from '../Icon.svelte';
+  import { t } from '../../lib/i18n';
 
   let {
     text,
@@ -31,22 +32,22 @@
   const blocks = $derived(parseMarkdown(text));
 
   const CALLOUT: Record<CalloutKind, { icon: IconName; word: string }> = {
-    note: { icon: 'info', word: 'Note' },
-    good: { icon: 'check', word: 'Good' },
-    warn: { icon: 'warning', word: 'Warning' },
+    note: { icon: 'info', word: t('Note') },
+    good: { icon: 'check', word: t('Good') },
+    warn: { icon: 'warning', word: t('Warning') },
   };
 
   /** The words of a live number, and what its tooltip says. */
   function number(id: string, part: 'value' | 'compare' | 'period'): { text: string; title: string; missing: boolean } {
-    if (!isKnown(id)) return { text: '—', title: 'This measure was deleted', missing: true };
+    if (!isKnown(id)) return { text: '—', title: t('This measure was deleted'), missing: true };
     const name = nameOf(id);
     if (!values) return { text: '…', title: name, missing: false };
     const v = values[part === 'value' ? id : `${id}|${part}`];
-    if (part === 'period') return { text: typeof v === 'string' ? v : '—', title: `${name}: the period`, missing: v == null };
-    if (typeof v !== 'number') return { text: '—', title: part === 'compare' ? `${name}: nothing to compare with` : name, missing: true };
+    if (part === 'period') return { text: typeof v === 'string' ? v : '—', title: t('{name}: the period', { name }), missing: v == null };
+    if (typeof v !== 'number') return { text: '—', title: part === 'compare' ? t('{name}: nothing to compare with', { name }) : name, missing: true };
     if (part === 'compare') {
       const tone = changeTone(v);
-      return { text: tone === 'flat' ? '≈ Same' : `${v > 0 ? '▲' : '▼'} ${pctChange(v)}`, title: `${name}: the change against the period before`, missing: false };
+      return { text: tone === 'flat' ? `≈ ${t('Same')}` : `${v > 0 ? '▲' : '▼'} ${pctChange(v)}`, title: t('{name}: the change against the period before', { name }), missing: false };
     }
     const fmt = formatOf({ measures: [namedMeasure(id)] }, 0);
     return { text: compact(v, fmt), title: `${name}: ${tip(v, fmt)}`, missing: false };
@@ -77,7 +78,7 @@
 
 <div class="text {style}" class:center={align === 'center'}>
   {#if !blocks.length && editing}
-    <p class="empty">Write something in the panel on the right.</p>
+    <p class="empty">{t('Write something in the panel on the right.')}</p>
   {/if}
   {#each blocks as b, i}
     {#if b.t === 'h1'}<h4 class="h1">{@render inl(b.children)}</h4>

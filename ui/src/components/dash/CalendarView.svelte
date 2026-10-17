@@ -9,6 +9,7 @@
   import { weekStartSet } from '../../lib/locale';
   import { heatRange, heatStep, inkFor } from '../../lib/charts/heat';
   import { cell, getLocale, numberFormatter, partName } from '../../lib/format';
+  import { t } from '../../lib/i18n';
 
   let {
     res,
@@ -75,7 +76,7 @@
 </script>
 
 <div class="cal" bind:clientWidth={w} bind:clientHeight={h}>
-  <svg width={w} height={h} role="img" aria-label="Calendar of {res.columns[1]?.name ?? 'values'} by day">
+  <svg width={w} height={h} role="img" aria-label={t('Calendar of {name} by day', { name: res.columns[1]?.name ?? t('values') })}>
     {#each monthLabels as l}
       <text class="mname" x={mx(l.m.week)} y={TOP - 6}>{l.text}</text>
     {/each}
@@ -95,7 +96,7 @@
           height={sy - pad}
           rx="2"
           fill={bg ?? 'var(--inset)'}>
-          <title>{dayName(d.key)}: {d.value === null ? 'No data' : fmt.tip(d.value)}</title>
+          <title>{dayName(d.key)}: {d.value === null ? t('No data') : fmt.tip(d.value)}</title>
         </rect>
         {#if !compact && sx >= 20 && sy >= 20 && bg}
           <text class="dnum" x={mx(d.week) + sx / 2} y={my(d.row) + sy / 2 + 3} text-anchor="middle" fill={inkFor(bg)}>{d.day}</text>

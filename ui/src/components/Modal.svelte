@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import Icon from './Icon.svelte';
+  import { t } from '../lib/i18n';
 
   // Every sheet has the same parts: a header (title, an optional line under it, Close), the body, and a
   // footer with its actions on the right.
@@ -47,7 +48,7 @@
         <h2>{title}</h2>
         {#if subtitle}<p>{subtitle}</p>{/if}
       </div>
-      <button class="btn plain icon close" title="Close  Esc" aria-label="Close" onclick={onclose}><Icon name="x" /></button>
+      <button class="btn plain icon close" title={t('Close  Esc')} aria-label={t('Close')} onclick={onclose}><Icon name="x" /></button>
     </header>
     <div class="content" class:flush>{@render children()}</div>
     {#if footer}

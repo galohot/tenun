@@ -10,6 +10,7 @@
   import FlowLayout from './FlowLayout.svelte';
   import { flowOrder } from '../../lib/flow';
   import { cardGround } from '../../lib/card';
+  import { t } from '../../lib/i18n';
 
   let {
     title,
@@ -61,7 +62,7 @@
   <header>
     <h1>{title}</h1>
     <p>{subtitle}</p>
-    {#if filters.length}<p class="filters">Filtered by: {filters.join(' · ')}</p>{/if}
+    {#if filters.length}<p class="filters">{t('Filtered by: {filters}', { filters: filters.join(' · ') })}</p>{/if}
   </header>
   <!-- One tile: on the grid at its place, or in a story's column (build 11). A text may be cut across pages of a PDF. -->
   {#snippet frame(t: Tile, box: { left: number; top: number; w: number; h: number } | null)}

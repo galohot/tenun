@@ -10,6 +10,7 @@ import { farFromZero } from './math';
 import { niceUp } from './small';
 import { partialNote } from '../run';
 import { isGood, moveOf, moveWords, relative } from './pairs';
+import { t } from '../i18n';
 
 type Api = {
   value: (i: number) => number;
@@ -60,7 +61,7 @@ function buildDumbbell({ res, tile, colors: c, selected, width, tables = [] }: B
   // The hairline between the two dots.
   const line = {
     type: 'custom',
-    name: 'Gap',
+    name: t('Gap'),
     z: 2,
     silent: false,
     encode: { x: [1, 2], y: 0 },
@@ -108,7 +109,7 @@ function buildDumbbell({ res, tile, colors: c, selected, width, tables = [] }: B
     if (a !== null && b !== null) {
       const mv = moveWords(moveOf(a, b));
       const rel = relative(a, b);
-      lines.push(`Gap: ${esc(fmt.tip(Math.abs(b - a)))} ${mv.glyph} ${esc(sides[1])} ${mv.word}${rel === null ? '' : ` (${rel > 0 ? '+' : rel < 0 ? '−' : ''}${Math.abs(Math.round(rel * 100))} %)`}`);
+      lines.push(`${esc(t('Gap'))}: ${esc(fmt.tip(Math.abs(b - a)))} ${mv.glyph} ${esc(sides[1])} ${mv.word}${rel === null ? '' : ` (${rel > 0 ? '+' : rel < 0 ? '−' : ''}${Math.abs(Math.round(rel * 100))} %)`}`);
     }
     return lines.join('<br/>');
   };
@@ -131,8 +132,8 @@ function buildDumbbell({ res, tile, colors: c, selected, width, tables = [] }: B
     },
     series: [line, dot(0), dot(1)],
   };
-  const cut = res.total_rows ? `Showing the ${res.rows.length} rows with the biggest gap, of ${res.total_rows.toLocaleString('en-US')}.` : '';
-  return { option, categories: groups, horizontal: true, rows: res.rows.length, note: [far ? 'The axis does not start at zero.' : '', cut].filter(Boolean).join(' ') || null };
+  const cut = res.total_rows ? t('Showing the {n} rows with the biggest gap, of {total}.', { n: res.rows.length, total: res.total_rows.toLocaleString('en-US') }) : '';
+  return { option, categories: groups, horizontal: true, rows: res.rows.length, note: [far ? t('The axis does not start at zero.') : '', cut].filter(Boolean).join(' ') || null };
 }
 
 function buildSlope({ res, tile, colors: c, selected, width, tables = [] }: BuildArgs): Built {
@@ -202,9 +203,9 @@ function buildSlope({ res, tile, colors: c, selected, width, tables = [] }: Buil
     const mv = moveWords(moveOf(a, b));
     if (a !== null && b !== null) {
       const rel = relative(a, b);
-      lines.push(`${mv.glyph} ${esc(measure || 'The value')} ${mv.word} by ${esc(fmt.tip(Math.abs(b - a)))}${rel === null ? '' : ` (${Math.abs(Math.round(rel * 100))} %)`}`.trim());
+      lines.push(`${mv.glyph} ${esc(t('{name} {move} by {amount}', { name: measure || t('The value'), move: mv.word, amount: fmt.tip(Math.abs(b - a)) }))}${rel === null ? '' : ` (${Math.abs(Math.round(rel * 100))} %)`}`.trim());
     } else {
-      lines.push(`The value ${mv.word}.`);
+      lines.push(esc(t('The value {move}.', { move: mv.word })));
     }
     return lines.join('<br/>');
   };
@@ -225,7 +226,7 @@ function buildSlope({ res, tile, colors: c, selected, width, tables = [] }: Buil
     yAxis: { type: 'value' as const, show: false, scale: far },
     series,
   };
-  const note = [far ? 'The scale does not start at zero.' : '', unfinished ? partialNote(res, grain) : ''].filter(Boolean).join(' ') || null;
+  const note = [far ? t('The scale does not start at zero.') : '', unfinished ? partialNote(res, grain) : ''].filter(Boolean).join(' ') || null;
   return {
     option,
     categories: groups,

@@ -8,6 +8,7 @@
   import { cell } from '../../lib/format';
   import Modal from '../Modal.svelte';
   import Icon from '../Icon.svelte';
+  import { t } from '../../lib/i18n';
 
   let { ids, onclose }: { ids: string[]; onclose: () => void } = $props();
 
@@ -45,7 +46,7 @@
 
   /** Closing with names typed and not saved asks first: the text is not lost without a word. */
   function close() {
-    if (changed.length && !confirm('Close without saving the names you typed?')) return;
+    if (changed.length && !confirm(t('Close without saving the names you typed?'))) return;
     onclose();
   }
 
@@ -62,18 +63,17 @@
     const dtype = table(r.to.table)?.columns.find((c) => c.name === r.to.column)?.dtype ?? 'text';
     const parts = h.sample.map((k, i) => {
       const rows = h.sampleRows?.[i];
-      return `${cell(k, dtype)}${rows ? ` (${rows} rows)` : ''}`;
+      return rows ? t('{value} ({n} rows)', { value: cell(k, dtype), n: rows }) : cell(k, dtype);
     });
     const more = (h.keys ?? parts.length) - parts.length;
-    return more > 0 ? `${parts.join(', ')} and ${more} more` : parts.join(', ');
+    return more > 0 ? t('{list} and {n} more', { list: parts.join(', '), n: more }) : parts.join(', ');
   }
 </script>
 
-<Modal title={naming ? 'Name these links' : 'Link'} onclose={close} width={540}>
+<Modal title={naming ? t('Name these links') : t('Link')} onclose={close} width={540}>
   {#if naming}
     <p class="lead">
-      {links.length} links join {table(links[0].from.table)?.label} and {table(links[0].to.table)?.label}. Give each one a name,
-      so a tile or a formula can say which one it means, like “Shipped from” and “Sold at”.
+      {t('{n} links join {a} and {b}. Give each one a name, so a tile or a formula can say which one it means, like “Shipped from” and “Sold at”.', { n: links.length, a: table(links[0].from.table)?.label ?? '', b: table(links[0].to.table)?.label ?? '' })}
     </p>
   {/if}
 
@@ -81,7 +81,7 @@
     {@const h = app.linkHealth?.[r.id]}
     <section class="link" data-link={r.id}>
       <label class="stack">
-        <span class="label">{naming ? `Name for ${table(r.from.table)?.label}.${shown(r.from.table, r.from.column)}` : 'Name'}</span>
+        <span class="label">{naming ? t('Name for {field}', { field: `${table(r.from.table)?.label}.${shown(r.from.table, r.from.column)}` }) : t('Name')}</span>
         <input
           class="field"
           class:bad={!!problems[r.id]}
@@ -104,17 +104,17 @@
           <div>
             {#if h?.note}<p>{h.note}</p>{/if}
             {#if clash(r.id)}<p>{clash(r.id)}</p>{/if}
-            {#if h && repeated(r) && !h.note?.includes('Repeated ')}<p class="keys">Repeated {shown(r.to.table, r.to.column)}: {repeated(r)}</p>{/if}
+            {#if h && repeated(r) && !h.note?.includes('Repeated ')}<p class="keys">{t('Repeated {column}: {values}', { column: shown(r.to.table, r.to.column), values: repeated(r) })}</p>{/if}
           </div>
         </div>
       {/if}
-      <button class="remove" onclick={() => remove(r)}><Icon name="trash" size={12} /> Remove this link</button>
+      <button class="remove" onclick={() => remove(r)}><Icon name="trash" size={12} /> {t('Remove this link')}</button>
     </section>
   {/each}
 
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>Cancel</button>
-    <button class="btn primary" disabled={!valid || !changed.length} onclick={save}>Save</button>
+    <button class="btn" onclick={onclose}>{t('Cancel')}</button>
+    <button class="btn primary" disabled={!valid || !changed.length} onclick={save}>{t('Save')}</button>
   {/snippet}
 </Modal>
 

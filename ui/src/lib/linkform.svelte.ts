@@ -1,6 +1,7 @@
 // The fields of a web link: address, key, records and pages. The Add sheet and Link settings share
 // this one form, so a link reads the same in both. The pure parts live in sources.ts.
 
+import { t } from './i18n';
 import { api, type KeyIn, type KeyPlace, type LinkLook, type LinkSettings, type Paging, type Source, type UrlEvery } from './api';
 import { NO_PAGES, keyStart, linkProblem, pagesFromApi, pagesFromHint, pagesToApi, splitKey, type PagesBy, type PagesForm } from './sources';
 
@@ -73,7 +74,7 @@ export class LinkForm {
     this.keyValue = r.key.value;
     this.removeKey = false;
     this.keyOpen = true;
-    this.moved = `Moved ${r.key.name} out of the link. Tenun keeps keys out of the workspace file.`;
+    this.moved = t('Moved {name} out of the link. Tenun keeps keys out of the workspace file.', { name: r.key.name });
   }
 
   /**

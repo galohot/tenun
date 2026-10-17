@@ -7,9 +7,10 @@
   import Icon from '../Icon.svelte';
   import Modal from '../Modal.svelte';
   import CardView from './card/CardView.svelte';
+  import { t, tn } from '../../lib/i18n';
 
-  const SAMPLE: KpiInfo = { value: 128400, period: 'This month', versus: 'last month', prev: 117800, delta: 0.09, partial: false, bars: [] };
-  const PLAIN: Tile = { id: 'sample', type: 'kpi', title: 'Revenue', x: 0, y: 0, w: 3, h: 2, measures: [], dims: [] };
+  const SAMPLE: KpiInfo = { value: 128400, period: t('This month'), versus: t('last month'), prev: 117800, delta: 0.09, partial: false, bars: [] };
+  const PLAIN: Tile = { id: 'sample', type: 'kpi', title: t('Revenue'), x: 0, y: 0, w: 3, h: 2, measures: [], dims: [] };
   /** The thumbnails draw this number: the tile being edited, or a made-up one when the list opens from the dashboard. */
   let { kpi = SAMPLE, tile = PLAIN, onclose }: { kpi?: KpiInfo; tile?: Tile; onclose: () => void } = $props();
 
@@ -27,7 +28,7 @@
     const id = `cs-${Math.random().toString(36).slice(2, 10)}`;
     const at = styles.indexOf(s);
     const list = [...styles];
-    list.splice(at + 1, 0, { id, name: `${s.name} (copy)`, card: JSON.parse(JSON.stringify(s.card)) });
+    list.splice(at + 1, 0, { id, name: t('{name} (copy)', { name: s.name }), card: JSON.parse(JSON.stringify(s.card)) });
     app.saveCardStyles(list);
   }
   function remove(s: CardStyle) {
@@ -47,30 +48,30 @@
   }
 </script>
 
-<Modal title="Card styles" width={520} {onclose}>
+<Modal title={t('Card styles')} width={520} {onclose}>
   {#if !styles.length}
-    <p class="empty">No card styles yet. Make one from a number tile: Edit tile › Card › Save as card style.</p>
+    <p class="empty">{t('No card styles yet. Make one from a number tile: Edit tile › Card › Save as card style.')}</p>
   {:else}
     <ul class="list">
       {#each styles as s (s.id)}
         {@const n = uses(s.id)}
         <li>
           <span class="thumb ground-{s.card.ground ?? 'plain'}" aria-hidden="true">
-            <span class="inner"><CardView {kpi} {tile} card={resolveCard({ style: s.id }, styles, !!tile.target)} title={tile.title || 'Revenue'} /></span>
+            <span class="inner"><CardView {kpi} {tile} card={resolveCard({ style: s.id }, styles, !!tile.target)} title={tile.title || t('Revenue')} /></span>
           </span>
           <div class="info">
-            <input class="field" aria-label="Name of the style" value={s.name} maxlength="60" onchange={(e) => rename(s, e.currentTarget.value)} />
-            <span class="muted">{n === 0 ? 'Not used' : n === 1 ? 'Used by 1 card' : `Used by ${n} cards`}</span>
+            <input class="field" aria-label={t('Name of the style')} value={s.name} maxlength="60" onchange={(e) => rename(s, e.currentTarget.value)} />
+            <span class="muted">{n === 0 ? t('Not used') : tn('Used by {n} card', 'Used by {n} cards', n)}</span>
             {#if deleting === s.id}
               <div class="confirm" role="alert">
-                <span>{n ? `Delete it? The ${n === 1 ? 'card keeps its' : `${n} cards keep their`} look.` : 'Delete it?'}</span>
-                <button class="btn danger" onclick={() => remove(s)}>Delete</button>
-                <button class="btn plain" onclick={() => (deleting = null)}>Cancel</button>
+                <span>{n ? tn('Delete it? The card keeps its look.', 'Delete it? The {n} cards keep their look.', n) : t('Delete it?')}</span>
+                <button class="btn danger" onclick={() => remove(s)}>{t('Delete')}</button>
+                <button class="btn plain" onclick={() => (deleting = null)}>{t('Cancel')}</button>
               </div>
             {:else}
               <div class="acts">
-                <button class="btn plain" onclick={() => duplicate(s)}>Duplicate</button>
-                <button class="btn plain danger" onclick={() => (deleting = s.id)}><Icon name="trash" size={14} /> Delete</button>
+                <button class="btn plain" onclick={() => duplicate(s)}>{t('Duplicate')}</button>
+                <button class="btn plain danger" onclick={() => (deleting = s.id)}><Icon name="trash" size={14} /> {t('Delete')}</button>
               </div>
             {/if}
           </div>

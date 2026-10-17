@@ -11,6 +11,7 @@
   import { resultKey, tileQuery, type DashFilter } from '../../lib/tiles';
   import ChartView from './ChartView.svelte';
   import TileBody from './TileBody.svelte';
+  import { t } from '../../lib/i18n';
 
   let {
     tile,
@@ -28,8 +29,8 @@
   const res = $derived(current && current.key === resultKey(tile, filters) ? current.res : null);
 
   const NAMES: Partial<Record<TileType, string>> = {
-    bar: 'Bar', line: 'Line', area: 'Area', share: 'Share', kpi: 'Number', table: 'Table',
-    scatter: 'Scatter', histogram: 'Histogram', pivot: 'Pivot',
+    bar: t('Bar'), line: t('Line'), area: t('Area'), share: t('Share'), kpi: t('Number'), table: t('Table'),
+    scatter: t('Scatter'), histogram: t('Histogram'), pivot: t('Pivot'),
   };
   /** The preview box, and the size the non-chart types are drawn at before they are scaled down. */
   const W = 96;
@@ -98,12 +99,12 @@
 
 {#if shown.length}
   <div class="sec">
-    <span class="label">Also try</span>
+    <span class="label">{t('Also try')}</span>
     <div class="row">
       {#each shown as s (s.type)}
         {@const o = (CHART_TYPES as readonly string[]).includes(s.type) ? option(s) : null}
         {#if o || !(CHART_TYPES as readonly string[]).includes(s.type)}
-          <button class="card" title="Show this as a {NAMES[s.type] ?? s.type}" onclick={() => onapply(s.variant)}>
+          <button class="card" title={t('Show this as a {type}', { type: NAMES[s.type] ?? s.type })} onclick={() => onapply(s.variant)}>
             <span class="thumb" style:width="{W}px" style:height="{H}px" aria-hidden="true">
               {#if o}
                 <ChartView option={o} />

@@ -9,6 +9,7 @@
   import FileBrowser from './FileBrowser.svelte';
   import NewTableSheet from './data/NewTableSheet.svelte';
   import { OPS, type DerivedOp } from '../lib/derived';
+  import { t } from '../lib/i18n';
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -35,17 +36,17 @@
 
   type Kind = 'file' | 'folder' | 'link' | 'database' | 'new';
   const kinds = $derived<{ id: Kind; icon: IconName; label: string; words: string }[]>([
-    { id: 'file', icon: 'sheet', label: 'File', words: 'Excel, CSV, Parquet' },
-    { id: 'folder', icon: 'folder', label: 'Folder', words: 'Many files, one table' },
-    { id: 'link', icon: 'link', label: 'Link', words: 'Sheet, CSV or API' },
-    { id: 'database', icon: 'database', label: 'Database', words: 'PostgreSQL, MySQL' },
-    ...(canMake ? [{ id: 'new' as Kind, icon: 'newtable' as IconName, label: 'New table', words: 'From your tables' }] : []),
+    { id: 'file', icon: 'sheet', label: t('File'), words: 'Excel, CSV, Parquet' },
+    { id: 'folder', icon: 'folder', label: t('Folder'), words: t('Many files, one table') },
+    { id: 'link', icon: 'link', label: t('Link'), words: t('Sheet, CSV or API') },
+    { id: 'database', icon: 'database', label: t('Database'), words: 'PostgreSQL, MySQL' },
+    ...(canMake ? [{ id: 'new' as Kind, icon: 'newtable' as IconName, label: t('New table'), words: t('From your tables') }] : []),
   ]);
 
   async function addFiles(paths: string[]) {
     let last: string | undefined;
     for (const p of paths) {
-      const ok = await app.run(`Reading ${p.split(/[\\/]/).pop()}…`, async () => {
+      const ok = await app.run(t('Reading {name}…', { name: p.split(/[\\/]/).pop() ?? p }), async () => {
         const r = await api.addFile(p);
         last = r.added;
         return r;
@@ -53,9 +54,9 @@
       if (!ok) return;
     }
     onclose();
-    const t = app.tables.find((x) => x.source_id === last);
-    go({ view: 'data', table: t?.id });
-    app.toast(paths.length > 1 ? `Added ${paths.length} files` : 'Added');
+    const tb = app.tables.find((x) => x.source_id === last);
+    go({ view: 'data', table: tb?.id });
+    app.toast(paths.length > 1 ? t('Added {n} files', { n: paths.length }) : t('Added'));
   }
 
   async function chooseFiles() {
@@ -79,16 +80,16 @@
   async function addFolder(e: SubmitEvent) {
     e.preventDefault();
     let added = '';
-    const ok = await app.run('Reading the folder…', async () => {
+    const ok = await app.run(t('Reading the folder…'), async () => {
       const r = await api.addFolder(folder, pattern.trim());
       added = r.added;
       return r;
     });
     if (ok) {
       onclose();
-      const t = app.tables.find((x) => x.source_id === added);
-      go({ view: 'data', table: t?.id });
-      app.toast('Added the folder');
+      const tb = app.tables.find((x) => x.source_id === added);
+      go({ view: 'data', table: tb?.id });
+      app.toast(t('Added the folder'));
     }
   }
 
@@ -96,23 +97,23 @@
     e.preventDefault();
     link.tidy();
     let added = '';
-    const ok = await app.run('Fetching the link…', async () => {
+    const ok = await app.run(t('Fetching the link…'), async () => {
       const r = await api.addUrl(link.url.trim(), link.every, link.name.trim(), link.settings());
       added = r.added;
       return r;
     });
     if (ok) {
       onclose();
-      const t = app.tables.find((x) => x.source_id === added);
-      go({ view: 'data', table: t?.id });
-      app.toast('Added the link');
+      const tb = app.tables.find((x) => x.source_id === added);
+      go({ view: 'data', table: tb?.id });
+      app.toast(t('Added the link'));
     }
   }
 
   async function connect(e: SubmitEvent) {
     e.preventDefault();
     let added = '';
-    const ok = await app.run('Connecting…', async () => {
+    const ok = await app.run(t('Connecting…'), async () => {
       const r = await api.addDatabase(kind, {
         host,
         port: port ? Number(port) : null,
@@ -126,9 +127,9 @@
     });
     if (ok) {
       onclose();
-      const t = app.tables.find((x) => x.source_id === added);
-      go({ view: 'data', table: t?.id });
-      app.toast(`Connected to ${database}`);
+      const tb = app.tables.find((x) => x.source_id === added);
+      go({ view: 'data', table: tb?.id });
+      app.toast(t('Connected to {name}', { name: database }));
     }
   }
 </script>
@@ -137,14 +138,14 @@
   <NewTableSheet
     op={making}
     onclose={() => (making = null)}
-    ondone={(t) => {
+    ondone={(id) => {
       making = null;
       onclose();
-      go({ view: 'data', table: t });
+      go({ view: 'data', table: id });
     }} />
 {:else}
-<Modal title="Add data" subtitle="Tenun reads your data where it is and never writes to it." onclose={onclose} width={canMake ? 680 : 600}>
-  <div class="kinds" role="tablist" aria-label="Kind of data" style:--n={kinds.length}>
+<Modal title={t('Add data')} subtitle={t('Tenun reads your data where it is and never writes to it.')} onclose={onclose} width={canMake ? 680 : 600}>
+  <div class="kinds" role="tablist" aria-label={t('Kind of data')} style:--n={kinds.length}>
     {#each kinds as k (k.id)}
       <button role="tab" aria-selected={tab === k.id} class:on={tab === k.id} onclick={() => (tab = k.id)}>
         <Icon name={k.icon} size={16} />
@@ -157,25 +158,25 @@
   {#if tab === 'file'}
     <button class="drop" onclick={chooseFiles} disabled={!!app.busy}>
       <svg class="up" width="24" height="24" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13V3.5M6.5 7 10 3.5 13.5 7M4 11.5v4h12v-4" /></svg>
-      <strong>{app.busy ?? 'Choose files…'}</strong>
-      <span>Excel, CSV, Parquet, SQLite or DuckDB.{app.health?.native ? ' You can also drop files on the window.' : ''}</span>
-      <span>Tenun reads the file where it is and updates when you save it.</span>
+      <strong>{app.busy ?? t('Choose files…')}</strong>
+      <span>{t('Excel, CSV, Parquet, SQLite or DuckDB.')}{app.health?.native ? ' ' + t('You can also drop files on the window.') : ''}</span>
+      <span>{t('Tenun reads the file where it is and updates when you save it.')}</span>
     </button>
     <form class="paste" id="pathform" onsubmit={(e) => { e.preventDefault(); if (path.trim()) addFiles([path.trim()]); }}>
-      <input class="field" placeholder="Or paste a full file path" aria-label="Full path of a file" bind:value={path} />
+      <input class="field" placeholder={t('Or paste a full file path')} aria-label={t('Full path of a file')} bind:value={path} />
     </form>
   {:else if tab === 'folder'}
     <form class="db" id="folderform" onsubmit={addFolder}>
       <button type="button" class="drop" onclick={chooseFolder} disabled={!!app.busy}>
         <Icon name="folder" size={28} />
-        <strong>{folder ? folder.split(/[\\/]/).filter(Boolean).pop() : 'A folder of files…'}</strong>
-        <span>{folder || 'Excel and CSV files in one folder stack into one table.'}</span>
-        <span>Tenun adds a "file" column with the name of each file, and picks up files you add, change or remove.</span>
+        <strong>{folder ? folder.split(/[\\/]/).filter(Boolean).pop() : t('A folder of files…')}</strong>
+        <span>{folder || t('Excel and CSV files in one folder stack into one table.')}</span>
+        <span>{t('Tenun adds a "file" column with the name of each file, and picks up files you add, change or remove.')}</span>
       </button>
       <label class="stack">
-        <span class="label">Files to read</span>
+        <span class="label">{t('Files to read')}</span>
         <input class="field" bind:value={pattern} placeholder={DEFAULT_PATTERN} />
-        <span class="help">Separate patterns with a semicolon. Use * for any text.</span>
+        <span class="help">{t('Separate patterns with a semicolon. Use * for any text.')}</span>
       </label>
     </form>
   {:else if tab === 'link'}
@@ -183,7 +184,7 @@
       <LinkFields f={link} />
       <p class="note">
         <Icon name="info" size={14} />
-        Tenun downloads the link and keeps a copy next to your workspace. It sends no cookies, and reads up to 50 MB.
+        {t('Tenun downloads the link and keeps a copy next to your workspace. It sends no cookies, and reads up to 50 MB.')}
       </p>
     </form>
   {:else if tab === 'new'}
@@ -197,48 +198,47 @@
       {/each}
       <p class="note">
         <Icon name="info" size={14} />
-        A new table reads the tables you pick and is made again when they change. Tenun never writes to your files.
+        {t('A new table reads the tables you pick and is made again when they change. Tenun never writes to your files.')}
       </p>
     </div>
   {:else}
     <form class="db" id="dbform" onsubmit={connect}>
-      <div class="seg" role="radiogroup" aria-label="Database type">
+      <div class="seg" role="radiogroup" aria-label={t('Database type')}>
         <button type="button" role="radio" aria-checked={kind === 'postgres'} class:on={kind === 'postgres'} onclick={() => (kind = 'postgres')}>PostgreSQL</button>
         <button type="button" role="radio" aria-checked={kind === 'mysql'} class:on={kind === 'mysql'} onclick={() => (kind = 'mysql')}>MySQL</button>
       </div>
       <div class="grid">
-        <label class="wide"><span class="label">Host</span><input class="field" bind:value={host} required /></label>
-        <label><span class="label">Port</span><input class="field" bind:value={port} placeholder={kind === 'postgres' ? '5432' : '3306'} inputmode="numeric" /></label>
-        <label class="wide"><span class="label">Database</span><input class="field" bind:value={database} required /></label>
+        <label class="wide"><span class="label">{t('Host')}</span><input class="field" bind:value={host} required /></label>
+        <label><span class="label">{t('Port')}</span><input class="field" bind:value={port} placeholder={kind === 'postgres' ? '5432' : '3306'} inputmode="numeric" /></label>
+        <label class="wide"><span class="label">{t('Database')}</span><input class="field" bind:value={database} required /></label>
         {#if kind === 'postgres'}
-          <label><span class="label">Schema</span><input class="field" bind:value={schema} placeholder="all" /></label>
+          <label><span class="label">{t('Schema')}</span><input class="field" bind:value={schema} placeholder={t('all')} /></label>
         {/if}
-        <label class="wide"><span class="label">User</span><input class="field" bind:value={user} required autocomplete="username" /></label>
-        <label class="wide"><span class="label">Password</span><input class="field" type="password" bind:value={password} autocomplete="current-password" /></label>
+        <label class="wide"><span class="label">{t('User')}</span><input class="field" bind:value={user} required autocomplete="username" /></label>
+        <label class="wide"><span class="label">{t('Password')}</span><input class="field" type="password" bind:value={password} autocomplete="current-password" /></label>
       </div>
       <p class="note">
         <Icon name="info" size={14} />
-        Read-only. The password is kept on this computer, never in the workspace file. The first connection downloads
-        the {kind === 'postgres' ? 'PostgreSQL' : 'MySQL'} connector once.
+        {t('Read-only. The password is kept on this computer, never in the workspace file. The first connection downloads the {name} connector once.', { name: kind === 'postgres' ? 'PostgreSQL' : 'MySQL' })}
       </p>
     </form>
   {/if}
 
   {#snippet footer()}
     {#if tab === 'database'}
-      <button class="btn" onclick={onclose}>Cancel</button>
-      <button class="btn primary" type="submit" form="dbform" disabled={!!app.busy}>{app.busy ?? 'Connect'}</button>
+      <button class="btn" onclick={onclose}>{t('Cancel')}</button>
+      <button class="btn primary" type="submit" form="dbform" disabled={!!app.busy}>{app.busy ?? t('Connect')}</button>
     {:else if tab === 'folder'}
-      <button class="btn" onclick={onclose}>Cancel</button>
-      <button class="btn primary" type="submit" form="folderform" disabled={!!app.busy || !folder}>{app.busy ?? 'Add folder'}</button>
+      <button class="btn" onclick={onclose}>{t('Cancel')}</button>
+      <button class="btn primary" type="submit" form="folderform" disabled={!!app.busy || !folder}>{app.busy ?? t('Add folder')}</button>
     {:else if tab === 'link'}
-      <button class="btn" onclick={onclose}>Cancel</button>
-      <button class="btn primary" type="submit" form="linkform" disabled={!!app.busy || !link.url.trim() || !!link.problem}>{app.busy ?? 'Add link'}</button>
+      <button class="btn" onclick={onclose}>{t('Cancel')}</button>
+      <button class="btn primary" type="submit" form="linkform" disabled={!!app.busy || !link.url.trim() || !!link.problem}>{app.busy ?? t('Add link')}</button>
     {:else if tab === 'file'}
-      <button class="btn" onclick={onclose}>Cancel</button>
-      <button class="btn primary" type="submit" form="pathform" title={path.trim() ? undefined : 'Paste a file path first, or choose files above'} disabled={!!app.busy || !path.trim()}>{app.busy ?? 'Add'}</button>
+      <button class="btn" onclick={onclose}>{t('Cancel')}</button>
+      <button class="btn primary" type="submit" form="pathform" title={path.trim() ? undefined : t('Paste a file path first, or choose files above')} disabled={!!app.busy || !path.trim()}>{app.busy ?? t('Add')}</button>
     {:else}
-      <button class="btn" onclick={onclose}>Close</button>
+      <button class="btn" onclick={onclose}>{t('Close')}</button>
     {/if}
   {/snippet}
 </Modal>

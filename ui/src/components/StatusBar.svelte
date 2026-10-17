@@ -4,6 +4,7 @@
   import { app } from '../lib/state.svelte';
   import { stampLabel } from '../lib/format';
   import { palette, modKey } from './Palette.svelte';
+  import { t, tn } from '../lib/i18n';
 
   const snap = $derived(app.snap!);
   // A new table made from other tables is not a source of its own: it follows its inputs.
@@ -18,17 +19,17 @@
   );
 
   const stateWords = $derived.by(() => {
-    if (status === 'none') return 'No data yet';
-    if (status === 'error') return failed.length === 1 ? `${failed[0].name} could not be read` : `${failed.length} sources could not be read`;
-    if (status === 'waiting') return waiting.length === 1 ? '1 source not loaded yet' : `${waiting.length} sources not loaded yet`;
-    return live === 1 ? '1 source live' : `${live} sources live`;
+    if (status === 'none') return t('No data yet');
+    if (status === 'error') return failed.length === 1 ? t('{name} could not be read', { name: failed[0].name }) : t('{n} sources could not be read', { n: failed.length });
+    if (status === 'waiting') return tn('{n} source not loaded yet', '{n} sources not loaded yet', waiting.length);
+    return tn('{n} source live', '{n} sources live', live);
   });
   const stateTitle = $derived(
     snap.workspace.sources
       .map((s) => {
         const at = loadedAt[s.id] ? stampLabel(loadedAt[s.id]) : '';
-        if (snap.errors[s.id]) return `${s.name}: could not be read. ${snap.errors[s.id]}`;
-        return `${s.name}: ${at ? `loaded ${at}` : 'not loaded yet'}`;
+        if (snap.errors[s.id]) return t('{name}: could not be read. {error}', { name: s.name, error: snap.errors[s.id] });
+        return at ? t('{name}: loaded {at}', { name: s.name, at }) : t('{name}: not loaded yet', { name: s.name });
       })
       .join('\n'),
   );
@@ -38,32 +39,32 @@
   const table = $derived(app.route.view === 'data' && app.route.table ? app.table(app.route.table) : undefined);
   const rows = $derived.by(() => {
     if (table) return table.rows;
-    const known = app.tables.filter((t) => t.rows !== null);
-    return known.length ? known.reduce((n, t) => n + (t.rows ?? 0), 0) : null;
+    const known = app.tables.filter((tb) => tb.rows !== null);
+    return known.length ? known.reduce((n, tb) => n + (tb.rows ?? 0), 0) : null;
   });
-  const rowsWords = $derived(rows === null ? '' : `${nf.format(rows)} ${rows === 1 ? 'row' : 'rows'}`);
+  const rowsWords = $derived(rows === null ? '' : tn('{n} row', '{n} rows', rows, { n: nf.format(rows) }));
   const tableCount = $derived(app.tables.length);
 
   const newest = $derived(Object.values(loadedAt).filter(Boolean).sort().at(-1) ?? null);
 </script>
 
-<footer class="status" aria-label="Status">
+<footer class="status" aria-label={t('Status')}>
   <span class="cell state {status}" title={stateTitle || undefined}>
     {#if status !== 'none'}<span class="dot" aria-hidden="true"></span>{/if}
     {stateWords}
   </span>
   {#if rowsWords}
     <span class="sep" aria-hidden="true"></span>
-    <span class="cell num" title={table ? `Rows in ${table.label || table.name}` : `Rows in ${tableCount} ${tableCount === 1 ? 'table' : 'tables'}`}>
-      {table ? `${table.label || table.name} · ${rowsWords}` : rowsWords}{#if !table && tableCount > 1}<span class="soft"> in {tableCount} tables</span>{/if}
+    <span class="cell num" title={table ? t('Rows in {name}', { name: table.label || table.name }) : tn('Rows in {n} table', 'Rows in {n} tables', tableCount)}>
+      {table ? `${table.label || table.name} · ${rowsWords}` : rowsWords}{#if !table && tableCount > 1}<span class="soft"> {t('in {n} tables', { n: tableCount })}</span>{/if}
     </span>
   {/if}
   {#if newest}
     <span class="sep" aria-hidden="true"></span>
-    <span class="cell num"><time datetime={newest}>Updated {stampLabel(newest)}</time></span>
+    <span class="cell num"><time datetime={newest}>{t('Updated {at}', { at: stampLabel(newest) })}</time></span>
   {/if}
-  <button class="cell hint" onclick={() => (palette.open = true)} title="Command palette">
-    <kbd>{modKey}K</kbd> Commands
+  <button class="cell hint" onclick={() => (palette.open = true)} title={t('Command palette')}>
+    <kbd>{modKey}K</kbd> {t('Commands')}
   </button>
 </footer>
 

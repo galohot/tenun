@@ -10,6 +10,7 @@ import * as L from './locale';
 import { toneOf, type Tone } from './numfmt';
 import type { Locale } from './locale';
 import { localeState } from './localeState.svelte';
+import { t } from './i18n';
 
 export type { Locale } from './locale';
 
@@ -138,8 +139,8 @@ export type ColRef = { table?: string | null; column?: string | null } | null | 
  *  and a date at day grain then follow that column's settings. */
 export function cell(v: Cell, dtype: DType, grain?: Grain | null, short = false, f?: NumFormat | null, unit?: Unit | null, col?: ColRef): string {
   const own = col ? columnFormat(col.table, col.column) : null;
-  if (v === null || v === undefined) return own?.format?.blank || '(blank)';
-  if (v === OTHER_KEY) return 'Other';
+  if (v === null || v === undefined) return own?.format?.blank || t('(blank)');
+  if (v === OTHER_KEY) return t('Other');
   if (grain && isPart(grain) && typeof v === 'number') return partName(v, grain);
   if (dtype === 'number' && typeof v === 'number') {
     const g = f ?? own?.format ?? null;
@@ -150,7 +151,7 @@ export function cell(v: Cell, dtype: DType, grain?: Grain | null, short = false,
     if (own?.date_pattern && (!grain || grain === 'day')) return L.datePattern(v, own.date_pattern, getLocale());
     return formatDate(v, grain, dtype);
   }
-  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (typeof v === 'boolean') return v ? t('Yes') : t('No');
   return String(v);
 }
 
@@ -171,35 +172,55 @@ export function fieldWord(tables: Named[] | undefined, table: string, column: st
   return labelOf(tables, table, column) ?? pretty(column).toLowerCase();
 }
 
-const aggWords: Record<Agg, string> = {
-  sum: 'Total',
-  avg: 'Average',
-  min: 'Lowest',
-  max: 'Highest',
-  count: 'Count of',
-  count_distinct: 'Unique',
-  median: 'Median',
-  p90: '90th percentile of',
-  stdev: 'Spread of',
-  variance: 'Variance of',
-  closing: 'Closing',
-  opening: 'Opening',
-};
+/** A value added up a way, in words: "Average amount". */
+function aggWord(agg: Agg, name: string): string {
+  switch (agg) {
+    case 'sum': return t('Total {name}', { name });
+    case 'avg': return t('Average {name}', { name });
+    case 'min': return t('Lowest {name}', { name });
+    case 'max': return t('Highest {name}', { name });
+    case 'count': return t('Count of {name}', { name });
+    case 'count_distinct': return t('Unique {name}', { name });
+    case 'median': return t('Median {name}', { name });
+    case 'p90': return t('90th percentile of {name}', { name });
+    case 'stdev': return t('Spread of {name}', { name });
+    case 'variance': return t('Variance of {name}', { name });
+    case 'closing': return t('Closing {name}', { name });
+    case 'opening': return t('Opening {name}', { name });
+  }
+}
 
 export const aggNames: Record<Agg, string> = {
-  sum: 'Sum',
-  avg: 'Average',
-  min: 'Minimum',
-  max: 'Maximum',
-  count: 'Count',
-  count_distinct: 'Count unique',
-  median: 'Median',
-  p90: '90th percentile',
-  stdev: 'Standard deviation',
-  variance: 'Variance',
-  closing: 'Closing value',
-  opening: 'Opening value',
+  get sum() { return t('Sum'); },
+  get avg() { return t('Average'); },
+  get min() { return t('Minimum'); },
+  get max() { return t('Maximum'); },
+  get count() { return t('Count'); },
+  get count_distinct() { return t('Count unique'); },
+  get median() { return t('Median'); },
+  get p90() { return t('90th percentile'); },
+  get stdev() { return t('Standard deviation'); },
+  get variance() { return t('Variance'); },
+  get closing() { return t('Closing value'); },
+  get opening() { return t('Opening value'); },
 };
+
+/** "a and b and c": names joined in the language of the screens. */
+const and = (names: string[]) => names.reduce((a, b) => t('{a} and {b}', { a, b }));
+
+/** A period grain inside a title: "Revenue by month". */
+function grainWord(g: Grain): string {
+  switch (g) {
+    case 'year': return t('year');
+    case 'quarter': return t('quarter');
+    case 'month': return t('month');
+    case 'week': return t('week');
+    case 'day': return t('day');
+    case 'month_of_year': return t('month of year');
+    case 'weekday': return t('weekday');
+    case 'hour': return t('hour');
+  }
+}
 
 const singular = (s: string) => s.replace(/ies$/i, 'y').replace(/(ss)$/i, '$1').replace(/s$/i, '');
 
@@ -220,7 +241,7 @@ export type Named = Pick<Table, 'id' | 'name' | 'label'> & { columns?: Column[] 
 export function measureLabel(m: Measure, tables: Named[], how?: ShowAs | null): string {
   // A named measure is called what the user called it; its formula says the rest.
   const base = m.named ? nameOf(m.named) : ratioLabel(m, tables);
-  return how && how !== 'value' ? `${base} (${SHOW_AS_WORDS[how]})` : base;
+  return how && how !== 'value' ? t('{name} ({how})', { name: base, how: SHOW_AS_WORDS[how] }) : base;
 }
 
 /**
@@ -228,26 +249,29 @@ export function measureLabel(m: Measure, tables: Named[], how?: ShowAs | null): 
  * of rows of another table counts the joined rows of the first table, so it reads "row" (V3-D36).
  */
 function perWord(p: NonNullable<Measure['per']>, top: string, tables: Named[]): string {
-  if (p.column == null && p.table !== top) return 'row';
-  if (p.column == null) return singular((tables.find((x) => x.id === p.table)?.label ?? 'row').toLowerCase());
+  if (p.column == null && p.table !== top) return t('row');
+  if (p.column == null) {
+    const label = tables.find((x) => x.id === p.table)?.label;
+    return label ? singular(label.toLowerCase()) : t('row');
+  }
   return plainLabel({ table: p.table, column: p.column, agg: p.agg }, tables).toLowerCase();
 }
 
 function ratioLabel(m: Measure, tables: Named[]): string {
   const top = plainLabel(m, tables);
-  return m.per ? `${top} per ${perWord(m.per, m.table, tables)}` : top;
+  return m.per ? t('{value} per {per}', { value: top, per: perWord(m.per, m.table, tables) }) : top;
 }
 
 function plainLabel(m: Measure, tables: Named[]): string {
   if (m.named) return nameOf(m.named);
-  const t = tables.find((x) => x.id === m.table);
-  if (m.column === null) return `Number of ${(t?.label ?? 'rows').toLowerCase()}`;
+  const tb = tables.find((x) => x.id === m.table);
+  if (m.column === null) return t('Number of {name}', { name: tb?.label ? tb.label.toLowerCase() : t('rows') });
   const base = labelOf(tables, m.table, m.column) ? null : idBase(m.column);
   if (base && (m.agg === 'count_distinct' || m.agg === 'count')) {
-    return m.agg === 'count_distinct' ? `Unique ${base}s` : `Number of ${base}s`;
+    return m.agg === 'count_distinct' ? t('Unique {name}s', { name: base }) : t('Number of {name}s', { name: base });
   }
   if (m.agg === 'sum') return fieldLabel(tables, m.table, m.column);
-  return `${aggWords[m.agg]} ${fieldWord(tables, m.table, m.column)}`;
+  return aggWord(m.agg, fieldWord(tables, m.table, m.column));
 }
 
 /**
@@ -291,77 +315,82 @@ export function dimLabel(d: Dim, tables: Named[] = []): string {
 }
 
 function dimWord(d: Dim, tables: Named[]): string {
-  if (d.grain === 'month_of_year') return 'month of year';
-  if (d.grain) return d.grain;
+  if (d.grain) return grainWord(d.grain);
   if (GENERIC.has(d.column.toLowerCase())) {
-    const t = tables.find((x) => x.id === d.table);
-    if (t) return singular(t.name.split('.').pop()!).toLowerCase();
+    const tb = tables.find((x) => x.id === d.table);
+    if (tb) return singular(tb.name.split('.').pop()!).toLowerCase();
   }
   return fieldWord(tables, d.table, d.column);
 }
 
-export function tileTitle(t: Tile, tables: Named[], parts?: QueryResult['parts']): string {
-  if (t.title) return t.title;
+export function tileTitle(tl: Tile, tables: Named[], parts?: QueryResult['parts']): string {
+  if (tl.title) return tl.title;
   // A value shown another way adds its words to its name; the engine ignores a way that does not fit.
-  const d0 = t.dims[0];
+  const d0 = tl.dims[0];
   const dtype = d0 ? tables.find((x) => x.id === d0.table)?.columns?.find((c) => c.name === d0.column)?.dtype : undefined;
   const kind = d0 ? dim0Kind(dtype, d0.grain) : 'none';
-  const label = (x: Measure, i: number) => measureLabel(x, tables, effectiveShowAs(t, i, kind, parts));
+  const label = (x: Measure, i: number) => measureLabel(x, tables, effectiveShowAs(tl, i, kind, parts));
+  // "Revenue by region": a title and the field its groups come from.
+  const by = (title: string, d: Dim | undefined) => (d ? t('{value} by {field}', { value: title, field: dimLabel(d, tables) }) : title);
   // A note or a picture needs no title; a filter and a parameter's control write their own name.
-  if (t.type === 'text' || t.type === 'image' || t.type === 'filter' || t.type === 'param') return '';
-  if (!t.measures.length && !t.dims.length) return 'New tile';
-  let m = t.measures[0] ? label(t.measures[0], 0) : fieldLabel(tables, t.dims[0].table, t.dims[0].column);
+  if (tl.type === 'text' || tl.type === 'image' || tl.type === 'filter' || tl.type === 'param') return '';
+  if (!tl.measures.length && !tl.dims.length) return t('New tile');
+  let m = tl.measures[0] ? label(tl.measures[0], 0) : fieldLabel(tables, tl.dims[0].table, tl.dims[0].column);
   // Several values: "Sales and cost by month".
-  if ((t.type === 'bar' || t.type === 'line' || t.type === 'area') && t.measures.length > 1) {
-    const names = t.measures.slice(0, MAX_CHART_MEASURES).map((x, i) => (i ? label(x, i).toLowerCase() : label(x, i)));
-    m = names.length > 2 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names.join(' and ');
+  if ((tl.type === 'bar' || tl.type === 'line' || tl.type === 'area') && tl.measures.length > 1) {
+    const names = tl.measures.slice(0, MAX_CHART_MEASURES).map((x, i) => (i ? label(x, i).toLowerCase() : label(x, i)));
+    m = names.length > 2 ? t('{list} and {last}', { list: names.slice(0, -1).join(', '), last: names.at(-1)! }) : and(names);
   }
   // "Revenue by category and channel": rows, then columns.
-  if (t.type === 'pivot' || t.type === 'heatmap') {
-    const fields = [...t.dims.slice(0, 3), ...(t.cols ? [t.cols] : [])].map((d) => dimLabel(d, tables));
-    return fields.length ? `${m} by ${fields.join(' and ')}` : m;
+  if (tl.type === 'pivot' || tl.type === 'heatmap') {
+    const fields = [...tl.dims.slice(0, 3), ...(tl.cols ? [tl.cols] : [])].map((d) => dimLabel(d, tables));
+    return fields.length ? t('{value} by {field}', { value: m, field: and(fields) }) : m;
   }
-  if (t.type === 'table') {
-    return t.dims.length ? `${m} by ${t.dims.map((d) => dimLabel(d, tables)).join(' and ')}` : m;
+  if (tl.type === 'table') {
+    return tl.dims.length ? t('{value} by {field}', { value: m, field: and(tl.dims.map((d) => dimLabel(d, tables))) }) : m;
   }
   // "Spread of amount by region": a box plot reads one number column for each group.
-  if (t.type === 'box') {
-    const col = t.measures[0]?.column ? pretty(t.measures[0].column).toLowerCase() : null;
-    return col ? `Spread of ${col}${t.dims[0] ? ` by ${dimLabel(t.dims[0], tables)}` : ''}` : m;
+  if (tl.type === 'box') {
+    const col = tl.measures[0]?.column ? pretty(tl.measures[0].column).toLowerCase() : null;
+    return col ? by(t('Spread of {name}', { name: col }), tl.dims[0]) : m;
   }
   // "Distribution of amount": a histogram bins one column, whatever the way it is added up.
-  if (t.type === 'histogram') return t.measures[0]?.column ? `Distribution of ${fieldWord(tables, t.measures[0].table, t.measures[0].column)}` : m;
-  // "Actual against target by region": a bullet chart reads a value and its target.
-  if (t.type === 'bullet') {
-    const by = t.dims[0] ? ` by ${dimLabel(t.dims[0], tables)}` : '';
-    return t.measures[1] || t.target ? `${m} against target${by}` : m + by;
+  if (tl.type === 'histogram') {
+    return tl.measures[0]?.column ? t('Distribution of {name}', { name: fieldWord(tables, tl.measures[0].table, tl.measures[0].column) }) : m;
   }
+  // "Actual against target by region": a bullet chart reads a value and its target.
+  if (tl.type === 'bullet') return by(tl.measures[1] || tl.target ? t('{value} against target', { value: m }) : m, tl.dims[0]);
   // "Actual vs target by region", or "Revenue by region, two periods" for one value over two.
-  if (t.type === 'compare') {
-    const by = t.dims[0] ? ` by ${dimLabel(t.dims[0], tables)}` : '';
-    return t.measures[1] ? `${m} vs ${label(t.measures[1], 1).toLowerCase()}${by}` : `${m}${by}, two periods`;
+  if (tl.type === 'compare') {
+    return tl.measures[1]
+      ? by(t('{a} vs {b}', { a: m, b: label(tl.measures[1], 1).toLowerCase() }), tl.dims[0])
+      : t('{title}, two periods', { title: by(m, tl.dims[0]) });
   }
   // "Revenue from channel to category to status".
-  if (t.type === 'sankey') return t.dims.length > 1 ? `${m} from ${t.dims.slice(0, 3).map((d) => dimLabel(d, tables)).join(' to ')}` : m;
-  if (t.type === 'calendar') return `${m} by day`;
+  if (tl.type === 'sankey') {
+    if (tl.dims.length < 2) return m;
+    const path = tl.dims.slice(0, 3).map((d) => dimLabel(d, tables)).reduce((a, b) => t('{a} to {b}', { a, b }));
+    return t('{value} from {path}', { value: m, path });
+  }
+  if (tl.type === 'calendar') return t('{value} by day', { value: m });
   // "Cohorts of customer by month".
-  if (t.type === 'cohort') {
-    const who = t.measures[0]?.column ? fieldWord(tables, t.measures[0].table, t.measures[0].column) : 'entity';
-    return `Cohorts of ${who}${t.dims[0] ? ` by ${dimLabel(t.dims[0], tables)}` : ''}`;
+  if (tl.type === 'cohort') {
+    const who = tl.measures[0]?.column ? fieldWord(tables, tl.measures[0].table, tl.measures[0].column) : t('entity');
+    return by(t('Cohorts of {name}', { name: who }), tl.dims[0]);
   }
   // "Timeline by task".
-  if (t.type === 'gantt') return t.dims[0] ? `Timeline by ${dimLabel(t.dims[0], tables)}` : 'Timeline';
+  if (tl.type === 'gantt') return tl.dims[0] ? t('Timeline by {field}', { field: dimLabel(tl.dims[0], tables) }) : t('Timeline');
   // "Revenue vs quantity by product": one dot for each product.
-  if (t.type === 'scatter' && t.measures[1]) m = `${m} vs ${label(t.measures[1], 1).toLowerCase()}`;
-  // A third value sets the size of the dots: "Revenue vs quantity, sized by margin".
-  const sized = t.type === 'scatter' && t.measures[2] ? `, sized by ${label(t.measures[2], 2).toLowerCase()}` : '';
-  const by = t.dims[0] && t.type !== 'kpi' ? ` by ${dimLabel(t.dims[0], tables)}` : '';
-  const chart = t.type === 'bar' || t.type === 'line' || t.type === 'area';
-  const repeated = !!t.repeat && !!t.dims[0] && chart;
-  const split = t.dims[1] && t.measures.length < 2 && chart && !repeated ? ` and ${dimLabel(t.dims[1], tables)}` : '';
+  if (tl.type === 'scatter' && tl.measures[1]) m = t('{a} vs {b}', { a: m, b: label(tl.measures[1], 1).toLowerCase() });
+  const chart = tl.type === 'bar' || tl.type === 'line' || tl.type === 'area';
+  const repeated = !!tl.repeat && !!tl.dims[0] && chart;
+  let title = tl.type !== 'kpi' ? by(m, tl.dims[0]) : m;
+  if (tl.dims[1] && tl.measures.length < 2 && chart && !repeated) title = and([title, dimLabel(tl.dims[1], tables)]);
   // Small multiples: "Revenue by month, a chart for each region".
-  const each = repeated ? `, a chart for each ${dimLabel(t.repeat!, tables)}` : '';
-  return m + by + split + each + sized;
+  if (repeated) title = t('{title}, a chart for each {field}', { title, field: dimLabel(tl.repeat!, tables) });
+  // A third value sets the size of the dots: "Revenue vs quantity, sized by margin".
+  if (tl.type === 'scatter' && tl.measures[2]) title = t('{title}, sized by {value}', { title, value: label(tl.measures[2], 2).toLowerCase() });
+  return title;
 }
 
 /** When data was loaded, for the "Updated" stamp: "10:32" today, "Oct 9, 10:32" or "9 Okt, 10:32" on other days. */

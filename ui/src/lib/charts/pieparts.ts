@@ -7,6 +7,7 @@
 import type { EChartsCoreOption } from 'echarts/core';
 import type { Cell } from '../api';
 import { pctShareIn, type Locale } from '../locale.ts';
+import { t } from '../i18n.ts';
 
 /** The key `"Other"` has in a result (`shape::OTHER_KEY`). */
 const OTHER_KEY = '\u0000other';
@@ -57,7 +58,7 @@ export function slicesOf(rows: readonly Cell[][], label: (v: Cell) => string, sl
   const given = slots(names);
   const slotOf = new Map(names.map((k, i) => [k, given[i]]));
   const out: Slice[] = rest.map((r) => ({ raw: r.raw, label: label(r.raw), value: r.value, share: total ? r.value / total : 0, other: false, slot: slotOf.get(keyOf(r.raw)) ?? 0 }));
-  if (other) out.push({ raw: OTHER_KEY, label: 'Other', value: other.value, share: total ? other.value / total : 0, other: true, slot: null });
+  if (other) out.push({ raw: OTHER_KEY, label: t('Other'), value: other.value, share: total ? other.value / total : 0, other: true, slot: null });
   return out;
 }
 

@@ -1,8 +1,9 @@
 // Saved views (v5 build 03): a dashboard keeps named views of how it was read: the clicks, the filter tiles'
 // selections, the grain for every chart, the drill paths, and (from build 05) the parameter values. Opening a view
-// sets exactly those. Pure, with only type imports, so the node tests load it.
+// sets exactly those. Pure, with type imports and t(), so the node tests load it.
 
 import type { Cell, Dashboard, DashFilter, DrillState, Grain, SavedView, Tile, TileFilter } from './api';
+import { t } from './i18n.ts';
 
 /** A dashboard keeps at most this many views (V5-D5: an export holds each one in full). */
 export const MAX_VIEWS = 10;
@@ -42,7 +43,7 @@ export function currentState(
 }
 
 /** A view of the state now, with a name. A new view has an empty id; `newViewId` gives it one. */
-export const viewOf = (id: string, name: string, state: ViewState): SavedView => ({ id, name: name.trim() || 'View', ...state });
+export const viewOf = (id: string, name: string, state: ViewState): SavedView => ({ id, name: name.trim() || t('View'), ...state });
 
 /** The next `v<n>` id of a dashboard's views. */
 export function newViewId(views: readonly SavedView[]): string {

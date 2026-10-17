@@ -5,6 +5,7 @@
   import { untrack } from 'svelte';
   import { api, type DerivedPreview, type DerivedSpec, type GroupValue } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
+  import { t, tn } from '../../lib/i18n';
   import { cell } from '../../lib/format';
   import { appendColumns, guessKey, OPS, pickable, specOf, specProblem, tableNameProblem, type DerivedOp } from '../../lib/derived';
   import { scopeFor } from '../../lib/formulaScope';
@@ -93,14 +94,14 @@
   const valid = $derived(!problem && !nameBad && look.state === 'ok' && !saving);
   const dirty = $derived(JSON.stringify(spec) !== JSON.stringify(oldSpec ?? null) || (!editing && !!name.trim()));
   function close() {
-    if (dirty && !confirm('Close without making the table?')) return;
+    if (dirty && !confirm(t('Close without making the table?'))) return;
     onclose();
   }
 
   async function save() {
     if (!valid) return;
     saving = true;
-    app.busy = editing ? 'Saving' : 'Making the table';
+    app.busy = editing ? t('Saving') : t('Making the table');
     try {
       if (editing) {
         app.snap = await api.setDerived(editing, $state.snapshot(spec) as DerivedSpec);
@@ -148,7 +149,7 @@
   }
 </script>
 
-<Modal title={editing ? `New table ${old?.name ?? ''}` : meta.title} width={680} onclose={close}>
+<Modal title={editing ? t('New table {name}', { name: old?.name ?? '' }) : meta.title} width={680} onclose={close}>
   <form
     id="derived-form"
     onsubmit={(e) => {
@@ -159,20 +160,20 @@
 
     {#if op === 'append'}
       <fieldset>
-        <legend class="label">Tables, in the order their rows come</legend>
+        <legend class="label">{t('Tables, in the order their rows come')}</legend>
         <div class="picks">
-          {#each choices as t (t.id)}
-            <label class="pick"><input type="checkbox" checked={tables.includes(t.id)} onchange={(e) => toggle(t.id, e.currentTarget.checked)} /> {t.label} <span class="dim">{t.columns.length} columns</span></label>
+          {#each choices as tb (tb.id)}
+            <label class="pick"><input type="checkbox" checked={tables.includes(tb.id)} onchange={(e) => toggle(tb.id, e.currentTarget.checked)} /> {tb.label} <span class="dim">{t('{n} columns', { n: tb.columns.length })}</span></label>
           {/each}
         </div>
       </fieldset>
       {#if picked.length >= 2}
-        <div class="cols" role="table" aria-label="The columns of the new table">
-          <div class="crow head" role="row"><span role="columnheader">Column</span><span role="columnheader">Blank in</span></div>
-          <div class="crow" role="row"><span role="cell"><strong>source</strong></span><span role="cell" class="dim">The name of the table each row came from</span></div>
+        <div class="cols" role="table" aria-label={t('The columns of the new table')}>
+          <div class="crow head" role="row"><span role="columnheader">{t('Column')}</span><span role="columnheader">{t('Blank in')}</span></div>
+          <div class="crow" role="row"><span role="cell"><strong>source</strong></span><span role="cell" class="dim">{t('The name of the table each row came from')}</span></div>
           {#each columns as c (c.name)}
             <div class="crow" role="row">
-              <span role="cell">{c.name}{#if c.types.length > 1}<em class="warn" title="The tables hold different kinds of values here, so the column becomes text."> mixed, read as text</em>{/if}</span>
+              <span role="cell">{c.name}{#if c.types.length > 1}<em class="warn" title={t('The tables hold different kinds of values here, so the column becomes text.')}> {t('mixed, read as text')}</em>{/if}</span>
               <span role="cell" class:dim={!c.missing.length}>{c.missing.length ? c.missing.join(', ') : '–'}</span>
             </div>
           {/each}
@@ -181,55 +182,55 @@
     {:else if op === 'merge'}
       <div class="two">
         <label class="row">
-          <span class="label">Left table: every row of it stays</span>
+          <span class="label">{t('Left table: every row of it stays')}</span>
           <select class="field" value={left} onchange={(e) => pickSide('left', e.currentTarget.value)}>
-            <option value="" disabled>Pick a table</option>
-            {#each choices as t (t.id)}<option value={t.id}>{t.label}</option>{/each}
+            <option value="" disabled>{t('Pick a table')}</option>
+            {#each choices as tb (tb.id)}<option value={tb.id}>{tb.label}</option>{/each}
           </select>
         </label>
         <label class="row">
-          <span class="label">Right table: its columns come beside</span>
+          <span class="label">{t('Right table: its columns come beside')}</span>
           <select class="field" value={right} onchange={(e) => pickSide('right', e.currentTarget.value)}>
-            <option value="" disabled>Pick a table</option>
-            {#each choices as t (t.id)}<option value={t.id}>{t.label}</option>{/each}
+            <option value="" disabled>{t('Pick a table')}</option>
+            {#each choices as tb (tb.id)}<option value={tb.id}>{tb.label}</option>{/each}
           </select>
         </label>
       </div>
       <fieldset>
-        <legend class="label">Match rows where</legend>
+        <legend class="label">{t('Match rows where')}</legend>
         {#each on as pair, i (i)}
           <div class="pair">
-            <select class="field" aria-label="Column of the left table" bind:value={pair[0]}>
-              <option value="" disabled>{leftT ? 'A column' : 'Pick the left table'}</option>
+            <select class="field" aria-label={t('Column of the left table')} bind:value={pair[0]}>
+              <option value="" disabled>{leftT ? t('A column') : t('Pick the left table')}</option>
               {#each leftT?.columns ?? [] as c (c.name)}<option value={c.name}>{c.label ?? c.name}</option>{/each}
             </select>
             <span class="eq">=</span>
-            <select class="field" aria-label="Column of the right table" bind:value={pair[1]}>
-              <option value="" disabled>{rightT ? 'A column' : 'Pick the right table'}</option>
+            <select class="field" aria-label={t('Column of the right table')} bind:value={pair[1]}>
+              <option value="" disabled>{rightT ? t('A column') : t('Pick the right table')}</option>
               {#each rightT?.columns ?? [] as c (c.name)}<option value={c.name}>{c.label ?? c.name}</option>{/each}
             </select>
-            <button type="button" class="btn plain icon" aria-label="Remove this pair" disabled={on.length < 2} onclick={() => (on = on.filter((_, j) => j !== i))}><Icon name="x" size={13} /></button>
+            <button type="button" class="btn plain icon" aria-label={t('Remove this pair')} disabled={on.length < 2} onclick={() => (on = on.filter((_, j) => j !== i))}><Icon name="x" size={13} /></button>
           </div>
         {/each}
-        <button type="button" class="btn plain add" onclick={() => (on = [...on, ['', '']])}><Icon name="plus" size={13} /> Add another pair</button>
+        <button type="button" class="btn plain add" onclick={() => (on = [...on, ['', '']])}><Icon name="plus" size={13} /> {t('Add another pair')}</button>
       </fieldset>
-      <fieldset class="seg" aria-label="Which rows to keep">
-        <legend class="label">Keep</legend>
-        <label><input type="radio" name="keep" value="left" bind:group={keep} /> All rows of the left table</label>
-        <label><input type="radio" name="keep" value="inner" bind:group={keep} /> Only rows that match</label>
+      <fieldset class="seg" aria-label={t('Which rows to keep')}>
+        <legend class="label">{t('Keep')}</legend>
+        <label><input type="radio" name="keep" value="left" bind:group={keep} /> {t('All rows of the left table')}</label>
+        <label><input type="radio" name="keep" value="inner" bind:group={keep} /> {t('Only rows that match')}</label>
       </fieldset>
-      <p class="note">When the right table has a key twice, the first row of it is used, so no row of the left table is counted twice.</p>
+      <p class="note">{t('When the right table has a key twice, the first row of it is used, so no row of the left table is counted twice.')}</p>
     {:else}
       <label class="row">
-        <span class="label">Table</span>
+        <span class="label">{t('Table')}</span>
         <select class="field" value={table} onchange={(e) => pickTable(e.currentTarget.value)}>
-          <option value="" disabled>Pick a table</option>
-          {#each choices as t (t.id)}<option value={t.id}>{t.label}</option>{/each}
+          <option value="" disabled>{t('Pick a table')}</option>
+          {#each choices as tb (tb.id)}<option value={tb.id}>{tb.label}</option>{/each}
         </select>
       </label>
       {#if groupT}
         <fieldset>
-          <legend class="label">Group by</legend>
+          <legend class="label">{t('Group by')}</legend>
           <div class="picks">
             {#each groupT.columns as c (c.name)}
               <label class="pick"><input type="checkbox" checked={by.includes(c.name)} onchange={(e) => (by = e.currentTarget.checked ? [...by, c.name] : by.filter((x) => x !== c.name))} /> {c.label ?? c.name}</label>
@@ -237,53 +238,53 @@
           </div>
         </fieldset>
         <fieldset>
-          <legend class="label">Values</legend>
+          <legend class="label">{t('Values')}</legend>
           {#each values as v, i (i)}
             <div class="value">
-              <input class="field vname" aria-label="Name of value {i + 1}" placeholder="Total" bind:value={v.name} />
+              <input class="field vname" aria-label={t('Name of value {n}', { n: i + 1 })} placeholder={t('Total')} bind:value={v.name} />
               <div class="vformula">
-                <FormulaField bind:value={v.formula} {scope} label="Formula of value {i + 1}" placeholder={'SUM([amount])'} />
+                <FormulaField bind:value={v.formula} {scope} label={t('Formula of value {n}', { n: i + 1 })} placeholder={'SUM([amount])'} />
               </div>
-              <button type="button" class="btn plain icon" aria-label="Remove this value" onclick={() => (values = values.filter((_, j) => j !== i))}><Icon name="x" size={13} /></button>
+              <button type="button" class="btn plain icon" aria-label={t('Remove this value')} onclick={() => (values = values.filter((_, j) => j !== i))}><Icon name="x" size={13} /></button>
             </div>
           {/each}
-          <button type="button" class="btn plain add" onclick={() => (values = [...values, { name: '', formula: '' }])}><Icon name="plus" size={13} /> Add a value</button>
+          <button type="button" class="btn plain add" onclick={() => (values = [...values, { name: '', formula: '' }])}><Icon name="plus" size={13} /> {t('Add a value')}</button>
         </fieldset>
       {/if}
     {/if}
 
     <label class="row">
-      <span class="label">Name of the new table</span>
-      <input class="field" bind:value={name} placeholder={op === 'group' ? 'Sales by province' : op === 'merge' ? 'Sales with stores' : 'All targets'} autocomplete="off" disabled={!!editing} aria-invalid={!!(name.trim() && nameBad)} />
+      <span class="label">{t('Name of the new table')}</span>
+      <input class="field" bind:value={name} placeholder={op === 'group' ? t('Sales by province') : op === 'merge' ? t('Sales with stores') : t('All targets')} autocomplete="off" disabled={!!editing} aria-invalid={!!(name.trim() && nameBad)} />
     </label>
-    {#if editing}<p class="note">The name stays, so the links and tiles that use the table keep working.</p>{:else if name.trim() && nameBad}<p class="bad">{nameBad}</p>{/if}
+    {#if editing}<p class="note">{t('The name stays, so the links and tiles that use the table keep working.')}</p>{:else if name.trim() && nameBad}<p class="bad">{nameBad}</p>{/if}
 
-    <section class="look" aria-live="polite" aria-label="A look at the new table">
+    <section class="look" aria-live="polite" aria-label={t('A look at the new table')}>
       {#if problem}
         <p class="note">{problem}</p>
       {:else if look.state === 'bad'}
         <p class="bad"><Icon name="warning" size={13} /> {look.error}</p>
       {:else if look.preview}
-        <p class="count" class:stale={look.state === 'looking'}>{look.preview.total.toLocaleString('en-US')} {look.preview.total === 1 ? 'row' : 'rows'}, {look.preview.columns.length} columns</p>
+        <p class="count" class:stale={look.state === 'looking'}>{tn('{n} row, {k} columns', '{n} rows, {k} columns', look.preview.total, { n: look.preview.total.toLocaleString('en-US'), k: look.preview.columns.length })}</p>
         {#each look.preview.notes ?? [] as n (n)}<p class="note">{n}</p>{/each}
         <div class="grid" style:--cols={look.preview.columns.length}>
           <table>
             <thead><tr>{#each look.preview.columns as c (c.name)}<th>{c.name}</th>{/each}</tr></thead>
             <tbody>
               {#each look.preview.rows as r, i (i)}
-                <tr>{#each r as v, j (j)}<td class:blank={v === null || v === ''}>{v === null || v === '' ? 'blank' : cell(v, look.preview.columns[j]?.dtype ?? 'text', null, false)}</td>{/each}</tr>
+                <tr>{#each r as v, j (j)}<td class:blank={v === null || v === ''}>{v === null || v === '' ? t('blank') : cell(v, look.preview.columns[j]?.dtype ?? 'text', null, false)}</td>{/each}</tr>
               {/each}
             </tbody>
           </table>
         </div>
       {:else if look.state === 'looking'}
-        <p class="note">Looking…</p>
+        <p class="note">{t('Looking…')}</p>
       {/if}
     </section>
   </form>
   {#snippet footer()}
-    <button type="button" class="btn" onclick={close}>Cancel</button>
-    <button type="submit" form="derived-form" class="btn primary" disabled={!valid}>{editing ? 'Save' : 'Make table'}</button>
+    <button type="button" class="btn" onclick={close}>{t('Cancel')}</button>
+    <button type="submit" form="derived-form" class="btn primary" disabled={!valid}>{editing ? t('Save') : t('Make table')}</button>
   {/snippet}
 </Modal>
 

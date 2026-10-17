@@ -4,6 +4,7 @@
 
 import type { ShowAs, Tile } from './api';
 import { addsUpAlong, addsUpHere, ADDING_WAYS, ALONG_WAYS, type Parts } from './measures.ts';
+import { t } from './i18n.ts';
 
 /** What the first group-by field is: a date, a part of a date (month of year…), or something else. */
 export type Dim0Kind = 'date' | 'part' | 'other' | 'none';
@@ -14,34 +15,34 @@ export const SHOW_AS_TYPES: readonly string[] = ['bar', 'line', 'area', 'table',
 /** The ways that read the points in time order. The engine ignores them unless the first field is a date or a date part. */
 const ORDERED: readonly ShowAs[] = ['running', 'moving_3', 'moving_7', 'moving_12', 'change', 'pct_change'];
 
-/** The choices in the Inspector. */
+/** The choices in the Inspector, in the language of the screens. */
 export const SHOW_AS_LABELS: Record<ShowAs, string> = {
-  value: 'Value',
-  pct_total: '% of total',
-  pct_group: '% of group',
-  running: 'Running total',
-  moving_3: 'Moving average, 3 points',
-  moving_7: 'Moving average, 7 points',
-  moving_12: 'Moving average, 12 points',
-  change: 'Change from the one before',
-  pct_change: '% change from the one before',
-  rank: 'Rank',
-  ytd: 'Year to date',
+  get value() { return t('Value'); },
+  get pct_total() { return t('% of total'); },
+  get pct_group() { return t('% of group'); },
+  get running() { return t('Running total'); },
+  get moving_3() { return t('Moving average, 3 points'); },
+  get moving_7() { return t('Moving average, 7 points'); },
+  get moving_12() { return t('Moving average, 12 points'); },
+  get change() { return t('Change from the one before'); },
+  get pct_change() { return t('% change from the one before'); },
+  get rank() { return t('Rank'); },
+  get ytd() { return t('Year to date'); },
 };
 
 /** The words that follow the name of a value: "Revenue (% of total)". Same as the engine's. */
 export const SHOW_AS_WORDS: Record<ShowAs, string> = {
   value: '',
-  pct_total: '% of total',
-  pct_group: '% of group',
-  running: 'running total',
-  moving_3: '3-period average',
-  moving_7: '7-period average',
-  moving_12: '12-period average',
-  change: 'change',
-  pct_change: '% change',
-  rank: 'rank',
-  ytd: 'year to date',
+  get pct_total() { return t('% of total'); },
+  get pct_group() { return t('% of group'); },
+  get running() { return t('running total'); },
+  get moving_3() { return t('3-period average'); },
+  get moving_7() { return t('7-period average'); },
+  get moving_12() { return t('12-period average'); },
+  get change() { return t('change'); },
+  get pct_change() { return t('% change'); },
+  get rank() { return t('rank'); },
+  get ytd() { return t('year to date'); },
 };
 
 /** How many fields the engine groups by for this tile. Same as `snapshot::tile_query`. */

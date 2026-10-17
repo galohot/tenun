@@ -1,8 +1,9 @@
-// Link tables (build 03b, V4-D112): which table looks like one, and what to say about it. Pure functions
-// with no imports at run time, so the node tests can load them. The engine decides what a marked table
+// Link tables (build 03b, V4-D112): which table looks like one, and what to say about it. Pure functions; the only
+// import at run time is t(), so the node tests can load them. The engine decides what a marked table
 // means (links.rs); this file only suggests the mark.
 
 import type { LinkHealth, Relationship, Table } from './api';
+import { t, tk } from './i18n.ts';
 
 export interface LinkTableSuggestion {
   /** The table that looks like a link table. */
@@ -19,7 +20,7 @@ type Health = Record<string, Pick<LinkHealth, 'fromUnique'>> | undefined;
 /** A join of two lists of words: "A and B", "A, B and C". */
 export function andList(words: string[]): string {
   if (words.length < 2) return words.join('');
-  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
+  return t('{list} and {last}', { list: words.slice(0, -1).join(', '), last: words[words.length - 1] });
 }
 
 /** The forms of a name that another name may hold it in: "programmes" → programmes, programme; "categories" → category. */
@@ -56,33 +57,38 @@ export function suggestLinkTables(
   marked: ReadonlySet<string> = new Set(),
   dismissed: readonly string[] = [],
 ): LinkTableSuggestion[] {
-  const label = (id: string) => tables.find((t) => t.id === id)?.label ?? id;
+  const label = (id: string) => tables.find((x) => x.id === id)?.label ?? id;
   const out: LinkTableSuggestion[] = [];
-  for (const t of tables) {
-    if (marked.has(t.id) || dismissed.includes(t.id)) continue;
-    if (rels.some((r) => r.to.table === t.id)) continue;
-    const mine = rels.filter((r) => r.from.table === t.id && r.to.table !== t.id && health?.[r.id]?.fromUnique !== true);
+  for (const tb of tables) {
+    if (marked.has(tb.id) || dismissed.includes(tb.id)) continue;
+    if (rels.some((r) => r.to.table === tb.id)) continue;
+    const mine = rels.filter((r) => r.from.table === tb.id && r.to.table !== tb.id && health?.[r.id]?.fromUnique !== true);
     const columns = new Set(mine.map((r) => r.from.column));
     const ones = [...new Set(mine.map((r) => r.to.table))];
     if (columns.size < 2 || ones.length < 2) continue;
-    if (columns.size * 2 < t.columns.length) continue;
-    const name = stems(t.label)[0] ?? '';
+    if (columns.size * 2 < tb.columns.length) continue;
+    const name = stems(tb.label)[0] ?? '';
     const named = ones.filter((o) =>
       [label(o), ...mine.filter((r) => r.to.table === o).map((r) => keyStem(r.from.column))].some((w) => stems(w).some((x) => name.includes(x))),
     );
-    if (named.length < 2 && columns.size < t.columns.length) continue;
+    if (named.length < 2 && columns.size < tb.columns.length) continue;
     const between = ones.map(label);
     out.push({
-      table: t.id,
+      table: tb.id,
       between,
-      why: `${t.label} looks like a link table between ${andList(between)}. Mark it, and a chart can group ${between[0]} by ${between[1]}, or the other way round.`,
+      why: t('{table} looks like a link table between {tables}. Mark it, and a chart can group {a} by {b}, or the other way round.', {
+        table: tb.label,
+        tables: andList(between),
+        a: between[0],
+        b: between[1],
+      }),
     });
   }
   return out;
 }
 
-/** What the node of a link table says under its name. */
-export const LINK_TABLE_LABEL = 'Link table';
+/** What the node of a link table says under its name; shown through t(). */
+export const LINK_TABLE_LABEL = tk('Link table');
 
 /** A table can be marked by hand when two or more of its columns are the many side of a link (V4-D119). */
 export function canMarkLinkTable(table: string, rels: Relationship[]): boolean {

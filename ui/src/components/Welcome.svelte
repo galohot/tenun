@@ -2,51 +2,52 @@
   import { api } from '../lib/api';
   import { app, go } from '../lib/state.svelte';
   import Icon from './Icon.svelte';
+  import { t, tn } from '../lib/i18n';
   import { modKey } from './Palette.svelte';
 
   let { hasData }: { hasData: boolean } = $props();
 
   async function sample() {
-    if (await app.run('Opening the sample…', () => api.sample())) {
+    if (await app.run(t('Opening the sample…'), () => api.sample())) {
       const d = app.dashboards[0];
       go(d ? { view: 'dashboard', id: d.id } : { view: 'data' });
     }
   }
 
   const KIND: Record<string, string> = {
-    excel: 'Excel', csv: 'CSV', parquet: 'Parquet', sqlite: 'SQLite', duckdb: 'DuckDB', folder: 'Folder',
-    url: 'Web link', postgres: 'PostgreSQL', mysql: 'MySQL', derived: 'New table',
+    excel: 'Excel', csv: 'CSV', parquet: 'Parquet', sqlite: 'SQLite', duckdb: 'DuckDB', folder: t('Folder'),
+    url: t('Web link'), postgres: 'PostgreSQL', mysql: 'MySQL', derived: t('New table'),
   };
   // The sources of this workspace, as the threads of the cloth: each keeps a series colour in the fixed order.
   const threads = $derived((app.snap?.workspace.sources ?? []).slice(0, 8));
 
   const steps = [
-    { title: 'Add your data', text: 'Excel, CSV, Parquet, SQLite, DuckDB, PostgreSQL, MySQL, a folder of files or a web link. Tenun reads them where they are.' },
-    { title: 'Draw relationships', text: 'Link a column in one source to a column in another. Tenun suggests the likely links and checks them against the data.' },
-    { title: 'Build the dashboard', text: 'Pick a value and a group. Click any bar to filter every chart. Save the Excel file and the dashboard updates.' },
+    { title: t('Add your data'), text: t('Excel, CSV, Parquet, SQLite, DuckDB, PostgreSQL, MySQL, a folder of files or a web link. Tenun reads them where they are.') },
+    { title: t('Draw relationships'), text: t('Link a column in one source to a column in another. Tenun suggests the likely links and checks them against the data.') },
+    { title: t('Build the dashboard'), text: t('Pick a value and a group. Click any bar to filter every chart. Save the Excel file and the dashboard updates.') },
   ] as const;
 </script>
 
 <div class="welcome">
   <div class="selvedge" aria-hidden="true"></div>
   <div class="inner">
-    <p class="mono">Welcome to Tenun</p>
-    <h1>Weave your spreadsheets and databases into one dashboard.</h1>
-    <p class="lede">Everything stays on this computer. There is no server to run and no account to make.</p>
+    <p class="mono">{t('Welcome to Tenun')}</p>
+    <h1>{t('Weave your spreadsheets and databases into one dashboard.')}</h1>
+    <p class="lede">{t('Everything stays on this computer. There is no server to run and no account to make.')}</p>
     <div class="actions">
       <button class="btn primary big" onclick={sample} disabled={!!app.busy}>
-        <Icon name="sparkles" /> {app.busy ?? 'Open the sample'}
+        <Icon name="sparkles" /> {app.busy ?? t('Open the sample')}
       </button>
-      <button class="btn big" onclick={() => (app.addOpen = true)}><Icon name="plus" /> Add data…</button>
-      <span class="hint"><kbd>{modKey}K</kbd> Search everything</span>
+      <button class="btn big" onclick={() => (app.addOpen = true)}><Icon name="plus" /> {t('Add data…')}</button>
+      <span class="hint"><kbd>{modKey}K</kbd> {t('Search everything')}</span>
     </div>
 
     {#if hasData && threads.length}
-      <section class="threads" aria-label="Sources in this workspace">
+      <section class="threads" aria-label={t('Sources in this workspace')}>
         <div class="th-head">
-          <p class="mono">In this workspace</p>
+          <p class="mono">{t('In this workspace')}</p>
           <button class="link" onclick={() => go({ view: 'data' })}>
-            {app.tables.length} table{app.tables.length === 1 ? '' : 's'} · Go to Data
+            {tn('{n} table · Go to Data', '{n} tables · Go to Data', app.tables.length)}
           </button>
         </div>
         <ul>

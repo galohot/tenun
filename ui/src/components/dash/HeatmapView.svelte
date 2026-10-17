@@ -6,6 +6,7 @@
   import type { Colors } from '../../lib/chart';
   import { heatRange, heatStep, inkFor } from '../../lib/charts/heat';
   import { cell, columnHeads, type Named } from '../../lib/format';
+  import { t } from '../../lib/i18n';
   import { pivotModel } from '../../lib/pivot';
 
   let {
@@ -58,14 +59,14 @@
 
 <div class="heat">
   <div class="scroll">
-    <table aria-label="{valueName} by {rowName} and {colName}">
+    <table aria-label={t('{value} by {row} and {column}', { value: valueName, row: rowName, column: colName })}>
       <thead>
         <tr>
           <th class="corner" scope="col">{rowName}</th>
           {#each m.cols as c}
             <th class="colhead" class:dim={!colSel(c.raw)} scope="col">
               {#if onpickcol && m.hasCols}
-                <button onclick={() => onpickcol?.(c.raw)} title="Filter the other tiles to this column">{colLabel(c.raw)}</button>
+                <button onclick={() => onpickcol?.(c.raw)} title={t('Filter the other tiles to this column')}>{colLabel(c.raw)}</button>
               {:else}
                 <span>{m.hasCols ? colLabel(c.raw) : valueName}</span>
               {/if}
@@ -78,7 +79,7 @@
           <tr class:dim={!rowSel(r.raw)}>
             <th class="rowhead" scope="row">
               {#if onpick}
-                <button onclick={() => onpick?.(r.raw[0])} title="Filter the other tiles to this row">{rowLabel(r.raw[0])}</button>
+                <button onclick={() => onpick?.(r.raw[0])} title={t('Filter the other tiles to this row')}>{rowLabel(r.raw[0])}</button>
               {:else}
                 <span>{rowLabel(r.raw[0])}</span>
               {/if}
@@ -91,7 +92,7 @@
                 class:dim={!colSel(m.cols[ci].raw)}
                 style:background={bg ?? undefined}
                 style:color={bg ? inkFor(bg) : undefined}
-                title={v === null ? 'No data' : `${rowLabel(r.raw[0])} · ${m.hasCols ? colLabel(m.cols[ci].raw) : valueName}: ${full(v)}`}>
+                title={v === null ? t('No data') : `${rowLabel(r.raw[0])} · ${m.hasCols ? colLabel(m.cols[ci].raw) : valueName}: ${full(v)}`}>
                 {v === null ? '' : show(v)}
               </td>
             {/each}
@@ -101,13 +102,13 @@
     </table>
   </div>
   {#if range}
-    <div class="legend" aria-label="Scale from {full(range.lo)} to {full(range.hi)}">
+    <div class="legend" aria-label={t('Scale from {from} to {to}', { from: full(range.lo), to: full(range.hi) })}>
       <span class="end">{show(range.lo)}</span>
       <span class="ramp" style:background="linear-gradient(to right, {ramp.map((c, i) => `${c} ${(i / steps) * 100}% ${((i + 1) / steps) * 100}%`).join(', ')})"></span>
       <span class="end">{show(range.hi)}</span>
     </div>
   {/if}
-  {#if m.cut}<p class="cutnote">Showing {m.cols.length} of {m.colCount} columns.</p>{/if}
+  {#if m.cut}<p class="cutnote">{t('Showing {shown} of {count} columns.', { shown: m.cols.length, count: m.colCount })}</p>{/if}
 </div>
 
 <style>

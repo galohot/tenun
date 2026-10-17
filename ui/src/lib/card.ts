@@ -1,9 +1,10 @@
 // KPI cards (build 08, V4-D10, GRANDPLAN §4.1): what a number tile shows, in which order, how big, on which ground,
 // and the rules that colour its value. A card style is saved in the workspace and applied by reference; a card's own
 // fields override the style's, field by field. A KPI tile without `card` is drawn by KpiView as it always was. Pure,
-// with type-only imports, so the node tests and the contrast test load it.
+// with type-only imports and t(), so the node tests and the contrast test load it.
 
 import type { CardPart, CardRule, CardSpec, CardStyle, Tile } from './api';
+import { t } from './i18n.ts';
 
 export type CardGround = NonNullable<CardSpec['ground']>;
 export type CardSize = NonNullable<CardSpec['size']>;
@@ -94,22 +95,28 @@ export function asStyle(card: ResolvedCard): Omit<CardSpec, 'style'> {
 
 /** The six presets of the card editor. Each is a whole card, so picking one replaces every field. */
 export const PRESETS: { id: string; name: string; card: (withTarget: boolean) => Omit<CardSpec, 'style'> }[] = [
-  { id: 'classic', name: 'Classic', card: (t) => ({ parts: classicParts(t), align: 'start', size: 'm', ground: 'plain', rules: [] }) },
-  { id: 'big', name: 'Big number', card: () => ({ parts: [{ kind: 'value' }, { kind: 'title' }], align: 'center', size: 'l', ground: 'plain', rules: [] }) },
+  { id: 'classic', get name() { return t('Classic'); }, card: (withTarget) => ({ parts: classicParts(withTarget), align: 'start', size: 'm', ground: 'plain', rules: [] }) },
+  { id: 'big', get name() { return t('Big number'); }, card: () => ({ parts: [{ kind: 'value' }, { kind: 'title' }], align: 'center', size: 'l', ground: 'plain', rules: [] }) },
   {
     id: 'target',
-    name: 'With target',
+    get name() {
+      return t('With target');
+    },
     card: () => ({ parts: [{ kind: 'title' }, { kind: 'value' }, { kind: 'target' }, { kind: 'compare' }], align: 'start', size: 'm', ground: 'tint', rules: [] }),
   },
-  { id: 'compact', name: 'Compact', card: () => ({ parts: [{ kind: 'title' }, { kind: 'value' }, { kind: 'compare' }], align: 'start', size: 's', ground: 'plain', rules: [] }) },
+  { id: 'compact', get name() { return t('Compact'); }, card: () => ({ parts: [{ kind: 'title' }, { kind: 'value' }, { kind: 'compare' }], align: 'start', size: 's', ground: 'plain', rules: [] }) },
   {
     id: 'trend',
-    name: 'Trend',
+    get name() {
+      return t('Trend');
+    },
     card: () => ({ parts: [{ kind: 'title' }, { kind: 'value' }, { kind: 'compare' }, { kind: 'spark', style: 'line' }], align: 'start', size: 'm', ground: 'plain', rules: [] }),
   },
   {
     id: 'split',
-    name: 'Split',
+    get name() {
+      return t('Split');
+    },
     card: () => ({
       parts: [{ kind: 'title' }, { kind: 'value' }, { kind: 'divider' }, { kind: 'extra', measure: 1 }, { kind: 'extra', measure: 2 }],
       align: 'start',
@@ -243,9 +250,9 @@ export function ruleFor(rules: readonly CardRule[] | undefined, value: number | 
 /** The words a rule adds beside the value. A rule at the tile's target says "target" instead of the number. */
 export function ruleWords(rule: CardRule, format: (v: number) => string, target?: number | null): string {
   const atTarget = target !== null && target !== undefined && rule.op !== 'between' && rule.value === target;
-  if (rule.op === '<') return atTarget ? 'Below target' : `Below ${format(rule.value)}`;
-  if (rule.op === '>') return atTarget ? 'Above target' : `Above ${format(rule.value)}`;
-  return `Between ${format(Math.min(rule.value, rule.to ?? rule.value))} and ${format(Math.max(rule.value, rule.to ?? rule.value))}`;
+  if (rule.op === '<') return atTarget ? t('Below target') : t('Below {value}', { value: format(rule.value) });
+  if (rule.op === '>') return atTarget ? t('Above target') : t('Above {value}', { value: format(rule.value) });
+  return t('Between {from} and {to}', { from: format(Math.min(rule.value, rule.to ?? rule.value)), to: format(Math.max(rule.value, rule.to ?? rule.value)) });
 }
 
 // ---- colour ---------------------------------------------------------------------------------------------------------

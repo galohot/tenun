@@ -4,6 +4,7 @@
   import type { Cell, DrillInfo, Grain } from '../../lib/api';
   import { crumbs } from '../../lib/drilldown';
   import { formatDate, OTHER_KEY } from '../../lib/format';
+  import { t } from '../../lib/i18n';
   import Icon from '../Icon.svelte';
 
   let {
@@ -24,15 +25,15 @@
   } = $props();
 
   const fmt = (v: Cell, grain: Grain | null): string => {
-    if (v === null || v === undefined) return '(blank)';
-    if (v === OTHER_KEY) return 'Other';
+    if (v === null || v === undefined) return t('(blank)');
+    if (v === OTHER_KEY) return t('Other');
     if (grain && typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return formatDate(v, grain, 'date');
     return String(v);
   };
   const bar = $derived(crumbs(info, fmt));
 </script>
 
-<nav class="drill" aria-label="Drill-down">
+<nav class="drill" aria-label={t('Drill-down')}>
   <ol>
     {#each bar.parts as p, i (i)}
       <li>
@@ -47,12 +48,12 @@
     <li class="showing">{bar.showing}</li>
   </ol>
   <span class="actions">
-    <button class="btn plain small" disabled={info.at === 0} onclick={onup} title="Up one level (Esc)">
-      <Icon name="chevronDown" size={12} class="flip" /> Up
+    <button class="btn plain small" disabled={info.at === 0} onclick={onup} title={t('Up one level (Esc)')}>
+      <Icon name="chevronDown" size={12} class="flip" /> {t('Up')}
     </button>
     {#if onnext}
-      <button class="btn plain small" disabled={!info.canDown} onclick={onnext} title="Every value, one level down">
-        Next level <Icon name="chevronDown" size={12} />
+      <button class="btn plain small" disabled={!info.canDown} onclick={onnext} title={t('Every value, one level down')}>
+        {t('Next level')} <Icon name="chevronDown" size={12} />
       </button>
     {/if}
   </span>

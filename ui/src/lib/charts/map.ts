@@ -9,6 +9,7 @@ import type { Cell, QueryResult } from '../api';
 import type { Colors } from './common';
 import type { Feature } from '../topo';
 import { bounds } from '../topo.ts';
+import { getLang, t } from '../i18n.ts';
 
 /** How many steps a ramp has. */
 export const STEPS = 7;
@@ -48,8 +49,9 @@ export function stepOf(ramp: Ramp, v: number | null): number | null {
   return 0;
 }
 
-/** "1st", "2nd", "3rd", "4th", "11th", "22nd". */
+/** "1st", "2nd", "3rd", "4th", "11th", "22nd"; in Indonesian "ke-1". */
 export function ordinal(n: number): string {
+  if (getLang() === 'id') return `ke-${n}`;
   const tens = n % 100;
   if (tens >= 11 && tens <= 13) return `${n}th`;
   return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
@@ -163,8 +165,8 @@ export function buildFilled(a: MapArgs): { option: EChartsCoreOption; ramp: Ramp
         textStyle: { color: c.text, fontSize: 12 },
         formatter: (p: { name: string; value: unknown; data?: { rank?: number } }) => {
           const name = escape(nameOf.get(p.name) ?? p.name);
-          if (typeof p.value !== 'number' || !Number.isFinite(p.value)) return `${name}<br/><span style="color:${c.text2}">No data</span>`;
-          const rank = p.data?.rank ? `<br/><span style="color:${c.text2}">${ordinal(p.data.rank)} of ${total}</span>` : '';
+          if (typeof p.value !== 'number' || !Number.isFinite(p.value)) return `${name}<br/><span style="color:${c.text2}">${t('No data')}</span>`;
+          const rank = p.data?.rank ? `<br/><span style="color:${c.text2}">${t('{rank} of {total}', { rank: ordinal(p.data.rank), total })}</span>` : '';
           return `${name}<br/><b>${escape(a.format(p.value))}</b>${rank}`;
         },
       },
@@ -216,7 +218,7 @@ export function buildPoints(a: PointArgs): EChartsCoreOption {
   const series = order.map((g, i) => ({
     type: 'scatter',
     coordinateSystem: 'geo',
-    name: g === '\u0000other' ? 'Other' : g || 'Blank',
+    name: g === '\u0000other' ? t('Other') : g || t('Blank'),
     data: res.rows
       .filter((r) => groupOf(r) === g)
       .map((r) => ({ value: [r[1], r[0], r[valueAt]], symbolSize: size(Math.abs(Number(r[valueAt]) || 0)) })),

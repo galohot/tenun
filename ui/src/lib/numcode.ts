@@ -3,6 +3,8 @@
 // The engine writes the same text (crates/tenun-core/src/numcode.rs); ui/tests/fixtures/numfmt.json holds both to it.
 // The marks of the result follow the digit style, as Excel follows the reader's locale.
 
+import { getLang, t } from './i18n.ts';
+
 /** The marks a number is written with: decimal mark, thousands mark, group sizes (Indian: 3 then 2). */
 export interface Marks {
   decimal: string;
@@ -72,11 +74,13 @@ export function runCode(
 }
 
 function parse(code: string): { sections: Section[] } | { problem: string } {
-  let p = parsed.get(code);
+  // A problem is written in the language of the screens, so the key holds it.
+  const key = `${getLang()}\u0000${code}`;
+  let p = parsed.get(key);
   if (!p) {
     p = parseNow(code);
     if (parsed.size > 500) parsed.clear();
-    parsed.set(code, p);
+    parsed.set(key, p);
   }
   return p;
 }
@@ -98,7 +102,7 @@ function parseNow(code: string): { sections: Section[] } | { problem: string } {
     const c = code[i];
     if (c === '"') {
       const end = code.indexOf('"', i + 1);
-      if (end < 0) return { problem: 'A quote is not closed.' };
+      if (end < 0) return { problem: t('A quote is not closed.') };
       toks.push({ t: 'lit', s: code.slice(i + 1, end) });
       i = end;
     } else if (c === '\\') {
@@ -110,7 +114,7 @@ function parseNow(code: string): { sections: Section[] } | { problem: string } {
       i++;
     } else if (c === '[') {
       const end = code.indexOf(']', i + 1);
-      if (end < 0) return { problem: 'A [ is not closed.' };
+      if (end < 0) return { problem: t('A [ is not closed.') };
       const inner = code.slice(i + 1, end).trim();
       i = end;
       const m = COND.exec(inner);
@@ -126,15 +130,15 @@ function parseNow(code: string): { sections: Section[] } | { problem: string } {
         // [$€-407]: a currency symbol with a locale; the symbol is written.
         toks.push({ t: 'lit', s: inner.slice(1).split('-')[0] });
       } else {
-        return { problem: `Tenun does not know [${inner}].` };
+        return { problem: t('Tenun does not know [{code}].', { code: inner }) };
       }
     } else if (c === ';') {
       close();
-      if (sections.length > 3) return { problem: 'A code has 4 parts at most.' };
+      if (sections.length > 3) return { problem: t('A code has 4 parts at most.') };
     } else if (c === '0' || c === '#' || c === '?') {
       toks.push({ t: 'digit', c });
     } else if (c === '.') {
-      if (++points > 1) return { problem: 'A part has one decimal point at most.' };
+      if (++points > 1) return { problem: t('A part has one decimal point at most.') };
       toks.push({ t: 'point' });
     } else if (c === ',') {
       toks.push({ t: 'comma' });
@@ -153,7 +157,7 @@ function parseNow(code: string): { sections: Section[] } | { problem: string } {
     }
   }
   close();
-  if (sections.length > 4) return { problem: 'A code has 4 parts at most.' };
+  if (sections.length > 4) return { problem: t('A code has 4 parts at most.') };
   return { sections };
 }
 

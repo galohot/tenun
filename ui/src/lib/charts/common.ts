@@ -12,6 +12,7 @@ import { effectiveShowAs } from '../showas';
 import { assignSlots } from './math';
 import { foldSeries, splitKept } from './fold';
 import { addsUp as tileAddsUp } from '../measures';
+import { t } from '../i18n';
 
 export interface Colors {
   surface: string;
@@ -53,7 +54,18 @@ export function readColors(el: Element = document.documentElement): Colors {
 }
 
 export const MAX_SERIES = 8;
+/** The raw value of the series that adds up the small groups; its name is `t('Other')`. */
 export const OTHER = 'Other';
+
+/** The caption of the trend in a tooltip: "Last 12 months" for a monthly trend; none without a trend. */
+export function lastTwelve(trend: { grain?: string | null } | null | undefined): string {
+  if (!trend) return '';
+  const grain = trend.grain;
+  if (grain === 'week') return t('Last 12 weeks');
+  if (grain === 'quarter') return t('Last 12 quarters');
+  if (grain === 'day') return t('Last 12 days');
+  return t('Last 12 months');
+}
 
 /** Key used to compare a category value with a filter value. */
 export const key = (v: Cell) => (v === null ? '\u0000null' : String(v));
@@ -133,7 +145,7 @@ export function pivot(res: QueryResult, tile: Tile, tables: Named[] = []): Pivot
     slot: slots[i],
   }));
   const hasOther = ranked.length > keep.length;
-  if (hasOther) series.push({ name: OTHER, raw: OTHER, values: categories.map(() => null), slot: null });
+  if (hasOther) series.push({ name: t('Other'), raw: OTHER, values: categories.map(() => null), slot: null });
   for (const r of res.rows) {
     const si = names.get(key(r[1])) ?? (hasOther ? series.length - 1 : -1);
     if (si < 0) continue;
@@ -232,7 +244,7 @@ export function makeLabel(res: QueryResult, tile: Tile) {
   const grain = tile.dims[0]?.grain;
   const partialKey = res.partial?.key;
   return (v: Cell) =>
-    v === FOLDED ? 'Other' : cell(v, dim0.dtype, grain, true, null, null, tile.dims[0]) + (partialKey !== undefined && v === partialKey ? '*' : '');
+    v === FOLDED ? t('Other') : cell(v, dim0.dtype, grain, true, null, null, tile.dims[0]) + (partialKey !== undefined && v === partialKey ? '*' : '');
 }
 
 export const FOLDED = OTHER_KEY;

@@ -14,6 +14,7 @@
   import LinkSheet from './model/LinkSheet.svelte';
   import HierarchySheet from './model/HierarchySheet.svelte';
   import Icon from './Icon.svelte';
+  import { t } from '../lib/i18n';
 
   const nodeTypes = { table: TableNode };
   const edgeTypes = { rel: RelEdge };
@@ -199,7 +200,7 @@
     try {
       suggestions = await api.suggest();
       relayout();
-      if (!suggestions.length) app.toast('No more likely relationships found.');
+      if (!suggestions.length) app.toast(t('No more likely relationships found.'));
     } catch (e) {
       app.error(e);
     } finally {
@@ -238,7 +239,8 @@
         const first = firstLinks(a.id, b.id, ws.relationships, app.linkHealth, app.linkTables);
         if (first.length < 2) continue;
         const names = first.map((id) => ws.relationships.find((r) => r.id === id)).filter((r): r is Relationship => !!r).map((r) => linkLabel(r, app.tables));
-        out.push(`${a.label} reaches ${b.label} ${first.length === 2 ? 'two ways' : `${first.length} ways`}: ${names.join(' and ')}.`);
+        const vars = { a: a.label, b: b.label, n: first.length, names: names.join(` ${t('and')} `) };
+        out.push(first.length === 2 ? t('{a} reaches {b} two ways: {names}.', vars) : t('{a} reaches {b} {n} ways: {names}.', vars));
       }
     }
     return out;
@@ -277,20 +279,20 @@
 </script>
 
 <header class="toolbar">
-  <nav class="crumbs" aria-label="Breadcrumb">
-    <button class="crumb link ws" onclick={() => go({ view: 'data' })} title="Open Data">{ws.name || 'Workspace'}</button>
+  <nav class="crumbs" aria-label={t('Breadcrumb')}>
+    <button class="crumb link ws" onclick={() => go({ view: 'data' })} title={t('Open Data')}>{ws.name || t('Workspace')}</button>
     <Icon name="chevronRight" size={12} />
-    <h2 class="crumb now">Model</h2>
+    <h2 class="crumb now">{t('Model')}</h2>
   </nav>
-  <span class="hint muted">Drag from a column to a column in another table to relate them. Click the label of a line to open it.</span>
+  <span class="hint muted">{t('Drag from a column to a column in another table to relate them. Click the label of a line to open it.')}</span>
   <span class="spacer"></span>
   {#if advancedOn() || (app.snap?.workspace.hierarchies ?? []).length}
-    <button class="btn" aria-label="Hierarchies" title="Hierarchies, such as Region › Store, for drill-down" onclick={() => (hierarchies = true)} disabled={!app.tables.length}>
-      <Icon name="drill" /> <span class="bl">Hierarchies</span>
+    <button class="btn" aria-label={t('Hierarchies')} title={t('Hierarchies, such as Region › Store, for drill-down')} onclick={() => (hierarchies = true)} disabled={!app.tables.length}>
+      <Icon name="drill" /> <span class="bl">{t('Hierarchies')}</span>
     </button>
   {/if}
-  <button class="btn" aria-label={looking ? 'Looking…' : 'Suggest relationships'} title="Find the columns that likely join your tables" onclick={findSuggestions} disabled={looking || app.tables.length < 2}>
-    <Icon name="sparkles" /> <span class="bl">{looking ? 'Looking…' : 'Suggest relationships'}</span>
+  <button class="btn" aria-label={looking ? t('Looking…') : t('Suggest relationships')} title={t('Find the columns that likely join your tables')} onclick={findSuggestions} disabled={looking || app.tables.length < 2}>
+    <Icon name="sparkles" /> <span class="bl">{looking ? t('Looking…') : t('Suggest relationships')}</span>
   </button>
 </header>
 
@@ -301,9 +303,9 @@
 {#if app.tables.length === 0}
   <div class="empty">
     <Icon name="model" size={32} />
-    <h2>Nothing to relate yet</h2>
-    <p class="muted">Add two or more tables, then link them here.</p>
-    <button class="btn primary" onclick={() => (app.addOpen = true)}><Icon name="plus" /> Add data</button>
+    <h2>{t('Nothing to relate yet')}</h2>
+    <p class="muted">{t('Add two or more tables, then link them here.')}</p>
+    <button class="btn primary" onclick={() => (app.addOpen = true)}><Icon name="plus" /> {t('Add data')}</button>
   </div>
 {:else}
   <div class="body">
@@ -341,45 +343,45 @@
     {/key}
     {#if ways.length}
       <div class="ways" role="note">
-        <strong>More than one way</strong>
+        <strong>{t('More than one way')}</strong>
         {#each ways.slice(0, 3) as w (w)}<span>{w}</span>{/each}
-        {#if ways.length > 3}<span>and {ways.length - 3} more.</span>{/if}
-        <span class="muted">The field list offers these tables once for each way.</span>
+        {#if ways.length > 3}<span>{t('and {n} more.', { n: ways.length - 3 })}</span>{/if}
+        <span class="muted">{t('The field list offers these tables once for each way.')}</span>
       </div>
     {/if}
   </div>
-  <aside class="rels" aria-label="Relationships">
-    <div class="rh"><span>Relationships · <span class="num">{ws.relationships.length}</span></span></div>
+  <aside class="rels" aria-label={t('Relationships')}>
+    <div class="rh"><span>{t('Relationships')} · <span class="num">{ws.relationships.length}</span></span></div>
     <div class="rlist">
       {#each ws.relationships as r (r.id)}
         {@const h = app.linkHealth?.[r.id]}
         {@const note = h?.note ?? app.snap?.link_clashes?.[r.id]}
         <div class="rel" class:on={picked === r.id}>
-          <button class="rmain" aria-pressed={picked === r.id} onclick={() => pick(r.id)} title="Show it on the canvas">
+          <button class="rmain" aria-pressed={picked === r.id} onclick={() => pick(r.id)} title={t('Show it on the canvas')}>
             {#if r.name}<span class="rname">{r.name}</span>{/if}
             <span class="path">{tableName(r.from.table)}.{r.from.column} <span class="arrow">→</span> {tableName(r.to.table)}.{r.to.column}</span>
             <span class="state">
               <i class="dot" class:warn={!!note} class:off={h?.unusable}></i>
               <span>{kindWords(h)}</span>
-              {#if h?.unusable}<span>· Not used</span>{/if}
+              {#if h?.unusable}<span>· {t('Not used')}</span>{/if}
             </span>
             {#if note}<span class="note">{note}</span>{/if}
           </button>
-          <button class="btn plain icon tiny" title="Open {linkLabel(r, app.tables)}" aria-label="Open {linkLabel(r, app.tables)}" onclick={() => openRel(r)}><Icon name="chevronRight" size={13} /></button>
+          <button class="btn plain icon tiny" title={t('Open {name}', { name: linkLabel(r, app.tables) })} aria-label={t('Open {name}', { name: linkLabel(r, app.tables) })} onclick={() => openRel(r)}><Icon name="chevronRight" size={13} /></button>
         </div>
       {:else}
-        <p class="empty-note">No relationships yet. Drag from a column to a column in another table, or ask for suggestions.</p>
+        <p class="empty-note">{t('No relationships yet. Drag from a column to a column in another table, or ask for suggestions.')}</p>
       {/each}
       {#if shownSuggestions.length}
-        <div class="rh sub"><span>Suggested · <span class="num">{shownSuggestions.length}</span></span></div>
+        <div class="rh sub"><span>{t('Suggested')} · <span class="num">{shownSuggestions.length}</span></span></div>
         {#each shownSuggestions as sg (sk(sg))}
           <div class="rel sug">
             <div class="rmain static">
               <span class="path">{tableName(sg.from.table)}.{sg.from.column} <span class="arrow">→</span> {tableName(sg.to.table)}.{sg.to.column}</span>
               {#if sg.reason}<span class="note">{sg.reason}</span>{/if}
               <span class="acts">
-                <button class="btn primary small" onclick={() => accept(sg)}><Icon name="check" size={12} /> Link</button>
-                <button class="btn plain small" onclick={() => (dismissed = [...dismissed, sk(sg)])}>Dismiss</button>
+                <button class="btn primary small" onclick={() => accept(sg)}><Icon name="check" size={12} /> {t('Link')}</button>
+                <button class="btn plain small" onclick={() => (dismissed = [...dismissed, sk(sg)])}>{t('Dismiss')}</button>
               </span>
             </div>
           </div>
@@ -387,9 +389,9 @@
       {/if}
     </div>
     <div class="legend">
-      <span><i></i> Relationship · the dot marks the unique side</span>
-      <span><i class="warn-line"></i> A column repeats values</span>
-      <span><i class="dash"></i> Suggestion</span>
+      <span><i></i> {t('Relationship · the dot marks the unique side')}</span>
+      <span><i class="warn-line"></i> {t('A column repeats values')}</span>
+      <span><i class="dash"></i> {t('Suggestion')}</span>
     </div>
   </aside>
   </div>

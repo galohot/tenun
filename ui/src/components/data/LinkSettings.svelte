@@ -4,6 +4,7 @@
   import { api, type Source } from '../../lib/api';
   import { LinkForm } from '../../lib/linkform.svelte';
   import { app } from '../../lib/state.svelte';
+  import { t } from '../../lib/i18n';
   import LinkFields from '../LinkFields.svelte';
   import Modal from '../Modal.svelte';
 
@@ -20,26 +21,26 @@
   async function save(e: SubmitEvent) {
     e.preventDefault();
     problem = '';
-    const ok = await app.run('Fetching the link…', () => api.setLink(source.id, f.change()));
+    const ok = await app.run(t('Fetching the link…'), () => api.setLink(source.id, f.change()));
     if (!ok) return;
     // The settings are saved even when the fetch fails. The error shows here and beside the source.
     problem = app.snap?.errors[source.id] ?? '';
     if (problem) return;
     onclose();
-    app.toast('Saved the link settings');
+    app.toast(t('Saved the link settings'));
   }
 </script>
 
-<Modal title="Link settings" {onclose} width={560}>
+<Modal title={t('Link settings')} {onclose} width={560}>
   <form id="linkset" onsubmit={save}>
     <LinkFields {f} />
   </form>
   {#if problem}
-    <p class="bad">Saved, but the link did not load. {problem}</p>
+    <p class="bad">{t('Saved, but the link did not load. {problem}', { problem })}</p>
   {/if}
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>{problem ? 'Close' : 'Cancel'}</button>
-    <button class="btn primary" type="submit" form="linkset" disabled={!!app.busy}>{app.busy ?? 'Save'}</button>
+    <button class="btn" onclick={onclose}>{problem ? t('Close') : t('Cancel')}</button>
+    <button class="btn primary" type="submit" form="linkset" disabled={!!app.busy}>{app.busy ?? t('Save')}</button>
   {/snippet}
 </Modal>
 

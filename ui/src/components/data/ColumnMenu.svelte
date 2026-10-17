@@ -3,6 +3,7 @@
   import { DATE_FORMATS, TYPE_CHOICES, labelProblem, withColumn } from '../../lib/prep';
   import { datePattern, patternProblem } from '../../lib/locale';
   import { app } from '../../lib/state.svelte';
+  import { t } from '../../lib/i18n';
   import Icon from '../Icon.svelte';
   import FormatEditor from '../FormatEditor.svelte';
 
@@ -97,35 +98,35 @@
 
 <div class="menu" class:wide={mode === 'format'} bind:this={root} style:left="{left}px" style:top="{y}px" role="menu">
   {#if mode === 'main'}
-    <button role="menuitem" onclick={() => (mode = 'rename')}><Icon name="pencil" size={13} /> Rename</button>
+    <button role="menuitem" onclick={() => (mode = 'rename')}><Icon name="pencil" size={13} /> {t('Rename')}</button>
     {#if canRetype}
       <button role="menuitem" onclick={() => (mode = 'type')}>
-        <Icon name="text" size={13} /> Type
-        <span class="more">{TYPE_CHOICES.find((t) => t.dtype === column.dtype)?.label}<Icon name="chevronRight" size={12} /></span>
+        <Icon name="text" size={13} /> {t('Type')}
+        <span class="more">{TYPE_CHOICES.find((c) => c.dtype === column.dtype)?.label}<Icon name="chevronRight" size={12} /></span>
       </button>
     {/if}
     <button role="menuitem" onclick={() => patch({ hidden: !column.hidden })}>
-      <Icon name={column.hidden ? 'check' : 'x'} size={13} /> {column.hidden ? 'Show in field lists' : 'Hide from field lists'}
+      <Icon name={column.hidden ? 'check' : 'x'} size={13} /> {column.hidden ? t('Show in field lists') : t('Hide from field lists')}
     </button>
-    <button role="menuitem" onclick={() => (mode = 'description')}><Icon name="info" size={13} /> Description</button>
+    <button role="menuitem" onclick={() => (mode = 'description')}><Icon name="info" size={13} /> {t('Description')}</button>
     {#if column.dtype === 'number'}
       <button role="menuitem" onclick={() => (mode = 'format')}>
-        <Icon name="hash" size={13} /> Number format
-        <span class="more">{mine?.format ? 'Set' : 'Automatic'}<Icon name="chevronRight" size={12} /></span>
+        <Icon name="hash" size={13} /> {t('Number format')}
+        <span class="more">{mine?.format ? t('Set') : t('Automatic')}<Icon name="chevronRight" size={12} /></span>
       </button>
     {:else if isDate(column.dtype)}
       <button role="menuitem" onclick={() => (mode = 'dates')}>
-        <Icon name="calendar" size={13} /> Date format
-        <span class="more">{mine?.date_pattern ? datePattern(SAMPLE_DAY, mine.date_pattern, app.locale) : 'Automatic'}<Icon name="chevronRight" size={12} /></span>
+        <Icon name="calendar" size={13} /> {t('Date format')}
+        <span class="more">{mine?.date_pattern ? datePattern(SAMPLE_DAY, mine.date_pattern, app.locale) : t('Automatic')}<Icon name="chevronRight" size={12} /></span>
       </button>
     {/if}
     {#if column.calc && (onedit || ondelete)}
       <div class="rule" role="separator"></div>
       {#if onedit}
-        <button role="menuitem" onclick={edit}><Icon name="fx" size={13} /> Edit formula</button>
+        <button role="menuitem" onclick={edit}><Icon name="fx" size={13} /> {t('Edit formula')}</button>
       {/if}
       {#if ondelete}
-        <button role="menuitem" class="danger" onclick={remove}><Icon name="trash" size={13} /> Delete column</button>
+        <button role="menuitem" class="danger" onclick={remove}><Icon name="trash" size={13} /> {t('Delete column')}</button>
       {/if}
     {/if}
   {:else if mode === 'rename'}
@@ -134,19 +135,19 @@
         e.preventDefault();
         if (!nameProblem) patch({ label });
       }}>
-      <label class="label" for="cm-name">Name shown in Tenun</label>
+      <label class="label" for="cm-name">{t('Name shown in Tenun')}</label>
       <!-- svelte-ignore a11y_autofocus -->
       <input id="cm-name" class="field" bind:value={label} placeholder={column.name} aria-invalid={!!nameProblem} autofocus />
       {#if nameProblem}
         <p class="hint warn" role="alert">{nameProblem}</p>
       {:else}
-        <p class="hint">Queries still use "{column.name}".</p>
+        <p class="hint">{t('Queries still use "{name}".', { name: column.name })}</p>
       {/if}
       <div class="row">
-        {#if column.label}<button type="button" class="btn plain" onclick={() => patch({ label: undefined })}>Reset</button>{/if}
+        {#if column.label}<button type="button" class="btn plain" onclick={() => patch({ label: undefined })}>{t('Reset')}</button>{/if}
         <span class="sp"></span>
-        <button type="button" class="btn" onclick={() => (mode = 'main')}>Back</button>
-        <button class="btn primary" disabled={!!nameProblem}>Save</button>
+        <button type="button" class="btn" onclick={() => (mode = 'main')}>{t('Back')}</button>
+        <button class="btn primary" disabled={!!nameProblem}>{t('Save')}</button>
       </div>
     </form>
   {:else if mode === 'description'}
@@ -155,27 +156,27 @@
         e.preventDefault();
         patch({ description });
       }}>
-      <label class="label" for="cm-desc">Shown as a tip in the field lists</label>
+      <label class="label" for="cm-desc">{t('Shown as a tip in the field lists')}</label>
       <!-- svelte-ignore a11y_autofocus -->
-      <input id="cm-desc" class="field" bind:value={description} placeholder="What is in this column?" autofocus />
+      <input id="cm-desc" class="field" bind:value={description} placeholder={t('What is in this column?')} autofocus />
       <div class="row">
-        {#if column.description}<button type="button" class="btn plain" onclick={() => patch({ description: undefined })}>Remove</button>{/if}
+        {#if column.description}<button type="button" class="btn plain" onclick={() => patch({ description: undefined })}>{t('Remove')}</button>{/if}
         <span class="sp"></span>
-        <button type="button" class="btn" onclick={() => (mode = 'main')}>Back</button>
-        <button class="btn primary">Save</button>
+        <button type="button" class="btn" onclick={() => (mode = 'main')}>{t('Back')}</button>
+        <button class="btn primary">{t('Save')}</button>
       </div>
     </form>
   {:else if mode === 'format'}
-    <div class="head"><button class="btn plain icon" aria-label="Back" onclick={() => (mode = 'main')}><Icon name="chevronLeft" size={13} /></button> Number format</div>
+    <div class="head"><button class="btn plain icon" aria-label={t('Back')} onclick={() => (mode = 'main')}><Icon name="chevronLeft" size={13} /></button> {t('Number format')}</div>
     <div class="pad">
-      <FormatEditor value={mine?.format ?? null} onchange={setFormat} shortDefault={false} blank advanced={!!app.settings?.advanced} label="Every tile that adds up this column" />
-      <p class="hint">A sum, an average, a minimum or a maximum of this column is written this way. A tile or a measure can still set its own.</p>
-      {#if mine?.format}<button type="button" class="btn plain" onclick={() => patch({ format: undefined }, false)}>Back to automatic</button>{/if}
+      <FormatEditor value={mine?.format ?? null} onchange={setFormat} shortDefault={false} blank advanced={!!app.settings?.advanced} label={t('Every tile that adds up this column')} />
+      <p class="hint">{t('A sum, an average, a minimum or a maximum of this column is written this way. A tile or a measure can still set its own.')}</p>
+      {#if mine?.format}<button type="button" class="btn plain" onclick={() => patch({ format: undefined }, false)}>{t('Back to automatic')}</button>{/if}
     </div>
   {:else if mode === 'dates'}
-    <div class="head"><button class="btn plain icon" aria-label="Back" onclick={() => (mode = 'main')}><Icon name="chevronLeft" size={13} /></button> Date format</div>
+    <div class="head"><button class="btn plain icon" aria-label={t('Back')} onclick={() => (mode = 'main')}><Icon name="chevronLeft" size={13} /></button> {t('Date format')}</div>
     <button role="menuitemradio" aria-checked={!mine?.date_pattern} class:on={!mine?.date_pattern} onclick={() => { pattern = ''; patch({ date_pattern: undefined }, false); }}>
-      <span class="tick">{#if !mine?.date_pattern}<Icon name="check" size={12} />{/if}</span>Automatic
+      <span class="tick">{#if !mine?.date_pattern}<Icon name="check" size={12} />{/if}</span>{t('Automatic')}
     </button>
     {#each column.dtype === 'datetime' ? TIME_PATTERNS : PATTERNS as p (p)}
       <button role="menuitemradio" aria-checked={mine?.date_pattern === p} class:on={mine?.date_pattern === p} onclick={() => { pattern = p; patch({ date_pattern: p }, false); }}>
@@ -187,24 +188,24 @@
         e.preventDefault();
         if (!ownPattern) patch({ date_pattern: pattern.trim() || undefined }, false);
       }}>
-      <label class="label" for="cm-pat">Your own pattern</label>
+      <label class="label" for="cm-pat">{t('Your own pattern')}</label>
       <input id="cm-pat" class="field mono" bind:value={pattern} placeholder="d MMM yyyy" spellcheck="false" autocomplete="off" />
       {#if ownPattern}
         <p class="hint warn" role="alert">{ownPattern}</p>
       {:else}
         <p class="hint">{pattern.trim() ? datePattern(SAMPLE_DAY, pattern.trim(), app.locale) : 'yyyy MM MMM MMMM d dd EEE EEEE HH mm ss · \'text\''}</p>
       {/if}
-      <div class="row"><span class="sp"></span><button class="btn primary" disabled={!!ownPattern || !pattern.trim()}>Use</button></div>
+      <div class="row"><span class="sp"></span><button class="btn primary" disabled={!!ownPattern || !pattern.trim()}>{t('Use')}</button></div>
     </form>
   {:else}
-    <div class="head"><button class="btn plain icon" aria-label="Back" onclick={() => (mode = 'main')}><Icon name="chevronLeft" size={13} /></button> Read this column as</div>
-    {#each TYPE_CHOICES as t (t.dtype)}
-      <button role="menuitemradio" aria-checked={column.dtype === t.dtype} class:on={column.dtype === t.dtype} onclick={() => pickType(t.dtype)}>
-        <span class="tick">{#if column.dtype === t.dtype}<Icon name="check" size={12} />{/if}</span>{t.label}
+    <div class="head"><button class="btn plain icon" aria-label={t('Back')} onclick={() => (mode = 'main')}><Icon name="chevronLeft" size={13} /></button> {t('Read this column as')}</div>
+    {#each TYPE_CHOICES as c (c.dtype)}
+      <button role="menuitemradio" aria-checked={column.dtype === c.dtype} class:on={column.dtype === c.dtype} onclick={() => pickType(c.dtype)}>
+        <span class="tick">{#if column.dtype === c.dtype}<Icon name="check" size={12} />{/if}</span>{c.label}
       </button>
     {/each}
     {#if isDate(column.dtype) && mine?.dtype}
-      <div class="sub">Dates written as text</div>
+      <div class="sub">{t('Dates written as text')}</div>
       {#each DATE_FORMATS as f (f.value)}
         <button role="menuitemradio" aria-checked={format === f.value} class:on={format === f.value} onclick={() => patch({ date_format: f.value }, false)}>
           <span class="tick">{#if format === f.value}<Icon name="check" size={12} />{/if}</span>{f.label}
@@ -212,10 +213,10 @@
       {/each}
     {/if}
     {#if mine?.dtype}
-      <button role="menuitem" onclick={() => patch({ dtype: undefined, date_format: undefined })}>Use the type from the file</button>
+      <button role="menuitem" onclick={() => patch({ dtype: undefined, date_format: undefined })}>{t('Use the type from the file')}</button>
     {/if}
     {#if column.failed}
-      <p class="hint warn">Cells that cannot be read become blank.</p>
+      <p class="hint warn">{t('Cells that cannot be read become blank.')}</p>
     {/if}
   {/if}
 </div>

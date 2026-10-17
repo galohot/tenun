@@ -6,6 +6,7 @@
   import { chartColumns, sharedScale, splitCharts } from '../../lib/charts/small';
   import { cell, type Named } from '../../lib/format';
   import MiniChart from './MiniChart.svelte';
+  import { t } from '../../lib/i18n';
 
   let {
     res,
@@ -52,7 +53,7 @@
       <figure>
         <figcaption>
           <span class="name" title={title(p.key)}>{title(p.key)}</span>
-          {#if tile.ownScale}<span class="own">Own scale</span>{/if}
+          {#if tile.ownScale}<span class="own">{t('Own scale')}</span>{/if}
         </figcaption>
         <div class="plot">
           <MiniChart res={p.res} tile={mini} {colors} {selected} {tables} {scale} {onpick} />
@@ -60,7 +61,7 @@
       </figure>
     {/each}
   </div>
-  {#if more > 0}<p class="more">and {more} more</p>{/if}
+  {#if more > 0}<p class="more">{t('and {n} more', { n: more })}</p>{/if}
 </div>
 
 <style>

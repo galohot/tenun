@@ -2,12 +2,13 @@
 // edits of a table's setup. Pure functions, so the node tests can load them.
 
 import type { CalcColumn, Column, ColumnSetup, DType, Table, TableSetup, Transform, UnpivotPlan } from './api';
+import { t, tn } from './i18n.ts';
 
 type WithColumns = Pick<Table, 'id'> & { columns?: Column[] };
 
 /** The column of a table, or undefined. */
 export function findColumn(tables: WithColumns[] | undefined, table: string, column: string): Column | undefined {
-  return tables?.find((t) => t.id === table)?.columns?.find((c) => c.name === column);
+  return tables?.find((x) => x.id === table)?.columns?.find((c) => c.name === column);
 }
 
 /** The label the user gave a column, or undefined. */
@@ -25,35 +26,32 @@ export const BLANK_NOTE_FROM = 0.1;
 /** "23 % blank" when more than 10 % of the cells are blank; otherwise nothing. */
 export function blankNote(c: Pick<Column, 'blank'>): string {
   const b = c.blank ?? 0;
-  return b > BLANK_NOTE_FROM ? `${Math.round(b * 100)} % blank` : '';
+  return b > BLANK_NOTE_FROM ? t('{n} % blank', { n: Math.round(b * 100) }) : '';
 }
-
-const READ_AS: Record<DType, [string, string]> = {
-  date: ['a date', 'dates'],
-  datetime: ['a date and time', 'dates and times'],
-  number: ['a number', 'numbers'],
-  bool: ['a yes or no value', 'yes or no values'],
-  text: ['text', 'text'],
-};
 
 /** "12 values could not be read as dates." after a type override. */
 export function failedText(c: Pick<Column, 'failed' | 'dtype'>): string {
   const n = c.failed ?? 0;
   if (n <= 0) return '';
-  const [one, many] = READ_AS[c.dtype];
-  return n === 1 ? `1 value could not be read as ${one}.` : `${n} values could not be read as ${many}.`;
+  switch (c.dtype) {
+    case 'date': return tn('1 value could not be read as a date.', '{n} values could not be read as dates.', n);
+    case 'datetime': return tn('1 value could not be read as a date and time.', '{n} values could not be read as dates and times.', n);
+    case 'number': return tn('1 value could not be read as a number.', '{n} values could not be read as numbers.', n);
+    case 'bool': return tn('1 value could not be read as a yes or no value.', '{n} values could not be read as yes or no values.', n);
+    default: return tn('1 value could not be read as text.', '{n} values could not be read as text.', n);
+  }
 }
 
 export const TYPE_CHOICES: { dtype: DType; label: string }[] = [
-  { dtype: 'text', label: 'Text' },
-  { dtype: 'number', label: 'Number' },
-  { dtype: 'date', label: 'Date' },
-  { dtype: 'datetime', label: 'Date and time' },
-  { dtype: 'bool', label: 'Yes or no' },
+  { dtype: 'text', get label() { return t('Text'); } },
+  { dtype: 'number', get label() { return t('Number'); } },
+  { dtype: 'date', get label() { return t('Date'); } },
+  { dtype: 'datetime', get label() { return t('Date and time'); } },
+  { dtype: 'bool', get label() { return t('Yes or no'); } },
 ];
 
 export const DATE_FORMATS: { value: 'auto' | 'dmy' | 'mdy'; label: string }[] = [
-  { value: 'auto', label: 'Automatic' },
+  { value: 'auto', get label() { return t('Automatic'); } },
   { value: 'dmy', label: 'dd/mm/yyyy' },
   { value: 'mdy', label: 'mm/dd/yyyy' },
 ];
@@ -143,5 +141,5 @@ export function labelProblem(label: string, column: Pick<Column, 'name'>, table:
   const n = label.trim();
   if (!n) return null;
   const other = table.columns.find((c) => c.name !== column.name && (sameName(c.name, n) || (c.label && sameName(c.label, n))));
-  return other ? `The name ${n} is already used by another column of ${table.label}. Choose another name.` : null;
+  return other ? t('The name {name} is already used by another column of {table}. Choose another name.', { name: n, table: table.label }) : null;
 }

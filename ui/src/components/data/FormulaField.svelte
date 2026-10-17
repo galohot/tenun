@@ -6,6 +6,7 @@
   import type { FormulaError } from '../../lib/api';
   import { apply, cut, type Item, type Scope, suggest } from '../../lib/formula';
   import { typeIcon } from '../../lib/ui';
+  import { t } from '../../lib/i18n';
   import Icon, { type IconName } from '../Icon.svelte';
 
   let {
@@ -156,7 +157,7 @@
       class="list"
       id={listId}
       role="listbox"
-      aria-label="Suggestions"
+      aria-label={t('Suggestions')}
       style:left="{rect.left}px"
       style:top="{rect.top}px"
       style:width="{rect.width}px"
@@ -179,7 +180,7 @@
           {#if it.hint}<span class="hint">{it.hint}</span>{/if}
         </li>
       {/each}
-      <li class="keys" role="presentation" aria-hidden="true">↑ ↓ to move · Enter or Tab to insert · Esc to close</li>
+      <li class="keys" role="presentation" aria-hidden="true">{t('↑ ↓ to move · Enter or Tab to insert · Esc to close')}</li>
     </ul>
   {/if}
 </div>

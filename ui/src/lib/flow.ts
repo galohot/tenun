@@ -1,9 +1,10 @@
 // Story pages (build 11, V4-D13): a dashboard that reads like a document. Its tiles run down a centred column in the
 // page's order, a text as tall as its words, a chart in three heights; two half-width tiles share a row on a wide
 // screen and stack on a phone. The tiles keep their places on the grid, so a page switches back unchanged. Pure, with
-// type-only imports, so the node tests load it.
+// type-only imports and t(), so the node tests load it.
 
 import type { Dashboard, Tile } from './api';
+import { t } from './i18n.ts';
 
 /** The column of a story: text reads best up to 760 px; a full-width chart may go to 1080. */
 export const FLOW_TEXT = 760;
@@ -120,11 +121,11 @@ export function pageCuts(boxes: readonly Box[], total: number, page: number): [n
 export function newStory(id: string, n: number, tileId: (p: string) => string): Dashboard {
   return {
     id,
-    title: n ? `Story ${n + 1}` : 'Story',
+    title: n ? t('Story {n}', { n: n + 1 }) : t('Story'),
     refresh: 60,
     layout: 'flow',
     tiles: [
-      { id: tileId('t'), type: 'text', title: '', x: 0, y: 0, w: 12, h: 2, measures: [], dims: [], text: '# A title\n\nWhat this page tells, in a sentence or two.', textStyle: 'lead' },
+      { id: tileId('t'), type: 'text', title: '', x: 0, y: 0, w: 12, h: 2, measures: [], dims: [], text: t('# A title\n\nWhat this page tells, in a sentence or two.'), textStyle: 'lead' },
       { id: tileId('t'), type: 'bar', title: '', x: 0, y: 2, w: 12, h: 5, measures: [], dims: [] },
     ],
   } as Dashboard;

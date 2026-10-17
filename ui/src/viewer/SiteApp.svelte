@@ -13,6 +13,7 @@
   import { hashOf, parseHash, type Route } from '../lib/siteview';
   import SiteFrame from '../components/site/SiteFrame.svelte';
   import Viewer from './Viewer.svelte';
+  import { t } from '../lib/i18n';
 
   let { data, hosted = null }: { data: SitePayload; hosted?: { updated: string; source: string; every: number | null; updates?: string | null } | null } = $props();
 
@@ -58,11 +59,11 @@
       const fromPage = route.drill.tile.split('/')[0];
       const at = d.values[route.drill.key];
       if (at) return { payload: at, from: fromPage };
-      const field = data.pages[fromPage]?.tiles.find((t) => `${fromPage}/${t.id}` === route.drill!.tile)?.dims[0]?.column ?? 'the field';
+      const field = data.pages[fromPage]?.tiles.find((x) => `${fromPage}/${x.id}` === route.drill!.tile)?.dims[0]?.column ?? t('the field');
       return {
         payload: data.pages[d.page],
         from: fromPage,
-        note: `This page is not kept to the value you clicked: the file holds the pages of the first 50 values of ${field}.`,
+        note: t('This page is not kept to the value you clicked: the file holds the pages of the first 50 values of {field}.', { field }),
       };
     }
     return { payload: data.pages[route.page] };
@@ -94,11 +95,11 @@
     if (!everyPick) return null;
     const e = data.every?.[everyPick.source];
     if (!e || e.page === current) return null;
-    const d = data.pages[e.page]?.tiles.find((t) => t.id === e.tile)?.dims[0];
+    const d = data.pages[e.page]?.tiles.find((x) => x.id === e.tile)?.dims[0];
     // The words of the app's chip: "Region: Java".
     const label = d
       ? filterText({ table: d.table, column: d.column, grain: null, op: 'in', values: [everyPick.value], fromTile: '', ...(d.via ? { via: d.via } : {}) }, data.pages[e.page]?.tables ?? [])
-      : String(everyPick.value ?? '(blank)');
+      : String(everyPick.value ?? t('(blank)'));
     return { label, results: e.values[everyPick.key]?.[current], onclear: () => (everyPick = null) };
   });
   /** The page the every-page value was picked on starts with it picked. */
@@ -114,15 +115,15 @@
         pages={ids}
         onpage={go}
         ondrill={drill}
-        drillFrom={shown.from ? { title: data.titles[shown.from] || 'the page before', back } : null}
-        note={shown.note ?? (everyAt && !everyAt.results ? 'This page is not kept to the value picked for every page: the file holds the first 50 values.' : undefined)}
+        drillFrom={shown.from ? { title: data.titles[shown.from] || t('the page before'), back } : null}
+        note={shown.note ?? (everyAt && !everyAt.results ? t('This page is not kept to the value picked for every page: the file holds the first 50 values.') : undefined)}
         {everyAt}
         {startPick}
         useHash={false}
         onpickchange={pickChange} />
     {/key}
   {:else}
-    <p class="missing">This page is not in the file.</p>
+    <p class="missing">{t('This page is not in the file.')}</p>
   {/if}
 </SiteFrame>
 

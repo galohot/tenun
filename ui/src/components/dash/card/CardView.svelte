@@ -11,6 +11,7 @@
   import RuleChip from './RuleChip.svelte';
   import Spark from './Spark.svelte';
   import Target from './Target.svelte';
+  import { t, tn } from '../../../lib/i18n';
 
   let {
     kpi,
@@ -66,7 +67,7 @@
             {#if rule}<RuleChip tone={rule.tone} words={ruleWords(rule, (v) => compact(v, fmt), tile.target?.value)} />{/if}
           </div>
         {:else if p.kind === 'period'}
-          <div class="period">{kpi.period}{kpi.partial ? ' · so far' : ''}</div>
+          <div class="period">{kpi.partial ? t('{period} · so far', { period: kpi.period }) : kpi.period}</div>
         {:else if p.kind === 'compare'}
           <Compare {kpi} better={tile.better ?? 'up'} />
         {:else if p.kind === 'target'}
@@ -89,7 +90,7 @@
     {#if side?.kind === 'spark'}<Spark {kpi} kind={side.style ?? 'bars'} {fmt} />{/if}
   </div>
   {#if fit.dropped}
-    <span class="more" title="{fit.dropped === 1 ? 'One part does' : `${fit.dropped} parts do`} not fit. Make the tile taller to see {fit.dropped === 1 ? 'it' : 'them'}.">…</span>
+    <span class="more" title={tn('One part does not fit. Make the tile taller to see it.', '{n} parts do not fit. Make the tile taller to see them.', fit.dropped)}>…</span>
   {/if}
 </div>
 

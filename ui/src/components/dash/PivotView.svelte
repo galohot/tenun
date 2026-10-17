@@ -5,6 +5,7 @@
   import { barScale, barSpan, barStyle, goodBad } from '../../lib/cells';
   import { cell, columnHeads, toneFor, resultDim0, type Named } from '../../lib/format';
   import { effectiveShowAs } from '../../lib/showas';
+  import { t } from '../../lib/i18n';
   import { groupKeys, isExpandable, MAX_PIVOT_ROWS, pivotModel, pivotTree, visibleNodes } from '../../lib/pivot';
 
   let {
@@ -121,8 +122,8 @@
 <div class="pivot">
   {#if expandable}
     <div class="tools">
-      <button class="link" onclick={() => (closed = new Set())}>Open all</button>
-      <button class="link" onclick={() => (closed = new Set(groupKeys(tree)))}>Close all</button>
+      <button class="link" onclick={() => (closed = new Set())}>{t('Open all')}</button>
+      <button class="link" onclick={() => (closed = new Set(groupKeys(tree)))}>{t('Close all')}</button>
     </div>
   {/if}
   <div class="scroll">
@@ -136,13 +137,13 @@
             {#each m.cols as c}
               <th class="colhead" colspan={m.nValues} class:dim={!colSel(c.raw)} scope="colgroup">
                 {#if onpickcol}
-                  <button onclick={() => onpickcol?.(c.raw)} title="Filter the other tiles to this column">{colLabel(c.raw)}</button>
+                  <button onclick={() => onpickcol?.(c.raw)} title={t('Filter the other tiles to this column')}>{colLabel(c.raw)}</button>
                 {:else}
                   <span>{colLabel(c.raw)}</span>
                 {/if}
               </th>
             {/each}
-            {#if hasRowTotals}<th class="colhead totalhead" colspan={m.nValues} scope="colgroup">Total</th>{/if}
+            {#if hasRowTotals}<th class="colhead totalhead" colspan={m.nValues} scope="colgroup">{t('Total')}</th>{/if}
           {:else}
             {#each values as j}<th class="colhead" scope="col">{vname(j)}</th>{/each}
           {/if}
@@ -164,11 +165,11 @@
                 {#each rowFields as i}
                   <th class="rowhead" class:first={i === 0} scope="row" colspan={i === g.depth ? m.nRows - g.depth : 1} hidden={i > g.depth}>
                     {#if i === g.depth}
-                      <button class="twisty" aria-expanded={!closed.has(g.key)} aria-label="{closed.has(g.key) ? 'Open' : 'Close'} {rowLabel(g.raw[g.depth], g.depth)}" onclick={() => toggle(g.key)}>
+                      <button class="twisty" aria-expanded={!closed.has(g.key)} aria-label={closed.has(g.key) ? t('Open {name}', { name: rowLabel(g.raw[g.depth], g.depth) }) : t('Close {name}', { name: rowLabel(g.raw[g.depth], g.depth) })} onclick={() => toggle(g.key)}>
                         <span class="chev" class:shut={closed.has(g.key)} aria-hidden="true">▾</span>
                       </button>
                       {#if onpick && g.depth === 0}
-                        <button class="name" onclick={() => onpick?.(g.raw[0])} title="Filter the other tiles to this row">{rowLabel(g.raw[g.depth], g.depth)}</button>
+                        <button class="name" onclick={() => onpick?.(g.raw[0])} title={t('Filter the other tiles to this row')}>{rowLabel(g.raw[g.depth], g.depth)}</button>
                       {:else}
                         {rowLabel(g.raw[g.depth], g.depth)}
                       {/if}
@@ -201,7 +202,7 @@
               <th class="rowhead" class:first={i === 0} scope="row">
                 {#if shownRow(ri, i)}
                   {#if onpick && i === 0}
-                    <button onclick={() => onpick?.(r.raw[0])} title="Filter the other tiles to this row">{rowLabel(v, i)}</button>
+                    <button onclick={() => onpick?.(r.raw[0])} title={t('Filter the other tiles to this row')}>{rowLabel(v, i)}</button>
                   {:else}
                     {rowLabel(v, i)}
                   {/if}
@@ -216,7 +217,7 @@
       {#if hasTotalRow}
         <tfoot>
           <tr>
-            <th class="rowhead first" colspan={Math.max(m.nRows, 1)} scope="row">Total</th>
+            <th class="rowhead first" colspan={Math.max(m.nRows, 1)} scope="row">{t('Total')}</th>
             {#each m.cols as c, ci}
               {#each values as j}
                 <td class="num">{total(m.hasCols ? m.colTotals[ci] : m.grand, j)}</td>
@@ -232,8 +233,8 @@
   </div>
   {#if m.cut || m.limited}
     <p class="note">
-      {#if m.cut}Showing {m.cols.length} of {m.colCount} columns.{/if}
-      {#if m.limited}Showing the first {MAX_PIVOT_ROWS.toLocaleString('en-US')} cells. Add a filter to see the rest.{/if}
+      {#if m.cut}{t('Showing {shown} of {count} columns.', { shown: m.cols.length, count: m.colCount })}{/if}
+      {#if m.limited}{t('Showing the first {n} cells. Add a filter to see the rest.', { n: MAX_PIVOT_ROWS.toLocaleString('en-US') })}{/if}
     </p>
   {/if}
 </div>

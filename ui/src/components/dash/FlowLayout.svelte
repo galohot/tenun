@@ -7,6 +7,7 @@
   import type { Tile } from '../../lib/api';
   import { FLOW_GAP, FLOW_PAIR_FROM, flowHeight, flowRows, flowWidth, rowWidth } from '../../lib/flow';
   import Icon from '../Icon.svelte';
+  import { t } from '../../lib/i18n';
 
   let {
     tiles,
@@ -34,16 +35,16 @@
 
 <div class="flow" class:editing bind:clientWidth={width} style:--gap="{FLOW_GAP}px">
   {#if editing && onadd}
-    <button class="plus" title="Add a tile here" aria-label="Add a tile at the top" onclick={(e) => onadd(0, e)}><Icon name="plus" size={12} /></button>
+    <button class="plus" title={t('Add a tile here')} aria-label={t('Add a tile at the top')} onclick={(e) => onadd(0, e)}><Icon name="plus" size={12} /></button>
   {/if}
   {#each rows as row, r (row.map((t) => t.id).join('+'))}
     <div class="row" class:pair={row.length === 2} style:max-width="{rowWidth(row)}px">
-      {#each row as t, k (t.id)}
+      {#each row as tl, k (tl.id)}
         {@const i = starts[r] + k}
-        {@const h = flowHeight(t)}
+        {@const h = flowHeight(tl)}
         <div
           class="slot"
-          class:half={flowWidth(t) === 'half' && row.length === 1 && width >= FLOW_PAIR_FROM}
+          class:half={flowWidth(tl) === 'half' && row.length === 1 && width >= FLOW_PAIR_FROM}
           class:over={over === i && dragFrom !== null && dragFrom !== i}
           style:height={h === null ? undefined : `${h}px`}
           role="listitem"
@@ -64,17 +65,17 @@
               draggable="true"
               role="button"
               tabindex="-1"
-              title="Drag to move"
-              aria-label="Drag to move"
+              title={t('Drag to move')}
+              aria-label={t('Drag to move')}
               ondragstart={() => (dragFrom = i)}
               ondragend={() => ((dragFrom = null), (over = null))}><Icon name="grip" size={14} /></span>
           {/if}
-          {@render cell(t)}
+          {@render cell(tl)}
         </div>
       {/each}
     </div>
     {#if editing && onadd}
-      <button class="plus" title="Add a tile here" aria-label="Add a tile here" onclick={(e) => onadd(starts[r] + row.length, e)}><Icon name="plus" size={12} /></button>
+      <button class="plus" title={t('Add a tile here')} aria-label={t('Add a tile here')} onclick={(e) => onadd(starts[r] + row.length, e)}><Icon name="plus" size={12} /></button>
     {/if}
   {/each}
 </div>

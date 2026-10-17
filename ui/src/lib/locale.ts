@@ -6,6 +6,7 @@ import { formatLocale } from 'd3-format';
 import { timeFormatLocale } from 'd3-time-format';
 import type { Grain, NumFormat } from './api';
 import { digitsFor, isDigits, oneForm, writeNumber, type Digits } from './numfmt.ts';
+import { t } from './i18n.ts';
 
 export type { Digits } from './numfmt.ts';
 
@@ -121,8 +122,8 @@ const PATTERN = /'[^']*'|yyyy|yy|MMMM|MMM|MM|M|dd|d|EEEE|EEE|HH|H|hh|h|mm|ss|a/g
 
 /** Why a date pattern cannot be used, or null. */
 export function patternProblem(p: string): string | null {
-  if ((p.match(/'/g) ?? []).length % 2) return 'A quote is not closed.';
-  return /yy|M|d|E|H|h|m|s/.test(p.replace(/'[^']*'/g, '')) ? null : 'The pattern names no part of a date.';
+  if ((p.match(/'/g) ?? []).length % 2) return t('A quote is not closed.');
+  return /yy|M|d|E|H|h|m|s/.test(p.replace(/'[^']*'/g, '')) ? null : t('The pattern names no part of a date.');
 }
 
 /**
