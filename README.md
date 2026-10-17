@@ -194,6 +194,9 @@ Tenun aims to do a few things well. These are left out by choice. Each has an an
 | macOS (Intel) | `Tenun_x.y.z_x64.dmg` |
 | Linux | `.AppImage` or `.deb` |
 
+On Windows, install one of the two. The `-setup.exe` installs Tenun for you only, and the `.msi` for
+everyone on the computer. Both use the same folder, so uninstall one before you install the other.
+
 The apps are not code-signed (see the [code signing policy](#code-signing-policy)):
 
 - **macOS:** open the app once and close the warning. Then open **System Settings → Privacy &

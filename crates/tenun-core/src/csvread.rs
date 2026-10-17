@@ -45,6 +45,13 @@ pub fn plan(db: &Connection, path: &Path, copies: &Path) -> anyhow::Result<CsvPl
     let mut notes = Vec::new();
     let (read, encoding) = match encoding_of(path)? {
         Encoding::Utf8 => (path.to_path_buf(), ""),
+        Encoding::Utf8MixedLines => {
+            notes.push(
+                "Read with one kind of line end: the file mixes Windows and Unix line ends"
+                    .to_string(),
+            );
+            (utf8_copy(path, copies)?, "")
+        }
         Encoding::Utf16 => {
             notes.push("Read as UTF-16 text".to_string());
             (path.to_path_buf(), "utf-16")
@@ -105,20 +112,34 @@ pub fn plan(db: &Connection, path: &Path, copies: &Path) -> anyhow::Result<CsvPl
 
 enum Encoding {
     Utf8,
+    /// UTF-8 with lines that end in `\r\n` and lines that end in `\n` alone. DuckDB reads one kind
+    /// per file, so such a file is read from a copy (an edit in Notepad of an Excel export does this).
+    Utf8MixedLines,
     Utf16,
     Other,
 }
 
 /// UTF-16 by its byte order mark; UTF-8 when every byte of the file is valid UTF-8 (checked in
-/// blocks, so a big file is never held in memory).
+/// blocks, so a big file is never held in memory). The same pass sees the kinds of line end.
 fn encoding_of(path: &Path) -> anyhow::Result<Encoding> {
     let mut f = std::fs::File::open(path)?;
     let mut buf = vec![0u8; 1 << 20];
     let mut carry = 0;
     let mut first = true;
+    let (mut crlf, mut lf, mut prev) = (false, false, 0u8);
     loop {
         let n = f.read(&mut buf[carry..])?;
         let end = carry + n;
+        for &b in &buf[carry..end] {
+            if b == b'\n' {
+                if prev == b'\r' {
+                    crlf = true;
+                } else {
+                    lf = true;
+                }
+            }
+            prev = b;
+        }
         if first {
             first = false;
             if buf[..end].starts_with(&[0xFF, 0xFE]) || buf[..end].starts_with(&[0xFE, 0xFF]) {
@@ -126,10 +147,12 @@ fn encoding_of(path: &Path) -> anyhow::Result<Encoding> {
             }
         }
         if n == 0 {
-            return Ok(if carry == 0 {
-                Encoding::Utf8
-            } else {
+            return Ok(if carry != 0 {
                 Encoding::Other
+            } else if crlf && lf {
+                Encoding::Utf8MixedLines
+            } else {
+                Encoding::Utf8
             });
         }
         match std::str::from_utf8(&buf[..end]) {
@@ -145,8 +168,9 @@ fn encoding_of(path: &Path) -> anyhow::Result<Encoding> {
     }
 }
 
-/// A UTF-8 copy of a file that is not UTF-8: its valid UTF-8 stays as it is, other bytes are read
-/// as Windows-1252. The copy is named after the file's path, so a reload replaces it.
+/// A UTF-8 copy of a file that is not UTF-8 or mixes line ends: its valid UTF-8 stays as it is,
+/// other bytes are read as Windows-1252, and every `\r\n` becomes `\n`. The copy is named after the
+/// file's path, so a reload replaces it.
 fn utf8_copy(path: &Path, copies: &Path) -> anyhow::Result<std::path::PathBuf> {
     let bytes = std::fs::read(path)?;
     let mut out = String::with_capacity(bytes.len() + bytes.len() / 8);
@@ -154,6 +178,7 @@ fn utf8_copy(path: &Path, copies: &Path) -> anyhow::Result<std::path::PathBuf> {
         out.push_str(chunk.valid());
         out.extend(chunk.invalid().iter().map(|&b| windows_1252(b)));
     }
+    let out = out.replace("\r\n", "\n");
     std::fs::create_dir_all(copies)?;
     let key = path.to_string_lossy();
     // FNV-1a: a short, stable name for the path.
@@ -252,21 +277,23 @@ fn sniff(
          FROM (SELECT *, unnest(Columns) AS c, generate_subscripts(Columns, 1) AS i \
          FROM sniff_csv({file}, {opts})) ORDER BY i"
     );
-    let mut stmt = db.prepare(&sql)?;
-    let rows = stmt.query_map([], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, u32>(3)?,
-            r.get::<_, bool>(4)?,
-            r.get::<_, String>(5)?,
-            r.get::<_, String>(6)?,
-            r.get::<_, String>(7)?,
-            r.get::<_, String>(8)?,
-        ))
-    })?;
-    let rows: Vec<_> = rows.collect::<Result<_, _>>()?;
+    let mut stmt = db.prepare(&sql).map_err(not_csv)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, u32>(3)?,
+                r.get::<_, bool>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, String>(7)?,
+                r.get::<_, String>(8)?,
+            ))
+        })
+        .map_err(not_csv)?;
+    let rows: Vec<_> = rows.collect::<Result<_, _>>().map_err(not_csv)?;
     let Some(first) = rows.first().cloned() else {
         anyhow::bail!("the file has no columns");
     };
@@ -283,6 +310,17 @@ fn sniff(
         decimal_comma: numbers != Numbers::Point,
         thousands_dot: numbers == Numbers::CommaAndDots,
     })
+}
+
+/// DuckDB's sniffer error is a page of options to try; the person needs one sentence.
+fn not_csv(e: duckdb::Error) -> anyhow::Error {
+    if e.to_string().contains("Error when sniffing file") {
+        anyhow::anyhow!(
+            "Tenun could not find the rows and columns of this CSV file. Open it in Excel and save it as CSV again."
+        )
+    } else {
+        e.into()
+    }
 }
 
 fn numbers_opts(numbers: Numbers) -> &'static str {
@@ -449,6 +487,27 @@ mod tests {
         assert!(matches!(encoding_of(&f).unwrap(), Encoding::Utf8));
         std::fs::write(&f, [0xFF, 0xFE, b'a', 0]).unwrap();
         assert!(matches!(encoding_of(&f).unwrap(), Encoding::Utf16));
+    }
+
+    #[test]
+    fn a_file_that_mixes_line_ends_is_read_from_a_copy_with_one_kind() {
+        let d = std::env::temp_dir().join(format!("tenun-csvlines-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("m.csv");
+        std::fs::write(&f, "region,amount\nA,1\nB,2\r\n").unwrap();
+        assert!(matches!(encoding_of(&f).unwrap(), Encoding::Utf8MixedLines));
+        let db = Connection::open_in_memory().unwrap();
+        let plan = plan(&db, &f, &d.join("copies")).unwrap();
+        let n: i64 = db
+            .query_row(
+                &format!("SELECT sum(amount) FROM ({})", plan.select),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 3);
+        std::fs::write(&f, "region,amount\r\nA,1\r\n").unwrap();
+        assert!(matches!(encoding_of(&f).unwrap(), Encoding::Utf8));
     }
 
     #[test]

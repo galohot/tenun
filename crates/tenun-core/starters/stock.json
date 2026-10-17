@@ -3,6 +3,7 @@
   "name": "Stock",
   "description": "What is in store, where it is, and which items run low.",
   "sample": "stock.csv",
+  "sample_id": { "file": "stok.csv", "header": "barang,kategori,gudang,stok,nilai" },
   "roles": [
     { "name": "item", "label": "Item", "kind": "text", "required": true, "shape": "many",
       "description": "What is kept: an item, a product or a material.",

@@ -1138,7 +1138,7 @@ export const api = {
   sample: () => call<Snapshot>('POST', '/sample'),
   starters: () => call<Starter[]>('GET', '/starters'),
   /** Adds the sample CSV of a starter as a source. `table` is its table. */
-  starterSample: (starter: string) => call<Snapshot & { added: string; table: string | null }>('POST', '/starters/sample', { starter }),
+  starterSample: (starter: string, lang: string) => call<Snapshot & { added: string; table: string | null }>('POST', '/starters/sample', { starter, lang }),
   starterGuess: (starter: string, table: string) => call<StarterGuess[]>('POST', '/starters/guess', { starter, table }),
   /** Makes the dashboard of a starter with a column for each role (role → column). Fails in words when a required role has none. */
   applyStarter: (starter: string, table: string, mapping: Record<string, string>, title: string) =>

@@ -3,6 +3,7 @@
   "name": "Survey",
   "description": "The average score of each question and each group, and how the scores spread.",
   "sample": "survey.csv",
+  "sample_id": { "file": "survei.csv", "header": "responden,tanggal,lokasi,pertanyaan,skor" },
   "roles": [
     { "name": "question", "label": "Question", "kind": "text", "required": true, "shape": "few",
       "description": "What was asked: a question, an aspect or an indicator.",

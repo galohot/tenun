@@ -3,6 +3,7 @@
   "name": "Budget against actual",
   "description": "What was planned and what was spent, by account, by unit and by month.",
   "sample": "budget.csv",
+  "sample_id": { "file": "anggaran.csv", "header": "bulan,bagian,akun,anggaran,realisasi" },
   "roles": [
     { "name": "account", "label": "Account", "kind": "text", "required": true, "shape": "few",
       "description": "What the money is for: an account, a cost line or an activity.",

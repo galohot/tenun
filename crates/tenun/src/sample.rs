@@ -19,15 +19,14 @@ pub fn folder() -> PathBuf {
     base.join("Tenun Sample")
 }
 
-/// Writes the sample CSV of a starter dashboard to `Starters/` in the sample folder and returns its
-/// path. A file that is already there is kept, with the user's edits.
-pub fn starter_file(starter: &str) -> anyhow::Result<PathBuf> {
-    let s = tenun_core::starter::get(starter)
+/// Writes the sample CSV of a starter dashboard, in the app's language, to `Starters/` in the sample
+/// folder and returns its path. A file that is already there is kept, with the user's edits.
+pub fn starter_file(starter: &str, lang: &str) -> anyhow::Result<PathBuf> {
+    let (name, csv) = tenun_core::starter::sample_in(starter, lang)
         .ok_or_else(|| anyhow::anyhow!("unknown starter {starter}"))?;
-    let csv = tenun_core::starter::sample(starter).unwrap_or_default();
     let dir = folder().join("Starters");
     std::fs::create_dir_all(&dir)?;
-    let p = dir.join(&s.sample);
+    let p = dir.join(name);
     if !p.exists() {
         std::fs::write(&p, csv)?;
     }

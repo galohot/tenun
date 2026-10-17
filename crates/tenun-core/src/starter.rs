@@ -103,6 +103,9 @@ pub struct Starter {
     pub description: String,
     /// The file name of the sample.
     pub sample: String,
+    /// The sample in Indonesian: the same rows under its own file name and header.
+    #[serde(default, skip_serializing)]
+    pub sample_id: Option<LocalSample>,
     pub roles: Vec<Role>,
     /// The dashboard, with `@table` and `@<role>` in place of the table and the columns.
     #[serde(skip_serializing)]
@@ -129,6 +132,27 @@ pub fn sample(id: &str) -> Option<&'static str> {
         .iter()
         .find(|(i, _, _)| *i == id)
         .map(|(_, _, csv)| *csv)
+}
+
+/// A sample's file name and header line in another language. The rows are the same.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalSample {
+    pub file: String,
+    pub header: String,
+}
+
+/// The sample of a starter in the app's language (`en` or `id`): its file name and its CSV text. An
+/// Indonesian dashboard then reads "Nilai menurut bulan", not "Amount menurut bulan".
+pub fn sample_in(id: &str, lang: &str) -> Option<(String, String)> {
+    let s = get(id)?;
+    let csv = sample(id)?;
+    Some(match (&s.sample_id, lang) {
+        (Some(l), "id") => {
+            let rows = csv.split_once('\n').map_or("", |(_, r)| r);
+            (l.file.clone(), format!("{}\n{rows}", l.header))
+        }
+        _ => (s.sample.clone(), csv.to_string()),
+    })
 }
 
 /// The column the engine guessed for one role, and how sure it is (0..1). No column: nothing fits.
@@ -376,6 +400,9 @@ mod tests {
         );
         for s in &list {
             assert!(sample(&s.id).is_some_and(|c| c.lines().count() > 50));
+            let (_, id_csv) = sample_in(&s.id, "id").unwrap();
+            let width = |c: &str| c.lines().next().unwrap().split(',').count();
+            assert_eq!(width(&id_csv), width(sample(&s.id).unwrap()), "{}", s.id);
             let names: BTreeSet<&str> = s.roles.iter().map(|r| r.name.as_str()).collect();
             let mut used = BTreeSet::new();
             fn walk(v: &Value, out: &mut BTreeSet<String>) {

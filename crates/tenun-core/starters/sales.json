@@ -3,6 +3,7 @@
   "name": "Sales",
   "description": "What sold, where and when: totals, a trend by month, the best products.",
   "sample": "sales.csv",
+  "sample_id": { "file": "penjualan.csv", "header": "tanggal,produk,kota,kuantitas,nilai" },
   "roles": [
     { "name": "date", "label": "Date", "kind": "date", "required": true,
       "description": "The day of the sale.",

@@ -537,3 +537,32 @@ fn real_files_are_guessed() {
     let res = run_all(&e, &e.dashboard(&id).unwrap());
     assert!(!res.is_empty());
 }
+
+#[test]
+fn each_indonesian_sample_is_guessed_like_the_english_one() {
+    for s in starter::all() {
+        let place = |lang: &str| {
+            let (name, csv) = starter::sample_in(&s.id, lang).unwrap();
+            let d = dir(&format!("{}-{lang}", s.id));
+            let p = d.join(name);
+            std::fs::write(&p, &csv).unwrap();
+            let (e, t) = load(&d, &p);
+            let head: Vec<String> = csv
+                .lines()
+                .next()
+                .unwrap()
+                .split(',')
+                .map(str::to_string)
+                .collect();
+            // Each role's column, as its place in the header.
+            let at: Vec<Option<usize>> = e
+                .starter_guess(&s.id, &t)
+                .unwrap()
+                .into_iter()
+                .map(|g| g.column.map(|c| head.iter().position(|h| *h == c).unwrap()))
+                .collect();
+            at
+        };
+        assert_eq!(place("id"), place("en"), "{}", s.id);
+    }
+}

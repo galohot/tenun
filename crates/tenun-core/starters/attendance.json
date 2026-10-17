@@ -3,6 +3,7 @@
   "name": "Attendance",
   "description": "Who came, who did not, and why: by day, by person and by unit.",
   "sample": "attendance.csv",
+  "sample_id": { "file": "kehadiran.csv", "header": "tanggal,nama,bagian,kehadiran" },
   "roles": [
     { "name": "date", "label": "Date", "kind": "date", "required": true,
       "description": "The day.",

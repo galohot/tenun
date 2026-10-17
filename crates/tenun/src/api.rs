@@ -361,6 +361,9 @@ async fn starters() -> Json<Value> {
 #[derive(Deserialize)]
 struct StarterBody {
     starter: String,
+    /// The app's language: the sample's file name and column names follow it.
+    #[serde(default)]
+    lang: String,
 }
 
 /// Adds the sample of a starter as a source: a CSV file in the sample folder, never in a folder
@@ -368,7 +371,7 @@ struct StarterBody {
 async fn starter_sample(State(s): S, Json(b): Json<StarterBody>) -> R<Json<Value>> {
     Ok(Json(
         blocking(&s, move |st| {
-            let path = sample::starter_file(&b.starter)?;
+            let path = sample::starter_file(&b.starter, &b.lang)?;
             let id = st.engine.add_source(AddSource::File {
                 path: path.to_string_lossy().into_owned(),
             })?;

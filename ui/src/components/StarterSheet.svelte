@@ -26,7 +26,7 @@
     let added = '';
     let first: string | null = null;
     const ok = await app.run(t('Adding the sample…'), async () => {
-      const r = await api.starterSample(starter.id);
+      const r = await api.starterSample(starter.id, getLang());
       added = r.added;
       first = r.table;
       return r;
