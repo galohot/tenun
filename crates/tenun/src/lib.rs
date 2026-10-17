@@ -10,6 +10,7 @@ mod guard;
 pub mod mcp;
 pub mod sample;
 pub mod settings;
+pub mod update;
 pub mod xlsx;
 
 use axum::Router;
@@ -98,6 +99,10 @@ pub struct AppState {
     pub alerts_lock: Mutex<()>,
     /// What AI apps changed through `tenun mcp` (v5 build 14), so Undo can take it back.
     pub ai_journal: mcp::Journal,
+    /// The desktop shell's updater (0.7 build 01); none in `tenun serve`.
+    pub updater: Mutex<Option<Arc<dyn update::Updater>>>,
+    pub update: Mutex<update::UpdateStatus>,
+    pub update_busy: std::sync::atomic::AtomicBool,
 }
 
 pub struct Running {
@@ -140,6 +145,12 @@ impl AppState {
         }
     }
 
+    /// The desktop shell's updater: the first look runs at once if one is due.
+    pub fn set_updater(self: &Arc<Self>, updater: Arc<dyn update::Updater>) {
+        *self.updater.lock().unwrap() = Some(updater);
+        update::tick(self);
+    }
+
     pub fn emit(&self, value: serde_json::Value) {
         let _ = self.events.send(value.to_string());
     }
@@ -178,6 +189,9 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
         schedule: Mutex::new(cloud::Schedule::default()),
         alerts_lock: Mutex::new(()),
         ai_journal: mcp::Journal::default(),
+        updater: Mutex::new(None),
+        update: Mutex::new(update::UpdateStatus::default()),
+        update_busy: std::sync::atomic::AtomicBool::new(false),
     });
 
     // A check of live database links finishes after the load that began it: tell the windows.
@@ -245,6 +259,8 @@ pub async fn start(opts: Options) -> anyhow::Result<Running> {
                 }
                 // Alerts read the data as it is now (v5 build 12).
                 st.run_alerts();
+                // A new version of the desktop app, once a day (0.7 build 01).
+                update::tick(&st);
                 let mut schedule = st.schedule.lock().unwrap();
                 let (ok, failed) =
                     cloud::run_due(&st.engine, &st.secrets, &st.cloud_base, &mut schedule);

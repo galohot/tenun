@@ -3,8 +3,9 @@
   // Settings of this computer. They are not saved in the workspace file (V3-D1).
   import { api, type AlertRule, type AlertState } from '../lib/api';
   import { channelOf, conditionText, stateText } from '../lib/alerts';
-  import { compact, timeShort, tileTitle } from '../lib/format';
+  import { compact, dateTimeMedium, timeShort, tileTitle } from '../lib/format';
   import { formatOf } from '../lib/measures';
+  import { t } from '../lib/i18n';
   import { app } from '../lib/state.svelte';
   import { MORE_CHARTS, SHOW_ADVANCED_SWITCH } from '../lib/tiers';
   import Modal from './Modal.svelte';
@@ -45,6 +46,20 @@
     { id: 'light', label: 'Light' },
     { id: 'dark', label: 'Dark' },
   ];
+  /** "Check now" (0.7 build 01): the answer comes back on the bar. */
+  let checking = $state(false);
+  async function checkNow() {
+    checking = true;
+    try {
+      app.update = await api.checkUpdate();
+      if (!app.update.available && !app.update.error) app.toast(t('Tenun is up to date.'));
+      else if (app.update.error) app.toast(t('Tenun could not check for updates: {why}', { why: app.update.error }), 'error');
+    } catch (e) {
+      app.error(e);
+    } finally {
+      checking = false;
+    }
+  }
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 </script>
 
@@ -134,6 +149,16 @@
         </ul>
       </div>
     {/if}
+    {#if app.update?.supported}
+      <label class="row">
+        <span class="text">
+          <span class="name">{t('Check for updates')}</span>
+          <span class="muted hint">{t('Looks for a new version once a day. Tenun installs one only when you say so.')}{#if app.update.checked} {t('Last checked {when}.', { when: dateTimeMedium(app.update.checked) })}{/if}</span>
+          <span><button type="button" class="btn" disabled={checking} onclick={checkNow}>{checking ? t('Checking…') : t('Check now')}</button></span>
+        </span>
+        <input type="checkbox" role="switch" class="switch" checked={app.settings?.updates !== false} onchange={(e) => app.saveSettings({ updates: e.currentTarget.checked ? undefined : false })} />
+      </label>
+    {/if}
     <div class="row center">
       <span class="text">
         <span class="name">Appearance</span>
@@ -151,6 +176,13 @@
         <span class="muted hint">The standard names and codes of countries, provinces and kabupaten/kota that a map reads, with a CSV to start from.</span>
       </span>
       <button type="button" class="btn" onclick={() => (places = true)}>Show</button>
+    </div>
+    <div class="row center">
+      <span class="text">
+        <span class="name">{t('Report a problem')}</span>
+        <span class="muted hint">{t('Opens a new issue on GitHub. You see everything before it is sent, and your data never is.')}</span>
+      </span>
+      <button type="button" class="btn" onclick={() => { onclose(); app.reportOpen = true; }}>{t('Report…')}</button>
     </div>
   </div>
   <p class="muted note">The number and date format, the year and week, and the alerts are saved in your workspace file; an alert's address is not. The other settings belong to this computer.</p>

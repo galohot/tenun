@@ -1,13 +1,13 @@
 // App-wide state: the workspace snapshot, the route, the theme, live events.
 
 import { guessLocale } from './locale';
-import { setLang, type Lang } from './i18n';
+import { setLang, t, type Lang } from './i18n';
 import { PHONE_MAX } from './layout';
 import { linkTablesOf, setLinkLabels } from './links';
 import { columnFormatsOf, setColumnFormats, setKnownMeasures } from './measures';
 import type { Digits } from './numfmt';
 import type { Drill } from './site';
-import { api, type Calendar, type CardStyle, type Cell, type CloudStatus, type SiteSettings, type Dashboard, type Health, type Settings, type Snapshot, type Table } from './api';
+import { api, type Calendar, type CardStyle, type Cell, type CloudStatus, type SiteSettings, type Dashboard, type Health, type Settings, type Snapshot, type Table, type UpdateStatus } from './api';
 
 export type Route =
   | { view: 'home' }
@@ -61,6 +61,11 @@ class App {
   /** Set while waiting for the browser approval of a tenun.cloud connection. */
   connecting = $state<{ code: string; url: string } | null>(null);
   busy = $state<string | null>(null);
+  /** The words of the last error shown, for "Report a problem" (0.7 build 05). Kept in memory only. */
+  lastError = $state('');
+  reportOpen = $state(false);
+  /** A new version of the desktop app (0.7 build 01); null in `tenun serve` until it answers. */
+  update = $state<UpdateStatus | null>(null);
   /** This computer's settings; null until they load. */
   settings = $state<Settings | null>(null);
   settingsOpen = $state(false);
@@ -148,6 +153,7 @@ class App {
         api.settings().catch(() => ({ advanced: false })),
       ]);
       await this.matchBrowserLanguage();
+      api.update().then((u) => (this.update = u), () => {});
     } catch (e) {
       this.error(e);
     }
@@ -196,10 +202,15 @@ class App {
   }
 
   toast(text: string, kind: 'info' | 'error' = 'info', action?: Toast['action']) {
+    if (kind === 'error') {
+      this.lastError = text;
+      // Every error can be reported from where it shows (0.7 build 05).
+      action ??= { label: t('Report…'), run: () => (this.reportOpen = true) };
+    }
     const id = ++this.#toastId;
     this.toasts.push({ id, kind, text, action });
     // A notice with a button stays long enough to reach it.
-    setTimeout(() => (this.toasts = this.toasts.filter((t) => t.id !== id)), action ? 12000 : kind === 'error' ? 7000 : 3500);
+    setTimeout(() => (this.toasts = this.toasts.filter((t) => t.id !== id)), kind === 'error' ? 9000 : action ? 12000 : 3500);
   }
 
   /** Takes back the last change an AI app made through `tenun mcp` (v5 build 14). */
@@ -339,6 +350,8 @@ class App {
         // An alert went, or could not (v5 build 12): the list in Settings says why.
         if (ev.failed) this.toast('An alert could not be sent. Settings › Alerts says why.', 'error');
         else if (ev.sent) this.toast(ev.sent === 1 ? 'An alert was sent' : `${ev.sent} alerts were sent`);
+      } else if (ev.type === 'update') {
+        this.update = (ev as unknown as { status: UpdateStatus }).status;
       } else if (ev.type === 'error' && ev.message) {
         this.toast(ev.message, 'error');
       }

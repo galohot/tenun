@@ -17,3 +17,4 @@ anyhow.workspace = true
 webbrowser = "1"
 serde_json.workspace = true
 tenun-core = { path = "../../crates/tenun-core" }
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls"] }

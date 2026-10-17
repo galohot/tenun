@@ -326,13 +326,17 @@ workspace a site**. It is off by default, and with it off nothing about export o
 - Database passwords are kept in a private file in your user folder (like `~/.pgpass`), never in
   the `.tenun` file.
 - Databases are opened read-only. Tenun never writes to your data.
-- No telemetry. The only network use: connecting to PostgreSQL or MySQL the first time downloads
+- No telemetry. The only network use, besides the update check below: connecting to PostgreSQL or MySQL the first time downloads
   the DuckDB connector for it, and a map of the provinces or second level of a country other than
   Indonesia downloads that country's boundaries from geoBoundaries once (the tile says so first).
   Countries, and Indonesia's provinces and kabupaten/kota, ship with Tenun. What you set up yourself
   uses the network too, and only that: a web link you add as a source, publishing to tenun.cloud, and
   an alert (one message to the Slack, Teams, Discord, Telegram or web address you give it, holding the
   value and the tile's name). `tenun mcp` talks only to the Tenun app on this computer.
+- The desktop app looks for a new version once a day: one request for `latest.json` on this
+  repository's latest GitHub release, which carries nothing but what any download carries. It installs
+  a new version only when you press Install, and only after its signature checks out. Settings ›
+  Check for updates turns the look off. `tenun serve` never looks.
 
 ## Code signing policy
 

@@ -1,7 +1,7 @@
 //! JSON routes under `/api`, the event socket, and the embedded UI files.
 
 use crate::settings::Settings;
-use crate::{AppState, VERSION, alerts, cloud, export, fsbrowse, mcp, sample, xlsx};
+use crate::{AppState, VERSION, alerts, cloud, export, fsbrowse, mcp, sample, update, xlsx};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, Uri, header};
@@ -103,6 +103,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/formula/check", post(formula_check))
         .route("/fs", get(fs))
         .route("/settings", get(get_settings).put(put_settings))
+        .route("/report", post(open_report))
+        .route("/update", get(get_update))
+        .route("/update/check", post(check_update))
+        .route("/update/install", post(install_update))
         .route("/viewer", get(viewer))
         .route("/tile", post(tile))
         .route("/rows", post(rows))
@@ -172,6 +176,44 @@ async fn get_settings(State(s): S) -> Json<Settings> {
 async fn put_settings(State(s): S, Json(b): Json<Settings>) -> R<Json<Settings>> {
     b.save(&s.settings_path)?;
     Ok(Json(b))
+}
+
+#[derive(Deserialize)]
+struct ReportUrl {
+    url: String,
+}
+
+/// Opens a new issue on Tenun's GitHub in the system browser ("Report a problem", 0.7 build 05). Only that
+/// address: a page cannot use this to open anything else.
+async fn open_report(Json(b): Json<ReportUrl>) -> R<Json<Value>> {
+    if !b
+        .url
+        .starts_with("https://github.com/galohot/tenun/issues/new?")
+        || b.url.contains(['\n', '\r', ' '])
+    {
+        return Err(anyhow::anyhow!("Only a new Tenun issue can be opened this way.").into());
+    }
+    webbrowser::open(&b.url)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// What the last look for a new version found (0.7 build 01).
+async fn get_update(State(s): S) -> Json<update::UpdateStatus> {
+    Json(update::status(&s))
+}
+
+/// "Check now": looks at once, whatever the time of the last look.
+async fn check_update(State(s): S) -> R<Json<update::UpdateStatus>> {
+    let st = s.clone();
+    tokio::task::spawn_blocking(move || update::check_now(&st)).await?;
+    Ok(Json(update::status(&s)))
+}
+
+/// Installs the version found; the app restarts when it is in.
+async fn install_update(State(s): S) -> R<Json<Value>> {
+    let st = s.clone();
+    tokio::task::spawn_blocking(move || update::install(&st)).await??;
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn workspace(State(s): S) -> R<Json<Value>> {

@@ -16,6 +16,8 @@
   import Icon from './components/Icon.svelte';
   import Palette from './components/Palette.svelte';
   import StatusBar from './components/StatusBar.svelte';
+  import UpdateBar from './components/UpdateBar.svelte';
+  import ReportSheet from './components/ReportSheet.svelte';
 
   onMount(() => {
     app.init();
@@ -58,6 +60,7 @@
       <Sidebar />
     {/if}
     <main>
+      <UpdateBar />
       <div class="view">
       {#if app.route.view === 'data'}
         <DataView tableId={app.route.table} />
@@ -81,6 +84,9 @@
   {/if}
   {#if app.settingsOpen}
     <SettingsSheet onclose={() => (app.settingsOpen = false)} />
+  {/if}
+  {#if app.reportOpen}
+    <ReportSheet onclose={() => (app.reportOpen = false)} />
   {/if}
   {#if app.siteOpen}
     <SiteSheet onclose={() => (app.siteOpen = false)} />

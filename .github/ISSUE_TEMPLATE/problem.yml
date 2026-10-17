@@ -1,0 +1,31 @@
+name: Report a problem
+description: Something in Tenun did not work. The app's "Report a problem" fills this in.
+labels: [problem]
+body:
+  - type: markdown
+    attributes:
+      value: Please leave out your data, file names and passwords. A small made-up example is the best help.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what Tenun did instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Tenun version
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Windows, macOS or Linux, and the desktop app or a browser.
+  - type: textarea
+    id: error
+    attributes:
+      label: Last error
+      description: The words of the last error Tenun showed, without paths or values.
+      render: text

@@ -9,6 +9,7 @@
 </script>
 
 <script lang="ts">
+  import { t } from '../lib/i18n';
   import { tick } from 'svelte';
   import { app, go, type ThemePref } from '../lib/state.svelte';
   import { api } from '../lib/api';
@@ -63,6 +64,7 @@
       { id: 'a:story', group: 'Actions', label: 'New story', icon: 'text', keys: 'create page document', run: () => addDashboard('story') },
       { id: 'a:site', group: 'Actions', label: 'Site…', icon: 'globe', keys: 'publish web', hint: app.snap.workspace.site?.on ? 'On' : undefined, run: () => (app.siteOpen = true) },
       { id: 'a:settings', group: 'Actions', label: 'Settings', icon: 'settings', keys: 'preferences options', run: () => (app.settingsOpen = true) },
+      { id: 'a:report', group: 'Actions', label: t('Report a problem…'), icon: 'warning', keys: 'bug issue help feedback', run: () => (app.reportOpen = true) },
     );
     if (app.health?.native) out.push({ id: 'a:browser', group: 'Actions', label: 'Open in browser', icon: 'globe', run: () => api.openBrowser() });
     for (const [p, icon] of [['light', 'sun'], ['dark', 'moon'], ['system', 'auto']] as const) {

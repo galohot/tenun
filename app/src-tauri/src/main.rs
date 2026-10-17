@@ -4,10 +4,12 @@
 
 use std::net::IpAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::{DragDropEvent, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_updater::UpdaterExt;
 use tenun::PickRequest;
+use tenun::update::{UpdateInfo, Updater};
 use tenun_core::engine::AddSource;
 
 fn main() {
@@ -18,6 +20,7 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             let handle = app.handle().clone();
             let picker: tenun::Picker = Arc::new(move |req: PickRequest| pick(&handle, req));
@@ -29,6 +32,10 @@ fn main() {
             }))?;
             let url = running.url.parse()?;
             app.manage(running.state.clone());
+            running.state.set_updater(Arc::new(AppUpdater {
+                app: app.handle().clone(),
+                found: Mutex::new(None),
+            }));
             // Keep this server in the list `tenun mcp` reads for as long as the app runs (v5 build 14).
             if let Some(r) = running.registration {
                 app.manage(r);
@@ -77,6 +84,34 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("Tenun failed to start");
+}
+
+/// New versions from the GitHub release's `latest.json` (0.7 build 01). The signature of what it
+/// downloads is checked against the public key in `tauri.conf.json` before anything is installed.
+struct AppUpdater {
+    app: tauri::AppHandle,
+    found: Mutex<Option<tauri_plugin_updater::Update>>,
+}
+
+impl Updater for AppUpdater {
+    fn check(&self) -> anyhow::Result<Option<UpdateInfo>> {
+        let found = tauri::async_runtime::block_on(self.app.updater()?.check())?;
+        let info = found.as_ref().map(|u| UpdateInfo {
+            version: u.version.clone(),
+            notes: u.body.clone().unwrap_or_default(),
+        });
+        *self.found.lock().unwrap() = found;
+        Ok(info)
+    }
+
+    fn install(&self) -> anyhow::Result<()> {
+        let update =
+            self.found.lock().unwrap().take().ok_or_else(|| {
+                anyhow::anyhow!("There is no new version to install. Check again.")
+            })?;
+        tauri::async_runtime::block_on(update.download_and_install(|_, _| {}, || {}))?;
+        self.app.restart();
+    }
 }
 
 fn pick(app: &tauri::AppHandle, req: PickRequest) -> Vec<PathBuf> {

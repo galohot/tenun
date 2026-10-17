@@ -49,16 +49,33 @@ jobs:
           key: ${{ matrix.args }}
       - run: pnpm install --frozen-lockfile
         working-directory: app
+      # The version's part of the CHANGELOG: the release notes, and what the app's update bar shows.
+      - name: Release notes
+        id: notes
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          {
+            echo 'body<<NOTES_END'
+            awk -v h="## $v " 'index($0, h) == 1 { on = 1; next } on && /^## / { exit } on' CHANGELOG.md
+            echo
+            echo 'Install notes are in the README. Code signing policy: https://github.com/galohot/tenun#code-signing-policy'
+            echo 'NOTES_END'
+          } >> "$GITHUB_OUTPUT"
+      # The update key signs what the app's updater downloads (0.7 build 01); latest.json lists it.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
           tagName: ${{ github.ref_name }}
           releaseName: Tenun ${{ github.ref_name }}
-          releaseBody: See the README for install notes. Code signing policy - https://github.com/galohot/tenun#code-signing-policy
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
+          includeUpdaterJson: true
           args: ${{ matrix.args }}
       # The Windows installers go to the signing job when SignPath is set up (code signing policy in the README).
       - name: Windows installers to sign
@@ -158,11 +175,37 @@ jobs:
             version: "${{ steps.version.outputs.v }}"
           wait-for-completion-timeout-in-seconds: 18000
           output-artifact-directory: signed
+      # SignPath changed the bytes, so the update signatures of the unsigned files no longer match (AD-D5): sign the
+      # signed files again with the update key and put the new signatures in latest.json.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Update signatures of the signed installers
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          for f in signed/msi/*.msi signed/nsis/*-setup.exe; do
+            npx --yes @tauri-apps/cli@2 signer sign "$f"
+          done
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern latest.json
+          python3 - <<'PY'
+          import glob, json, os
+          m = json.load(open('latest.json'))
+          sigs = {os.path.basename(f[:-4]): open(f).read().strip() for f in glob.glob('signed/*/*.sig')}
+          for p in m['platforms'].values():
+              name = p['url'].rsplit('/', 1)[-1]
+              if name in sigs:
+                  p['signature'] = sigs[name]
+          json.dump(m, open('latest.json', 'w'), indent=2)
+          PY
       - name: Signed installers on the release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" signed/msi/*.msi signed/nsis/*-setup.exe --clobber --repo "${{ github.repository }}"
+        run: gh release upload "${{ github.ref_name }}" signed/msi/*.msi signed/msi/*.msi.sig signed/nsis/*-setup.exe signed/nsis/*-setup.exe.sig latest.json --clobber --repo "${{ github.repository }}"
 
   checksums:
     needs: [app, cli, sign]

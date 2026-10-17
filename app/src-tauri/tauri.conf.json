@@ -30,6 +30,18 @@
       "deb": {
         "section": "utils"
       }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI2NjRCQjE3RTcwNTlGOUYKUldTZm53WG5GN3RrdG8xQnhJN3JORlcxU2puL05ka0U4MFJOUm9icHRGMUJmSVM1ZFlWTG1kdUoK",
+      "endpoints": [
+        "https://github.com/galohot/tenun/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

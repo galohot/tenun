@@ -772,6 +772,15 @@ export interface Settings {
   updates?: boolean;
 }
 
+/** What the last look for a new version of the desktop app found (0.7 build 01). */
+export interface UpdateStatus {
+  /** The desktop app: it can update itself. `tenun serve` cannot. */
+  supported: boolean;
+  available: { version: string; notes: string } | null;
+  checked: string | null;
+  error: string | null;
+}
+
 export interface PublishSettings {
   /** Set by the publisher: the cloud dashboard (or site), its link, the last success and the last error. */
   id?: string;
@@ -1077,6 +1086,11 @@ export const api = {
   health: () => call<Health>('GET', '/health'),
   settings: () => call<Settings>('GET', '/settings'),
   saveSettings: (s: Settings) => call<Settings>('PUT', '/settings', s),
+  /** Opens a new Tenun issue in the system browser (desktop app; 0.7 build 05). */
+  openReport: (url: string) => call<{ ok: boolean }>('POST', '/report', { url }),
+  update: () => call<UpdateStatus>('GET', '/update'),
+  checkUpdate: () => call<UpdateStatus>('POST', '/update/check', {}),
+  installUpdate: () => call<{ ok: boolean }>('POST', '/update/install', {}),
   workspace: () => call<Snapshot>('GET', '/workspace'),
   newWorkspace: () => call<Snapshot>('POST', '/workspace/new', { lang: navigator.language }),
   setLocale: (locale: 'id' | 'en') => call<Snapshot>('PUT', '/workspace/locale', { locale }),
