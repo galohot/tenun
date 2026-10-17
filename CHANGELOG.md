@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.7.0 (2026-10-17)
+
+This release is about getting started: Tenun in Bahasa Indonesia, five starter dashboards, updates that install
+themselves, and a way to report a problem. **If you use 0.6.0, download this one by hand; after it, Tenun
+updates itself.**
+
+### Bahasa Indonesia
+
+- Every menu, message and chart label reads in Bahasa Indonesia. Pick the language in **Settings › Language**;
+  it belongs to this computer, so a shared `.tenun` file never changes a colleague's menus. With no choice, the
+  app follows the system's language.
+- Exported and published dashboards read in the language of the workspace's number and date format.
+- One Indonesian word for each product term, used the same way on every screen (dasbor, petak, ukuran, relasi…).
+
+### Starter dashboards
+
+- **Start from a starter** on the home screen: sales, budget against actual, stock, attendance and survey.
+- Use the sample, or your own file. Tenun guesses which column is which (from the names, in English or
+  Indonesian, and from the data) and shows each guess with three of its values. Change any guess before the
+  dashboard is made; a role it needs and does not have stops the button, with the reason.
+
+### Updates
+
+- The desktop app (Windows, macOS, Linux AppImage) looks for a new version once a day and shows a bar with what
+  changed. It installs only when you press **Install and restart**, and only after the signature checks out.
+- **Settings › Check for updates** turns the look off; **Check now** looks at once. `tenun serve`, the `.deb`
+  and the `.rpm` never look: update those by hand.
+
+### Report a problem
+
+- In Settings, in the command palette, and on every error message. It opens a new issue on GitHub with the
+  version, the system and the last error filled in. You see all of it before you send it. Paths, links and
+  values are taken out of the error first; your data never goes.
+
 ## 0.6.0 (2026-10-15)
 
 ### Number and date formats

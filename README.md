@@ -31,6 +31,10 @@ every other chart filters. Save the Excel file and the dashboard updates.
 
 ## What it does
 
+- **English or Bahasa Indonesia:** every menu and message, in **Settings › Language**. The language
+  belongs to this computer; a shared `.tenun` file never changes a colleague's menus.
+- **Starter dashboards:** sales, budget against actual, stock, attendance and survey, from your own
+  file in about two minutes (see [Start from a starter](#start-from-a-starter)).
 - **Sources:** Excel (`.xlsx`, `.xlsm`, `.xls`, `.ods`), CSV and TSV, Parquet, SQLite, DuckDB,
   PostgreSQL and MySQL. Also a folder of CSV and Excel files (they stack into one table with a
   `file` column), a table pasted from the clipboard, and a web link to CSV or JSON data, such as a
@@ -360,6 +364,13 @@ workspace a site**. It is off by default, and with it off nothing about export o
   repository's latest GitHub release, which carries nothing but what any download carries. It installs
   a new version only when you press Install, and only after its signature checks out. Settings ›
   Check for updates turns the look off. `tenun serve` never looks.
+
+### Report a problem
+
+**Settings › Report a problem**, the command palette, or the **Report…** button on an error opens a
+new issue on GitHub with the version, the system and the last error filled in. You see all of it
+before you send it. Paths, links and values are taken out of the error first, and your data is
+never part of it. **Copy instead** copies the same text, for someone who has no GitHub account.
 
 ## Code signing policy
 
