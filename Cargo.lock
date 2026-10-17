@@ -4890,7 +4890,7 @@ dependencies = [
 
 [[package]]
 name = "tenun"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -4919,7 +4919,7 @@ dependencies = [
 
 [[package]]
 name = "tenun-app"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -4935,7 +4935,7 @@ dependencies = [
 
 [[package]]
 name = "tenun-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "calamine",
