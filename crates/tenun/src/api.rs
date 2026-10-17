@@ -75,6 +75,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/alerts/check", post(alert_check))
         .route("/workspace/site", put(put_site))
         .route("/sample", post(open_sample))
+        .route("/starters", get(starters))
+        .route("/starters/sample", post(starter_sample))
+        .route("/starters/guess", post(starter_guess))
+        .route("/starters/apply", post(starter_apply))
         .route("/sources", post(add_source))
         .route("/sources/{id}", delete(remove_source))
         .route("/sources/{id}/reload", post(reload_source))
@@ -344,6 +348,87 @@ async fn open_sample(State(s): S) -> R<Json<Value>> {
         blocking(&s, |st| {
             sample::open(&st.engine)?;
             changed(st)
+        })
+        .await?,
+    ))
+}
+
+/// The starter dashboards (0.7 build 04): each with its roles.
+async fn starters() -> Json<Value> {
+    Json(json!(tenun_core::starter::all()))
+}
+
+#[derive(Deserialize)]
+struct StarterBody {
+    starter: String,
+}
+
+/// Adds the sample of a starter as a source: a CSV file in the sample folder, never in a folder
+/// the user chose. Answers the new snapshot, the source (`added`) and its table (`table`).
+async fn starter_sample(State(s): S, Json(b): Json<StarterBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let path = sample::starter_file(&b.starter)?;
+            let id = st.engine.add_source(AddSource::File {
+                path: path.to_string_lossy().into_owned(),
+            })?;
+            let table = st
+                .engine
+                .catalog()
+                .tables
+                .iter()
+                .find(|t| t.source_id == id)
+                .map(|t| t.id.clone());
+            let mut v = changed(st)?;
+            v["added"] = json!(id);
+            v["table"] = json!(table);
+            Ok(v)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct GuessBody {
+    starter: String,
+    table: String,
+}
+
+/// The column the engine guesses for each role of a starter, with a score from 0 to 1.
+async fn starter_guess(State(s): S, Json(b): Json<GuessBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            Ok(serde_json::to_value(
+                st.engine.starter_guess(&b.starter, &b.table)?,
+            )?)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct ApplyBody {
+    starter: String,
+    table: String,
+    /// Role → column. A role left out has no column.
+    #[serde(default)]
+    mapping: std::collections::BTreeMap<String, String>,
+    /// The dashboard's title, in the app's language. Not set: the starter's English name.
+    #[serde(default)]
+    title: Option<String>,
+}
+
+/// Adds the dashboard of a starter with the columns the person confirmed. Answers the new snapshot
+/// and the dashboard's id (`dashboard`). A required role without a column is an error in words.
+async fn starter_apply(State(s): S, Json(b): Json<ApplyBody>) -> R<Json<Value>> {
+    Ok(Json(
+        blocking(&s, move |st| {
+            let id =
+                st.engine
+                    .apply_starter(&b.starter, &b.table, &b.mapping, b.title.as_deref())?;
+            let mut v = changed(st)?;
+            v["dashboard"] = json!(id);
+            Ok(v)
         })
         .await?,
     ))

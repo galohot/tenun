@@ -1,0 +1,361 @@
+respondent,date,outlet,question,score
+R001,2026-07-15,Jakarta,Keramahan staf,5
+R001,2026-07-15,Jakarta,Kecepatan layanan,4
+R001,2026-07-15,Jakarta,Kebersihan tempat,4
+R001,2026-07-15,Jakarta,Harga sesuai kualitas,3
+R001,2026-07-15,Jakarta,Kualitas produk,4
+R001,2026-07-15,Jakarta,Akan merekomendasikan,4
+R002,2026-08-29,Jakarta,Keramahan staf,5
+R002,2026-08-29,Jakarta,Kecepatan layanan,4
+R002,2026-08-29,Jakarta,Kebersihan tempat,5
+R002,2026-08-29,Jakarta,Harga sesuai kualitas,4
+R002,2026-08-29,Jakarta,Kualitas produk,5
+R002,2026-08-29,Jakarta,Akan merekomendasikan,4
+R003,2026-07-14,Jakarta,Keramahan staf,3
+R003,2026-07-14,Jakarta,Kecepatan layanan,2
+R003,2026-07-14,Jakarta,Kebersihan tempat,3
+R003,2026-07-14,Jakarta,Harga sesuai kualitas,4
+R003,2026-07-14,Jakarta,Kualitas produk,4
+R003,2026-07-14,Jakarta,Akan merekomendasikan,5
+R004,2026-07-12,Jakarta,Keramahan staf,4
+R004,2026-07-12,Jakarta,Kecepatan layanan,3
+R004,2026-07-12,Jakarta,Kebersihan tempat,5
+R004,2026-07-12,Jakarta,Harga sesuai kualitas,3
+R004,2026-07-12,Jakarta,Kualitas produk,4
+R004,2026-07-12,Jakarta,Akan merekomendasikan,5
+R005,2026-07-18,Jakarta,Keramahan staf,4
+R005,2026-07-18,Jakarta,Kecepatan layanan,4
+R005,2026-07-18,Jakarta,Kebersihan tempat,4
+R005,2026-07-18,Jakarta,Harga sesuai kualitas,4
+R005,2026-07-18,Jakarta,Kualitas produk,3
+R005,2026-07-18,Jakarta,Akan merekomendasikan,5
+R006,2026-09-06,Jakarta,Keramahan staf,5
+R006,2026-09-06,Jakarta,Kecepatan layanan,2
+R006,2026-09-06,Jakarta,Kebersihan tempat,5
+R006,2026-09-06,Jakarta,Harga sesuai kualitas,5
+R006,2026-09-06,Jakarta,Kualitas produk,5
+R006,2026-09-06,Jakarta,Akan merekomendasikan,3
+R007,2026-08-11,Jakarta,Keramahan staf,4
+R007,2026-08-11,Jakarta,Kecepatan layanan,4
+R007,2026-08-11,Jakarta,Kebersihan tempat,4
+R007,2026-08-11,Jakarta,Harga sesuai kualitas,4
+R007,2026-08-11,Jakarta,Kualitas produk,5
+R007,2026-08-11,Jakarta,Akan merekomendasikan,5
+R008,2026-08-02,Jakarta,Keramahan staf,4
+R008,2026-08-02,Jakarta,Kecepatan layanan,4
+R008,2026-08-02,Jakarta,Kebersihan tempat,3
+R008,2026-08-02,Jakarta,Harga sesuai kualitas,3
+R008,2026-08-02,Jakarta,Kualitas produk,5
+R008,2026-08-02,Jakarta,Akan merekomendasikan,3
+R009,2026-07-07,Jakarta,Keramahan staf,5
+R009,2026-07-07,Jakarta,Kecepatan layanan,3
+R009,2026-07-07,Jakarta,Kebersihan tempat,4
+R009,2026-07-07,Jakarta,Harga sesuai kualitas,4
+R009,2026-07-07,Jakarta,Kualitas produk,4
+R009,2026-07-07,Jakarta,Akan merekomendasikan,5
+R010,2026-07-11,Jakarta,Keramahan staf,5
+R010,2026-07-11,Jakarta,Kecepatan layanan,4
+R010,2026-07-11,Jakarta,Kebersihan tempat,5
+R010,2026-07-11,Jakarta,Harga sesuai kualitas,4
+R010,2026-07-11,Jakarta,Kualitas produk,2
+R010,2026-07-11,Jakarta,Akan merekomendasikan,5
+R011,2026-08-26,Jakarta,Keramahan staf,4
+R011,2026-08-26,Jakarta,Kecepatan layanan,4
+R011,2026-08-26,Jakarta,Kebersihan tempat,4
+R011,2026-08-26,Jakarta,Harga sesuai kualitas,4
+R011,2026-08-26,Jakarta,Kualitas produk,3
+R011,2026-08-26,Jakarta,Akan merekomendasikan,3
+R012,2026-09-04,Jakarta,Keramahan staf,4
+R012,2026-09-04,Jakarta,Kecepatan layanan,4
+R012,2026-09-04,Jakarta,Kebersihan tempat,4
+R012,2026-09-04,Jakarta,Harga sesuai kualitas,3
+R012,2026-09-04,Jakarta,Kualitas produk,4
+R012,2026-09-04,Jakarta,Akan merekomendasikan,4
+R013,2026-08-26,Bandung,Keramahan staf,5
+R013,2026-08-26,Bandung,Kecepatan layanan,4
+R013,2026-08-26,Bandung,Kebersihan tempat,5
+R013,2026-08-26,Bandung,Harga sesuai kualitas,5
+R013,2026-08-26,Bandung,Kualitas produk,4
+R013,2026-08-26,Bandung,Akan merekomendasikan,4
+R014,2026-09-11,Bandung,Keramahan staf,4
+R014,2026-09-11,Bandung,Kecepatan layanan,3
+R014,2026-09-11,Bandung,Kebersihan tempat,3
+R014,2026-09-11,Bandung,Harga sesuai kualitas,4
+R014,2026-09-11,Bandung,Kualitas produk,3
+R014,2026-09-11,Bandung,Akan merekomendasikan,4
+R015,2026-09-07,Bandung,Keramahan staf,5
+R015,2026-09-07,Bandung,Kecepatan layanan,3
+R015,2026-09-07,Bandung,Kebersihan tempat,5
+R015,2026-09-07,Bandung,Harga sesuai kualitas,3
+R015,2026-09-07,Bandung,Kualitas produk,3
+R015,2026-09-07,Bandung,Akan merekomendasikan,3
+R016,2026-07-08,Bandung,Keramahan staf,4
+R016,2026-07-08,Bandung,Kecepatan layanan,3
+R016,2026-07-08,Bandung,Kebersihan tempat,4
+R016,2026-07-08,Bandung,Harga sesuai kualitas,3
+R016,2026-07-08,Bandung,Kualitas produk,4
+R016,2026-07-08,Bandung,Akan merekomendasikan,4
+R017,2026-09-23,Bandung,Keramahan staf,4
+R017,2026-09-23,Bandung,Kecepatan layanan,3
+R017,2026-09-23,Bandung,Kebersihan tempat,3
+R017,2026-09-23,Bandung,Harga sesuai kualitas,5
+R017,2026-09-23,Bandung,Kualitas produk,5
+R017,2026-09-23,Bandung,Akan merekomendasikan,4
+R018,2026-09-25,Bandung,Keramahan staf,4
+R018,2026-09-25,Bandung,Kecepatan layanan,3
+R018,2026-09-25,Bandung,Kebersihan tempat,5
+R018,2026-09-25,Bandung,Harga sesuai kualitas,4
+R018,2026-09-25,Bandung,Kualitas produk,2
+R018,2026-09-25,Bandung,Akan merekomendasikan,3
+R019,2026-08-16,Bandung,Keramahan staf,3
+R019,2026-08-16,Bandung,Kecepatan layanan,4
+R019,2026-08-16,Bandung,Kebersihan tempat,4
+R019,2026-08-16,Bandung,Harga sesuai kualitas,4
+R019,2026-08-16,Bandung,Kualitas produk,5
+R019,2026-08-16,Bandung,Akan merekomendasikan,5
+R020,2026-09-09,Bandung,Keramahan staf,4
+R020,2026-09-09,Bandung,Kecepatan layanan,3
+R020,2026-09-09,Bandung,Kebersihan tempat,5
+R020,2026-09-09,Bandung,Harga sesuai kualitas,3
+R020,2026-09-09,Bandung,Kualitas produk,5
+R020,2026-09-09,Bandung,Akan merekomendasikan,5
+R021,2026-09-29,Bandung,Keramahan staf,3
+R021,2026-09-29,Bandung,Kecepatan layanan,4
+R021,2026-09-29,Bandung,Kebersihan tempat,4
+R021,2026-09-29,Bandung,Harga sesuai kualitas,5
+R021,2026-09-29,Bandung,Kualitas produk,5
+R021,2026-09-29,Bandung,Akan merekomendasikan,5
+R022,2026-09-14,Bandung,Keramahan staf,3
+R022,2026-09-14,Bandung,Kecepatan layanan,3
+R022,2026-09-14,Bandung,Kebersihan tempat,4
+R022,2026-09-14,Bandung,Harga sesuai kualitas,2
+R022,2026-09-14,Bandung,Kualitas produk,5
+R022,2026-09-14,Bandung,Akan merekomendasikan,5
+R023,2026-09-03,Bandung,Keramahan staf,4
+R023,2026-09-03,Bandung,Kecepatan layanan,2
+R023,2026-09-03,Bandung,Kebersihan tempat,5
+R023,2026-09-03,Bandung,Harga sesuai kualitas,5
+R023,2026-09-03,Bandung,Kualitas produk,4
+R023,2026-09-03,Bandung,Akan merekomendasikan,4
+R024,2026-09-26,Bandung,Keramahan staf,4
+R024,2026-09-26,Bandung,Kecepatan layanan,4
+R024,2026-09-26,Bandung,Kebersihan tempat,5
+R024,2026-09-26,Bandung,Harga sesuai kualitas,3
+R024,2026-09-26,Bandung,Kualitas produk,4
+R024,2026-09-26,Bandung,Akan merekomendasikan,4
+R025,2026-09-18,Surabaya,Keramahan staf,5
+R025,2026-09-18,Surabaya,Kecepatan layanan,4
+R025,2026-09-18,Surabaya,Kebersihan tempat,4
+R025,2026-09-18,Surabaya,Harga sesuai kualitas,3
+R025,2026-09-18,Surabaya,Kualitas produk,4
+R025,2026-09-18,Surabaya,Akan merekomendasikan,3
+R026,2026-08-08,Surabaya,Keramahan staf,5
+R026,2026-08-08,Surabaya,Kecepatan layanan,4
+R026,2026-08-08,Surabaya,Kebersihan tempat,4
+R026,2026-08-08,Surabaya,Harga sesuai kualitas,3
+R026,2026-08-08,Surabaya,Kualitas produk,5
+R026,2026-08-08,Surabaya,Akan merekomendasikan,4
+R027,2026-07-15,Surabaya,Keramahan staf,5
+R027,2026-07-15,Surabaya,Kecepatan layanan,3
+R027,2026-07-15,Surabaya,Kebersihan tempat,5
+R027,2026-07-15,Surabaya,Harga sesuai kualitas,4
+R027,2026-07-15,Surabaya,Kualitas produk,3
+R027,2026-07-15,Surabaya,Akan merekomendasikan,5
+R028,2026-09-26,Surabaya,Keramahan staf,5
+R028,2026-09-26,Surabaya,Kecepatan layanan,4
+R028,2026-09-26,Surabaya,Kebersihan tempat,4
+R028,2026-09-26,Surabaya,Harga sesuai kualitas,4
+R028,2026-09-26,Surabaya,Kualitas produk,3
+R028,2026-09-26,Surabaya,Akan merekomendasikan,4
+R029,2026-09-01,Surabaya,Keramahan staf,5
+R029,2026-09-01,Surabaya,Kecepatan layanan,4
+R029,2026-09-01,Surabaya,Kebersihan tempat,5
+R029,2026-09-01,Surabaya,Harga sesuai kualitas,4
+R029,2026-09-01,Surabaya,Kualitas produk,4
+R029,2026-09-01,Surabaya,Akan merekomendasikan,3
+R030,2026-09-25,Surabaya,Keramahan staf,4
+R030,2026-09-25,Surabaya,Kecepatan layanan,4
+R030,2026-09-25,Surabaya,Kebersihan tempat,4
+R030,2026-09-25,Surabaya,Harga sesuai kualitas,3
+R030,2026-09-25,Surabaya,Kualitas produk,5
+R030,2026-09-25,Surabaya,Akan merekomendasikan,4
+R031,2026-07-03,Surabaya,Keramahan staf,4
+R031,2026-07-03,Surabaya,Kecepatan layanan,4
+R031,2026-07-03,Surabaya,Kebersihan tempat,4
+R031,2026-07-03,Surabaya,Harga sesuai kualitas,4
+R031,2026-07-03,Surabaya,Kualitas produk,5
+R031,2026-07-03,Surabaya,Akan merekomendasikan,3
+R032,2026-09-24,Surabaya,Keramahan staf,4
+R032,2026-09-24,Surabaya,Kecepatan layanan,4
+R032,2026-09-24,Surabaya,Kebersihan tempat,5
+R032,2026-09-24,Surabaya,Harga sesuai kualitas,3
+R032,2026-09-24,Surabaya,Kualitas produk,3
+R032,2026-09-24,Surabaya,Akan merekomendasikan,2
+R033,2026-08-26,Surabaya,Keramahan staf,5
+R033,2026-08-26,Surabaya,Kecepatan layanan,4
+R033,2026-08-26,Surabaya,Kebersihan tempat,4
+R033,2026-08-26,Surabaya,Harga sesuai kualitas,4
+R033,2026-08-26,Surabaya,Kualitas produk,5
+R033,2026-08-26,Surabaya,Akan merekomendasikan,3
+R034,2026-07-05,Surabaya,Keramahan staf,5
+R034,2026-07-05,Surabaya,Kecepatan layanan,4
+R034,2026-07-05,Surabaya,Kebersihan tempat,3
+R034,2026-07-05,Surabaya,Harga sesuai kualitas,2
+R034,2026-07-05,Surabaya,Kualitas produk,5
+R034,2026-07-05,Surabaya,Akan merekomendasikan,2
+R035,2026-09-27,Surabaya,Keramahan staf,5
+R035,2026-09-27,Surabaya,Kecepatan layanan,3
+R035,2026-09-27,Surabaya,Kebersihan tempat,5
+R035,2026-09-27,Surabaya,Harga sesuai kualitas,3
+R035,2026-09-27,Surabaya,Kualitas produk,5
+R035,2026-09-27,Surabaya,Akan merekomendasikan,4
+R036,2026-07-28,Surabaya,Keramahan staf,4
+R036,2026-07-28,Surabaya,Kecepatan layanan,4
+R036,2026-07-28,Surabaya,Kebersihan tempat,4
+R036,2026-07-28,Surabaya,Harga sesuai kualitas,3
+R036,2026-07-28,Surabaya,Kualitas produk,5
+R036,2026-07-28,Surabaya,Akan merekomendasikan,3
+R037,2026-08-12,Medan,Keramahan staf,3
+R037,2026-08-12,Medan,Kecepatan layanan,3
+R037,2026-08-12,Medan,Kebersihan tempat,4
+R037,2026-08-12,Medan,Harga sesuai kualitas,3
+R037,2026-08-12,Medan,Kualitas produk,3
+R037,2026-08-12,Medan,Akan merekomendasikan,3
+R038,2026-07-03,Medan,Keramahan staf,4
+R038,2026-07-03,Medan,Kecepatan layanan,5
+R038,2026-07-03,Medan,Kebersihan tempat,3
+R038,2026-07-03,Medan,Harga sesuai kualitas,2
+R038,2026-07-03,Medan,Kualitas produk,4
+R038,2026-07-03,Medan,Akan merekomendasikan,3
+R039,2026-08-19,Medan,Keramahan staf,4
+R039,2026-08-19,Medan,Kecepatan layanan,4
+R039,2026-08-19,Medan,Kebersihan tempat,4
+R039,2026-08-19,Medan,Harga sesuai kualitas,4
+R039,2026-08-19,Medan,Kualitas produk,2
+R039,2026-08-19,Medan,Akan merekomendasikan,3
+R040,2026-09-28,Medan,Keramahan staf,5
+R040,2026-09-28,Medan,Kecepatan layanan,4
+R040,2026-09-28,Medan,Kebersihan tempat,4
+R040,2026-09-28,Medan,Harga sesuai kualitas,1
+R040,2026-09-28,Medan,Kualitas produk,4
+R040,2026-09-28,Medan,Akan merekomendasikan,2
+R041,2026-09-20,Medan,Keramahan staf,5
+R041,2026-09-20,Medan,Kecepatan layanan,4
+R041,2026-09-20,Medan,Kebersihan tempat,4
+R041,2026-09-20,Medan,Harga sesuai kualitas,3
+R041,2026-09-20,Medan,Kualitas produk,4
+R041,2026-09-20,Medan,Akan merekomendasikan,3
+R042,2026-07-10,Medan,Keramahan staf,4
+R042,2026-07-10,Medan,Kecepatan layanan,5
+R042,2026-07-10,Medan,Kebersihan tempat,4
+R042,2026-07-10,Medan,Harga sesuai kualitas,2
+R042,2026-07-10,Medan,Kualitas produk,3
+R042,2026-07-10,Medan,Akan merekomendasikan,3
+R043,2026-09-09,Medan,Keramahan staf,4
+R043,2026-09-09,Medan,Kecepatan layanan,3
+R043,2026-09-09,Medan,Kebersihan tempat,3
+R043,2026-09-09,Medan,Harga sesuai kualitas,2
+R043,2026-09-09,Medan,Kualitas produk,5
+R043,2026-09-09,Medan,Akan merekomendasikan,3
+R044,2026-09-03,Medan,Keramahan staf,4
+R044,2026-09-03,Medan,Kecepatan layanan,4
+R044,2026-09-03,Medan,Kebersihan tempat,4
+R044,2026-09-03,Medan,Harga sesuai kualitas,4
+R044,2026-09-03,Medan,Kualitas produk,4
+R044,2026-09-03,Medan,Akan merekomendasikan,4
+R045,2026-09-24,Medan,Keramahan staf,3
+R045,2026-09-24,Medan,Kecepatan layanan,4
+R045,2026-09-24,Medan,Kebersihan tempat,3
+R045,2026-09-24,Medan,Harga sesuai kualitas,3
+R045,2026-09-24,Medan,Kualitas produk,4
+R045,2026-09-24,Medan,Akan merekomendasikan,4
+R046,2026-08-08,Medan,Keramahan staf,4
+R046,2026-08-08,Medan,Kecepatan layanan,3
+R046,2026-08-08,Medan,Kebersihan tempat,3
+R046,2026-08-08,Medan,Harga sesuai kualitas,3
+R046,2026-08-08,Medan,Kualitas produk,4
+R046,2026-08-08,Medan,Akan merekomendasikan,4
+R047,2026-07-25,Medan,Keramahan staf,4
+R047,2026-07-25,Medan,Kecepatan layanan,3
+R047,2026-07-25,Medan,Kebersihan tempat,4
+R047,2026-07-25,Medan,Harga sesuai kualitas,4
+R047,2026-07-25,Medan,Kualitas produk,5
+R047,2026-07-25,Medan,Akan merekomendasikan,4
+R048,2026-09-27,Medan,Keramahan staf,3
+R048,2026-09-27,Medan,Kecepatan layanan,4
+R048,2026-09-27,Medan,Kebersihan tempat,5
+R048,2026-09-27,Medan,Harga sesuai kualitas,3
+R048,2026-09-27,Medan,Kualitas produk,4
+R048,2026-09-27,Medan,Akan merekomendasikan,3
+R049,2026-08-02,Makassar,Keramahan staf,3
+R049,2026-08-02,Makassar,Kecepatan layanan,3
+R049,2026-08-02,Makassar,Kebersihan tempat,4
+R049,2026-08-02,Makassar,Harga sesuai kualitas,3
+R049,2026-08-02,Makassar,Kualitas produk,4
+R049,2026-08-02,Makassar,Akan merekomendasikan,4
+R050,2026-08-27,Makassar,Keramahan staf,5
+R050,2026-08-27,Makassar,Kecepatan layanan,5
+R050,2026-08-27,Makassar,Kebersihan tempat,5
+R050,2026-08-27,Makassar,Harga sesuai kualitas,3
+R050,2026-08-27,Makassar,Kualitas produk,5
+R050,2026-08-27,Makassar,Akan merekomendasikan,5
+R051,2026-07-17,Makassar,Keramahan staf,4
+R051,2026-07-17,Makassar,Kecepatan layanan,3
+R051,2026-07-17,Makassar,Kebersihan tempat,5
+R051,2026-07-17,Makassar,Harga sesuai kualitas,2
+R051,2026-07-17,Makassar,Kualitas produk,4
+R051,2026-07-17,Makassar,Akan merekomendasikan,4
+R052,2026-07-25,Makassar,Keramahan staf,4
+R052,2026-07-25,Makassar,Kecepatan layanan,5
+R052,2026-07-25,Makassar,Kebersihan tempat,5
+R052,2026-07-25,Makassar,Harga sesuai kualitas,3
+R052,2026-07-25,Makassar,Kualitas produk,5
+R052,2026-07-25,Makassar,Akan merekomendasikan,4
+R053,2026-07-04,Makassar,Keramahan staf,4
+R053,2026-07-04,Makassar,Kecepatan layanan,3
+R053,2026-07-04,Makassar,Kebersihan tempat,4
+R053,2026-07-04,Makassar,Harga sesuai kualitas,3
+R053,2026-07-04,Makassar,Kualitas produk,5
+R053,2026-07-04,Makassar,Akan merekomendasikan,4
+R054,2026-07-06,Makassar,Keramahan staf,5
+R054,2026-07-06,Makassar,Kecepatan layanan,4
+R054,2026-07-06,Makassar,Kebersihan tempat,4
+R054,2026-07-06,Makassar,Harga sesuai kualitas,1
+R054,2026-07-06,Makassar,Kualitas produk,3
+R054,2026-07-06,Makassar,Akan merekomendasikan,5
+R055,2026-07-02,Makassar,Keramahan staf,5
+R055,2026-07-02,Makassar,Kecepatan layanan,4
+R055,2026-07-02,Makassar,Kebersihan tempat,4
+R055,2026-07-02,Makassar,Harga sesuai kualitas,3
+R055,2026-07-02,Makassar,Kualitas produk,3
+R055,2026-07-02,Makassar,Akan merekomendasikan,5
+R056,2026-08-12,Makassar,Keramahan staf,4
+R056,2026-08-12,Makassar,Kecepatan layanan,4
+R056,2026-08-12,Makassar,Kebersihan tempat,4
+R056,2026-08-12,Makassar,Harga sesuai kualitas,4
+R056,2026-08-12,Makassar,Kualitas produk,5
+R056,2026-08-12,Makassar,Akan merekomendasikan,3
+R057,2026-08-16,Makassar,Keramahan staf,3
+R057,2026-08-16,Makassar,Kecepatan layanan,4
+R057,2026-08-16,Makassar,Kebersihan tempat,3
+R057,2026-08-16,Makassar,Harga sesuai kualitas,3
+R057,2026-08-16,Makassar,Kualitas produk,4
+R057,2026-08-16,Makassar,Akan merekomendasikan,3
+R058,2026-08-12,Makassar,Keramahan staf,4
+R058,2026-08-12,Makassar,Kecepatan layanan,5
+R058,2026-08-12,Makassar,Kebersihan tempat,4
+R058,2026-08-12,Makassar,Harga sesuai kualitas,3
+R058,2026-08-12,Makassar,Kualitas produk,5
+R058,2026-08-12,Makassar,Akan merekomendasikan,4
+R059,2026-09-22,Makassar,Keramahan staf,5
+R059,2026-09-22,Makassar,Kecepatan layanan,1
+R059,2026-09-22,Makassar,Kebersihan tempat,3
+R059,2026-09-22,Makassar,Harga sesuai kualitas,4
+R059,2026-09-22,Makassar,Kualitas produk,2
+R059,2026-09-22,Makassar,Akan merekomendasikan,4
+R060,2026-07-17,Makassar,Keramahan staf,4
+R060,2026-07-17,Makassar,Kecepatan layanan,5
+R060,2026-07-17,Makassar,Kebersihan tempat,5
+R060,2026-07-17,Makassar,Harga sesuai kualitas,4
+R060,2026-07-17,Makassar,Kualitas produk,5
+R060,2026-07-17,Makassar,Akan merekomendasikan,4

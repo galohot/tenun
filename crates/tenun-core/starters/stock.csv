@@ -1,0 +1,101 @@
+item,category,warehouse,stock,value
+Air Mineral 600 ml,Minuman,Gudang Cikarang,244,1464000
+Teh Botol 350 ml,Minuman,Gudang Cikarang,4,62000
+Kopi Sachet,Minuman,Gudang Cikarang,416,1456000
+Susu UHT 1 l,Minuman,Gudang Cikarang,2,19000
+Jus Jeruk 250 ml,Minuman,Gudang Cikarang,483,5796000
+Sirup Melon,Minuman,Gudang Cikarang,404,27472000
+Mi Instan Goreng,Makanan,Gudang Cikarang,98,6664000
+Mi Instan Kuah,Makanan,Gudang Cikarang,257,6168000
+Biskuit Kelapa,Makanan,Gudang Cikarang,166,747000
+Roti Tawar,Makanan,Gudang Cikarang,5,120000
+Wafer Cokelat,Makanan,Gudang Cikarang,0,0
+Kacang Atom,Makanan,Gudang Cikarang,308,4774000
+Abon Sapi,Makanan,Gudang Cikarang,4,48000
+Beras 5 kg,Bahan pokok,Gudang Cikarang,271,4878000
+Minyak Goreng 2 l,Bahan pokok,Gudang Cikarang,177,796500
+Gula Pasir 1 kg,Bahan pokok,Gudang Cikarang,293,4541500
+Tepung Terigu 1 kg,Bahan pokok,Gudang Cikarang,276,6624000
+Telur 1 kg,Bahan pokok,Gudang Cikarang,6,108000
+Garam 250 g,Bahan pokok,Gudang Cikarang,172,1032000
+Sabun Mandi,Kebersihan,Gudang Cikarang,136,3264000
+Sampo Sachet,Kebersihan,Gudang Cikarang,215,2042500
+Pasta Gigi,Kebersihan,Gudang Cikarang,313,1878000
+Deterjen 800 g,Kebersihan,Gudang Cikarang,538,1883000
+Sabun Cuci Piring,Kebersihan,Gudang Cikarang,216,5184000
+Tisu Gulung,Kebersihan,Gudang Cikarang,258,2451000
+Air Mineral 600 ml,Minuman,Gudang Sidoarjo,190,1140000
+Teh Botol 350 ml,Minuman,Gudang Sidoarjo,244,3782000
+Kopi Sachet,Minuman,Gudang Sidoarjo,216,756000
+Susu UHT 1 l,Minuman,Gudang Sidoarjo,225,2137500
+Jus Jeruk 250 ml,Minuman,Gudang Sidoarjo,226,2712000
+Sirup Melon,Minuman,Gudang Sidoarjo,278,18904000
+Mi Instan Goreng,Makanan,Gudang Sidoarjo,357,24276000
+Mi Instan Kuah,Makanan,Gudang Sidoarjo,151,3624000
+Biskuit Kelapa,Makanan,Gudang Sidoarjo,186,837000
+Roti Tawar,Makanan,Gudang Sidoarjo,0,0
+Wafer Cokelat,Makanan,Gudang Sidoarjo,130,2015000
+Kacang Atom,Makanan,Gudang Sidoarjo,191,2960500
+Abon Sapi,Makanan,Gudang Sidoarjo,0,0
+Beras 5 kg,Bahan pokok,Gudang Sidoarjo,124,2232000
+Minyak Goreng 2 l,Bahan pokok,Gudang Sidoarjo,47,211500
+Gula Pasir 1 kg,Bahan pokok,Gudang Sidoarjo,434,6727000
+Tepung Terigu 1 kg,Bahan pokok,Gudang Sidoarjo,233,5592000
+Telur 1 kg,Bahan pokok,Gudang Sidoarjo,366,6588000
+Garam 250 g,Bahan pokok,Gudang Sidoarjo,134,804000
+Sabun Mandi,Kebersihan,Gudang Sidoarjo,3,72000
+Sampo Sachet,Kebersihan,Gudang Sidoarjo,0,0
+Pasta Gigi,Kebersihan,Gudang Sidoarjo,226,1356000
+Deterjen 800 g,Kebersihan,Gudang Sidoarjo,145,507500
+Sabun Cuci Piring,Kebersihan,Gudang Sidoarjo,5,120000
+Tisu Gulung,Kebersihan,Gudang Sidoarjo,62,589000
+Air Mineral 600 ml,Minuman,Gudang Deli Serdang,208,1248000
+Teh Botol 350 ml,Minuman,Gudang Deli Serdang,212,3286000
+Kopi Sachet,Minuman,Gudang Deli Serdang,149,521500
+Susu UHT 1 l,Minuman,Gudang Deli Serdang,213,2023500
+Jus Jeruk 250 ml,Minuman,Gudang Deli Serdang,301,3612000
+Sirup Melon,Minuman,Gudang Deli Serdang,127,8636000
+Mi Instan Goreng,Makanan,Gudang Deli Serdang,220,14960000
+Mi Instan Kuah,Makanan,Gudang Deli Serdang,170,4080000
+Biskuit Kelapa,Makanan,Gudang Deli Serdang,52,234000
+Roti Tawar,Makanan,Gudang Deli Serdang,225,5400000
+Wafer Cokelat,Makanan,Gudang Deli Serdang,583,9036500
+Kacang Atom,Makanan,Gudang Deli Serdang,267,4138500
+Abon Sapi,Makanan,Gudang Deli Serdang,304,3648000
+Beras 5 kg,Bahan pokok,Gudang Deli Serdang,0,0
+Minyak Goreng 2 l,Bahan pokok,Gudang Deli Serdang,425,1912500
+Gula Pasir 1 kg,Bahan pokok,Gudang Deli Serdang,117,1813500
+Tepung Terigu 1 kg,Bahan pokok,Gudang Deli Serdang,117,2808000
+Telur 1 kg,Bahan pokok,Gudang Deli Serdang,101,1818000
+Garam 250 g,Bahan pokok,Gudang Deli Serdang,183,1098000
+Sabun Mandi,Kebersihan,Gudang Deli Serdang,270,6480000
+Sampo Sachet,Kebersihan,Gudang Deli Serdang,38,361000
+Pasta Gigi,Kebersihan,Gudang Deli Serdang,260,1560000
+Deterjen 800 g,Kebersihan,Gudang Deli Serdang,430,1505000
+Sabun Cuci Piring,Kebersihan,Gudang Deli Serdang,421,10104000
+Tisu Gulung,Kebersihan,Gudang Deli Serdang,249,2365500
+Air Mineral 600 ml,Minuman,Gudang Gowa,425,2550000
+Teh Botol 350 ml,Minuman,Gudang Gowa,245,3797500
+Kopi Sachet,Minuman,Gudang Gowa,211,738500
+Susu UHT 1 l,Minuman,Gudang Gowa,0,0
+Jus Jeruk 250 ml,Minuman,Gudang Gowa,111,1332000
+Sirup Melon,Minuman,Gudang Gowa,165,11220000
+Mi Instan Goreng,Makanan,Gudang Gowa,308,20944000
+Mi Instan Kuah,Makanan,Gudang Gowa,471,11304000
+Biskuit Kelapa,Makanan,Gudang Gowa,190,855000
+Roti Tawar,Makanan,Gudang Gowa,246,5904000
+Wafer Cokelat,Makanan,Gudang Gowa,182,2821000
+Kacang Atom,Makanan,Gudang Gowa,317,4913500
+Abon Sapi,Makanan,Gudang Gowa,177,2124000
+Beras 5 kg,Bahan pokok,Gudang Gowa,3,54000
+Minyak Goreng 2 l,Bahan pokok,Gudang Gowa,349,1570500
+Gula Pasir 1 kg,Bahan pokok,Gudang Gowa,171,2650500
+Tepung Terigu 1 kg,Bahan pokok,Gudang Gowa,132,3168000
+Telur 1 kg,Bahan pokok,Gudang Gowa,0,0
+Garam 250 g,Bahan pokok,Gudang Gowa,5,30000
+Sabun Mandi,Kebersihan,Gudang Gowa,0,0
+Sampo Sachet,Kebersihan,Gudang Gowa,4,38000
+Pasta Gigi,Kebersihan,Gudang Gowa,233,1398000
+Deterjen 800 g,Kebersihan,Gudang Gowa,184,644000
+Sabun Cuci Piring,Kebersihan,Gudang Gowa,0,0
+Tisu Gulung,Kebersihan,Gudang Gowa,228,2166000

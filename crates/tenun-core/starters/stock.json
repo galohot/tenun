@@ -1,0 +1,51 @@
+{
+  "id": "stock",
+  "name": "Stock",
+  "description": "What is in store, where it is, and which items run low.",
+  "sample": "stock.csv",
+  "roles": [
+    { "name": "item", "label": "Item", "kind": "text", "required": true, "shape": "many",
+      "description": "What is kept: an item, a product or a material.",
+      "names": ["item", "product", "article", "material", "sku", "goods", "description", "barang", "namabarang", "produk", "bahan", "material", "nama"] },
+    { "name": "quantity", "label": "Quantity", "kind": "number", "required": true,
+      "description": "How many are in store.",
+      "names": ["stock", "quantity", "qty", "onhand", "balance", "available", "inventory", "units", "stok", "persediaan", "sisa", "saldo", "jumlah", "kuantitas"] },
+    { "name": "warehouse", "label": "Warehouse", "kind": "text", "required": false, "shape": "few",
+      "description": "Where it is kept: a warehouse, a store or a shelf.",
+      "names": ["warehouse", "location", "store", "site", "depot", "branch", "shelf", "gudang", "lokasi", "toko", "cabang", "rak"] },
+    { "name": "category", "label": "Category", "kind": "text", "required": false, "shape": "few",
+      "description": "The kind of item.",
+      "names": ["category", "group", "type", "class", "family", "kategori", "jenis", "golongan", "kelompok", "tipe"] },
+    { "name": "value", "label": "Value", "kind": "number", "required": false,
+      "description": "What the stock is worth.",
+      "names": ["value", "stockvalue", "worth", "amount", "cost", "totalcost", "nilai", "nilaistok", "harga", "total"] }
+  ],
+  "dashboard": {
+    "title": "Stock",
+    "refresh": 0,
+    "tiles": [
+      { "id": "t1", "type": "kpi", "title": "", "x": 0, "y": 0, "w": 4, "h": 2,
+        "measures": [{ "table": "@table", "column": "@quantity", "agg": "sum" }], "dims": [] },
+      { "id": "t2", "type": "kpi", "title": "", "x": 4, "y": 0, "w": 4, "h": 2,
+        "measures": [{ "table": "@table", "column": "@item", "agg": "count_distinct" }], "dims": [] },
+      { "id": "t3", "type": "kpi", "title": "", "x": 8, "y": 0, "w": 4, "h": 2,
+        "measures": [{ "table": "@table", "column": "@value", "agg": "sum" }], "dims": [] },
+      { "id": "t4", "type": "bar", "title": "", "x": 0, "y": 2, "w": 6, "h": 4, "horizontal": true,
+        "measures": [{ "table": "@table", "column": "@quantity", "agg": "sum" }],
+        "dims": [{ "table": "@table", "column": "@category" }],
+        "sort": { "by": "value", "desc": true } },
+      { "id": "t5", "type": "bar", "title": "", "x": 6, "y": 2, "w": 6, "h": 4, "horizontal": true,
+        "measures": [{ "table": "@table", "column": "@quantity", "agg": "sum" }],
+        "dims": [{ "table": "@table", "column": "@warehouse" }],
+        "sort": { "by": "value", "desc": true } },
+      { "id": "t6", "type": "table", "title": "", "x": 0, "y": 6, "w": 5, "h": 6,
+        "measures": [{ "table": "@table", "column": "@quantity", "agg": "sum" }],
+        "dims": [{ "table": "@table", "column": "@item" }],
+        "sort": { "by": "value", "desc": false } },
+      { "id": "t7", "type": "pivot", "title": "", "x": 5, "y": 6, "w": 7, "h": 6, "totals": true,
+        "measures": [{ "table": "@table", "column": "@quantity", "agg": "sum" }],
+        "dims": [{ "table": "@table", "column": "@item" }],
+        "cols": { "table": "@table", "column": "@warehouse" } }
+    ]
+  }
+}

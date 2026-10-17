@@ -4,6 +4,7 @@
   import Icon from './Icon.svelte';
   import { t, tn } from '../lib/i18n';
   import { modKey } from './Palette.svelte';
+  import StarterRow from './StarterRow.svelte';
 
   let { hasData }: { hasData: boolean } = $props();
 
@@ -41,6 +42,8 @@
       <button class="btn big" onclick={() => (app.addOpen = true)}><Icon name="plus" /> {t('Add data…')}</button>
       <span class="hint"><kbd>{modKey}K</kbd> {t('Search everything')}</span>
     </div>
+
+    <StarterRow />
 
     {#if hasData && threads.length}
       <section class="threads" aria-label={t('Sources in this workspace')}>
