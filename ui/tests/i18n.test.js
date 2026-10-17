@@ -19,9 +19,10 @@ test('every Indonesian text belongs to a text in the code', () => {
   assert.deepEqual(Object.keys(id).filter((k) => !used.has(k)), []);
 });
 
-// A place may be left out where the code passes two forms of one word ("All {names}" also gets {name}).
+// Indonesian has no plural, so it may use the one form where the code passes two ("All {names}" also gets {name}).
 test('the Indonesian uses only the {places} of the English', () => {
-  assert.deepEqual(Object.entries(id).filter(([k, v]) => ![...slots(v)].every((x) => slots(k).has(x))).map(([k]) => k), []);
+  const ok = (k, x) => slots(k).has(x) || slots(k).has(`${x}s`);
+  assert.deepEqual(Object.entries(id).filter(([k, v]) => ![...slots(v)].every((x) => ok(k, x))).map(([k]) => k), []);
 });
 
 test('no English text is left in the markup outside t()', () => {
