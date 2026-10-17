@@ -3,6 +3,7 @@
 
 import type { Cell, QueryResult, Tile } from './api';
 import { nameOf } from './measures.ts';
+import { t } from './i18n.ts';
 
 /** The key the engine gives the "Other" group of a top N (same as `OTHER_KEY` in format.ts). */
 const OTHER_KEY = '\u0000other';
@@ -53,7 +54,7 @@ export function tileTable(tile: Tile, res: QueryResult, heads: string[]): Plain 
   let total: Cell[] | null = null;
   if (hasTotals && groups > 0 && res.totals) {
     total = res.columns.map((c, i) => {
-      if (i === 0) return 'Total';
+      if (i === 0) return t('Total');
       const j = i - groups;
       // A value shown another way has no total.
       if (j < 0 || (tile.showAs?.[j] && tile.showAs[j] !== 'value')) return null;
@@ -67,7 +68,7 @@ export function tileTable(tile: Tile, res: QueryResult, heads: string[]): Plain 
 /** One CSV cell. Text that a spreadsheet would run as a formula gets a quote in front. */
 export function csvCell(v: Cell, text: boolean): string {
   if (v === null || v === undefined) return '';
-  let s = v === OTHER_KEY ? 'Other' : String(v);
+  let s = v === OTHER_KEY ? t('Other') : String(v);
   if (text && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }

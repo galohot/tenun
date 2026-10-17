@@ -1,5 +1,7 @@
 // The target line of a number tile: how far the value is from the goal, and for a period that is
-// not over yet, whether it is on pace. Pure code with no imports, so the node tests can load it.
+// not over yet, whether it is on pace. Pure code; its only import is the words, so the node tests can load it.
+
+import { t } from './i18n.ts';
 
 export interface TargetInfo {
   /** The value as a share of the target: 0.82 for 82 %. */
@@ -35,7 +37,7 @@ export function targetInfo(
  */
 export function targetWords(info: TargetInfo, better: 'up' | 'down' = 'up'): { chip: string; pace: string } {
   const unfinished = info.projected !== null;
-  if (info.onTrack) return { chip: 'On track', pace: unfinished ? 'on pace' : '' };
-  if (better === 'down') return { chip: 'Over target', pace: unfinished ? 'heading over target' : '' };
-  return { chip: 'Behind', pace: unfinished ? 'behind pace' : '' };
+  if (info.onTrack) return { chip: t('On track'), pace: unfinished ? t('on pace') : '' };
+  if (better === 'down') return { chip: t('Over target'), pace: unfinished ? t('heading over target') : '' };
+  return { chip: t('Behind'), pace: unfinished ? t('behind pace') : '' };
 }

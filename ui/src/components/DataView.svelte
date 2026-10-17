@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type Cell, type Column, type NamedMeasure, type Param, type Profile, type Source, type TableSetup, type Tile, type TileRef, type UnpivotPlan, type UrlEvery } from '../lib/api';
   import { typeIcon } from '../lib/ui';
+  import { t, tn } from '../lib/i18n';
   import { app, go } from '../lib/state.svelte';
   import { cell, full, numberFormatter, tileTitle } from '../lib/format';
   import { readersOf, tilesUsing, useWords } from '../lib/formula';
@@ -59,17 +60,17 @@
     parquet: 'Parquet',
     sqlite: 'SQLite',
     duckdb: 'DuckDB',
-    folder: 'Folder',
-    url: 'Web link',
+    folder: t('Folder'),
+    url: t('Web link'),
     postgres: 'PostgreSQL',
     mysql: 'MySQL',
-    derived: 'New table',
+    derived: t('New table'),
   };
   /** The new table whose sheet is open, to change how it is made (build 04). */
   let editingDerived = $state<string | null>(null);
 
   async function remove(id: string, name: string) {
-    if (!confirm(`Remove ${name}? Its relationships and the tiles that use it will stop working.`)) return;
+    if (!confirm(t('Remove {name}? Its relationships and the tiles that use it will stop working.', { name }))) return;
     if (await app.run(null, () => api.removeSource(id))) go({ view: 'data' });
   }
 
@@ -119,9 +120,9 @@
     try {
       const text = await navigator.clipboard.readText();
       if (looksTabular(text)) pasted = text;
-      else if (announce) app.toast('There is no table on the clipboard. Copy some cells in Excel or Google Sheets first.');
+      else if (announce) app.toast(t('There is no table on the clipboard. Copy some cells in Excel or Google Sheets first.'));
     } catch {
-      if (announce) app.toast('Tenun cannot read the clipboard from here. Copy the cells, then press Ctrl+V (Cmd+V on a Mac).', 'error');
+      if (announce) app.toast(t('Tenun cannot read the clipboard from here. Copy the cells, then press Ctrl+V (Cmd+V on a Mac).'), 'error');
     }
   }
 
@@ -171,7 +172,7 @@
   // calculated columns that could not be computed.
   const problems = $derived([
     ...(table?.columns ?? []).filter((c) => c.failed).map((c) => `${c.label ?? c.name}: ${failedText(c)}`),
-    ...(table?.columns ?? []).filter((c) => c.error).map((c) => `${c.label ?? c.name} could not be computed, so its values are blank. ${c.error}`),
+    ...(table?.columns ?? []).filter((c) => c.error).map((c) => t('{name} could not be computed, so its values are blank. {error}', { name: c.label ?? c.name, error: c.error ?? '' })),
   ]);
 
   // --- Calculated columns (build 02) ---------------------------------------------------------
@@ -218,8 +219,8 @@
   const paramValue = (p: Param) => (typeof p.value === 'number' ? numberFormatter(p.format ?? null).long(p.value) : String(p.value ?? ''));
   const paramRange = (p: Param) =>
     p.kind === 'choice'
-      ? `A choice of ${(p.choices ?? []).length}`
-      : `${numberFormatter(p.format ?? null).long(p.min ?? 0)} to ${numberFormatter(p.format ?? null).long(p.max ?? 0)}`;
+      ? t('A choice of {n}', { n: (p.choices ?? []).length })
+      : t('{min} to {max}', { min: numberFormatter(p.format ?? null).long(p.min ?? 0), max: numberFormatter(p.format ?? null).long(p.max ?? 0) });
   /** The measure to delete and the tiles that use it, while the question is open. */
   let askMeasure = $state<{ id: string; name: string; tiles: TileRef[] } | null>(null);
 
@@ -227,13 +228,14 @@
 
   /** What a tile is called: its title, or the words it is given when it has none. */
   function tileName(r: TileRef): string {
-    const t = app.dashboards.find((d) => d.id === r.dashboard)?.tiles.find((x) => x.id === r.tile);
-    const title = t ? tileTitle(t, app.tables) : r.title;
-    return `${title.trim() ? title : `A ${r.kind} tile`} on ${r.dashboardTitle || 'a dashboard'}`;
+    const tl = app.dashboards.find((d) => d.id === r.dashboard)?.tiles.find((x) => x.id === r.tile);
+    const title = tl ? tileTitle(tl, app.tables) : r.title;
+    const page = r.dashboardTitle || t('a dashboard');
+    return title.trim() ? t('{title} on {page}', { title, page }) : t('A {kind} tile on {page}', { kind: r.kind, page });
   }
 
   async function removeMeasure(m: NamedMeasure, confirmed = false) {
-    app.busy = 'Saving';
+    app.busy = t('Saving');
     try {
       const r = await api.setMeasures(
         measures.filter((x) => x.id !== m.id),
@@ -296,29 +298,35 @@
   const fileKinds = ['excel', 'csv', 'parquet', 'sqlite', 'duckdb', 'folder'];
   /** The state of a source in one word, for its dot: read and watched, live, or failed. */
   function liveOf(s: Source): { on: boolean; bad: boolean; words: string } | null {
-    if (errors[s.id]) return { on: false, bad: true, words: 'It could not be read' };
+    if (errors[s.id]) return { on: false, bad: true, words: t('It could not be read') };
     if (s.kind === 'derived') return null;
     if (s.kind === 'url') {
       const at = app.snap?.loaded_at?.[s.id];
-      return at ? { on: true, bad: false, words: `Fetched ${sinceWords(at)}` } : { on: false, bad: false, words: 'Not fetched yet' };
+      return at ? { on: true, bad: false, words: t('Fetched {when}', { when: sinceWords(at) }) } : { on: false, bad: false, words: t('Not fetched yet') };
     }
-    if (s.kind === 'postgres' || s.kind === 'mysql') return { on: true, bad: false, words: 'Queried live' };
-    return { on: true, bad: false, words: 'Watched: saved changes show up by themselves' };
+    if (s.kind === 'postgres' || s.kind === 'mysql') return { on: true, bad: false, words: t('Queried live') };
+    return { on: true, bad: false, words: t('Watched: saved changes show up by themselves') };
   }
   /** Where the rows of the table on show come from, under the grid. */
   const readFrom = $derived(
     !sourceOf
       ? ''
       : sourceOf.kind === 'derived'
-        ? 'Made from other tables'
+        ? t('Made from other tables')
         : sourceOf.kind === 'url'
-          ? app.snap?.loaded_at?.[sourceOf.id] ? `Fetched ${sinceWords(app.snap.loaded_at[sourceOf.id])}` : 'Not fetched yet'
+          ? app.snap?.loaded_at?.[sourceOf.id] ? t('Fetched {when}', { when: sinceWords(app.snap.loaded_at[sourceOf.id]) }) : t('Not fetched yet')
           : sourceOf.kind === 'postgres' || sourceOf.kind === 'mysql'
-            ? 'Queried live from the database'
+            ? t('Queried live from the database')
             : fileKinds.includes(sourceOf.kind)
-              ? `Read live from the ${sourceOf.kind === 'folder' ? 'folder' : 'file'} · saved changes show up by themselves`
+              ? sourceOf.kind === 'folder'
+                ? t('Read live from the folder · saved changes show up by themselves')
+                : t('Read live from the file · saved changes show up by themselves')
               : '',
   );
+
+  /** The columns an unpivot offer names, by the kind the engine found. */
+  const PLURAL: Record<string, () => string> = { Year: () => t('years'), Quarter: () => t('quarters'), Month: () => t('months'), Period: () => t('periods') };
+  const acrossOf = (name: string) => PLURAL[name]?.() ?? `${name.toLowerCase()}s`;
 
   function openMenu(e: MouseEvent, name: string) {
     leave();
@@ -328,36 +336,36 @@
 </script>
 
 <header class="toolbar">
-  <nav class="crumbs" aria-label="Breadcrumb">
-    <span class="crumb ws">{app.snap?.workspace.name || 'Workspace'}</span>
+  <nav class="crumbs" aria-label={t('Breadcrumb')}>
+    <span class="crumb ws">{app.snap?.workspace.name || t('Workspace')}</span>
     <Icon name="chevronRight" size={12} />
     {#if table && sources.length}
-      <button class="crumb link" onclick={() => go({ view: 'data' })}>Data</button>
+      <button class="crumb link" onclick={() => go({ view: 'data' })}>{t('Data')}</button>
       <Icon name="chevronRight" size={12} />
       <h2 class="crumb now">{table.label}</h2>
     {:else}
-      <h2 class="crumb now">Data</h2>
+      <h2 class="crumb now">{t('Data')}</h2>
     {/if}
   </nav>
   <span class="spacer"></span>
-  <button class="btn" title="Paste cells from Excel or Google Sheets as a new table  {mod}V" onclick={() => readClipboard(true)}><Icon name="table" /> Paste a table</button>
-  <button class="btn primary" onclick={() => (app.addOpen = true)}><Icon name="plus" /> Add data</button>
+  <button class="btn" title={t('Paste cells from Excel or Google Sheets as a new table  {key}', { key: `${mod}V` })} onclick={() => readClipboard(true)}><Icon name="table" /> {t('Paste a table')}</button>
+  <button class="btn primary" onclick={() => (app.addOpen = true)}><Icon name="plus" /> {t('Add data')}</button>
 </header>
 
 {#if !sources.length}
   <div class="empty">
     <Icon name="sheet" size={32} />
-    <h2>No data yet</h2>
-    <p class="muted">Add an Excel file, a CSV file, a folder of files, a link or a database to start. You can also paste cells from Excel.</p>
-    <button class="btn primary" onclick={() => (app.addOpen = true)}><Icon name="plus" /> Add data</button>
+    <h2>{t('No data yet')}</h2>
+    <p class="muted">{t('Add an Excel file, a CSV file, a folder of files, a link or a database to start. You can also paste cells from Excel.')}</p>
+    <button class="btn primary" onclick={() => (app.addOpen = true)}><Icon name="plus" /> {t('Add data')}</button>
   </div>
 {:else}
   <div class="split">
     <aside class="sources" class:open={sourcesOpen}>
       <button class="sources-toggle" aria-expanded={sourcesOpen} onclick={() => (sourcesOpen = !sourcesOpen)}>
         <Icon name="table" size={14} />
-        <span class="now">{table?.label ?? 'Sources'}</span>
-        <span class="count">{sources.length} {sources.length === 1 ? 'source' : 'sources'}</span>
+        <span class="now">{table?.label ?? t('Sources')}</span>
+        <span class="count">{tn('{n} source', '{n} sources', sources.length)}</span>
         <Icon name="chevronDown" size={12} />
       </button>
       <div class="sources-list">
@@ -369,44 +377,44 @@
             <span class="src-name" title={s.path ?? s.host}>{s.name}</span>
             <span class="kind">{kindLabel[s.kind]}</span>
             {#if live}<span class="live" class:on={live.on} class:bad={live.bad} title={live.words} role="img" aria-label={live.words}></span>{/if}
-            <button class="btn plain icon tiny" title={s.kind === 'url' ? 'Fetch the link now' : 'Reload'} aria-label={s.kind === 'url' ? 'Fetch the link now' : 'Reload'} onclick={() => app.run(null, () => api.reloadSource(s.id))}><Icon name="refresh" size={13} /></button>
-            <button class="btn plain icon tiny rm" title="Remove {s.name}" aria-label="Remove {s.name}" onclick={() => remove(s.id, s.name)}><Icon name="trash" size={13} /></button>
+            <button class="btn plain icon tiny" title={s.kind === 'url' ? t('Fetch the link now') : t('Reload')} aria-label={s.kind === 'url' ? t('Fetch the link now') : t('Reload')} onclick={() => app.run(null, () => api.reloadSource(s.id))}><Icon name="refresh" size={13} /></button>
+            <button class="btn plain icon tiny rm" title={t('Remove {name}', { name: s.name })} aria-label={t('Remove {name}', { name: s.name })} onclick={() => remove(s.id, s.name)}><Icon name="trash" size={13} /></button>
           </div>
           {#if s.kind === 'url'}
             <p class="srcline">
-              {#if app.snap?.loaded_at?.[s.id]}Fetched {sinceWords(app.snap.loaded_at[s.id])}{:else}Not fetched yet{/if}
-              <select class="every" aria-label="Refresh" value={s.every ?? 'hourly'} onchange={(e) => setEvery(s.id, e.currentTarget.value as UrlEvery)}>
+              {#if app.snap?.loaded_at?.[s.id]}{t('Fetched {when}', { when: sinceWords(app.snap.loaded_at[s.id]) })}{:else}{t('Not fetched yet')}{/if}
+              <select class="every" aria-label={t('Refresh')} value={s.every ?? 'hourly'} onchange={(e) => setEvery(s.id, e.currentTarget.value as UrlEvery)}>
                 {#each EVERY_CHOICES as c}<option value={c.value}>{c.label}</option>{/each}
               </select>
-              <button class="linkbtn" onclick={() => (linkSource = s)}>Link settings</button>
+              <button class="linkbtn" onclick={() => (linkSource = s)}>{t('Link settings')}</button>
             </p>
           {:else if s.kind === 'folder'}
-            <p class="srcline" title={s.path}>Reads {s.pattern}</p>
+            <p class="srcline" title={s.path}>{t('Reads {pattern}', { pattern: s.pattern ?? '' })}</p>
           {:else if s.spec}
             <p class="srcline">
               <span class="from" title={fromWords(s.spec, app.tables)}>{fromWords(s.spec, app.tables)}</span>
-              {#if canCalc}<button class="linkbtn" onclick={() => (editingDerived = s.id)}>Change</button>{/if}
+              {#if canCalc}<button class="linkbtn" onclick={() => (editingDerived = s.id)}>{t('Change')}</button>{/if}
             </p>
           {/if}
           {#if errors[s.id]}
             <p class="err"><Icon name="warning" size={13} /> {errors[s.id]}</p>
           {/if}
           <div class="tbls">
-            {#each app.tables.filter((t) => t.source_id === s.id) as t (t.id)}
-              <button class="tbl" class:on={table?.id === t.id} onclick={() => ((sourcesOpen = false), go({ view: 'data', table: t.id }))}>
+            {#each app.tables.filter((tb) => tb.source_id === s.id) as tb (tb.id)}
+              <button class="tbl" class:on={table?.id === tb.id} onclick={() => ((sourcesOpen = false), go({ view: 'data', table: tb.id }))}>
                 <Icon name="table" size={14} />
-                <span class="tname">{t.name}</span>
-                <span class="rows">{t.rows === null ? 'live' : full(t.rows)}</span>
+                <span class="tname">{tb.name}</span>
+                <span class="rows">{tb.rows === null ? t('live') : full(tb.rows)}</span>
               </button>
             {/each}
           </div>
         </section>
       {/each}
       {#if canCalc || measures.length}
-        <section class="measures" aria-label="Measures">
+        <section class="measures" aria-label={t('Measures')}>
           <div class="group">
-            <span>Measures{measures.length ? ` · ${measures.length}` : ''}</span>
-            <span class="adv" title="Measures are made with Advanced on">Advanced</span>
+            <span>{t('Measures')}{measures.length ? ` · ${measures.length}` : ''}</span>
+            <span class="adv" title={t('Measures are made with Advanced on')}>{t('Advanced')}</span>
           </div>
           {#each measures as m (m.id)}
             {@const info = measureInfo[m.id]}
@@ -414,25 +422,25 @@
               <button class="msr-main" onclick={() => canCalc && (measureSheet = { editing: m.id })} disabled={!canCalc} title={info?.error ?? m.description ?? m.formula}>
                 <span class="mname">{m.name}{#if info?.error}<Icon name="warning" size={12} />{/if}</span>
                 <span class="mformula">{m.formula}</span>
-                <span class="muse">{info?.error ? 'Does not work now' : usedIn(m) ? `Used in ${usedIn(m)} ${usedIn(m) === 1 ? 'tile' : 'tiles'}` : 'Not used yet'}</span>
+                <span class="muse">{info?.error ? t('Does not work now') : usedIn(m) ? tn('Used in {n} tile', 'Used in {n} tiles', usedIn(m)) : t('Not used yet')}</span>
               </button>
               {#if canCalc}
-                <button class="btn plain icon tiny" title="Delete {m.name}" aria-label="Delete {m.name}" onclick={() => removeMeasure(m)}><Icon name="trash" size={13} /></button>
+                <button class="btn plain icon tiny" title={t('Delete {name}', { name: m.name })} aria-label={t('Delete {name}', { name: m.name })} onclick={() => removeMeasure(m)}><Icon name="trash" size={13} /></button>
               {/if}
             </div>
           {:else}
-            <p class="srcline mhint">A measure is a formula of totals, like SUM([Sales].[amount]) / SUM([Targets].[target]). Any tile can use it.</p>
+            <p class="srcline mhint">{t('A measure is a formula of totals, like SUM([Sales].[amount]) / SUM([Targets].[target]). Any tile can use it.')}</p>
           {/each}
           {#if canCalc}
-            <button class="newm" onclick={() => (measureSheet = {})}><Icon name="plus" size={13} /> New measure</button>
+            <button class="newm" onclick={() => (measureSheet = {})}><Icon name="plus" size={13} /> {t('New measure')}</button>
           {/if}
         </section>
       {/if}
       {#if canCalc || params.length}
-        <section class="measures" aria-label="Parameters">
+        <section class="measures" aria-label={t('Parameters')}>
           <div class="group">
-            <span>Parameters{params.length ? ` · ${params.length}` : ''}</span>
-            <span class="adv" title="Parameters are made with Advanced on">Advanced</span>
+            <span>{t('Parameters')}{params.length ? ` · ${params.length}` : ''}</span>
+            <span class="adv" title={t('Parameters are made with Advanced on')}>{t('Advanced')}</span>
           </div>
           {#each params as p (p.id)}
             <div class="msr">
@@ -443,10 +451,10 @@
               </button>
             </div>
           {:else}
-            <p class="srcline mhint">A parameter is a number or a choice that a reader moves on a dashboard. A measure reads it, like SUM([amount]) * (1 + PARAM("Price rise")).</p>
+            <p class="srcline mhint">{t('A parameter is a number or a choice that a reader moves on a dashboard. A measure reads it, like SUM([amount]) * (1 + PARAM("Price rise")).')}</p>
           {/each}
           {#if canCalc}
-            <button class="newm" onclick={() => (paramSheet = {})}><Icon name="plus" size={13} /> New parameter</button>
+            <button class="newm" onclick={() => (paramSheet = {})}><Icon name="plus" size={13} /> {t('New parameter')}</button>
           {/if}
         </section>
       {/if}
@@ -460,8 +468,8 @@
             <h1>{table.label}</h1>
             <p class="muted meta">
               {kindLabel[sourceOf?.kind ?? ''] ?? ''} · {sourceOf?.name}
-              · {table.rows === null ? 'queried live' : `${full(table.rows)} rows`}
-              · {table.columns.length} columns{#if table.columns.some((c) => c.hidden)} · {table.columns.filter((c) => c.hidden).length} hidden{/if}
+              · {table.rows === null ? t('queried live') : t('{n} rows', { n: full(table.rows) })}
+              · {t('{n} columns', { n: table.columns.length })}{#if table.columns.some((c) => c.hidden)} · {t('{n} hidden', { n: table.columns.filter((c) => c.hidden).length })}{/if}
             </p>
             {#if table.notes?.length || problems.length}
               <ul class="notes">
@@ -473,24 +481,24 @@
           {#if table.prep || canCalc || showMainDate}
             <div class="tools">
               {#if showMainDate}
-                <label class="hdr" title="The date a measure uses to line this table up with the others over time">
-                  <span class="label">Main date</span>
+                <label class="hdr" title={t('The date a measure uses to line this table up with the others over time')}>
+                  <span class="label">{t('Main date')}</span>
                   <select
                     class="field"
-                    aria-label="Main date"
+                    aria-label={t('Main date')}
                     value={setup?.mainDate ?? ''}
                     onchange={(e) => save(withMainDate(setup, e.currentTarget.value || undefined))}>
-                    <option value="">{dateColumns.length === 1 ? `${dateColumns[0].label ?? dateColumns[0].name} (the only date)` : 'Not set'}</option>
+                    <option value="">{dateColumns.length === 1 ? t('{name} (the only date)', { name: dateColumns[0].label ?? dateColumns[0].name }) : t('Not set')}</option>
                     {#each dateColumns as c (c.name)}<option value={c.name}>{c.label ?? c.name}</option>{/each}
                   </select>
                 </label>
               {/if}
               {#if canCalc}
-                <button class="btn" title="Add a column that is computed from the others" onclick={() => (calcSheet = {})}><Icon name="fx" size={13} /> Add column</button>
+                <button class="btn" title={t('Add a column that is computed from the others')} onclick={() => (calcSheet = {})}><Icon name="fx" size={13} /> {t('Add column')}</button>
               {/if}
               {#if table.prep && isExcel}
-                <label class="hdr" title="The sheet row that holds the column names">
-                  <span class="label">Header row</span>
+                <label class="hdr" title={t('The sheet row that holds the column names')}>
+                  <span class="label">{t('Header row')}</span>
                   <input
                     class="field num-box"
                     type="number"
@@ -501,18 +509,18 @@
                     onkeydown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()} />
                 </label>
                 {#if setup?.header_row}
-                  <button class="btn plain" onclick={() => save(withHeaderRow(setup, undefined))}>Detect it again</button>
+                  <button class="btn plain" onclick={() => save(withHeaderRow(setup, undefined))}>{t('Detect it again')}</button>
                 {/if}
               {/if}
               {#if table.prep && (plan || turned)}
                 <div class="prep">
-                  <button class="btn" aria-expanded={prepareOpen} onclick={() => (prepareOpen = !prepareOpen)}>Prepare <Icon name="chevronDown" size={12} /></button>
+                  <button class="btn" aria-expanded={prepareOpen} onclick={() => (prepareOpen = !prepareOpen)}>{t('Prepare')} <Icon name="chevronDown" size={12} /></button>
                   {#if prepareOpen}
                     <div class="pm" role="menu">
                       {#if turned}
-                        <button role="menuitem" onclick={() => ((prepareOpen = false), save(withoutUnpivot(setup)))}>Put the columns back</button>
+                        <button role="menuitem" onclick={() => ((prepareOpen = false), save(withoutUnpivot(setup)))}>{t('Put the columns back')}</button>
                       {:else}
-                        <button role="menuitem" onclick={() => ((prepareOpen = false), (unpivotOpen = true))}>Turn these columns into rows</button>
+                        <button role="menuitem" onclick={() => ((prepareOpen = false), (unpivotOpen = true))}>{t('Turn these columns into rows')}</button>
                       {/if}
                     </div>
                   {/if}
@@ -524,31 +532,31 @@
         {#if plan && !turned}
           <div class="offer">
             <Icon name="sparkles" size={14} />
-            <span>{plan.columns.length} columns look like {plan.name.toLowerCase() === 'period' ? 'periods' : `${plan.name.toLowerCase()}s`} across the top.</span>
-            <button class="btn" onclick={() => (unpivotOpen = true)}>Turn these columns into rows</button>
+            <span>{t('{n} columns look like {what} across the top.', { n: plan.columns.length, what: acrossOf(plan.name) })}</span>
+            <button class="btn" onclick={() => (unpivotOpen = true)}>{t('Turn these columns into rows')}</button>
           </div>
         {:else if turned}
           <div class="offer">
             <Icon name="check" size={14} />
-            <span>Columns were turned into rows. Your file is not changed.</span>
-            <button class="btn" onclick={() => save(withoutUnpivot(setup))}>Put the columns back</button>
+            <span>{t('Columns were turned into rows. Your file is not changed.')}</span>
+            <button class="btn" onclick={() => save(withoutUnpivot(setup))}>{t('Put the columns back')}</button>
           </div>
         {/if}
         <div class="grid-wrap">
           {#if previewError}
             <p class="err pad">{previewError}</p>
           {:else if !preview}
-            <p class="muted pad">Loading…</p>
+            <p class="muted pad">{t('Loading…')}</p>
           {:else}
             <table>
               <thead>
                 <tr>
-                  <th class="rn" aria-label="Row">#</th>
+                  <th class="rn" aria-label={t('Row')}>#</th>
                   {#each preview.columns as c (c.name)}
                     {@const col = colOf(c.name)}
                     <th class:num={c.dtype === 'number'} class:hid={col?.hidden} class:bad={!!col?.error || !!col?.failed}>
-                      <button class="hd" aria-label="{col?.label ?? c.name}, column menu" onclick={(e) => openMenu(e, c.name)} onmouseenter={(e) => enter(e, c.name)} onmouseleave={leave} title="">
-                        {#if col?.calc}<span class="fx" aria-label="Calculated column"><Icon name="fx" size={11} /></span>{:else}<span class="ty"><Icon name={typeIcon[c.dtype]} size={12} /></span>{/if}<span class="hn">{col?.label ?? c.name}</span>{#if col?.hidden}<em>hidden</em>{/if}<span class="chev"><Icon name="chevronDown" size={11} /></span>
+                      <button class="hd" aria-label={t('{name}, column menu', { name: col?.label ?? c.name })} onclick={(e) => openMenu(e, c.name)} onmouseenter={(e) => enter(e, c.name)} onmouseleave={leave} title="">
+                        {#if col?.calc}<span class="fx" aria-label={t('Calculated column')}><Icon name="fx" size={11} /></span>{:else}<span class="ty"><Icon name={typeIcon[c.dtype]} size={12} /></span>{/if}<span class="hn">{col?.label ?? c.name}</span>{#if col?.hidden}<em>{t('hidden')}</em>{/if}<span class="chev"><Icon name="chevronDown" size={11} /></span>
                       </button>
                     </th>
                   {/each}
@@ -572,13 +580,13 @@
         {#if preview}
           <footer class="gridfoot">
             <span class="num">
-              {#if table.rows !== null && table.rows > preview.rows.length}Showing the first {full(preview.rows.length)} of {full(table.rows)} rows{:else}{full(preview.rows.length)} {preview.rows.length === 1 ? 'row' : 'rows'}{/if}
+              {#if table.rows !== null && table.rows > preview.rows.length}{t('Showing the first {n} of {total} rows', { n: full(preview.rows.length), total: full(table.rows) })}{:else}{tn('{n} row', '{n} rows', preview.rows.length, { n: full(preview.rows.length) })}{/if}
             </span>
             {#if readFrom}<span>{readFrom}</span>{/if}
           </footer>
         {/if}
       {:else}
-        <p class="muted pad">This source has no tables.</p>
+        <p class="muted pad">{t('This source has no tables.')}</p>
       {/if}
     </section>
   </div>
@@ -616,26 +624,26 @@
 
 {#if askMeasure}
   {@const d = askMeasure}
-  <Modal title="Delete {d.name}?" width={460} onclose={() => (askMeasure = null)}>
+  <Modal title={t('Delete {name}?', { name: d.name })} width={460} onclose={() => (askMeasure = null)}>
     <p class="lead">
-      {d.tiles.length === 1 ? 'This tile uses' : `These ${d.tiles.length} tiles use`} the measure. {d.tiles.length === 1 ? 'It' : 'They'} will show an error until you pick another measure.
+      {tn('This tile uses the measure. It will show an error until you pick another measure.', 'These {n} tiles use the measure. They will show an error until you pick another measure.', d.tiles.length)}
     </p>
     <ul class="uses">
       {#each d.tiles as t, i (i)}<li>{tileName(t)}</li>{/each}
     </ul>
     {#snippet footer()}
-      <button class="btn" onclick={() => (askMeasure = null)}>Keep the measure</button>
-      <button class="btn danger" onclick={() => removeMeasure({ id: d.id, name: d.name } as NamedMeasure, true)}>Delete measure</button>
+      <button class="btn" onclick={() => (askMeasure = null)}>{t('Keep the measure')}</button>
+      <button class="btn danger" onclick={() => removeMeasure({ id: d.id, name: d.name } as NamedMeasure, true)}>{t('Delete measure')}</button>
     {/snippet}
   </Modal>
 {/if}
 
 {#if askDelete}
   {@const d = askDelete}
-  <Modal title="Delete {d.shown}?" width={460} onclose={() => (askDelete = null)}>
+  <Modal title={t('Delete {name}?', { name: d.shown })} width={460} onclose={() => (askDelete = null)}>
     {#if d.tiles.length}
       <p class="lead">
-        {d.tiles.length === 1 ? 'This tile uses' : `These ${d.tiles.length} tiles use`} the column. {d.tiles.length === 1 ? 'It' : 'They'} will show an error until you pick another field.
+        {tn('This tile uses the column. It will show an error until you pick another field.', 'These {n} tiles use the column. They will show an error until you pick another field.', d.tiles.length)}
       </p>
       <ul class="uses">
         {#each d.tiles as t, i (i)}<li>{t}</li>{/each}
@@ -643,27 +651,27 @@
     {/if}
     {#if d.blank.length}
       <p class="lead">
-        {d.blank.length === 1 ? 'A calculated column reads it' : `${d.blank.length} calculated columns read it`} and will be blank:
+        {tn('A calculated column reads it and will be blank:', '{n} calculated columns read it and will be blank:', d.blank.length)}
       </p>
       <ul class="uses">
         {#each d.blank as b, i (i)}
           <li>
             <strong>{b.label}</strong>
             {#if b.tiles.length}
-              is used by
+              {t('is used by')}
               <ul class="uses">
                 {#each b.tiles as t, j (j)}<li>{t}</li>{/each}
               </ul>
             {:else}
-              is not used by a tile.
+              {t('is not used by a tile.')}
             {/if}
           </li>
         {/each}
       </ul>
     {/if}
     {#snippet footer()}
-      <button class="btn" onclick={() => (askDelete = null)}>Keep the column</button>
-      <button class="btn danger" onclick={() => removeCalc(d.name)}>Delete column</button>
+      <button class="btn" onclick={() => (askDelete = null)}>{t('Keep the column')}</button>
+      <button class="btn danger" onclick={() => removeCalc(d.name)}>{t('Delete column')}</button>
     {/snippet}
   </Modal>
 {/if}

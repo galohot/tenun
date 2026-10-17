@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n';
   // "Email me updates" on a hosted page (v5 build 13): a reader the owner invited asks tenun.cloud for the page's
   // numbers by email, and can stop them here or with the link in each email. Shown only when tenun.cloud sends emails.
   let { path }: { path: string } = $props();
@@ -21,9 +22,9 @@
       const r = await fetch(`/api/v1/${path}/updates`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: !on }) });
       const j = (await r.json()) as { on?: boolean; message?: string };
       if (r.ok) on = !!j.on;
-      else error = j.message ?? 'That did not work. Try again later.';
+      else error = j.message ?? t('That did not work. Try again later.');
     } catch {
-      error = 'tenun.cloud could not be reached.';
+      error = t('tenun.cloud could not be reached.');
     } finally {
       busy = false;
     }
@@ -32,7 +33,7 @@
 
 {#if on !== null}
   <span class="email">
-    {' · '}<button class="linkbtn" onclick={flip} disabled={busy}>{on ? 'Stop email updates' : 'Email me updates'}</button>
+    {' · '}<button class="linkbtn" onclick={flip} disabled={busy}>{on ? t('Stop email updates') : t('Email me updates')}</button>
     {#if error}<span class="err" role="alert">{error}</span>{/if}
   </span>
 {/if}

@@ -1,8 +1,9 @@
 // Filters of a dashboard: what a filter tile selects, the filters a click on a mark makes, "Keep only"
-// and "Exclude", and the one grain for every time tile. Pure code with no imports at run time, so the
+// and "Exclude", and the one grain for every time tile. Pure code; the only import at run time is t(), so the
 // node tests can load it. The engine does the same on its side (`filters.rs`); keep the two in step.
 
 import type { Bins, Cell, Dashboard, DashFilter, Dim, DType, Filter, GeoInfo, Grain, Tile, TileFilter } from './api';
+import { t } from './i18n.ts';
 
 export const isPeriod = (g: Grain | null | undefined): boolean => !!g && !['month_of_year', 'weekday', 'hour'].includes(g);
 
@@ -11,17 +12,17 @@ export const PERIODS: Grain[] = ['day', 'week', 'month', 'quarter', 'year'];
 
 /** The ways to cut a date range quickly. The engine resolves each against today's date. */
 export const DATE_PRESETS: { id: string; label: string }[] = [
-  { id: 'last_7_days', label: 'Last 7 days' },
-  { id: 'last_30_days', label: 'Last 30 days' },
-  { id: 'this_month', label: 'This month so far' },
-  { id: 'last_month', label: 'Last month' },
-  { id: 'this_quarter', label: 'This quarter' },
-  { id: 'last_quarter', label: 'Last quarter' },
-  { id: 'ytd', label: 'Year to date' },
-  { id: 'last_12_months', label: 'Last 12 months' },
+  { id: 'last_7_days', get label() { return t('Last 7 days'); } },
+  { id: 'last_30_days', get label() { return t('Last 30 days'); } },
+  { id: 'this_month', get label() { return t('This month so far'); } },
+  { id: 'last_month', get label() { return t('Last month'); } },
+  { id: 'this_quarter', get label() { return t('This quarter'); } },
+  { id: 'last_quarter', get label() { return t('Last quarter'); } },
+  { id: 'ytd', get label() { return t('Year to date'); } },
+  { id: 'last_12_months', get label() { return t('Last 12 months'); } },
 ];
 
-export const presetLabel = (id: string | undefined): string => DATE_PRESETS.find((p) => p.id === id)?.label ?? 'Custom';
+export const presetLabel = (id: string | undefined): string => DATE_PRESETS.find((p) => p.id === id)?.label ?? t('Custom');
 
 /** The key of a value, as the charts use it. `null` (blank) has a key of its own. */
 export const keyOf = (v: Cell): string => (v === null || v === undefined ? '\u0000null' : String(v));

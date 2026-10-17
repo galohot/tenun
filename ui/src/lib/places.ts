@@ -1,7 +1,8 @@
 // The standard place names a map reads (build 05, V4-D8): the lists of the Place names sheet and their CSV. Pure
-// functions with no imports at run time, so the node tests can load them. The engine matches (geo.rs).
+// functions; the only import at run time is t(), so the node tests can load them. The engine matches (geo.rs).
 
 import type { Plain } from './tabular';
+import { t } from './i18n.ts';
 
 export type PlaceLevel = 'country' | 'province' | 'regency';
 
@@ -15,9 +16,36 @@ export interface PlaceRow {
 
 /** The lists the sheet offers: the world's countries, and the provinces and kabupaten/kota of Indonesia. */
 export const PLACE_LISTS: { level: PlaceLevel; country: string; title: string; codeWords: string }[] = [
-  { level: 'country', country: '', title: 'Countries', codeWords: 'ISO 3166-1 alpha-2; the alpha-3 code is read too' },
-  { level: 'province', country: 'ID', title: 'Provinces of Indonesia', codeWords: 'ISO 3166-2, with or without ID-; the Kemendagri number is read too' },
-  { level: 'regency', country: 'ID', title: 'Kabupaten and kota of Indonesia', codeWords: 'Kemendagri, with or without the dot' },
+  {
+    level: 'country',
+    country: '',
+    get title() {
+      return t('Countries');
+    },
+    get codeWords() {
+      return t('ISO 3166-1 alpha-2; the alpha-3 code is read too');
+    },
+  },
+  {
+    level: 'province',
+    country: 'ID',
+    get title() {
+      return t('Provinces of Indonesia');
+    },
+    get codeWords() {
+      return t('ISO 3166-2, with or without ID-; the Kemendagri number is read too');
+    },
+  },
+  {
+    level: 'regency',
+    country: 'ID',
+    get title() {
+      return t('Kabupaten and kota of Indonesia');
+    },
+    get codeWords() {
+      return t('Kemendagri, with or without the dot');
+    },
+  },
 ];
 
 /** A word as the search compares it: lower case, no dots, dashes or spaces. */

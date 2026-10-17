@@ -9,6 +9,7 @@
   import { navOf, normaliseSite } from '../../lib/site';
   import Viewer from '../../viewer/Viewer.svelte';
   import Icon from '../Icon.svelte';
+  import { t } from '../../lib/i18n';
   import SiteFrame from './SiteFrame.svelte';
 
   let page = $state<string | null>(app.preview);
@@ -37,21 +38,21 @@
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && !document.querySelector('[role="dialog"][aria-modal="true"]') && close()} />
 
-<div class="preview" role="region" aria-label="Preview of the site">
+<div class="preview" role="region" aria-label={t('Preview of the site')}>
   <div class="bar">
-    <span><Icon name="globe" size={14} /> Preview of the site: this is how an export will look.</span>
-    <button class="btn" onclick={close}><Icon name="x" size={14} /> Close preview</button>
+    <span><Icon name="globe" size={14} /> {t('Preview of the site: this is how an export will look.')}</span>
+    <button class="btn" onclick={close}><Icon name="x" size={14} /> {t('Close preview')}</button>
   </div>
   <div class="frame">
     <SiteFrame {site} {nav} current={page} onnavigate={(id) => (page = id)}>
       {#if error}
-        <p class="msg">This page could not be drawn: {error}</p>
+        <p class="msg">{t('This page could not be drawn: {error}', { error })}</p>
       {:else if data}
         {#key data}
           <Viewer {data} embedded pages={ids} onpage={(id) => (page = id)} />
         {/key}
       {:else}
-        <p class="msg">Drawing the page…</p>
+        <p class="msg">{t('Drawing the page…')}</p>
       {/if}
     </SiteFrame>
   </div>

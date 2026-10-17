@@ -3,6 +3,7 @@
   // A filter tile's selection follows the same choice. "Keep only" and "Exclude" still filter every tile.
   import type { Tile } from '../../lib/api';
   import Modal from '../Modal.svelte';
+  import { parts, t } from '../../lib/i18n';
 
   let {
     tile,
@@ -19,7 +20,7 @@
     onclose: () => void;
   } = $props();
 
-  const others = $derived(tiles.filter((t) => t.id !== tile.id && t.type !== 'text' && t.type !== 'image'));
+  const others = $derived(tiles.filter((x) => x.id !== tile.id && x.type !== 'text' && x.type !== 'image'));
   // The sheet starts from the tile's reach and keeps its own draft until Done.
   // svelte-ignore state_referenced_locally
   let mode = $state<'all' | 'none' | 'some'>(tile.reach === undefined ? 'all' : tile.reach === 'none' ? 'none' : 'some');
@@ -27,40 +28,40 @@
   let picked = $state<string[]>(Array.isArray(tile.reach) ? [...tile.reach] : []);
 
   function save() {
-    onsave(mode === 'all' ? undefined : mode === 'none' ? 'none' : others.filter((t) => picked.includes(t.id)).map((t) => t.id));
+    onsave(mode === 'all' ? undefined : mode === 'none' ? 'none' : others.filter((x) => picked.includes(x.id)).map((x) => x.id));
     onclose();
   }
 </script>
 
-<Modal title="Filters other tiles" width={460} {onclose}>
-  <p class="intro">What a click on <b>{titleOf(tile) || 'this tile'}</b>{tile.type === 'filter' ? ', or a choice in it,' : ''} filters on this page.</p>
-  <div class="choices" role="radiogroup" aria-label="Which tiles it filters">
-    <label><input type="radio" name="reach" value="all" bind:group={mode} /> Every tile</label>
-    <label><input type="radio" name="reach" value="none" bind:group={mode} /> No tile</label>
-    <label><input type="radio" name="reach" value="some" bind:group={mode} /> These tiles</label>
+<Modal title={t('Filters other tiles')} width={460} {onclose}>
+  <p class="intro">{#each parts(tile.type === 'filter' ? t('What a click on {tile}, or a choice in it, filters on this page.') : t('What a click on {tile} filters on this page.')) as p}{#if p.slot === 'tile'}<b>{titleOf(tile) || t('this tile')}</b>{:else}{p.text}{/if}{/each}</p>
+  <div class="choices" role="radiogroup" aria-label={t('Which tiles it filters')}>
+    <label><input type="radio" name="reach" value="all" bind:group={mode} /> {t('Every tile')}</label>
+    <label><input type="radio" name="reach" value="none" bind:group={mode} /> {t('No tile')}</label>
+    <label><input type="radio" name="reach" value="some" bind:group={mode} /> {t('These tiles')}</label>
   </div>
   {#if mode === 'some'}
     <ul class="tiles">
-      {#each others as t (t.id)}
+      {#each others as tl (tl.id)}
         <li>
           <label>
             <input
               type="checkbox"
-              checked={picked.includes(t.id)}
-              onchange={(e) => (picked = e.currentTarget.checked ? [...picked, t.id] : picked.filter((x) => x !== t.id))} />
-            {titleOf(t) || 'Untitled'}
+              checked={picked.includes(tl.id)}
+              onchange={(e) => (picked = e.currentTarget.checked ? [...picked, tl.id] : picked.filter((x) => x !== tl.id))} />
+            {titleOf(tl) || t('Untitled')}
           </label>
         </li>
       {:else}
-        <li class="muted">No other tile on this page.</li>
+        <li class="muted">{t('No other tile on this page.')}</li>
       {/each}
     </ul>
   {/if}
-  <p class="hint">"Keep only" and "Exclude" still filter every tile.</p>
+  <p class="hint">{t('"Keep only" and "Exclude" still filter every tile.')}</p>
 
   {#snippet footer()}
-    <button class="btn plain" onclick={onclose}>Cancel</button>
-    <button class="btn primary" onclick={save}>Done</button>
+    <button class="btn plain" onclick={onclose}>{t('Cancel')}</button>
+    <button class="btn primary" onclick={save}>{t('Done')}</button>
   {/snippet}
 </Modal>
 

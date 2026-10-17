@@ -5,6 +5,7 @@
 
 import type { TileLine } from '../api';
 import type { Colors } from './common';
+import { t } from '../i18n';
 import { MAX_LINES, placeLevelLabels, placeUprightLabels, statOf, type Place, type StatKind } from './lines';
 
 export type Axis = 'x' | 'y';
@@ -16,12 +17,12 @@ export interface Level {
   name: string;
 }
 
-const WORDS: Record<StatKind | 'target', string> = {
-  average: 'Average',
-  median: 'Median',
-  min: 'Minimum',
-  max: 'Maximum',
-  target: 'Target',
+const WORDS: Record<StatKind | 'target', () => string> = {
+  average: () => t('Average'),
+  median: () => t('Median'),
+  min: () => t('Minimum'),
+  max: () => t('Maximum'),
+  target: () => t('Target'),
 };
 
 /** The lines of a tile that sit at a level: everything but the trend, and the Advanced band. */
@@ -39,7 +40,7 @@ export const wantsTrend = (lines: TileLine[] | undefined): boolean => (lines ?? 
 export function resolveLevels(lines: TileLine[] | undefined, scatter: boolean, read: (axis: Axis) => number[]): Level[] {
   const out: Level[] = [];
   for (const l of levelLines(lines)) {
-    const name = l.label?.trim() || WORDS[l.kind as StatKind | 'target'];
+    const name = l.label?.trim() || WORDS[l.kind as StatKind | 'target']();
     const axes: Axis[] = scatter ? (l.axis ? [l.axis] : l.kind === 'median' ? ['x', 'y'] : ['y']) : ['y'];
     for (const axis of axes) {
       const value = l.kind === 'target' ? (typeof l.value === 'number' && Number.isFinite(l.value) ? l.value : null) : statOf(l.kind as StatKind, read(axis));
@@ -50,7 +51,7 @@ export function resolveLevels(lines: TileLine[] | undefined, scatter: boolean, r
 }
 
 /** About how wide a label of 11 px text is. */
-const textWidth = (t: string) => 8 + t.length * 6.3;
+const textWidth = (s: string) => 8 + s.length * 6.3;
 
 /** The width in px of the widest name, as it is written on the chart. */
 export const widestName = (levels: Level[], short: (axis: Axis, n: number) => string): number =>

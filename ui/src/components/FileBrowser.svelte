@@ -7,10 +7,11 @@
   import { app } from '../lib/state.svelte';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
+  import { t, tn } from '../lib/i18n';
 
   let {
     mode,
-    suggestedName = 'Untitled',
+    suggestedName = t('Untitled'),
     onpick,
     onclose,
   }: {
@@ -60,7 +61,7 @@
   function confirm() {
     if (mode === 'save') {
       const sep = listing!.path.includes('\\') ? '\\' : '/';
-      const n = name.trim() || 'Untitled';
+      const n = name.trim() || t('Untitled');
       onpick([`${listing!.path.replace(/[\\/]$/, '')}${sep}${n.endsWith('.tenun') ? n : n + '.tenun'}`]);
     } else if (mode === 'folder') {
       if (listing) onpick([listing.path]);
@@ -69,18 +70,18 @@
     }
   }
 
-  const title = $derived(mode === 'files' ? 'Choose data files' : mode === 'folder' ? 'Choose a folder' : mode === 'open' ? 'Open a workspace' : 'Save workspace');
+  const title = $derived(mode === 'files' ? t('Choose data files') : mode === 'folder' ? t('Choose a folder') : mode === 'open' ? t('Open a workspace') : t('Save workspace'));
 </script>
 
 <Modal {title} {onclose} width={640}>
   <div class="bar">
-    <button class="btn icon" title="Up one folder" disabled={!listing?.parent} onclick={() => load(listing?.parent ?? undefined)}>
+    <button class="btn icon" title={t('Up one folder')} disabled={!listing?.parent} onclick={() => load(listing?.parent ?? undefined)}>
       <Icon name="chevronLeft" />
     </button>
     <input
       class="field path"
       bind:value={typed}
-      aria-label="Folder"
+      aria-label={t('Folder')}
       onkeydown={(e) => e.key === 'Enter' && load(typed)} />
   </div>
   <div class="body">
@@ -107,12 +108,12 @@
       {:else}
         <p class="none">
           {mode === 'folder'
-            ? 'There are no folders inside this one.'
+            ? t('There are no folders inside this one.')
             : mode === 'files'
-            ? 'No Excel, CSV, Parquet, SQLite or DuckDB files here.'
+            ? t('No Excel, CSV, Parquet, SQLite or DuckDB files here.')
             : mode === 'open'
-              ? 'No .tenun files here.'
-              : 'This folder is empty.'}
+              ? t('No .tenun files here.')
+              : t('This folder is empty.')}
         </p>
       {/each}
     </div>
@@ -120,21 +121,21 @@
   {#snippet footer()}
     {#if mode === 'save'}
       <label class="save-name">
-        <span class="label">Name</span>
+        <span class="label">{t('Name')}</span>
         <input class="field" bind:value={name} onkeydown={(e) => e.key === 'Enter' && confirm()} />
       </label>
     {:else}
       <span class="hint">
         {mode === 'files'
-          ? 'Click to select one or more files.'
+          ? t('Click to select one or more files.')
           : mode === 'folder'
-            ? `Open the folder, then press Use this folder. It holds ${dataFiles} CSV or Excel ${dataFiles === 1 ? 'file' : 'files'}.`
+            ? tn('Open the folder, then press Use this folder. It holds {n} CSV or Excel file.', 'Open the folder, then press Use this folder. It holds {n} CSV or Excel files.', dataFiles)
             : ''}
       </span>
     {/if}
-    <button class="btn" onclick={onclose}>Cancel</button>
+    <button class="btn" onclick={onclose}>{t('Cancel')}</button>
     <button class="btn primary" disabled={mode === 'folder' ? !listing : mode !== 'save' && !chosen.length} onclick={confirm}>
-      {mode === 'files' ? (chosen.length > 1 ? `Add ${chosen.length} files` : 'Add') : mode === 'folder' ? 'Use this folder' : mode === 'open' ? 'Open' : 'Save'}
+      {mode === 'files' ? (chosen.length > 1 ? t('Add {n} files', { n: chosen.length }) : t('Add')) : mode === 'folder' ? t('Use this folder') : mode === 'open' ? t('Open') : t('Save')}
     </button>
   {/snippet}
 </Modal>

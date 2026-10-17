@@ -5,6 +5,7 @@
   import { newStory } from '../lib/flow';
   import Menu from './dash/Menu.svelte';
   import Icon from './Icon.svelte';
+  import { t } from '../lib/i18n';
   import FileBrowser from './FileBrowser.svelte';
   import { palette, modKey } from './Palette.svelte';
 
@@ -40,7 +41,7 @@
 
   async function save() {
     if (app.snap!.path) {
-      if (await app.run(null, () => api.save())) app.toast('Saved');
+      if (await app.run(null, () => api.save())) app.toast(t('Saved'));
       return;
     }
     await saveAs();
@@ -49,7 +50,7 @@
   async function saveAs() {
     if (app.health?.native) {
       const { paths } = await api.pick({ kind: 'save_workspace', name: ws.name });
-      if (paths[0] && (await app.run('Saving…', () => api.save(paths[0])))) app.toast('Saved');
+      if (paths[0] && (await app.run(t('Saving…'), () => api.save(paths[0])))) app.toast(t('Saved'));
     } else {
       browser = 'save';
     }
@@ -65,21 +66,21 @@
   }
 
   async function openPath(p: string) {
-    if (await app.run('Opening…', () => api.open(p))) {
+    if (await app.run(t('Opening…'), () => api.open(p))) {
       const first = app.dashboards[0];
       go(first ? { view: 'dashboard', id: first.id } : { view: 'data' });
     }
   }
 
   async function newWs() {
-    if (app.snap!.dirty && !confirm('This workspace is not saved. Start a new one anyway?')) return;
+    if (app.snap!.dirty && !confirm(t('This workspace is not saved. Start a new one anyway?'))) return;
     if (await app.run(null, () => api.newWorkspace())) go({ view: 'home' });
   }
 
   const themes: { id: ThemePref; icon: 'sun' | 'moon' | 'auto'; label: string }[] = [
-    { id: 'light', icon: 'sun', label: 'Light' },
-    { id: 'dark', icon: 'moon', label: 'Dark' },
-    { id: 'system', icon: 'auto', label: 'Match system' },
+    { id: 'light', icon: 'sun', label: t('Light') },
+    { id: 'dark', icon: 'moon', label: t('Dark') },
+    { id: 'system', icon: 'auto', label: t('Match system') },
   ];
 </script>
 
@@ -90,7 +91,7 @@
       <!-- svelte-ignore a11y_autofocus -->
       <input
         class="field rename"
-        aria-label="Workspace name"
+        aria-label={t('Workspace name')}
         bind:value={nameDraft}
         autofocus
         onblur={commitRename}
@@ -102,7 +103,7 @@
   {:else}
     <button
       class="ws-card"
-      title="Workspace: double-click to rename"
+      title={t('Workspace: double-click to rename')}
       aria-haspopup="menu"
       aria-expanded={!!wsMenu}
       ondblclick={() => {
@@ -117,7 +118,7 @@
       <span class="ws-text">
         <span class="ws-name">{ws.name}</span>
         <span class="state" class:unsaved={app.snap!.dirty}>
-          {#if app.snap!.path}{app.snap!.dirty ? 'Unsaved changes' : 'Saved automatically'}{:else}Not saved yet{/if}
+          {#if app.snap!.path}{app.snap!.dirty ? t('Unsaved changes') : t('Saved automatically')}{:else}{t('Not saved yet')}{/if}
         </span>
       </span>
       <Icon name="chevronUpDown" size={14} />
@@ -128,41 +129,41 @@
       x={wsMenu.x}
       y={wsMenu.y}
       items={[
-        { label: 'Start page', run: () => go({ view: 'home' }) },
-        { label: 'Rename…', run: startRename },
-        { label: app.snap!.path ? 'Save' : 'Save as…', run: save },
-        ...(app.snap!.path ? [{ label: 'Save as…', run: saveAs }] : []),
-        { label: 'Open workspace…', run: open },
-        { label: 'New workspace', run: newWs },
-        ...(app.health?.native ? [{ label: 'Open in browser', run: () => void api.openBrowser() }] : []),
+        { label: t('Start page'), run: () => go({ view: 'home' }) },
+        { label: t('Rename…'), run: startRename },
+        { label: app.snap!.path ? t('Save') : t('Save as…'), run: save },
+        ...(app.snap!.path ? [{ label: t('Save as…'), run: saveAs }] : []),
+        { label: t('Open workspace…'), run: open },
+        { label: t('New workspace'), run: newWs },
+        ...(app.health?.native ? [{ label: t('Open in browser'), run: () => void api.openBrowser() }] : []),
       ]}
       onclose={() => (wsMenu = null)} />
   {/if}
 
-  <button class="search" onclick={() => (palette.open = true)} title="Search and commands ({modKey}K)">
+  <button class="search" onclick={() => (palette.open = true)} title={t('Search and commands ({key})', { key: `${modKey}K` })}>
     <Icon name="search" size={14} />
-    <span>Search</span>
+    <span>{t('Search')}</span>
     {#if !app.phone}<kbd>{modKey}K</kbd>{/if}
   </button>
 
-  <div class="heading section-label"><span>Workspace</span></div>
+  <div class="heading section-label"><span>{t('Workspace')}</span></div>
   <div class="group">
     <button class="item" class:on={route.view === 'data'} aria-current={route.view === 'data' ? 'page' : undefined} onclick={() => go({ view: 'data' })}>
-      <Icon name="table" /> Data
+      <Icon name="table" /> {t('Data')}
       {#if app.tables.length}<span class="count">{app.tables.length}</span>{/if}
     </button>
     <button class="item" class:on={route.view === 'model'} aria-current={route.view === 'model' ? 'page' : undefined} onclick={() => go({ view: 'model' })}>
-      <Icon name="model" /> Model
+      <Icon name="model" /> {t('Model')}
       {#if ws.relationships.length}<span class="count">{ws.relationships.length}</span>{/if}
     </button>
   </div>
 
   <div class="heading section-label">
-    <span>Dashboards</span>
+    <span>{t('Dashboards')}</span>
     <button
       class="btn plain icon small"
-      title="New dashboard or story"
-      aria-label="New dashboard or story"
+      title={t('New dashboard or story')}
+      aria-label={t('New dashboard or story')}
       aria-haspopup="menu"
       onclick={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
@@ -173,8 +174,8 @@
         x={newMenu.x}
         y={newMenu.y}
         items={[
-          { label: 'Dashboard', run: () => addDashboard('grid') },
-          { label: 'Story', run: () => addDashboard('story') },
+          { label: t('Dashboard'), run: () => addDashboard('grid') },
+          { label: t('Story'), run: () => addDashboard('story') },
         ]}
         onclose={() => (newMenu = null)} />
     {/if}
@@ -187,32 +188,32 @@
         <span class="ellipsis">{d.title}</span>
       </button>
     {:else}
-      <p class="empty">No dashboards yet.</p>
+      <p class="empty">{t('No dashboards yet.')}</p>
     {/each}
   </div>
 
   <div class="foot">
     <button class="site-link" onclick={() => (app.siteOpen = true)}>
-      <Icon name="globe" size={14} /> Site…{#if app.snap?.workspace.site?.on}<span class="on-dot" title="This workspace is a site"></span>{/if}
+      <Icon name="globe" size={14} /> {t('Site…')}{#if app.snap?.workspace.site?.on}<span class="on-dot" title={t('This workspace is a site')}></span>{/if}
     </button>
     <div class="theme-row">
-      <div class="seg" role="radiogroup" aria-label="Appearance">
-        {#each themes as t}
+      <div class="seg" role="radiogroup" aria-label={t('Appearance')}>
+        {#each themes as th}
           <button
             role="radio"
-            aria-checked={app.themePref === t.id}
-            class:on={app.themePref === t.id}
-            title={t.label}
-            onclick={() => app.setTheme(t.id)}><Icon name={t.icon} size={14} /></button>
+            aria-checked={app.themePref === th.id}
+            class:on={app.themePref === th.id}
+            title={th.label}
+            onclick={() => app.setTheme(th.id)}><Icon name={th.icon} size={14} /></button>
         {/each}
       </div>
       <span class="foot-actions">
         {#if app.health?.native}
-          <button class="btn plain icon gear" title="Open this workspace in your web browser" aria-label="Open in browser" onclick={() => api.openBrowser()}>
+          <button class="btn plain icon gear" title={t('Open this workspace in your web browser')} aria-label={t('Open in browser')} onclick={() => api.openBrowser()}>
             <Icon name="globe" size={16} />
           </button>
         {/if}
-        <button class="btn plain icon gear" title="Settings" aria-label="Settings" onclick={() => (app.settingsOpen = true)}>
+        <button class="btn plain icon gear" title={t('Settings')} aria-label={t('Settings')} onclick={() => (app.settingsOpen = true)}>
           <Icon name="settings" size={16} />
         </button>
       </span>
@@ -229,7 +230,7 @@
       const mode = browser;
       browser = null;
       if (mode === 'open') await openPath(paths[0]);
-      else if (await app.run('Saving…', () => api.save(paths[0]))) app.toast('Saved');
+      else if (await app.run(t('Saving…'), () => api.save(paths[0]))) app.toast(t('Saved'));
     }} />
 {/if}
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { BaseEdge, EdgeLabel, getBezierPath, type EdgeProps } from '@xyflow/svelte';
   import Icon from '../Icon.svelte';
+  import { t } from '../../lib/i18n';
 
   let { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected }: EdgeProps = $props();
 
@@ -31,8 +32,8 @@
   /** What a person who cannot see the chip hears, and what a long name shows when it is hovered: the name, the kind and the warning. */
   const said = $derived(
     d.needsName
-      ? `Name these links. ${d.kind ?? ''}${d.note ? `. Warning: ${d.note}` : ''}`
-      : `${d.name ?? 'Link'}, ${d.kind ?? ''}${d.unusable ? ', not used' : ''}${d.note ? `. Warning: ${d.note}` : ''}`,
+      ? `${t('Name these links.')} ${d.kind ?? ''}${d.note ? t('. Warning: {note}', { note: d.note }) : ''}`
+      : `${d.name ?? t('Link')}, ${d.kind ?? ''}${d.unusable ? t(', not used') : ''}${d.note ? t('. Warning: {note}', { note: d.note }) : ''}`,
   );
 </script>
 
@@ -44,22 +45,22 @@
 <EdgeLabel x={geo[1]} y={geo[2] + (d.dy ?? 0)} class="nodrag nopan" transparent>
   {#if d.suggestion}
     <div class="pill" title={d.reason}>
-      <button class="ok" onclick={d.onaccept}><Icon name="check" size={12} /> Link</button>
-      <button class="no" aria-label="Dismiss suggestion" onclick={d.ondismiss}><Icon name="x" size={12} /></button>
+      <button class="ok" onclick={d.onaccept}><Icon name="check" size={12} /> {t('Link')}</button>
+      <button class="no" aria-label={t('Dismiss suggestion')} onclick={d.ondismiss}><Icon name="x" size={12} /></button>
     </div>
   {:else}
     <div class="pill chip" class:on={selected} class:warn={!!d.note} class:needs={d.needsName}>
-      <button class="open" onclick={d.onopen} title={said} aria-label={`Open this link: ${said}`}>
+      <button class="open" onclick={d.onopen} title={said} aria-label={t('Open this link: {what}', { what: said })}>
         {#if d.note}<Icon name="warning" size={12} />{/if}
         {#if d.needsName}
-          <span class="name needs">Name these links</span>
+          <span class="name needs">{t('Name these links')}</span>
         {:else if d.name}
           <span class="name">{d.name}</span>
         {/if}
         <span class="kind">{d.kind}</span>
       </button>
       {#if selected}
-        <button class="no" onclick={d.onremove}><Icon name="trash" size={12} /> Remove</button>
+        <button class="no" onclick={d.onremove}><Icon name="trash" size={12} /> {t('Remove')}</button>
       {/if}
     </div>
   {/if}

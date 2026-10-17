@@ -43,32 +43,32 @@
     go({ view: 'dashboard', id: d.id });
   }
 
-  const themeNames: Record<ThemePref, string> = { light: 'Light', dark: 'Dark', system: 'Match system' };
+  const themeNames: Record<ThemePref, string> = { light: t('Light appearance'), dark: t('Dark appearance'), system: t('Match system appearance') };
 
   const commands = $derived.by<Command[]>(() => {
     if (!app.snap) return [];
     const out: Command[] = [];
     for (const d of app.dashboards) {
-      out.push({ id: `d:${d.id}`, group: 'Dashboards', label: d.title || 'Untitled', icon: d.layout === 'flow' ? 'text' : 'dashboard', hint: d.layout === 'flow' ? 'Story' : 'Dashboard', run: () => go({ view: 'dashboard', id: d.id }) });
+      out.push({ id: `d:${d.id}`, group: t('Dashboards'), label: d.title || t('Untitled'), icon: d.layout === 'flow' ? 'text' : 'dashboard', hint: d.layout === 'flow' ? t('Story') : t('Dashboard'), run: () => go({ view: 'dashboard', id: d.id }) });
     }
-    for (const t of app.tables) {
-      const src = app.snap.workspace.sources.find((s) => s.id === t.source_id);
-      out.push({ id: `t:${t.id}`, group: 'Tables', label: t.label || t.name, icon: 'table', keys: src?.name, hint: src && src.name !== (t.label || t.name) ? src.name : 'Table', run: () => go({ view: 'data', table: t.id }) });
+    for (const tb of app.tables) {
+      const src = app.snap.workspace.sources.find((s) => s.id === tb.source_id);
+      out.push({ id: `t:${tb.id}`, group: t('Tables'), label: tb.label || tb.name, icon: 'table', keys: src?.name, hint: src && src.name !== (tb.label || tb.name) ? src.name : t('Table'), run: () => go({ view: 'data', table: tb.id }) });
     }
     out.push(
-      { id: 'go:data', group: 'Go to', label: 'Data', icon: 'table', keys: 'sources tables', run: () => go({ view: 'data' }) },
-      { id: 'go:model', group: 'Go to', label: 'Model', icon: 'model', keys: 'relationships links', run: () => go({ view: 'model' }) },
-      { id: 'go:home', group: 'Go to', label: 'Start page', icon: 'sparkles', keys: 'home welcome', run: () => go({ view: 'home' }) },
-      { id: 'a:add', group: 'Actions', label: 'Add data…', icon: 'plus', keys: 'source excel csv database import', run: () => (app.addOpen = true) },
-      { id: 'a:dash', group: 'Actions', label: 'New dashboard', icon: 'dashboard', keys: 'create page', run: () => addDashboard('grid') },
-      { id: 'a:story', group: 'Actions', label: 'New story', icon: 'text', keys: 'create page document', run: () => addDashboard('story') },
-      { id: 'a:site', group: 'Actions', label: 'Site…', icon: 'globe', keys: 'publish web', hint: app.snap.workspace.site?.on ? 'On' : undefined, run: () => (app.siteOpen = true) },
-      { id: 'a:settings', group: 'Actions', label: 'Settings', icon: 'settings', keys: 'preferences options', run: () => (app.settingsOpen = true) },
-      { id: 'a:report', group: 'Actions', label: t('Report a problem…'), icon: 'warning', keys: 'bug issue help feedback', run: () => (app.reportOpen = true) },
+      { id: 'go:data', group: t('Go to'), label: t('Data'), icon: 'table', keys: 'sources tables', run: () => go({ view: 'data' }) },
+      { id: 'go:model', group: t('Go to'), label: t('Model'), icon: 'model', keys: 'relationships links', run: () => go({ view: 'model' }) },
+      { id: 'go:home', group: t('Go to'), label: t('Start page'), icon: 'sparkles', keys: 'home welcome', run: () => go({ view: 'home' }) },
+      { id: 'a:add', group: t('Actions'), label: t('Add data…'), icon: 'plus', keys: 'source excel csv database import', run: () => (app.addOpen = true) },
+      { id: 'a:dash', group: t('Actions'), label: t('New dashboard'), icon: 'dashboard', keys: 'create page', run: () => addDashboard('grid') },
+      { id: 'a:story', group: t('Actions'), label: t('New story'), icon: 'text', keys: 'create page document', run: () => addDashboard('story') },
+      { id: 'a:site', group: t('Actions'), label: t('Site…'), icon: 'globe', keys: 'publish web', hint: app.snap.workspace.site?.on ? t('On') : undefined, run: () => (app.siteOpen = true) },
+      { id: 'a:settings', group: t('Actions'), label: t('Settings'), icon: 'settings', keys: 'preferences options', run: () => (app.settingsOpen = true) },
+      { id: 'a:report', group: t('Actions'), label: t('Report a problem…'), icon: 'warning', keys: 'bug issue help feedback', run: () => (app.reportOpen = true) },
     );
-    if (app.health?.native) out.push({ id: 'a:browser', group: 'Actions', label: 'Open in browser', icon: 'globe', run: () => api.openBrowser() });
+    if (app.health?.native) out.push({ id: 'a:browser', group: t('Actions'), label: t('Open in browser'), icon: 'globe', run: () => api.openBrowser() });
     for (const [p, icon] of [['light', 'sun'], ['dark', 'moon'], ['system', 'auto']] as const) {
-      out.push({ id: `th:${p}`, group: 'Appearance', label: `${themeNames[p]} appearance`, icon, keys: 'theme mode', hint: app.themePref === p ? 'On' : undefined, run: () => app.setTheme(p) });
+      out.push({ id: `th:${p}`, group: t('Appearance'), label: themeNames[p], icon, keys: 'theme mode', hint: app.themePref === p ? t('On') : undefined, run: () => app.setTheme(p) });
     }
     return out;
   });
@@ -158,15 +158,15 @@
 
 {#if palette.open}
   <div class="scrim" role="presentation" use:portal onpointerdown={close}></div>
-  <div class="palette sheet-in" role="dialog" aria-modal="true" aria-label="Command palette" tabindex="-1" use:portal onkeydown={onkey}>
+  <div class="palette sheet-in" role="dialog" aria-modal="true" aria-label={t('Command palette')} tabindex="-1" use:portal onkeydown={onkey}>
     <div class="search">
       <Icon name="search" size={16} />
       <input
         bind:this={input}
         bind:value={query}
         type="text"
-        placeholder="Jump to a dashboard or a table, or run an action"
-        aria-label="Search"
+        placeholder={t('Jump to a dashboard or a table, or run an action')}
+        aria-label={t('Search')}
         role="combobox"
         aria-expanded="true"
         aria-controls="palette-list"
@@ -195,13 +195,13 @@
           {#if i === at}<Icon name="enter" size={14} class="enter" />{/if}
         </div>
       {:else}
-        <p class="none">Nothing matches “{query.trim()}”.</p>
+        <p class="none">{t('Nothing matches “{q}”.', { q: query.trim() })}</p>
       {/each}
     </div>
     <div class="foot">
-      <span><kbd>↑</kbd><kbd>↓</kbd> to move</span>
-      <span><kbd>↵</kbd> to open</span>
-      <span class="push"><kbd>{modKey}K</kbd> to close</span>
+      <span><kbd>↑</kbd><kbd>↓</kbd> {t('to move')}</span>
+      <span><kbd>↵</kbd> {t('to open')}</span>
+      <span class="push"><kbd>{modKey}K</kbd> {t('to close')}</span>
     </div>
   </div>
 {/if}

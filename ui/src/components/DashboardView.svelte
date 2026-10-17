@@ -32,6 +32,7 @@
   import { buildClip, clipText, dashboardCopy, freeName, withReach, joinMeasures, joinStyles, landTiles, measureIds, placeBelow, readClip, renamesFor, rewriteFormula, sameWorkspace, type Clip, type Matches } from '../lib/clipboard';
   import MatchFields from './dash/MatchFields.svelte';
   import CardStyles from './dash/CardStyles.svelte';
+  import { t, tn } from '../lib/i18n';
   // tenun.cloud is not live yet; build with VITE_TENUN_CLOUD=1 to show Publish.
   const CLOUD_ON = import.meta.env.VITE_TENUN_CLOUD === '1';
 
@@ -98,7 +99,7 @@
   );
   const allFilters = $derived<DashFilter[]>([...pins, ...everyPage, ...selections, ...filters]);
   /** The page an every-page filter comes from, for its chip. */
-  const pageTitle = (fromTile: string) => app.dashboards.find((d) => d.id === everySource(fromTile)?.dashboard)?.title || 'another page';
+  const pageTitle = (fromTile: string) => app.dashboards.find((d) => d.id === everySource(fromTile)?.dashboard)?.title || t('another page');
   /** Clears an every-page filter where it comes from: the filter tile on its page. */
   function clearEvery(fromTile: string) {
     const src = everySource(fromTile);
@@ -331,11 +332,12 @@
     return app.snap!.workspace.sources.filter((s) => ids.has(s.id));
   });
   /** A tile's subtitle: the sources it reads, when the dashboard reads more than one (so it tells something). */
-  function subtitleOf(t: Tile): string {
-    if (usedSources.length < 2 || ['kpi', 'text', 'image', 'filter', 'param'].includes(t.type)) return '';
-    const ids = sourceIdsOf(t);
+  function subtitleOf(tl: Tile): string {
+    if (usedSources.length < 2 || ['kpi', 'text', 'image', 'filter', 'param'].includes(tl.type)) return '';
+    const ids = sourceIdsOf(tl);
     const names = usedSources.filter((s) => ids.has(s.id)).map((s) => s.name);
-    return names.length ? `From ${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]}` : '';
+    if (!names.length) return '';
+    return t('From {sources}', { sources: names.length > 1 ? t('{list} and {last}', { list: names.slice(0, -1).join(', '), last: names.at(-1)! }) : names[0] });
   }
   const DB_KINDS = new Set(['sqlite', 'duckdb', 'postgres', 'mysql']);
   /** Undo and redo name their keys the way this computer writes them. */
@@ -345,13 +347,13 @@
   // ---- the filter bar: the dashboard's own filters, shown in one row (look v3) ----
   /** The filter tiles of this page, each one a button in the filter bar that opens its control. */
   const filterTiles = $derived((dash?.tiles ?? []).filter((t) => t.type === 'filter' && t.dims[0]));
-  function filterChip(t: Tile) {
-    const d = t.dims[0];
-    const sel = selections.find((f) => f.fromTile === t.id);
+  function filterChip(tl: Tile) {
+    const d = tl.dims[0];
+    const sel = selections.find((f) => f.fromTile === tl.id);
     const dtype = app.table(d.table)?.columns.find((c) => c.name === d.column)?.dtype;
-    const name = t.title?.trim() || pretty(dimLabel({ table: d.table, column: d.column, via: d.via }, app.tables));
+    const name = tl.title?.trim() || pretty(dimLabel({ table: d.table, column: d.column, via: d.via }, app.tables));
     const text = sel ? filterText(sel, app.tables) : '';
-    return { name, value: sel ? text.slice(text.indexOf(': ') + 2) || text : 'All', on: !!sel, date: dtype === 'date' || dtype === 'datetime' };
+    return { name, value: sel ? text.slice(text.indexOf(': ') + 2) || text : t('All'), on: !!sel, date: dtype === 'date' || dtype === 'datetime' };
   }
   /** The filter tile whose control is open under its button in the filter bar. */
   let filterPop = $state<{ id: string; x: number; y: number } | null>(null);
@@ -380,8 +382,8 @@
     usedSources
       .map((s) => {
         const at = loadedAt[s.id] ? stampLabel(loadedAt[s.id]) : '';
-        if (app.snap!.errors[s.id]) return `${s.name}: could not be read${at ? ` (last loaded ${at})` : ''}`;
-        return `${s.name}: ${at || 'not loaded'}`;
+        if (app.snap!.errors[s.id]) return at ? t('{source}: could not be read (last loaded {at})', { source: s.name, at }) : t('{source}: could not be read', { source: s.name });
+        return `${s.name}: ${at || t('not loaded')}`;
       })
       .join('\n'),
   );
@@ -631,17 +633,17 @@
   }
 
   function duplicate(id: string) {
-    const t = dash?.tiles.find((x) => x.id === id);
-    if (!dash || !t) return;
-    const copy = copyOf(t, dash.tiles, t.title ? `${t.title} copy` : '');
+    const tl = dash?.tiles.find((x) => x.id === id);
+    if (!dash || !tl) return;
+    const copy = copyOf(tl, dash.tiles, tl.title ? t('{name} copy', { name: tl.title }) : '');
     update((ts) => [...ts, copy]);
     selectedTile = copy.id;
   }
 
   /** Copy a tile to another dashboard (or a new one when `to` is null). */
   function copyTo(id: string, to: string | null) {
-    const t = dash?.tiles.find((x) => x.id === id);
-    if (!t) return;
+    const tl = dash?.tiles.find((x) => x.id === id);
+    if (!tl) return;
     let target = to ? app.dashboards.find((d) => d.id === to) : undefined;
     if (!target) {
       target = newDashboard(app.dashboards.length);
@@ -649,9 +651,9 @@
       target = app.dashboards.find((d) => d.id === target!.id)!;
     }
     // On another page, the tiles its reach names are not there (v5 build 02).
-    target.tiles = [...target.tiles, withReach(copyOf(t, target.tiles, t.title), new Map())];
+    target.tiles = [...target.tiles, withReach(copyOf(tl, target.tiles, tl.title), new Map())];
     app.saveDashboards();
-    app.toast(`Copied to ${target.title}`);
+    app.toast(t('Copied to {page}', { page: target.title }));
   }
 
   /** The arrow keys: the tile after (or before) this one in reading order gets the focus. */
@@ -740,7 +742,7 @@
 
   async function exportPicture(kind: 'png' | 'pdf') {
     if (!dash || exporting) return;
-    exporting = 'Preparing…';
+    exporting = t('Preparing…');
     try {
       if (kind === 'png') await downloadDashboardPng(picture(app.theme));
       else await downloadDashboardPdf(picture('light'));
@@ -759,12 +761,12 @@
       if (!paths[0]) return;
       target = paths[0].endsWith('.html') ? paths[0] : paths[0] + '.html';
     }
-    exporting = 'Preparing…';
+    exporting = t('Preparing…');
     const fs = $state.snapshot(filters) as DashFilter[];
     try {
       if (target) {
         await api.exportTo(dash.id, fs, target);
-        app.toast(`Exported ${target.split(/[\\/]/).pop()}`);
+        app.toast(t('Exported {file}', { file: target.split(/[\\/]/).pop() ?? '' }));
       } else {
         const html = await api.exportHtml(dash.id, fs);
         const a = document.createElement('a');
@@ -772,7 +774,7 @@
         a.download = `${dash.title.replace(/[\\/:*?"<>|]/g, '_')}.html`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-        app.toast('Exported');
+        app.toast(t('Exported'));
       }
     } catch (e) {
       app.error(e);
@@ -796,9 +798,9 @@
       const ext = zip ? '.zip' : '.html';
       target = paths[0].endsWith(ext) ? paths[0] : paths[0] + ext;
     }
-    exporting = 'Preparing…';
+    exporting = t('Preparing…');
     app.siteProgress = null;
-    const tick = setInterval(() => app.siteProgress && (exporting = `Page ${app.siteProgress.done} of ${app.siteProgress.total}…`), 200);
+    const tick = setInterval(() => app.siteProgress && (exporting = t('Page {done} of {total}…', { done: app.siteProgress.done, total: app.siteProgress.total })), 200);
     try {
       const { bytes, sizes } = await api.exportSite(zip, target ?? undefined);
       if (!target) {
@@ -811,8 +813,8 @@
       const total = target ? Object.values(sizes).reduce((t, n) => t + n, 0) : bytes.length;
       if (total > SITE_WARN_BYTES) {
         const big = Object.entries(sizes).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([t, n]) => `${t} (${mb(n)})`).join(', ');
-        app.toast(`The site is ${mb(total)}, which is slow to open. The biggest pages: ${big}.`, 'error');
-      } else app.toast(target ? `Exported ${target.split(/[\\/]/).pop()}` : 'Exported the site');
+        app.toast(t('The site is {size}, which is slow to open. The biggest pages: {pages}.', { size: mb(total), pages: big }), 'error');
+      } else app.toast(target ? t('Exported {file}', { file: target.split(/[\\/]/).pop() ?? '' }) : t('Exported the site'));
     } catch (e) {
       app.error(e);
     } finally {
@@ -858,14 +860,14 @@
     return buildClip($state.snapshot(tiles) as Tile[], app.snap!.workspace, app.tables, tablesOf, whole && dash ? { title: dash.title, grain: dash.grain ?? null } : undefined);
   }
 
-  const copiedWords = (n: number) => (n === 1 ? 'Copied the tile' : `Copied ${n} tiles`);
+  const copiedWords = (n: number) => tn('Copied the tile', 'Copied {n} tiles', n);
 
   async function copyToClipboard(clip: Clip, said: string) {
     try {
       await navigator.clipboard.writeText(clipText(clip));
       app.toast(said);
     } catch {
-      app.toast('The clipboard is not open to this page. Use Ctrl+C (⌘C on a Mac) on a tile instead.', 'error');
+      app.toast(t('The clipboard is not open to this page. Use Ctrl+C (⌘C on a Mac) on a tile instead.'), 'error');
     }
   }
 
@@ -900,12 +902,12 @@
     try {
       text = await navigator.clipboard.readText();
     } catch {
-      app.toast('The clipboard is not open to this page. Press Ctrl+V (⌘V on a Mac) on the dashboard instead.', 'error');
+      app.toast(t('The clipboard is not open to this page. Press Ctrl+V (⌘V on a Mac) on the dashboard instead.'), 'error');
       return;
     }
     const clip = readClip(text);
     if (clip) paste(clip);
-    else app.toast('The clipboard holds no Tenun tiles. Copy a tile or a dashboard first.');
+    else app.toast(t('The clipboard holds no Tenun tiles. Copy a tile or a dashboard first.'));
   }
 
   function paste(clip: Clip) {
@@ -926,7 +928,7 @@
         const r = await api.setMeasures([...here, ...kept]);
         if (!('saved' in r)) break;
         app.snap = r.saved;
-        if (left.length) app.toast(`Not pasted: ${left.join(' ')}`, 'error');
+        if (left.length) app.toast(t('Not pasted: {list}', { list: left.join(' ') }), 'error');
         return measureIds(ids, added, kept, r.saved.workspace.measures ?? [], here.length);
       } catch (e) {
         if (!(e instanceof MeasureRefused) || e.measure < here.length) {
@@ -937,7 +939,7 @@
         kept.splice(e.measure - here.length, 1);
       }
     }
-    if (left.length) app.toast(`Not pasted: ${left.join(' ')}`, 'error');
+    if (left.length) app.toast(t('Not pasted: {list}', { list: left.join(' ') }), 'error');
     return measureIds(ids, added, [], [], here.length);
   }
 
@@ -960,14 +962,14 @@
       const d: Dashboard = { ...newDashboard(app.dashboards.length), title: freeName(clip.dashboard.title, app.dashboards.map((x) => x.title)), tiles, grain: clip.dashboard.grain ?? undefined };
       app.snap!.workspace.dashboards.push(d);
       app.saveDashboards();
-      app.toast(`Pasted the dashboard as ${d.title}`);
+      app.toast(t('Pasted the dashboard as {name}', { name: d.title }));
       go({ view: 'dashboard', id: d.id });
       return;
     }
     const placed = placeBelow(tiles, dash.tiles);
     update((ts) => [...ts, ...placed]);
     picked = placed.length > 1 ? placed.map((t) => t.id) : [];
-    app.toast(placed.length === 1 ? 'Pasted the tile' : `Pasted ${placed.length} tiles`);
+    app.toast(tn('Pasted the tile', 'Pasted {n} tiles', placed.length));
     await nextTick();
     document.querySelector<HTMLElement>(`[data-tile="${CSS.escape(placed[0]?.id ?? '')}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
@@ -975,7 +977,7 @@
   /** A copy of this dashboard, after it in the list. Undo takes it away. */
   function duplicateDashboard() {
     if (!dash) return;
-    const d = dashboardCopy($state.snapshot(dash) as Dashboard, freeName(`${dash.title} copy`, app.dashboards.map((x) => x.title)), newId);
+    const d = dashboardCopy($state.snapshot(dash) as Dashboard, freeName(t('{name} copy', { name: dash.title }), app.dashboards.map((x) => x.title)), newId);
     const at = app.dashboards.findIndex((x) => x.id === dash.id);
     app.snap!.workspace.dashboards.splice(at + 1, 0, d);
     app.saveDashboards();
@@ -983,18 +985,20 @@
     if (past.length > MAX_STEPS) past.shift();
     future.length = 0;
     historyTick++;
-    app.toast(`Duplicated as ${d.title}`);
+    app.toast(t('Duplicated as {name}', { name: d.title }));
   }
 
   function removeDashboard() {
-    if (!dash || !confirm(`Delete the dashboard “${dash.title}”?`)) return;
+    if (!dash || !confirm(t('Delete the dashboard “{name}”?', { name: dash.title }))) return;
     app.snap!.workspace.dashboards = app.dashboards.filter((d) => d.id !== dash.id);
     app.saveDashboards();
     const next = app.dashboards[0];
     go(next ? { view: 'dashboard', id: next.id } : { view: 'home' });
   }
 
-  const sel = $derived(dash?.tiles.find((t) => t.id === selectedTile));
+  const sel = $derived(dash?.tiles.find((x) => x.id === selectedTile));
+  /** The words of the grains in the grain switch. */
+  const grainWord = (g: Grain) => ({ day: t('day'), week: t('week'), month: t('month'), quarter: t('quarter'), year: t('year') } as Record<string, string>)[g] ?? g;
 </script>
 
 <svelte:window
@@ -1011,10 +1015,10 @@
   <!-- The toolbar: where you are, how fresh the data is, and what you can do (look v3). -->
   <header class="toolbar" class:phone>
     {#if !phone}
-      <nav class="crumbs" aria-label="Breadcrumb">
-        <button class="crumb" title="Home of this workspace" onclick={() => go({ view: 'home' })}>{app.snap?.workspace.name || 'Workspace'}</button>
+      <nav class="crumbs" aria-label={t('Breadcrumb')}>
+        <button class="crumb" title={t('Home of this workspace')} onclick={() => go({ view: 'home' })}>{app.snap?.workspace.name || t('Workspace')}</button>
         <svg class="sep" width="12" height="12" viewBox="0 0 20 20" aria-hidden="true"><path d="M8 5l5 5-5 5" /></svg>
-        <span class="crumb plain">{story ? 'Stories' : 'Dashboards'}</span>
+        <span class="crumb plain">{story ? t('Stories') : t('Dashboards')}</span>
         <svg class="sep" width="12" height="12" viewBox="0 0 20 20" aria-hidden="true"><path d="M8 5l5 5-5 5" /></svg>
         <span class="crumb here" aria-current="page">{dash.title}</span>
       </nav>
@@ -1024,14 +1028,14 @@
       <span class="status" class:bad={failed.length > 0} title={stampTitle}>
         <i aria-hidden="true"></i>
         {#if failed.length}
-          {failed.length === 1 ? '1 source failed' : `${failed.length} sources failed`}{newestLoad ? ` · updated ${stampLabel(newestLoad)}` : ''}
+          {tn('{n} source failed', '{n} sources failed', failed.length)}{newestLoad ? ` · ${t('updated {when}', { when: stampLabel(newestLoad) })}` : ''}
         {:else}
-          {hasLive && dash.refresh ? 'Live · updated' : 'Updated'} {stampLabel(newestLoad!)}
+          {hasLive && dash.refresh ? t('Live · updated {when}', { when: stampLabel(newestLoad!) }) : t('Updated {when}', { when: stampLabel(newestLoad!) })}
         {/if}
       </span>
     {/if}
     {#if hasLive}
-      <label class="refresh" title="How often database data is refreshed">
+      <label class="refresh" title={t('How often database data is refreshed')}>
         <Icon name="clock" size={14} />
         <select
           value={String(dash.refresh)}
@@ -1039,20 +1043,20 @@
             dash.refresh = Number(e.currentTarget.value);
             app.saveDashboards();
           }}>
-          <option value="0">Off</option>
+          <option value="0">{t('Off')}</option>
           <option value="15">15 s</option>
-          <option value="60">1 min</option>
-          <option value="300">5 min</option>
+          <option value="60">{t('{n} min', { n: 1 })}</option>
+          <option value="300">{t('{n} min', { n: 5 })}</option>
         </select>
       </label>
     {/if}
     <span class="vsep" aria-hidden="true"></span>
-    <div class="group" role="group" aria-label="History and refresh">
+    <div class="group" role="group" aria-label={t('History and refresh')}>
       {#if !phone}
-        <button class="tb" aria-label="Undo" disabled={!canUndo} onclick={undo}><Icon name="undo" size={16} /><span class="tip" role="tooltip">Undo <kbd>{KEYS.undo}</kbd></span></button>
-        <button class="tb" aria-label="Redo" disabled={!canRedo} onclick={redo}><Icon name="redo" size={16} /><span class="tip" role="tooltip">Redo <kbd>{KEYS.redo}</kbd></span></button>
+        <button class="tb" aria-label={t('Undo')} disabled={!canUndo} onclick={undo}><Icon name="undo" size={16} /><span class="tip" role="tooltip">{t('Undo')} <kbd>{KEYS.undo}</kbd></span></button>
+        <button class="tb" aria-label={t('Redo')} disabled={!canRedo} onclick={redo}><Icon name="redo" size={16} /><span class="tip" role="tooltip">{t('Redo')} <kbd>{KEYS.redo}</kbd></span></button>
       {/if}
-      <button class="tb" aria-label="Refresh now" onclick={() => tick++}><Icon name="refresh" size={16} /><span class="tip" role="tooltip">Refresh now</span></button>
+      <button class="tb" aria-label={t('Refresh now')} onclick={() => tick++}><Icon name="refresh" size={16} /><span class="tip" role="tooltip">{t('Refresh now')}</span></button>
     </div>
     {#if !phone && CLOUD_ON}
     <button
@@ -1061,8 +1065,8 @@
       class:warn={!!dash.publish?.error}
       onclick={() => (publishing = true)}
       disabled={!dash.tiles.length}
-      title={dash.publish?.error ?? (dash.publish?.url ? 'Published on tenun.cloud' : 'Share this dashboard online')}>
-      <Icon name={dash.publish?.error ? 'warning' : 'globe'} /> {dash.publish?.url ? 'Published' : 'Publish'}
+      title={dash.publish?.error ?? (dash.publish?.url ? t('Published on tenun.cloud') : t('Share this dashboard online'))}>
+      <Icon name={dash.publish?.error ? 'warning' : 'globe'} /> {dash.publish?.url ? t('Published') : t('Publish')}
     </button>
     {/if}
     <button
@@ -1070,21 +1074,21 @@
       aria-haspopup="menu"
       aria-expanded={!!exportMenu}
       disabled={!dash.tiles.length || !!exporting}
-      title="Save this dashboard as a web page, a picture or a PDF"
+      title={t('Save this dashboard as a web page, a picture or a PDF')}
       onclick={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
         exportMenu = exportMenu ? null : { x: r.right - 200, y: r.bottom + 4 };
       }}>
-      <Icon name="export" /> {exporting ?? 'Export'}
+      <Icon name="export" /> {exporting ?? t('Export')}
     </button>
     {#if !phone}
     <div class="add">
-      <button class="btn primary" onclick={() => (addMenu = !addMenu)} aria-expanded={addMenu}><Icon name="plus" /> Add tile</button>
+      <button class="btn primary" onclick={() => (addMenu = !addMenu)} aria-expanded={addMenu}><Icon name="plus" /> {t('Add tile')}</button>
       {#if addMenu}
         <div class="menu" role="menu">
-          {#each [['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['share', 'Share of total'], ['pie', 'Pie chart'], ['donut', 'Donut chart'], ['table', 'Table'], ['pivot', 'Pivot table'], ['map', 'Map'], ['filter', 'Filter'], ['text', 'Text'], ['image', 'Image'], ...(advanced ? [['heatmap', 'Heat map'], ['funnel', 'Funnel'], ['box', 'Box plot'], ['bullet', 'Bullet chart'], ['compare', 'Compare two values'], ['sankey', 'Sankey'], ['calendar', 'Calendar heat map'], ['cohort', 'Cohort grid'], ...(hasTwoDates(app.tables) ? [['gantt', 'Gantt chart']] : []), ['param', 'Parameter']] : [])] as [t, label]}
-            <button role="menuitem" onclick={() => addTile(t as TileType)}>
-              <Icon name={(t === 'calendar' ? 'calendarheat' : t) as IconName} /> {label}
+          {#each [['kpi', t('Number')], ['bar', t('Bar chart')], ['line', t('Line chart')], ['area', t('Area chart')], ['share', t('Share of total')], ['pie', t('Pie chart')], ['donut', t('Donut chart')], ['table', t('Table')], ['pivot', t('Pivot table')], ['map', t('Map')], ['filter', t('Filter')], ['text', t('Text')], ['image', t('Image')], ...(advanced ? [['heatmap', t('Heat map')], ['funnel', t('Funnel')], ['box', t('Box plot')], ['bullet', t('Bullet chart')], ['compare', t('Compare two values')], ['sankey', 'Sankey'], ['calendar', t('Calendar heat map')], ['cohort', t('Cohort grid')], ...(hasTwoDates(app.tables) ? [['gantt', t('Gantt chart')]] : []), ['param', t('Parameter')]] : [])] as [type, label]}
+            <button role="menuitem" onclick={() => addTile(type as TileType)}>
+              <Icon name={(type === 'calendar' ? 'calendarheat' : type) as IconName} /> {label}
             </button>
           {/each}
         </div>
@@ -1092,13 +1096,13 @@
     </div>
     <button
       class="btn icon more"
-      aria-label="More for this dashboard"
+      aria-label={t('More for this dashboard')}
       aria-haspopup="menu"
       aria-expanded={!!dashMenu}
       onclick={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
         dashMenu = dashMenu ? null : { x: r.right - 200, y: r.bottom + 4 };
-      }}><Icon name="more" /><span class="tip end" role="tooltip">More</span></button>
+      }}><Icon name="more" /><span class="tip end" role="tooltip">{t('More')}</span></button>
     {/if}
   </header>
 
@@ -1111,7 +1115,7 @@
         <input
           class="field title-input"
           value={dash.title}
-          aria-label="Name of the dashboard"
+          aria-label={t('Name of the dashboard')}
           autofocus
           onblur={(e) => {
             const next = e.currentTarget.value.trim() || dash.title;
@@ -1124,14 +1128,14 @@
           }}
           onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
       {:else}
-        <h1><button class="title" title={phone ? undefined : 'Rename'} disabled={phone} onclick={() => (editingTitle = true)}>{dash.title}</button></h1>
+        <h1><button class="title" title={phone ? undefined : t('Rename')} disabled={phone} onclick={() => (editingTitle = true)}>{dash.title}</button></h1>
       {/if}
       {#if usedSources.length}
         <div class="sources">
-          <span>{usedSources.length === 1 ? 'From' : `From ${usedSources.length} sources`}</span>
+          <span>{usedSources.length === 1 ? t('From') : t('From {n} sources', { n: usedSources.length })}</span>
           {#each usedSources as src (src.id)}
             {@const bad = !!app.snap!.errors[src.id]}
-            <span class="src" class:bad title={bad ? `${src.name} could not be read` : loadedAt[src.id] ? `${src.name}: ${stampLabel(loadedAt[src.id])}` : src.name}>
+            <span class="src" class:bad title={bad ? t('{source} could not be read', { source: src.name }) : loadedAt[src.id] ? `${src.name}: ${stampLabel(loadedAt[src.id])}` : src.name}>
               {#if bad}
                 <Icon name="warning" size={12} />
               {:else if DB_KINDS.has(src.kind)}
@@ -1162,10 +1166,10 @@
         ondelete={deleteView}
         ondefault={(id) => saveViews(views, { defaultView: id ?? undefined })} />
       {#if grainOn}
-        <div class="seg" role="radiogroup" aria-label="Time grain for every chart over time">
-          <button role="radio" aria-checked={!dash.grain} class:on={!dash.grain} title="Each tile uses its own grain" onclick={() => setGrain(null)}>Auto</button>
+        <div class="seg" role="radiogroup" aria-label={t('Time grain for every chart over time')}>
+          <button role="radio" aria-checked={!dash.grain} class:on={!dash.grain} title={t('Each tile uses its own grain')} onclick={() => setGrain(null)}>{t('Auto')}</button>
           {#each PERIODS as g}
-            <button role="radio" aria-checked={dash.grain === g} class:on={dash.grain === g} onclick={() => setGrain(g)}>{g}</button>
+            <button role="radio" aria-checked={dash.grain === g} class:on={dash.grain === g} onclick={() => setGrain(g)}>{grainWord(g)}</button>
           {/each}
         </div>
       {/if}
@@ -1174,37 +1178,37 @@
 
   <!-- The filter bar: every filter this page has now, from its filter tiles, other pages, saved filters and clicks. -->
   {#if !phone || drillFrom || filterTiles.length || pins.length || everyPage.length || filters.length}
-    <div class="filterbar" class:phone role="toolbar" aria-label="Filters">
+    <div class="filterbar" class:phone role="toolbar" aria-label={t('Filters')}>
       {#if drillFrom}
-        <button class="fchip back" title="Back to {drillFrom.title}" onclick={() => drillFrom && go({ view: 'dashboard', id: drillFrom.id })}><Icon name="chevronLeft" size={12} /> {drillFrom.title}</button>
+        <button class="fchip back" title={t('Back to {page}', { page: drillFrom.title })} onclick={() => drillFrom && go({ view: 'dashboard', id: drillFrom.id })}><Icon name="chevronLeft" size={12} /> {drillFrom.title}</button>
         <span class="vsep" aria-hidden="true"></span>
       {/if}
-      {#each filterTiles as t (t.id)}
-        {@const c = filterChip(t)}
-        <span class="fchip" class:on={c.on} class:open={filterPop?.id === t.id}>
-          <button class="say" aria-haspopup="dialog" aria-expanded={filterPop?.id === t.id} title="Filter by {c.name}" onclick={(e) => openFilter(t, e)}>
+      {#each filterTiles as ftile (ftile.id)}
+        {@const c = filterChip(ftile)}
+        <span class="fchip" class:on={c.on} class:open={filterPop?.id === ftile.id}>
+          <button class="say" aria-haspopup="dialog" aria-expanded={filterPop?.id === ftile.id} title={t('Filter by {name}', { name: c.name })} onclick={(e) => openFilter(ftile, e)}>
             {#if c.date}<Icon name="calendar" size={13} />{/if}
             <span class="fname">{c.name}</span>
             <b>{c.value}</b>
             {#if !c.on}<Icon name="chevronDown" size={11} />{/if}
           </button>
           {#if c.on}
-            <button class="x" aria-label="Clear the filter {c.name}" onclick={() => clearFilterTile(t)}><Icon name="x" size={11} /></button>
+            <button class="x" aria-label={t('Clear the filter {name}', { name: c.name })} onclick={() => clearFilterTile(ftile)}><Icon name="x" size={11} /></button>
           {/if}
         </span>
       {/each}
       {#each everyPage as f (f.fromTile)}
-        <span class="fchip saved" title="Chosen on {pageTitle(f.fromTile)}; it filters every page">
+        <span class="fchip saved" title={t('Chosen on {page}; it filters every page', { page: pageTitle(f.fromTile) })}>
           <Icon name="filter" size={12} />
-          <span class="say static">Every page: {filterText(f, app.tables)}</span>
-          <button class="x" aria-label="Clear the filter on every page" onclick={() => clearEvery(f.fromTile)}><Icon name="x" size={11} /></button>
+          <span class="say static">{t('Every page: {filter}', { filter: filterText(f, app.tables) })}</span>
+          <button class="x" aria-label={t('Clear the filter on every page')} onclick={() => clearEvery(f.fromTile)}><Icon name="x" size={11} /></button>
         </span>
       {/each}
       {#each pins as f (f.fromTile)}
-        <span class="fchip saved" title="Saved with the dashboard">
+        <span class="fchip saved" title={t('Saved with the dashboard')}>
           <Icon name="pin" size={12} />
           <span class="say static">{filterText(f, app.tables)}</span>
-          <button class="x" aria-label="Remove saved filter" onclick={() => unpin(f)}><Icon name="x" size={11} /></button>
+          <button class="x" aria-label={t('Remove saved filter')} onclick={() => unpin(f)}><Icon name="x" size={11} /></button>
         </span>
       {/each}
       {#each filters as f (f.fromTile)}
@@ -1212,26 +1216,26 @@
           <button
             class="say"
             aria-haspopup="menu"
-            title="Keep only or exclude"
+            title={t('Keep only or exclude')}
             onclick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
               chipMenu = chipMenu?.id === f.fromTile ? null : { id: f.fromTile, x: r.left, y: r.bottom + 4 };
             }}>
             <Icon name="filter" size={12} />
-            {f.fromTile === DRILL && drillFrom ? `From ${drillFrom.title}: ` : ''}{filterText(f, app.tables)}
+            {f.fromTile === DRILL && drillFrom ? t('From {page}: {filter}', { page: drillFrom.title, filter: filterText(f, app.tables) }) : filterText(f, app.tables)}
           </button>
-          <button class="x" aria-label="Clear filter" onclick={() => (filters = filters.filter((x) => x !== f))}><Icon name="x" size={11} /></button>
+          <button class="x" aria-label={t('Clear filter')} onclick={() => (filters = filters.filter((x) => x !== f))}><Icon name="x" size={11} /></button>
         </span>
       {/each}
       {#if filters.length > 1}
-        <button class="fchip ghostbtn" onclick={() => (filters = [])}>Clear all</button>
+        <button class="fchip ghostbtn" onclick={() => (filters = [])}>{t('Clear all')}</button>
       {/if}
       {#if !phone && app.tables.length}
-        <button class="fchip add" title="Add a filter tile to this page" onclick={() => addTile('filter')}><Icon name="plus" size={12} /> Filter</button>
+        <button class="fchip add" title={t('Add a filter tile to this page')} onclick={() => addTile('filter')}><Icon name="plus" size={12} /> {t('Filter')}</button>
       {/if}
       {#if !phone && clickable && !filters.length}
         <span class="spacer"></span>
-        <span class="hint">Click a bar, a slice or a row to filter the other tiles</span>
+        <span class="hint">{t('Click a bar, a slice or a row to filter the other tiles')}</span>
       {/if}
     </div>
   {/if}
@@ -1241,7 +1245,7 @@
   {#if filterPop}
     {@const ft = dash.tiles.find((x) => x.id === filterPop?.id)}
     {#if ft && results[ft.id]?.res}
-      <div class="fpop {ft.filter?.style ?? 'list'}" role="dialog" aria-label="Filter" use:portal style:left="{filterPop.x}px" style:top="{filterPop.y}px">
+      <div class="fpop {ft.filter?.style ?? 'list'}" role="dialog" aria-label={t('Filter')} use:portal style:left="{filterPop.x}px" style:top="{filterPop.y}px">
         <FilterView
           tile={ft.filter?.style === 'dropdown' ? { ...ft, filter: { ...ft.filter, style: 'list' } } : ft}
           res={results[ft.id]!.res}
@@ -1255,8 +1259,7 @@
     <div class="banner" role="alert">
       <Icon name="warning" size={14} />
       <span>
-        {src.name} could not be read: {app.snap!.errors[src.id].replace(/\.$/, '')}.
-        Tiles that use it show an error until it is fixed.
+        {t('{source} could not be read: {error}. Tiles that use it show an error until it is fixed.', { source: src.name, error: app.snap!.errors[src.id].replace(/\.$/, '') })}
       </span>
     </div>
   {/each}
@@ -1266,13 +1269,13 @@
       x={dashMenu.x}
       y={dashMenu.y}
       items={[
-        { label: 'Copy dashboard', run: () => copyToClipboard(clipOf(dash!.tiles, true), 'Copied the dashboard'), disabled: !dash.tiles.length },
-        { label: 'Duplicate dashboard', run: duplicateDashboard },
-        { label: 'Paste', run: pasteFromMenu },
-        { label: 'Card styles…', run: () => (stylesOpen = true) },
-        ...(app.snap?.workspace.site?.on ? [{ label: 'Preview site', run: () => (app.preview = dash!.id) }] : [{ label: 'Site…', run: () => (app.siteOpen = true) }]),
-        { label: 'Layout', sub: [{ label: story ? 'Grid' : 'Grid  ✓', run: () => setLayout('grid') }, { label: story ? 'Story  ✓' : 'Story', run: () => setLayout('flow') }] },
-        { label: 'Delete dashboard…', run: removeDashboard },
+        { label: t('Copy dashboard'), run: () => copyToClipboard(clipOf(dash!.tiles, true), t('Copied the dashboard')), disabled: !dash.tiles.length },
+        { label: t('Duplicate dashboard'), run: duplicateDashboard },
+        { label: t('Paste'), run: pasteFromMenu },
+        { label: t('Card styles…'), run: () => (stylesOpen = true) },
+        ...(app.snap?.workspace.site?.on ? [{ label: t('Preview site'), run: () => (app.preview = dash!.id) }] : [{ label: t('Site…'), run: () => (app.siteOpen = true) }]),
+        { label: t('Layout'), sub: [{ label: story ? t('Grid') : `${t('Grid')}  ✓`, run: () => setLayout('grid') }, { label: story ? `${t('Story')}  ✓` : t('Story'), run: () => setLayout('flow') }] },
+        { label: t('Delete dashboard…'), run: removeDashboard },
       ]}
       onclose={() => (dashMenu = null)} />
   {/if}
@@ -1281,7 +1284,7 @@
     <Menu
       x={insertAt.x}
       y={insertAt.y}
-      items={[['text', 'Text'], ['kpi', 'Number'], ['bar', 'Bar chart'], ['line', 'Line chart'], ['area', 'Area chart'], ['pie', 'Pie chart'], ['map', 'Map'], ['table', 'Table'], ['image', 'Image']].map(([t, label]) => ({ label, run: () => addTile(t as TileType, place) }))}
+      items={[['text', t('Text')], ['kpi', t('Number')], ['bar', t('Bar chart')], ['line', t('Line chart')], ['area', t('Area chart')], ['pie', t('Pie chart')], ['map', t('Map')], ['table', t('Table')], ['image', t('Image')]].map(([type, label]) => ({ label, run: () => addTile(type as TileType, place) }))}
       onclose={() => (insertAt = null)} />
   {/if}
   {#if matching}
@@ -1298,12 +1301,12 @@
       items={[
         ...(app.snap?.workspace.site?.on
           ? [
-              { label: 'Whole site (one file)', run: () => exportSite(false) },
-              { label: 'Whole site (folder, ZIP)', run: () => exportSite(true) },
+              { label: t('Whole site (one file)'), run: () => exportSite(false) },
+              { label: t('Whole site (folder, ZIP)'), run: () => exportSite(true) },
             ]
           : []),
-        { label: app.snap?.workspace.site?.on ? 'This page (HTML)' : 'Web page (HTML)', run: exportHtml },
-        { label: 'Image (PNG)', run: () => exportPicture('png') },
+        { label: app.snap?.workspace.site?.on ? t('This page (HTML)') : t('Web page (HTML)'), run: exportHtml },
+        { label: t('Image (PNG)'), run: () => exportPicture('png') },
         { label: 'PDF', run: () => exportPicture('pdf') },
       ]}
       onclose={() => (exportMenu = null)} />
@@ -1316,7 +1319,7 @@
       <Menu
         x={chipMenu?.x ?? 0}
         y={chipMenu?.y ?? 0}
-        items={[{ label: 'Keep only', run: () => keep(from, 'keep') }, ...(canExclude(f) ? [{ label: 'Exclude', run: () => keep(from, 'exclude') }] : [])]}
+        items={[{ label: t('Keep only'), run: () => keep(from, 'keep') }, ...(canExclude(f) ? [{ label: t('Exclude'), run: () => keep(from, 'exclude') }] : [])]}
         onclose={() => (chipMenu = null)} />
     {/if}
   {/if}
@@ -1353,18 +1356,18 @@
       {#if !dash.tiles.length}
         <div class="empty">
           <Icon name="dashboard" size={32} />
-          <h2>An empty dashboard</h2>
+          <h2>{t('An empty dashboard')}</h2>
           <p class="muted">
-            {app.tables.length ? 'Add a tile, then pick a value and how to group it.' : 'Add some data first, then come back here.'}
+            {app.tables.length ? t('Add a tile, then pick a value and how to group it.') : t('Add some data first, then come back here.')}
           </p>
           {#if app.tables.length}
             <div class="quick">
-              <button class="btn" onclick={() => addTile('kpi')}><Icon name="kpi" /> Number</button>
-              <button class="btn" onclick={() => addTile('bar')}><Icon name="bar" /> Bar chart</button>
-              <button class="btn" onclick={() => addTile('line')}><Icon name="line" /> Line chart</button>
+              <button class="btn" onclick={() => addTile('kpi')}><Icon name="kpi" /> {t('Number')}</button>
+              <button class="btn" onclick={() => addTile('bar')}><Icon name="bar" /> {t('Bar chart')}</button>
+              <button class="btn" onclick={() => addTile('line')}><Icon name="line" /> {t('Line chart')}</button>
             </div>
           {:else}
-            <button class="btn primary" onclick={() => (app.addOpen = true)}><Icon name="plus" /> Add data</button>
+            <button class="btn primary" onclick={() => (app.addOpen = true)}><Icon name="plus" /> {t('Add data')}</button>
           {/if}
         </div>
       {/if}

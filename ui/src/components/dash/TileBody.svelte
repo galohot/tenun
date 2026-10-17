@@ -9,6 +9,7 @@
   import { effectiveShowAs } from '../../lib/showas';
   import { isRepeated } from '../../lib/tiles';
   import { stepsByDate, tileProblem, withNamedFormats } from '../../lib/measures';
+  import { t, tn } from '../../lib/i18n';
   import BulletView from './BulletView.svelte';
   import CalendarView from './CalendarView.svelte';
   import ChartView from './ChartView.svelte';
@@ -102,27 +103,27 @@
   // Without them there is nothing to draw, so the tile says what is missing.
   const missing = $derived.by(() => {
     if (tile.type === 'scatter' && (tile.measures.length < 2 || !tile.dims.length)) {
-      return 'A scatter chart needs two values and a field to draw one dot for each.';
+      return t('A scatter chart needs two values and a field to draw one dot for each.');
     }
-    if (tile.type === 'waterfall' && !tile.dims.length) return 'A waterfall needs a category or a date to step through.';
+    if (tile.type === 'waterfall' && !tile.dims.length) return t('A waterfall needs a category or a date to step through.');
     // A share chart and a waterfall by category add values up. One gate says whether they can, here and in every
     // picture of the tile (V4-D99).
     const refused = tileProblem(tile, res.parts, stepsByDate(tile, res), res.rows);
     if (refused) return refused;
     if (tile.type === 'heatmap' && (!tile.dims.length || !tile.cols || !tile.measures.length)) {
-      return 'A heat map needs a value, a field for the rows and a field for the columns.';
+      return t('A heat map needs a value, a field for the rows and a field for the columns.');
     }
-    if (tile.type === 'funnel' && !tile.dims.length) return 'A funnel needs a field that names its stages.';
+    if (tile.type === 'funnel' && !tile.dims.length) return t('A funnel needs a field that names its stages.');
     if (tile.type === 'compare' && (!tile.dims.length || (tile.measures.length < 2 && tile.dims.length < 2))) {
-      return 'A compare chart needs a field for its rows, and two values, or one value and a second field to take two periods from.';
+      return t('A compare chart needs a field for its rows, and two values, or one value and a second field to take two periods from.');
     }
-    if (tile.type === 'sankey' && tile.dims.length < 2) return 'A Sankey chart needs two or three fields, one for each stage.';
-    if (tile.type === 'calendar' && !tile.dims.length) return 'A calendar needs a date column.';
+    if (tile.type === 'sankey' && tile.dims.length < 2) return t('A Sankey chart needs two or three fields, one for each stage.');
+    if (tile.type === 'calendar' && !tile.dims.length) return t('A calendar needs a date column.');
     if (tile.type === 'cohort' && (!tile.measures.length || !tile.dims.length)) {
-      return 'A cohort grid needs the column that names who to follow, like a customer, and the date of their events.';
+      return t('A cohort grid needs the column that names who to follow, like a customer, and the date of their events.');
     }
     if (tile.type === 'gantt' && (tile.dims.length < 1 || tile.measures.length < 2)) {
-      return 'A Gantt chart needs a field that names each row, a start date and an end date.';
+      return t('A Gantt chart needs a field that names each row, a start date and an end date.');
     }
     return null;
   });
@@ -169,7 +170,7 @@
     if (!values) return null;
     const nums = values.filter((v): v is number => typeof v === 'number');
     const say = (v: number | undefined) => (v === undefined ? '' : cell(v, 'number', null, true, tile.formats?.[0]));
-    return { ...sparkPath(values), words: nums.length ? `Last ${values.length} periods, from ${say(nums[0])} to ${say(nums.at(-1))}` : 'No data in the last periods' };
+    return { ...sparkPath(values), words: nums.length ? t('Last {n} periods, from {from} to {to}', { n: values.length, from: say(nums[0]), to: say(nums.at(-1)) }) : t('No data in the last periods') };
   };
   const showText = (v: Cell, i: number) => {
     const measure = res.columns[i].role === 'measure';
@@ -191,8 +192,8 @@
   /** The line a verdict is read against, for the tooltip: "Above 100". */
   const lineText = (i: number) => {
     const how = effectiveShowAs(tile, i - groups, kind, res.parts);
-    const t = how === 'change' || how === 'pct_change' ? 0 : (condOf(i)?.threshold ?? 0);
-    return cell(t, 'number', null, false, how === 'pct_change' ? { percent: true } : formatOf(i));
+    const line = how === 'change' || how === 'pct_change' ? 0 : (condOf(i)?.threshold ?? 0);
+    return cell(line, 'number', null, false, how === 'pct_change' ? { percent: true } : formatOf(i));
   };
   const barOf = (v: Cell, i: number) => {
     const sc = scales[i];
@@ -209,11 +210,11 @@
     const loaded = res.rows.length;
     if (needle) {
       return cut
-        ? `${full(shownRows.length)} of the first ${full(loaded)} rows match (${full(res.total_rows!)} in all)`
-        : `${full(shownRows.length)} of ${full(loaded)} rows match`;
+        ? t('{shown} of the first {loaded} rows match ({total} in all)', { shown: full(shownRows.length), loaded: full(loaded), total: full(res.total_rows!) })
+        : t('{shown} of {loaded} rows match', { shown: full(shownRows.length), loaded: full(loaded) });
     }
-    if (cut) return `Rows 1–${full(loaded)} of ${full(res.total_rows!)}`;
-    return `${full(loaded)} ${loaded === 1 ? 'row' : 'rows'}`;
+    if (cut) return t('Rows 1–{loaded} of {total}', { loaded: full(loaded), total: full(res.total_rows!) });
+    return tn('{n} row', '{n} rows', loaded, { n: full(loaded) });
   });
   const tableTools = $derived(res.rows.length > FIND_FROM || cut);
 
@@ -294,7 +295,7 @@
 {:else if unfinished}
   <div class="placeholder">{missing}</div>
 {:else if res.rows.length === 0}
-  <div class="none">No data for this selection.</div>
+  <div class="none">{t('No data for this selection.')}</div>
 {:else if tile.type === 'share'}
   <ShareView {res} {tile} {colors} {selected} {onpick} {oncontext} />
 {:else if tile.type === 'pie' || tile.type === 'donut'}
@@ -316,7 +317,7 @@
 {:else if tile.type === 'table'}
   <div class="tabletile">
     {#if tableTools}
-      <input class="find" type="search" placeholder="Find in this table" aria-label="Find in this table" bind:value={find} />
+      <input class="find" type="search" placeholder={t('Find in this table')} aria-label={t('Find in this table')} bind:value={find} />
     {/if}
     <div class="tablewrap">
       <table class:fixed={!!widths} style:width={widths ? `${widths.reduce((a, b) => a + b, 0)}px` : undefined}>
@@ -332,13 +333,13 @@
                   class="grip"
                   role="separator"
                   aria-orientation="vertical"
-                  aria-label="Drag to change the width of {heads[i]}. Double click to reset."
-                  title="Drag to resize. Double click to reset."
+                  aria-label={t('Drag to change the width of {name}. Double click to reset.', { name: heads[i] })}
+                  title={t('Drag to resize. Double click to reset.')}
                   onpointerdown={(e) => startResize(e, i)}
                   ondblclick={resetWidths}></span>
               </th>
             {/each}
-            {#if sparks}<th class="trend" scope="col"><span>Trend</span></th>{/if}
+            {#if sparks}<th class="trend" scope="col"><span>{t('Trend')}</span></th>{/if}
           </tr>
         </thead>
         <tbody>
@@ -383,14 +384,14 @@
           <tfoot>
             <tr>
               {#each res.columns as c, i}
-                <td class:num={c.dtype === 'number'}>{i === 0 ? 'Total' : totalCell(i)}</td>
+                <td class:num={c.dtype === 'number'}>{i === 0 ? t('Total') : totalCell(i)}</td>
               {/each}
               {#if sparks}<td class="trend"></td>{/if}
             </tr>
           </tfoot>
         {/if}
       </table>
-      {#if needle && !shownRows.length}<p class="nomatch">Nothing matches "{find.trim()}".</p>{/if}
+      {#if needle && !shownRows.length}<p class="nomatch">{t('Nothing matches "{query}".', { query: find.trim() })}</p>{/if}
     </div>
     {#if tableTools}<p class="rowsnote">{rowsNote}</p>{/if}
   </div>
@@ -440,8 +441,8 @@
      </div>
     </div>
     {#if built.sizeLegend}
-      <div class="size-legend" role="group" aria-label="What the size of a dot means: {built.sizeLegend.title}">
-        <span>Size: {built.sizeLegend.title}</span>
+      <div class="size-legend" role="group" aria-label={t('What the size of a dot means: {name}', { name: built.sizeLegend.title })}>
+        <span>{t('Size: {name}', { name: built.sizeLegend.title })}</span>
         {#each built.sizeLegend.items as it}
           <svg width={it.size + 2} height={it.size + 2} aria-hidden="true"><circle cx={(it.size + 2) / 2} cy={(it.size + 2) / 2} r={it.size / 2} fill="none" stroke="var(--text-2)" stroke-width="1.2" /></svg>
           <span class="n">{it.label}</span>
@@ -455,7 +456,7 @@
       <p class="size-note">
         {note}
         {#if built?.noteAction === 'panels' && onlayout}
-          <button class="link" onclick={() => onlayout('panels')}>Use separate panels</button>
+          <button class="link" onclick={() => onlayout('panels')}>{t('Use separate panels')}</button>
         {/if}
       </p>
     {/if}

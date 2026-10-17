@@ -5,6 +5,7 @@
 import type { Cell } from '../api';
 import { getLocale, numberFormatter } from '../format';
 import { axisCommon, esc, key, tooltipBase, type BuildArgs, type Built } from './common';
+import { t, tn } from '../i18n';
 
 export function buildHistogram({ res, tile, colors: c, selected, width }: BuildArgs): Built {
   const loc = getLocale();
@@ -33,7 +34,7 @@ export function buildHistogram({ res, tile, colors: c, selected, width }: BuildA
       ...tooltipBase(c),
       trigger: 'item',
       formatter: (p: { value: number[] }) =>
-        `<b>${esc(fmt.tip(p.value[0]))} to ${esc(fmt.tip(p.value[1]))}</b><br/>${esc(count.tip(p.value[2]))} ${p.value[2] === 1 ? 'row' : 'rows'}`,
+        `<b>${esc(t('{from} to {to}', { from: fmt.tip(p.value[0]), to: fmt.tip(p.value[1]) }))}</b><br/>${esc(tn('{n} row', '{n} rows', p.value[2], { n: count.tip(p.value[2]) }))}`,
     },
     xAxis: {
       type: 'value' as const,
@@ -48,7 +49,7 @@ export function buildHistogram({ res, tile, colors: c, selected, width }: BuildA
     series: [
       {
         type: 'custom',
-        name: 'Rows',
+        name: t('Rows'),
         encode: { x: [0, 1], y: 2 },
         data,
         // The bar runs from its left edge to its right edge, so there is no gap between bars.

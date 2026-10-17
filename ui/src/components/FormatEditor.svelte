@@ -3,6 +3,7 @@
   // The common choices show at once; the rest sit under "More". A format code is for Advanced.
   import type { NumFormat } from '../lib/api';
   import { app } from '../lib/state.svelte';
+  import { t, tn } from '../lib/i18n';
   import { getDigits } from '../lib/locale';
   import { codeProblem, COMMON_CURRENCIES, currencyParts, CURRENCY_CODES, writeNumber } from '../lib/numfmt';
 
@@ -14,7 +15,7 @@
     advanced = false,
     percent = true,
     blank = false,
-    label = 'Format',
+    label = t('Format'),
   }: {
     /** The format as it applies now (a tile's: its measure's with its own over it). */
     value: NumFormat | null;
@@ -53,13 +54,13 @@
     else if (v === 'full') onchange({ compact: false, scale: undefined });
     else onchange({ scale: Number(v) as NumFormat['scale'], compact: undefined });
   }
-  const UNIT_NAMES: [number, string][] = [[3, 'Thousands'], [6, 'Millions'], [9, 'Billions'], [12, 'Trillions']];
+  const UNIT_NAMES: [number, string][] = [[3, t('Thousands')], [6, t('Millions')], [9, t('Billions')], [12, t('Trillions')]];
 
-  const NEGATIVES: { id: NonNullable<NumFormat['negative']>; words: string }[] = [
-    { id: 'minus', words: '' },
-    { id: 'parens', words: '' },
-    { id: 'red', words: ' in red' },
-    { id: 'parens_red', words: ' in red' },
+  const NEGATIVES: { id: NonNullable<NumFormat['negative']>; red: boolean }[] = [
+    { id: 'minus', red: false },
+    { id: 'parens', red: false },
+    { id: 'red', red: true },
+    { id: 'parens_red', red: true },
   ];
 
   const text = (v: string) => (v === '' ? undefined : v.slice(0, 16));
@@ -76,77 +77,77 @@
 <div class="fe" role="group" aria-label={label}>
   <div class="head">
     <span class="label">{label}</span>
-    <span class="preview" aria-label="Preview">{#each [...new Set(preview)] as p, i (i)}{#if i}<i>·</i>{/if}<span class="num">{p}</span>{/each}</span>
+    <span class="preview" aria-label={t('Preview')}>{#each [...new Set(preview)] as p, i (i)}{#if i}<i>·</i>{/if}<span class="num">{p}</span>{/each}</span>
   </div>
   <div class="grid">
-    <select class="field" aria-label="Currency" value={f.currency ?? ''} onchange={(e) => onchange({ currency: e.currentTarget.value || undefined })}>
-      <option value="">No currency</option>
-      <optgroup label="Common">
+    <select class="field" aria-label={t('Currency')} value={f.currency ?? ''} onchange={(e) => onchange({ currency: e.currentTarget.value || undefined })}>
+      <option value="">{t('No currency')}</option>
+      <optgroup label={t('Common')}>
         {#each COMMON_CURRENCIES as c (c)}<option value={c}>{c} · {symbolOf(c)}</option>{/each}
       </optgroup>
-      <optgroup label="All currencies">
+      <optgroup label={t('All currencies')}>
         {#each others as c (c)}<option value={c}>{c} · {symbolOf(c)}</option>{/each}
       </optgroup>
     </select>
-    <select class="field" aria-label="Decimals" value={digitsValue} onchange={(e) => setDigitsChoice(e.currentTarget.value)}>
-      <option value="auto">Auto decimals</option>
-      {#each [0, 1, 2, 3, 4, 5, 6] as d (d)}<option value={`d${d}`}>{d} {d === 1 ? 'decimal' : 'decimals'}</option>{/each}
-      <optgroup label="Significant digits">
-        {#each [1, 2, 3, 4, 5, 6] as s (s)}<option value={`s${s}`}>{s} significant</option>{/each}
+    <select class="field" aria-label={t('Decimals')} value={digitsValue} onchange={(e) => setDigitsChoice(e.currentTarget.value)}>
+      <option value="auto">{t('Auto decimals')}</option>
+      {#each [0, 1, 2, 3, 4, 5, 6] as d (d)}<option value={`d${d}`}>{tn('{n} decimal', '{n} decimals', d)}</option>{/each}
+      <optgroup label={t('Significant digits')}>
+        {#each [1, 2, 3, 4, 5, 6] as s (s)}<option value={`s${s}`}>{t('{n} significant', { n: s })}</option>{/each}
       </optgroup>
     </select>
-    <select class="field" aria-label="Size" value={sizeValue} onchange={(e) => setSize(e.currentTarget.value)}>
-      <option value="auto">Automatic ({shortDefault ? 'short' : 'full'})</option>
-      <option value="short">Short ({loc === 'id' ? '1,2 jt' : '1.2M'})</option>
-      <option value="full">Every digit</option>
-      <optgroup label="Always in">
+    <select class="field" aria-label={t('Size')} value={sizeValue} onchange={(e) => setSize(e.currentTarget.value)}>
+      <option value="auto">{shortDefault ? t('Automatic (short)') : t('Automatic (full)')}</option>
+      <option value="short">{t('Short ({example})', { example: loc === 'id' ? '1,2 jt' : '1.2M' })}</option>
+      <option value="full">{t('Every digit')}</option>
+      <optgroup label={t('Always in')}>
         {#each UNIT_NAMES as [p, w] (p)}<option value={String(p)}>{w}</option>{/each}
       </optgroup>
     </select>
-    <select class="field" aria-label="Negative numbers" value={f.negative ?? 'minus'} onchange={(e) => onchange({ negative: e.currentTarget.value === 'minus' ? undefined : (e.currentTarget.value as NumFormat['negative']) })}>
-      {#each NEGATIVES as n (n.id)}<option value={n.id}>{write(-1234, false, { ...f, code: undefined, negative: n.id, zero: undefined, prefix: undefined, suffix: undefined })}{n.words}</option>{/each}
+    <select class="field" aria-label={t('Negative numbers')} value={f.negative ?? 'minus'} onchange={(e) => onchange({ negative: e.currentTarget.value === 'minus' ? undefined : (e.currentTarget.value as NumFormat['negative']) })}>
+      {#each NEGATIVES as n (n.id)}{@const v = write(-1234, false, { ...f, code: undefined, negative: n.id, zero: undefined, prefix: undefined, suffix: undefined })}<option value={n.id}>{n.red ? t('{value} in red', { value: v }) : v}</option>{/each}
     </select>
-    <input class="field" aria-label="Text before" placeholder="Text before" maxlength="16" value={f.prefix ?? ''} onchange={(e) => onchange({ prefix: text(e.currentTarget.value) })} />
-    <input class="field" aria-label="Text after" placeholder="Text after: pcs, kg, °C" maxlength="16" value={f.suffix ?? ''} onchange={(e) => onchange({ suffix: text(e.currentTarget.value) })} />
+    <input class="field" aria-label={t('Text before')} placeholder={t('Text before')} maxlength="16" value={f.prefix ?? ''} onchange={(e) => onchange({ prefix: text(e.currentTarget.value) })} />
+    <input class="field" aria-label={t('Text after')} placeholder={t('Text after: pcs, kg, °C')} maxlength="16" value={f.suffix ?? ''} onchange={(e) => onchange({ suffix: text(e.currentTarget.value) })} />
   </div>
 
   <button type="button" class="more" aria-expanded={more || moreSet} onclick={() => (more = !(more || moreSet))}>
     <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2.5 7.5 6 4 9.5" /></svg>
-    More: percent, duration, zero{blank ? ', empty' : ''}{advanced ? ', format code' : ''}
+    {t('More: {list}', { list: [t('percent'), t('duration'), t('zero'), ...(blank ? [t('empty')] : []), ...(advanced ? [t('format code')] : [])].join(', ') })}
   </button>
   {#if more || moreSet}
     <div class="rest">
       {#if f.currency}
-        <label class="check"><input type="checkbox" checked={!!f.iso} onchange={(e) => onchange({ iso: e.currentTarget.checked || undefined })} /> Show the code: {f.currency} 1,234</label>
+        <label class="check"><input type="checkbox" checked={!!f.iso} onchange={(e) => onchange({ iso: e.currentTarget.checked || undefined })} /> {t('Show the code: {code} 1,234', { code: f.currency })}</label>
       {/if}
       {#if percent}
-        <label class="check"><input type="checkbox" checked={!!f.percent} onchange={(e) => onchange({ percent: e.currentTarget.checked || undefined })} /> A percent (0.58 reads 58%)</label>
+        <label class="check"><input type="checkbox" checked={!!f.percent} onchange={(e) => onchange({ percent: e.currentTarget.checked || undefined })} /> {t('A percent (0.58 reads 58%)')}</label>
       {/if}
       <div class="pair">
-        <label class="sub"><span>A duration in</span>
+        <label class="sub"><span>{t('A duration in')}</span>
           <select class="field" value={f.duration ?? ''} onchange={(e) => onchange({ duration: (e.currentTarget.value || undefined) as NumFormat['duration'] })}>
-            <option value="">Not a duration</option>
-            <option value="s">Seconds → 1:02:05</option>
-            <option value="m">Minutes → 1:02</option>
-            <option value="h">Hours → 1:02</option>
-            <option value="d">Days → 26:00</option>
+            <option value="">{t('Not a duration')}</option>
+            <option value="s">{t('Seconds → 1:02:05')}</option>
+            <option value="m">{t('Minutes → 1:02')}</option>
+            <option value="h">{t('Hours → 1:02')}</option>
+            <option value="d">{t('Days → 26:00')}</option>
           </select>
         </label>
-        <label class="sub"><span>Zero reads</span>
+        <label class="sub"><span>{t('Zero reads')}</span>
           <input class="field" placeholder="0" maxlength="16" value={f.zero ?? ''} onchange={(e) => onchange({ zero: text(e.currentTarget.value) })} />
         </label>
         {#if blank}
-          <label class="sub"><span>An empty cell reads</span>
+          <label class="sub"><span>{t('An empty cell reads')}</span>
             <input class="field" placeholder="–" maxlength="16" value={f.blank ?? ''} onchange={(e) => onchange({ blank: text(e.currentTarget.value) })} />
           </label>
         {/if}
       </div>
       {#if advanced}
-        <label class="sub code"><span>Format code <em>(Excel's codes; it decides the whole text)</em></span>
+        <label class="sub code"><span>{t('Format code')} <em>{t("(Excel's codes; it decides the whole text)")}</em></span>
           <input class="field mono" placeholder={'#,##0.00;(#,##0.00);"–"'} value={f.code ?? ''} spellcheck="false" autocomplete="off"
             onchange={(e) => onchange({ code: e.currentTarget.value.trim() || undefined })} />
         </label>
-        {#if problem}<p class="problem" role="alert">{problem} The other settings are used until it is fixed.</p>{/if}
+        {#if problem}<p class="problem" role="alert">{t('{problem} The other settings are used until it is fixed.', { problem })}</p>{/if}
       {/if}
     </div>
   {/if}

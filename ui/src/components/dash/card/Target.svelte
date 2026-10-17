@@ -6,6 +6,7 @@
   import { targetInfo, targetWords } from '../../../lib/kpi';
   import { paceElapsed, whyNotAdded, type Parts } from '../../../lib/measures';
   import Icon from '../../Icon.svelte';
+  import { t } from '../../../lib/i18n';
 
   let { kpi, tile, parts, narrow = false }: { kpi: KpiInfo; tile: Tile; parts?: Parts; narrow?: boolean } = $props();
 
@@ -16,9 +17,18 @@
   const words = $derived(goal ? targetWords(goal, better) : null);
   const noPace = $derived(typeof kpi.elapsed === 'number' && kpi.elapsed > 0 && kpi.elapsed < 1 ? whyNotAdded(tile, 0, parts) : null);
   const line = $derived(
-    target === null || !goal ? '' : `Target ${compact(target, fmt)} · ${pctOfTarget(goal.share)} of target${words?.pace ? ` · ${words.pace}` : ''}${noPace ? ` · ${noPace}, so no pace` : ''}`,
+    target === null || !goal
+      ? ''
+      : [
+          t('Target {value}', { value: compact(target, fmt) }),
+          t('{share} of target', { share: pctOfTarget(goal.share) }),
+          words?.pace,
+          noPace ? t('{why}, so no pace', { why: noPace }) : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
   );
-  const ends = $derived(goal?.projected == null ? '' : `At this pace the period ends near ${tip(goal.projected, fmt)}.`);
+  const ends = $derived(goal?.projected == null ? '' : t('At this pace the period ends near {value}.', { value: tip(goal.projected, fmt) }));
 </script>
 
 {#if goal && words}

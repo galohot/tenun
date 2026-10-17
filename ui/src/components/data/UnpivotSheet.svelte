@@ -2,6 +2,7 @@
   import { api, type Cell, type Column, type UnpivotPlan } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
   import { cell } from '../../lib/format';
+  import { t } from '../../lib/i18n';
   import Modal from '../Modal.svelte';
 
   let {
@@ -41,7 +42,10 @@
   });
 
   const show = (v: Cell, c: Column) => (v === null ? '' : c.dtype === 'number' ? cell(v, 'number') : String(v));
-  const listed = $derived(plan.columns.length > 6 ? `${plan.columns.slice(0, 5).join(', ')} and ${plan.columns.length - 5} more` : plan.columns.join(', '));
+  const listed = $derived(plan.columns.length > 6 ? t('{list} and {n} more', { list: plan.columns.slice(0, 5).join(', '), n: plan.columns.length - 5 }) : plan.columns.join(', '));
+  /** What one of the columns holds, by the kind the engine found. */
+  const KIND: Record<string, () => string> = { Year: () => t('year'), Quarter: () => t('quarter'), Month: () => t('month'), Period: () => t('period') };
+  const kind = $derived(KIND[plan.name]?.() ?? plan.name.toLowerCase());
 </script>
 
 {#snippet grid(p: { columns: Column[]; rows: Cell[][] } | null)}
@@ -57,38 +61,38 @@
       </table>
     </div>
   {:else}
-    <p class="muted">Loading…</p>
+    <p class="muted">{t('Loading…')}</p>
   {/if}
 {/snippet}
 
-<Modal title="Turn columns into rows" width={640} {onclose}>
+<Modal title={t('Turn columns into rows')} width={640} {onclose}>
   <p class="lead">
-    These {plan.columns.length} columns hold one {plan.name.toLowerCase() === 'period' ? 'period' : plan.name.toLowerCase()} each: {listed}.
-    Each one becomes a row, so you can chart by {plan.name.toLowerCase()}. Your file is not changed.
+    {t('These {n} columns hold one {kind} each: {list}.', { n: plan.columns.length, kind, list: listed })}
+    {t('Each one becomes a row, so you can chart by {kind}. Your file is not changed.', { kind })}
   </p>
   <div class="names">
     <label>
-      <span class="label">Name of the new column</span>
+      <span class="label">{t('Name of the new column')}</span>
       <input class="field" bind:value={name} />
     </label>
     <label>
-      <span class="label">Name of the values</span>
+      <span class="label">{t('Name of the values')}</span>
       <input class="field" bind:value={value} />
     </label>
   </div>
   {#if clash}
-    <p class="warn">Give the two new columns different names that no other column uses.</p>
+    <p class="warn">{t('Give the two new columns different names that no other column uses.')}</p>
   {:else if plan.dates}
-    <p class="muted small">{name.trim()} will be read as a date.</p>
+    <p class="muted small">{t('{name} will be read as a date.', { name: name.trim() })}</p>
   {/if}
   {#if problem}<p class="warn">{problem}</p>{/if}
-  <h3>Before</h3>
+  <h3>{t('Before')}</h3>
   {@render grid(before)}
-  <h3>After</h3>
+  <h3>{t('After')}</h3>
   {@render grid(after)}
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>Cancel</button>
-    <button class="btn primary" disabled={clash || !!app.busy} onclick={() => onapply(name.trim(), value.trim())}>Turn into rows</button>
+    <button class="btn" onclick={onclose}>{t('Cancel')}</button>
+    <button class="btn primary" disabled={clash || !!app.busy} onclick={() => onapply(name.trim(), value.trim())}>{t('Turn into rows')}</button>
   {/snippet}
 </Modal>
 

@@ -26,6 +26,7 @@
   import { EMPTY_RESULT, isStatic } from '../lib/tiles';
   import { phoneLayout, PHONE_MAX, readingOrder } from '../lib/layout';
   import { paramValues, stepKey, stepsOf, withParams } from '../lib/params';
+  import { t, parts } from '../lib/i18n';
 
   let {
     data: root,
@@ -162,13 +163,13 @@
     stepAt = stepKey(v) === stepKey(saved ?? null) ? {} : { [id]: v };
   }
   /** A parameter tile's control: it moves when the file holds the steps of its parameter. */
-  function controlFor(t: Tile) {
-    const p = params.find((x) => x.id === t.param?.id);
+  function controlFor(tl: Tile) {
+    const p = params.find((x) => x.id === tl.param?.id);
     if (!p) return { param: undefined, value: null };
     const value = values[p.id] ?? null;
-    if (viewId) return { param: p, value, note: "In a saved view, this file holds only the view's value." };
-    if (everyAt) return { param: p, value, note: 'With a value picked for every page, this file holds only the saved value.' };
-    if (!stepsOf(p)) return { param: p, value, note: 'This file holds only the saved value.' };
+    if (viewId) return { param: p, value, note: t('In a saved view, this file holds only the view\'s value.') };
+    if (everyAt) return { param: p, value, note: t('With a value picked for every page, this file holds only the saved value.') };
+    if (!stepsOf(p)) return { param: p, value, note: t('This file holds only the saved value.') };
     return { param: p, value, onchange: (v: Cell) => moveParam(p.id, v) };
   }
 
@@ -237,16 +238,16 @@
   }
 
   function label(tileId: string, v: Cell, col = false, stage = 0): string {
-    const t = data.tiles.find((x) => x.id === tileId)!;
+    const tl = data.tiles.find((x) => x.id === tileId)!;
     // A histogram bin is a range of its number column.
-    const bins = t.type === 'histogram' ? data.base[tileId]?.bins : undefined;
-    const m = t.measures[0];
-    const d = col && t.cols ? t.cols : bins && m?.column ? { table: m.table, column: m.column, via: m.via } : (t.dims[stage] ?? t.dims[0]);
+    const bins = tl.type === 'histogram' ? data.base[tileId]?.bins : undefined;
+    const m = tl.measures[0];
+    const d = col && tl.cols ? tl.cols : bins && m?.column ? { table: m.table, column: m.column, via: m.via } : (tl.dims[stage] ?? tl.dims[0]);
     const dtype = data.tables.find((x) => x.id === d.table)?.columns.find((c) => c.name === d.column)?.dtype ?? 'text';
     const name = dimLabel(d, data.tables);
     const shown =
       bins && typeof v === 'number'
-        ? `${cell(v, 'number', null, true)} to ${cell(Math.round((v + bins.width) * 1e10) / 1e10, 'number', null, true)}`
+        ? t('{from} to {to}', { from: cell(v, 'number', null, true), to: cell(Math.round((v + bins.width) * 1e10) / 1e10, 'number', null, true) })
         : cell(v, dtype, d.grain, false, null, null, d);
     return `${name.charAt(0).toUpperCase() + name.slice(1)}: ${shown}`;
   }
@@ -269,12 +270,12 @@
   const age = $derived.by(() => {
     if (!Number.isFinite(updatedAt)) return '';
     const s = (clock - updatedAt) / 1000;
-    if (s < 90) return 'just now';
-    if (s < 5400) return `${Math.round(s / 60)} minutes ago`;
+    if (s < 90) return t('just now');
+    if (s < 5400) return t('{n} minutes ago', { n: Math.round(s / 60) });
     const d = new Date(updatedAt);
     const today = new Date(clock).toDateString() === d.toDateString();
-    const t = timeShort(d);
-    return today ? `at ${t} today` : `${dateMedium(d)} ${t}`;
+    const time = timeShort(d);
+    return today ? t('at {time} today', { time }) : `${dateMedium(d)} ${time}`;
   });
   // Late = more than twice the schedule (daily schedules get two extra hours of slack).
   const late = $derived(
@@ -289,38 +290,38 @@
     <div>
       <h1>{data.title}</h1>
       {#if hosted}
-        <p>Updated {age}{hosted.source ? ` from ${hosted.source}` : ''}</p>
+        <p>{hosted.source ? t('Updated {age} from {source}', { age, source: hosted.source }) : t('Updated {age}', { age })}</p>
       {:else}
-        <p>{data.workspace} · exported {when}</p>
+        <p>{t('{workspace} · exported {when}', { workspace: data.workspace, when })}</p>
       {/if}
     </div>
     <div class="chips">
       {#if root.views?.length}
         <label class="viewpick">
-          <span class="sr">View</span>
-          <select value={viewId ?? ''} onchange={(e) => pickView(e.currentTarget.value || null)} aria-label="Saved view">
-            <option value="">As saved</option>
+          <span class="sr">{t('View')}</span>
+          <select value={viewId ?? ''} onchange={(e) => pickView(e.currentTarget.value || null)} aria-label={t('Saved view')}>
+            <option value="">{t('As saved')}</option>
             {#each root.views as v (v.id)}<option value={v.id}>{v.name}</option>{/each}
           </select>
         </label>
       {/if}
       {#each data.every ?? [] as f}
-        <span class="chip static" title="Chosen on another page; it filters every page">Every page: {filterText(f, data.tables)}</span>
+        <span class="chip static" title={t('Chosen on another page; it filters every page')}>{t('Every page: {filter}', { filter: filterText(f, data.tables) })}</span>
       {/each}
       {#if everyAt}
         <span class="chip">
-          Every page: {everyAt.label}
-          <button aria-label="Clear" onclick={everyAt.onclear}>×</button>
+          {t('Every page: {filter}', { filter: everyAt.label })}
+          <button aria-label={t('Clear')} onclick={everyAt.onclear}>×</button>
         </span>
       {/if}
       {#each data.saved ?? [] as f}
-        <span class="chip static" title="Saved with the dashboard"><Icon name="pin" size={12} /> {filterText(f, data.tables)}</span>
+        <span class="chip static" title={t('Saved with the dashboard')}><Icon name="pin" size={12} /> {filterText(f, data.tables)}</span>
       {/each}
       {#each data.filters as f}
         {#if f.fromTile === DRILL}
           <!-- A drill-through's filter: where it came from, and the way back (build 13). -->
-          <span class="chip static">{drillFrom ? `From ${drillFrom.title}: ` : ''}{filterText(f, data.tables)}</span>
-          {#if drillFrom}<button class="chip back" onclick={drillFrom.back}><Icon name="chevronLeft" size={12} /> Back</button>{/if}
+          <span class="chip static">{drillFrom ? t('From {page}: {filter}', { page: drillFrom.title, filter: filterText(f, data.tables) }) : filterText(f, data.tables)}</span>
+          {#if drillFrom}<button class="chip back" onclick={drillFrom.back}><Icon name="chevronLeft" size={12} /> {t('Back')}</button>{/if}
         {:else}
           <span class="chip static">{label(f.fromTile, f.op === 'not_in' ? OTHER_KEY : f.values[0], colFilter(f), stageFor(f))}</span>
         {/if}
@@ -329,7 +330,7 @@
         <span class="chip">
           {label(pick.tile, pick.value, pick.col, pick.stage)}
           <button
-            aria-label="Clear"
+            aria-label={t('Clear')}
             onclick={() => {
               const was = pick;
               pick = null;
@@ -344,28 +345,28 @@
 
   {#if late}
     <div class="late" role="status">
-      This dashboard has not updated since {dateTimeMedium(new Date(updatedAt))}.
-      It should update every {hosted!.every! >= 1440 ? 'day' : hosted!.every! >= 120 ? `${Math.round(hosted!.every! / 60)} hours` : 'hour'}.
-      The numbers below may be out of date.
+      {t('This dashboard has not updated since {when}.', { when: dateTimeMedium(new Date(updatedAt)) })}
+      {hosted!.every! >= 1440 ? t('It should update every day.') : hosted!.every! >= 120 ? t('It should update every {n} hours.', { n: Math.round(hosted!.every! / 60) }) : t('It should update every hour.')}
+      {t('The numbers below may be out of date.')}
     </div>
   {/if}
 
   <!-- One tile's frame: on the grid at its place, or in a story's column (build 11). -->
-  {#snippet frame(t: Tile, box: { x: number; y: number; w: number; h: number } | null)}
-    {@const r = resultFor(t)}
+  {#snippet frame(tl: Tile, box: { x: number; y: number; w: number; h: number } | null)}
+    {@const r = resultFor(tl)}
     <!-- A drilled tile is drawn with the field of its level (v5 build 01). -->
-    {@const shown = shownTile(t, r.res?.drill, data.hierarchies ?? [])}
-    {@const name = data.titles?.[t.id] ?? tileTitle(t, data.tables, r?.res?.parts)}
+    {@const shown = shownTile(tl, r.res?.drill, data.hierarchies ?? [])}
+    {@const name = data.titles?.[tl.id] ?? tileTitle(tl, data.tables, r?.res?.parts)}
     <!-- A number card fills its tile with its ground and draws its own title (build 08). -->
-    {@const ground = cardGround(t)}
+    {@const ground = cardGround(tl)}
     <!-- A tile is a stop for the keyboard: arrows go to the next and the previous tile, Enter opens it large. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
     <article
       class="tile"
       tabindex="0"
-      data-tile={t.id}
-      aria-label={name || 'Tile'}
-      onkeydown={(e) => onkey(e, t)}
+      data-tile={tl.id}
+      aria-label={name || t('Tile')}
+      onkeydown={(e) => onkey(e, tl)}
       class:flowtile={!box}
       class:grounded={!!ground && ground !== 'surface'}
       style:transform={box ? `translate(${box.x}px, ${box.y}px)` : undefined}
@@ -375,51 +376,51 @@
       {#if name !== '' && !ground}
         <h3>{name}</h3>
       {/if}
-      {#if r.res && !isStatic(t.type) && t.type !== 'filter'}
-        <button class="expand" title="Open large" aria-label="Open large" onclick={() => (focusId = t.id)}><Icon name="expand" size={14} /></button>
+      {#if r.res && !isStatic(tl.type) && tl.type !== 'filter'}
+        <button class="expand" title={t('Open large')} aria-label={t('Open large')} onclick={() => (focusId = tl.id)}><Icon name="expand" size={14} /></button>
       {/if}
-      {#if canDrill(t)}
+      {#if canDrill(tl)}
         <button
           class="expand drillsw"
-          class:on={drillMode[t.id]}
-          aria-pressed={!!drillMode[t.id]}
-          title={drillMode[t.id] ? 'A click drills down. Click to make a click filter again.' : 'Drill down: make a click open the level below.'}
-          aria-label="Drill down"
-          onclick={() => (drillMode = { ...drillMode, [t.id]: !drillMode[t.id] })}><Icon name="drill" size={14} /></button>
+          class:on={drillMode[tl.id]}
+          aria-pressed={!!drillMode[tl.id]}
+          title={drillMode[tl.id] ? t('A click drills down. Click to make a click filter again.') : t('Drill down: make a click open the level below.')}
+          aria-label={t('Drill down')}
+          onclick={() => (drillMode = { ...drillMode, [tl.id]: !drillMode[tl.id] })}><Icon name="drill" size={14} /></button>
       {/if}
-      {#if r.res?.drill && (drillMode[t.id] || drilled[t.id])}
+      {#if r.res?.drill && (drillMode[tl.id] || drilled[tl.id])}
         <DrillBar
           info={r.res.drill}
-          onto={(d) => drillTo(t, d)}
-          onup={() => drillTo(t, 0)}
-          onnext={!drilled[t.id] && data.down?.[t.id]?.[ALL] ? () => (drilled = { ...drilled, [t.id]: { key: ALL } }) : undefined}
-          note={deeper[t.id] ? 'This file holds one level of drill-down. Open the workspace in Tenun to go further.' : ''} />
+          onto={(d) => drillTo(tl, d)}
+          onup={() => drillTo(tl, 0)}
+          onnext={!drilled[tl.id] && data.down?.[tl.id]?.[ALL] ? () => (drilled = { ...drilled, [tl.id]: { key: ALL } }) : undefined}
+          note={deeper[tl.id] ? t('This file holds one level of drill-down. Open the workspace in Tenun to go further.') : ''} />
       {/if}
-      <div class="body" class:bare={((isStatic(t.type) || t.type === 'filter') && !t.title) || !!ground}>
-        {#if r.res || isStatic(t)}
+      <div class="body" class:bare={((isStatic(tl.type) || tl.type === 'filter') && !tl.title) || !!ground}>
+        {#if r.res || isStatic(tl)}
           <TileBody
             tile={withParams(shown, values)}
             res={r.res ?? EMPTY_RESULT}
-            control={t.type === 'param' ? controlFor(t) : undefined}
+            control={tl.type === 'param' ? controlFor(tl) : undefined}
             colors={colors!}
             tables={data.tables}
             title={name}
             {pages}
             {onpage}
-            selected={pick?.tile === t.id && !pick.col ? [pick.value] : null}
-            selectedCol={pick?.tile === t.id && pick.col ? [pick.value] : null}
-            selectedStage={pick?.tile === t.id && !pick.col ? (pick.stage ?? null) : null}
-            onpick={data.cross[t.id] || (ondrill && t.action) || canDrill(t) ? (v, stage) => onpick(t, v, false, stage) : undefined}
-            onpickcol={data.cross[t.id] && t.cols ? (v) => onpick(t, v, true) : undefined} />
+            selected={pick?.tile === tl.id && !pick.col ? [pick.value] : null}
+            selectedCol={pick?.tile === tl.id && pick.col ? [pick.value] : null}
+            selectedStage={pick?.tile === tl.id && !pick.col ? (pick.stage ?? null) : null}
+            onpick={data.cross[tl.id] || (ondrill && tl.action) || canDrill(tl) ? (v, stage) => onpick(tl, v, false, stage) : undefined}
+            onpickcol={data.cross[tl.id] && tl.cols ? (v) => onpick(tl, v, true) : undefined} />
         {/if}
       </div>
-      {#if r.res && t.type !== 'kpi' && partialNote(r.res, shown.dims[0]?.grain)}
+      {#if r.res && tl.type !== 'kpi' && partialNote(r.res, shown.dims[0]?.grain)}
         <p class="note">{partialNote(r.res, shown.dims[0]?.grain)}</p>
       {/if}
       {#each r.res?.notes ?? [] as n (n)}
         <p class="note link-note"><Icon name="warning" size={12} /> {n}</p>
       {/each}
-      {#if r.offline && !isStatic(t) && t.type !== 'filter'}<p class="note">Not filtered in this file</p>{/if}
+      {#if r.offline && !isStatic(tl) && tl.type !== 'filter'}<p class="note">{t('Not filtered in this file')}</p>{/if}
       {#if r.res?.unusual?.length}<div class="note"><UnusualList res={r.res} tile={shown} /></div>{/if}
     </article>
   {/snippet}
@@ -458,9 +459,9 @@
 
   <footer>
     {#if hosted}
-      Published with <a href="https://tenun.cloud" target="_blank" rel="noopener">Tenun</a> · the numbers update when the owner's computer publishes them.{#if hosted.updates}<EmailMe path={hosted.updates} />{/if}
+      {#each parts(t('Published with {tenun} · the numbers update when the owner\'s computer publishes them.')) as p, i (i)}{#if p.slot === 'tenun'}<a href="https://tenun.cloud" target="_blank" rel="noopener">Tenun</a>{:else}{p.text}{/if}{/each}{#if hosted.updates}<EmailMe path={hosted.updates} />{/if}
     {:else}
-      Made with <a href="https://github.com/galohot/tenun" target="_blank" rel="noopener">Tenun</a> · the data in this file is a snapshot.
+      {#each parts(t('Made with {tenun} · the data in this file is a snapshot.')) as p, i (i)}{#if p.slot === 'tenun'}<a href="https://github.com/galohot/tenun" target="_blank" rel="noopener">Tenun</a>{:else}{p.text}{/if}{/each}
     {/if}
   </footer>
 </div>

@@ -1,7 +1,8 @@
-// The maths behind reference lines and the trend line. Pure functions with no imports at run time,
-// so the node tests can load this file on its own. The UI draws; nothing here touches ECharts.
+// The maths behind reference lines and the trend line. Pure functions whose only import at run time is
+// the words, so the node tests can load this file on its own. The UI draws; nothing here touches ECharts.
 
 import type { Grain } from '../api';
+import { t } from '../i18n.ts';
 /** The middle value. An even count averages the two in the middle. */
 export function median(values: number[]): number | null {
   if (!values.length) return null;
@@ -116,21 +117,21 @@ export function fitWords(r2: number): 'fits well' | 'fits loosely' | 'no clear t
 export function stepWord(grain: Grain | null | undefined): string {
   switch (grain) {
     case 'year':
-      return 'year';
+      return t('year');
     case 'quarter':
-      return 'quarter';
+      return t('quarter');
     case 'month':
     case 'month_of_year':
-      return 'month';
+      return t('month');
     case 'week':
-      return 'week';
+      return t('week');
     case 'day':
     case 'weekday':
-      return 'day';
+      return t('day');
     case 'hour':
-      return 'hour';
+      return t('hour');
     default:
-      return 'step';
+      return t('step');
   }
 }
 
@@ -140,10 +141,10 @@ export function stepWord(grain: Grain | null | undefined): string {
  * words say there is no clear trend.
  */
 export function trendSentence(fit: TrendFit, amount: string, per: string): string {
-  const way = fit.slope < 0 ? 'Falls' : 'Rises';
+  const way = fit.slope < 0 ? t('Falls about {amount} {per}.', { amount, per }) : t('Rises about {amount} {per}.', { amount, per });
   const words = fitWords(fit.r2);
-  const tail = words === 'no clear trend' ? 'There is no clear trend.' : `It ${words}.`;
-  return `${way} about ${amount} ${per}. ${tail}`;
+  const tail = words === 'no clear trend' ? t('There is no clear trend.') : words === 'fits well' ? t('It fits well.') : t('It fits loosely.');
+  return `${way} ${tail}`;
 }
 
 export type Place = 'above' | 'below' | 'hide';

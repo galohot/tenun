@@ -14,6 +14,7 @@
   import CardView from './card/CardView.svelte';
   import CardStyles from './CardStyles.svelte';
   import type { Colors } from '../../lib/chart';
+  import { t } from '../../lib/i18n';
 
   let {
     tile,
@@ -36,12 +37,12 @@
 
   const SAMPLE: KpiInfo = {
     value: 128400,
-    period: 'This month',
-    versus: 'last month',
+    period: t('This month'),
+    versus: t('last month'),
     prev: 117800,
     delta: 0.09,
     partial: false,
-    bars: [62, 70, 66, 81, 77, 90, 86, 99, 94, 108, 118, 128].map((v, i) => ({ label: `Month ${i + 1}`, value: v * 1000 })),
+    bars: [62, 70, 66, 81, 77, 90, 86, 99, 94, 108, 118, 128].map((v, i) => ({ label: t('Month {n}', { n: i + 1 }), value: v * 1000 })),
   };
   const data = $derived(kpi ?? SAMPLE);
   const styles = $derived(app.snap?.workspace.cardStyles ?? []);
@@ -55,15 +56,15 @@
   const read = (raw: string) => Number(raw.replace(/\s/g, '')) / unit.scale;
 
   const NAMES: Record<CardKind, string> = {
-    title: 'Title',
-    value: 'Value',
-    period: 'Period',
-    compare: 'Change',
-    target: 'Target',
-    spark: 'Trend',
-    extra: 'Another value',
-    note: 'Note',
-    divider: 'Line',
+    title: t('Title'),
+    value: t('Value'),
+    period: t('Period'),
+    compare: t('Change@@noun'),
+    target: t('Target'),
+    spark: t('Trend'),
+    extra: t('Another value'),
+    note: t('Note'),
+    divider: t('Line'),
   };
   /** Parts a card has once at most. */
   const ONCE: CardKind[] = ['title', 'value', 'period', 'compare', 'target', 'spark'];
@@ -150,12 +151,12 @@
 </script>
 
 {#snippet dot(f: CardField)}
-  {#if over.has(f)}<span class="dot" title="Set on this card. The style says otherwise."></span>{/if}
+  {#if over.has(f)}<span class="dot" title={t('Set on this card. The style says otherwise.')}></span>{/if}
 {/snippet}
 
 <div class="sec cardsec">
-  <span class="label">Card</span>
-  <div class="presets" role="radiogroup" aria-label="Card presets">
+  <span class="label">{t('Card')}</span>
+  <div class="presets" role="radiogroup" aria-label={t('Card presets')}>
     {#each PRESETS as p (p.id)}
       <button role="radio" aria-checked={preset === p.id} class:on={preset === p.id} title={p.name} onclick={() => pickPreset(p.id)}>
         <span class="thumb" aria-hidden="true">
@@ -172,39 +173,39 @@
     {/each}
   </div>
 
-  <span class="label up">Card style</span>
+  <span class="label up">{t('Card style')}</span>
   {#if style}
     <div class="stylerow">
       <span class="stylename" title={style.name}>{style.name}</span>
-      {#if over.size}<button class="link" onclick={reset}>Reset to style</button>{/if}
+      {#if over.size}<button class="link" onclick={reset}>{t('Reset to style')}</button>{/if}
     </div>
     <div class="row">
-      <button class="btn" onclick={updateStyle} disabled={!over.size}>Update style from this card</button>
-      <button class="btn plain" onclick={detach}>Detach</button>
+      <button class="btn" onclick={updateStyle} disabled={!over.size}>{t('Update style from this card')}</button>
+      <button class="btn plain" onclick={detach}>{t('Detach')}</button>
     </div>
   {/if}
   {#if styles.length}
-    <select class="field" aria-label="Apply a card style" value="" onchange={(e) => e.currentTarget.value && applyStyle(e.currentTarget.value)}>
-      <option value="">{style ? 'Apply another style…' : 'Apply a style…'}</option>
+    <select class="field" aria-label={t('Apply a card style')} value="" onchange={(e) => e.currentTarget.value && applyStyle(e.currentTarget.value)}>
+      <option value="">{style ? t('Apply another style…') : t('Apply a style…')}</option>
       {#each styles.filter((s) => s.id !== style?.id) as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
     </select>
   {/if}
   {#if naming === null}
     <div class="row links">
-      <button class="link" onclick={() => (naming = '')}>Save as card style…</button>
-      {#if styles.length}<button class="link" onclick={() => (managing = true)}>Manage card styles…</button>{/if}
+      <button class="link" onclick={() => (naming = '')}>{t('Save as card style…')}</button>
+      {#if styles.length}<button class="link" onclick={() => (managing = true)}>{t('Manage card styles…')}</button>{/if}
     </div>
   {:else}
     <form class="row" onsubmit={(e) => { e.preventDefault(); saveAsStyle(); }}>
       <!-- svelte-ignore a11y_autofocus -->
-      <input class="field" placeholder="Name of the style" aria-label="Name of the card style" bind:value={naming} autofocus maxlength="60" />
-      <button class="btn primary" type="submit" disabled={!naming.trim()}>Save</button>
-      <button class="btn plain" type="button" onclick={() => (naming = null)}>Cancel</button>
+      <input class="field" placeholder={t('Name of the style')} aria-label={t('Name of the card style')} bind:value={naming} autofocus maxlength="60" />
+      <button class="btn primary" type="submit" disabled={!naming.trim()}>{t('Save')}</button>
+      <button class="btn plain" type="button" onclick={() => (naming = null)}>{t('Cancel')}</button>
     </form>
   {/if}
 
-  <span class="label up">Parts {@render dot('parts')}</span>
-  <ul class="order" aria-label="Parts of the card, top to bottom">
+  <span class="label up">{t('Parts')} {@render dot('parts')}</span>
+  <ul class="order" aria-label={t('Parts of the card, top to bottom')}>
     {#each card.parts as p, i (i)}
       <li
         class:over={dragFrom !== null && dragFrom !== i}
@@ -221,39 +222,39 @@
         <div class="head">
           <Icon name="grip" size={14} />
           <span class="pname">{NAMES[p.kind]}</span>
-          <button class="btn plain icon" aria-label="{p.hidden ? 'Show' : 'Hide'} {NAMES[p.kind]}" aria-pressed={!p.hidden} title={p.hidden ? 'Show' : 'Hide'} onclick={() => toggle(i)}>
+          <button class="btn plain icon" aria-label={p.hidden ? t('Show {part}', { part: NAMES[p.kind] }) : t('Hide {part}', { part: NAMES[p.kind] })} aria-pressed={!p.hidden} title={p.hidden ? t('Show') : t('Hide')} onclick={() => toggle(i)}>
             <Icon name={p.hidden ? 'eyeOff' : 'eye'} size={13} />
           </button>
-          <button class="btn plain icon" aria-label="Move {NAMES[p.kind]} up" disabled={i === 0} onclick={() => move(i, i - 1)}><Icon name="chevronDown" size={12} class="flip" /></button>
-          <button class="btn plain icon" aria-label="Move {NAMES[p.kind]} down" disabled={i === card.parts.length - 1} onclick={() => move(i, i + 1)}><Icon name="chevronDown" size={12} /></button>
+          <button class="btn plain icon" aria-label={t('Move {part} up', { part: NAMES[p.kind] })} disabled={i === 0} onclick={() => move(i, i - 1)}><Icon name="chevronDown" size={12} class="flip" /></button>
+          <button class="btn plain icon" aria-label={t('Move {part} down', { part: NAMES[p.kind] })} disabled={i === card.parts.length - 1} onclick={() => move(i, i + 1)}><Icon name="chevronDown" size={12} /></button>
           {#if p.kind !== 'value'}
-            <button class="btn plain icon" aria-label="Remove {NAMES[p.kind]}" title="Remove" onclick={() => remove(i)}><Icon name="x" size={12} /></button>
+            <button class="btn plain icon" aria-label={t('Remove {part}', { part: NAMES[p.kind] })} title={t('Remove')} onclick={() => remove(i)}><Icon name="x" size={12} /></button>
           {/if}
         </div>
         {#if p.kind === 'spark'}
-          <div class="grains stack" role="radiogroup" aria-label="Trend as">
-            {#each [['bars', 'Columns'], ['line', 'Line']] as [id, label]}
+          <div class="grains stack" role="radiogroup" aria-label={t('Trend as')}>
+            {#each [['bars', t('Columns')], ['line', t('Line')]] as [id, label]}
               <button role="radio" aria-checked={(p.style ?? 'bars') === id} class:on={(p.style ?? 'bars') === id} onclick={() => update(i, { style: id as 'bars' | 'line' })}>{label}</button>
             {/each}
           </div>
         {:else if p.kind === 'target' && !withTarget}
-          <p class="hint tight">Set a target above to show this part.</p>
+          <p class="hint tight">{t('Set a target above to show this part.')}</p>
         {:else if p.kind === 'note'}
-          <input class="field" placeholder="One line of text" aria-label="Text of the note" maxlength="140" value={p.text} onchange={(e) => update(i, { text: e.currentTarget.value })} />
+          <input class="field" placeholder={t('One line of text')} aria-label={t('Text of the note')} maxlength="140" value={p.text} onchange={(e) => update(i, { text: e.currentTarget.value })} />
         {:else if p.kind === 'extra'}
           {#if p.measure >= 1 && p.measure < tile.measures.length}
-            <select class="field" aria-label="Which value" value={String(p.measure)} onchange={(e) => update(i, { measure: Number(e.currentTarget.value) })}>
+            <select class="field" aria-label={t('Which value')} value={String(p.measure)} onchange={(e) => update(i, { measure: Number(e.currentTarget.value) })}>
               {#each tile.measures as m, k (k)}
                 {#if k >= 1}<option value={String(k)}>{measureLabel(m, app.tables)}</option>{/if}
               {/each}
             </select>
-            <input class="field" placeholder="Label (optional)" aria-label="Label of the value" maxlength="40" value={p.label ?? ''} onchange={(e) => update(i, { label: e.currentTarget.value.trim() || undefined })} />
+            <input class="field" placeholder={t('Label (optional)')} aria-label={t('Label of the value')} maxlength="40" value={p.label ?? ''} onchange={(e) => update(i, { label: e.currentTarget.value.trim() || undefined })} />
           {:else}
             <FieldPicker
               mode="measure"
               table={null}
               column={null}
-              placeholder="Pick the value to show"
+              placeholder={t('Pick the value to show')}
               reachable={reach}
               {base}
               measures={namedList}
@@ -264,58 +265,58 @@
       </li>
     {/each}
   </ul>
-  <select class="field" aria-label="Add a part" bind:value={adding} onchange={() => adding && addPart(adding as CardKind)}>
-    <option value="">Add a part…</option>
+  <select class="field" aria-label={t('Add a part')} bind:value={adding} onchange={() => adding && addPart(adding as CardKind)}>
+    <option value="">{t('Add a part…')}</option>
     {#each Object.entries(NAMES) as [k, label] (k)}
       <option value={k} disabled={ONCE.includes(k as CardKind) && has(k as CardKind)}>{label}</option>
     {/each}
   </select>
 
-  <span class="label up">Size {@render dot('size')}</span>
-  <div class="grains stack" role="radiogroup" aria-label="Size of the value">
-    {#each [['s', 'Small'], ['m', 'Medium'], ['l', 'Large']] as [id, label]}
+  <span class="label up">{t('Size')} {@render dot('size')}</span>
+  <div class="grains stack" role="radiogroup" aria-label={t('Size of the value')}>
+    {#each [['s', t('Small')], ['m', t('Medium')], ['l', t('Large')]] as [id, label]}
       <button role="radio" aria-checked={card.size === id} class:on={card.size === id} onclick={() => setCard({ size: id as 's' | 'm' | 'l' })}>{label}</button>
     {/each}
   </div>
-  <span class="label up">Alignment {@render dot('align')}</span>
-  <div class="grains stack" role="radiogroup" aria-label="Alignment">
-    {#each [['start', 'Left'], ['center', 'Centre']] as [id, label]}
+  <span class="label up">{t('Alignment')} {@render dot('align')}</span>
+  <div class="grains stack" role="radiogroup" aria-label={t('Alignment')}>
+    {#each [['start', t('Left')], ['center', t('Centre')]] as [id, label]}
       <button role="radio" aria-checked={card.align === id} class:on={card.align === id} onclick={() => setCard({ align: id as 'start' | 'center' })}>{label}</button>
     {/each}
   </div>
-  <span class="label up">Ground {@render dot('ground')}</span>
-  <div class="grains stack" role="radiogroup" aria-label="Ground of the card">
-    {#each [['plain', 'Plain'], ['tint', 'Tint'], ['accent', 'Accent']] as [id, label]}
+  <span class="label up">{t('Ground')} {@render dot('ground')}</span>
+  <div class="grains stack" role="radiogroup" aria-label={t('Ground of the card')}>
+    {#each [['plain', t('Plain')], ['tint', t('Tint')], ['accent', t('Accent')]] as [id, label]}
       <button role="radio" aria-checked={card.ground === id} class:on={card.ground === id} onclick={() => setCard({ ground: id as 'plain' | 'tint' | 'accent' })}>{label}</button>
     {/each}
   </div>
 
-  <span class="label up">Rules {@render dot('rules')}</span>
+  <span class="label up">{t('Rules')} {@render dot('rules')}</span>
   {#each card.rules as r, i (i)}
     <div class="rule">
-      <select class="field" aria-label="When the value is" value={r.op} onchange={(e) => setRule(i, { op: e.currentTarget.value as CardRule['op'] })}>
-        <option value="<">Below</option>
-        <option value=">">Above</option>
-        <option value="between">Between</option>
+      <select class="field" aria-label={t('When the value is')} value={r.op} onchange={(e) => setRule(i, { op: e.currentTarget.value as CardRule['op'] })}>
+        <option value="<">{t('Below')}</option>
+        <option value=">">{t('Above')}</option>
+        <option value="between">{t('Between')}</option>
       </select>
       <span class="withunit">
-        <input class="field" type="number" step="any" aria-label="Value{unit.unit ? ` in ${unit.unit}` : ''}" value={typed(r.value)} onchange={(e) => Number.isFinite(read(e.currentTarget.value)) && setRule(i, { value: read(e.currentTarget.value) })} />
+        <input class="field" type="number" step="any" aria-label={unit.unit ? t('Value in {unit}', { unit: unit.unit }) : t('Value')} value={typed(r.value)} onchange={(e) => Number.isFinite(read(e.currentTarget.value)) && setRule(i, { value: read(e.currentTarget.value) })} />
         {#if r.op === 'between'}
-          <span class="unit">and</span>
-          <input class="field" type="number" step="any" aria-label="Upper value{unit.unit ? ` in ${unit.unit}` : ''}" value={r.to === undefined ? '' : typed(r.to)} onchange={(e) => Number.isFinite(read(e.currentTarget.value)) && setRule(i, { to: read(e.currentTarget.value) })} />
+          <span class="unit">{t('and')}</span>
+          <input class="field" type="number" step="any" aria-label={unit.unit ? t('Upper value in {unit}', { unit: unit.unit }) : t('Upper value')} value={r.to === undefined ? '' : typed(r.to)} onchange={(e) => Number.isFinite(read(e.currentTarget.value)) && setRule(i, { to: read(e.currentTarget.value) })} />
         {/if}
         {#if unit.unit}<span class="unit" aria-hidden="true">{unit.unit}</span>{/if}
       </span>
-      <select class="field" aria-label="Then the card shows" value={r.tone} onchange={(e) => setRule(i, { tone: e.currentTarget.value as CardRule['tone'] })}>
-        <option value="good">Good</option>
-        <option value="warn">Warning</option>
-        <option value="bad">Bad</option>
+      <select class="field" aria-label={t('Then the card shows')} value={r.tone} onchange={(e) => setRule(i, { tone: e.currentTarget.value as CardRule['tone'] })}>
+        <option value="good">{t('Good')}</option>
+        <option value="warn">{t('Warning')}</option>
+        <option value="bad">{t('Bad')}</option>
       </select>
-      <button class="btn plain icon" aria-label="Remove this rule" onclick={() => dropRule(i)}><Icon name="x" size={12} /></button>
+      <button class="btn plain icon" aria-label={t('Remove this rule')} onclick={() => dropRule(i)}><Icon name="x" size={12} /></button>
     </div>
   {/each}
-  <button class="link" onclick={addRule}>Add a rule</button>
-  {#if card.rules.length}<p class="hint tight">The first rule the value meets colours it and adds its words, like "Below target".</p>{/if}
+  <button class="link" onclick={addRule}>{t('Add a rule')}</button>
+  {#if card.rules.length}<p class="hint tight">{t('The first rule the value meets colours it and adds its words, like "Below target".')}</p>{/if}
 </div>
 
 {#if managing}

@@ -2,6 +2,7 @@
   import type { Column, Profile } from '../../lib/api';
   import { barHeights } from '../../lib/prep';
   import { cell, full } from '../../lib/format';
+  import { t, tn } from '../../lib/i18n';
 
   let {
     column,
@@ -20,21 +21,21 @@
   {#if column.description}<p class="desc">{column.description}</p>{/if}
   {#if column.calc}
     <p class="calc">
-      {#if column.error}Could not be computed. Its values are blank.{:else}Calculated column{/if}{#if column.as_of}, as of {column.as_of}{/if}
+      {#if column.error}{t('Could not be computed. Its values are blank.')}{:else}{t('Calculated column')}{/if}{#if column.as_of}{t(', as of {date}', { date: column.as_of })}{/if}
     </p>
   {/if}
   {#if !profile}
-    <p class="muted">Reading the column…</p>
+    <p class="muted">{t('Reading the column…')}</p>
   {:else}
-    <p class="line">{blank} % blank · {full(profile.distinct)} different {profile.distinct === 1 ? 'value' : 'values'}</p>
+    <p class="line">{tn('{blank} % blank · {n} different value', '{blank} % blank · {n} different values', profile.distinct, { blank, n: full(profile.distinct) })}</p>
     {#if profile.mixed}
-      <p class="mixed">The file had text and numbers mixed in this column.</p>
+      <p class="mixed">{t('The file had text and numbers mixed in this column.')}</p>
     {/if}
     {#if profile.min !== undefined && profile.max !== undefined}
-      <p class="line">From {shown(profile.min)} to {shown(profile.max)}</p>
+      <p class="line">{t('From {min} to {max}', { min: shown(profile.min), max: shown(profile.max) })}</p>
     {/if}
     {#if bars.length > 1}
-      <div class="hist" aria-label="How the values spread">
+      <div class="hist" aria-label={t('How the values spread')}>
         {#each bars as h, i (i)}
           <span style:height="{Math.max(h * 100, h > 0 ? 6 : 0)}%"></span>
         {/each}

@@ -6,6 +6,7 @@ import type { Cell } from '../api';
 import { cell, dayMonth, getLocale } from '../format';
 import { axisCommon, esc, key, makeLabel, tooltipBase, type BuildArgs, type Built } from './common';
 import { barOf, dayStart, spanOf, todayIn, type Bar } from './timeline';
+import { t, tn } from '../i18n';
 
 type Api = {
   value: (i: number) => number;
@@ -24,13 +25,13 @@ export function buildGantt({ res, tile, colors: c, selected, width }: BuildArgs)
   const span = spanOf(bars);
   const now = dayStart(Date.now());
   const loc = getLocale();
-  const [startName, endName] = ['Start', 'End'];
+  const [startName, endName] = [t('Start'), t('End')];
   const dtype = res.columns[1]?.dtype ?? 'date';
   const dayText = (ms: number) => cell(new Date(ms).toISOString().slice(0, 10), dtype === 'datetime' ? 'date' : dtype, 'day');
 
   const bar = {
     type: 'custom',
-    name: 'Rows',
+    name: t('Rows'),
     z: 3,
     encode: { x: [1, 2], y: 0 },
     renderItem: (_: unknown, api: Api) => {
@@ -50,7 +51,7 @@ export function buildGantt({ res, tile, colors: c, selected, width }: BuildArgs)
   // Today: a hairline across the whole plot.
   const today = {
     type: 'custom',
-    name: 'Today',
+    name: t('Today'),
     z: 5,
     silent: true,
     tooltip: { show: false },
@@ -61,7 +62,7 @@ export function buildGantt({ res, tile, colors: c, selected, width }: BuildArgs)
         type: 'group',
         children: [
           { type: 'line', shape: { x1: x, y1: s.y, x2: x, y2: s.y + s.height }, style: { stroke: c.text, lineWidth: 1, opacity: 0.7 } },
-          { type: 'text', x: x + 4, y: s.y + 2, style: { text: 'Today', fill: c.text2, fontSize: 11, textVerticalAlign: 'top' } },
+          { type: 'text', x: x + 4, y: s.y + 2, style: { text: t('Today'), fill: c.text2, fontSize: 11, textVerticalAlign: 'top' } },
         ],
       };
     },
@@ -80,7 +81,7 @@ export function buildGantt({ res, tile, colors: c, selected, width }: BuildArgs)
         if (!b || !r) return '';
         // An end with no time of day is a whole day, so the bar runs a day past its end ms.
         const lastDay = typeof r[2] === 'string' && r[2].length === 10 ? b.end - 86_400_000 : b.end;
-        return `<b>${esc(names[p.dataIndex])}</b><br/>${esc(startName)}: ${esc(dayText(b.start))}<br/>${esc(endName)}: ${esc(dayText(lastDay))}<br/>${b.days} ${b.days === 1 ? 'day' : 'days'}`;
+        return `<b>${esc(names[p.dataIndex])}</b><br/>${esc(startName)}: ${esc(dayText(b.start))}<br/>${esc(endName)}: ${esc(dayText(lastDay))}<br/>${esc(tn('{n} day', '{n} days', b.days))}`;
       },
     },
     xAxis: {
@@ -110,8 +111,10 @@ export function buildGantt({ res, tile, colors: c, selected, width }: BuildArgs)
     },
     series: [bar, today],
   };
-  const cut = res.rows.length >= 100 ? 'Showing the first 100 rows.' : '';
+  const cut = res.rows.length >= 100 ? t('Showing the first {n} rows.', { n: 100 }) : '';
   const missing = bars.filter((b) => b === null).length;
-  const bad = missing ? `${missing} ${missing === 1 ? 'row has' : 'rows have'} no start or an end before its start, so ${missing === 1 ? 'it has' : 'they have'} no bar.` : '';
+  const bad = missing
+    ? tn('{n} row has no start or an end before its start, so it has no bar.', '{n} rows have no start or an end before its start, so they have no bar.', missing)
+    : '';
   return { option, categories: groups, horizontal: true, rows: res.rows.length, note: [cut, bad].filter(Boolean).join(' ') || null };
 }

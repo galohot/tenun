@@ -4,6 +4,7 @@
 
 import type { Column, Dashboard, DType, FormulaError, Relationship, Table, Tile } from './api';
 import functions from './functions.json' with { type: 'json' };
+import { t } from './i18n.ts';
 
 // ---- the function list -------------------------------------------------------------------------
 
@@ -135,15 +136,15 @@ function qualifierBefore(text: string, at: number): string | null {
   return last && last.end === at - 1 ? unbracket(text.slice(last.start + 1, last.end - 1)) : null;
 }
 
-const TYPE_WORDS: Record<DType, string> = {
-  number: 'Number',
-  text: 'Text',
-  date: 'Date',
-  datetime: 'Date and time',
-  bool: 'Yes or no',
-};
-
-export const typeWords = (d: DType): string => TYPE_WORDS[d];
+export function typeWords(d: DType): string {
+  switch (d) {
+    case 'number': return t('Number');
+    case 'text': return t('Text');
+    case 'date': return t('Date');
+    case 'datetime': return t('Date and time');
+    case 'bool': return t('Yes or no');
+  }
+}
 
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
@@ -189,26 +190,26 @@ function columnItem(c: Column, wrap: (name: string) => string): Item {
 function tableItems(scope: Scope): Item[] {
   const { table, tables, rels } = scope;
   const out: Item[] = [];
-  for (const t of tables) {
-    if (t.id === table?.id || (scope.reach && !scope.reach.has(t.id))) continue;
-    const firsts = scope.firsts ? scope.firsts(t.id) : [];
-    const direct = firsts.map((id) => rels.find((r) => r.id === id)).filter((r): r is Relationship => !!r && r.to.table === t.id);
+  for (const tb of tables) {
+    if (tb.id === table?.id || (scope.reach && !scope.reach.has(tb.id))) continue;
+    const firsts = scope.firsts ? scope.firsts(tb.id) : [];
+    const direct = firsts.map((id) => rels.find((r) => r.id === id)).filter((r): r is Relationship => !!r && r.to.table === tb.id);
     const named = direct.filter((r) => r.name?.trim());
     if (firsts.length >= 2 && named.length) {
       // Two links lead here: each is written by its name (V4-D28).
       for (const r of named) {
         const insert = `${bracketed(r.name!.trim())}.[`;
-        out.push({ kind: 'link', label: r.name!.trim(), insert, caret: insert.length, detail: `Link to ${t.label}` });
+        out.push({ kind: 'link', label: r.name!.trim(), insert, caret: insert.length, detail: t('Link to {table}', { table: tb.label }) });
       }
       continue;
     }
-    const insert = `${bracketed(t.label)}.[`;
+    const insert = `${bracketed(tb.label)}.[`;
     out.push({
       kind: 'table',
-      label: t.label,
+      label: tb.label,
       insert,
       caret: insert.length,
-      detail: firsts.length >= 2 ? 'Two links lead here. Name them in Model.' : table ? 'Related table' : 'Table',
+      detail: firsts.length >= 2 ? t('Two links lead here. Name them in Model.') : table ? t('Related table') : t('Table'),
     });
   }
   return out;
@@ -300,12 +301,12 @@ export const MAX_NAME = 100;
  */
 export function nameProblem(name: string, table: Table, except?: string): string | null {
   const n = name.trim();
-  if (!n) return 'Give the column a name.';
-  if (n.length > MAX_NAME) return `Keep the name to ${MAX_NAME} letters or fewer.`;
-  if (/[[\]]/.test(n)) return 'Leave the square brackets out of the name. Formulas use them to write names.';
-  if (n.startsWith('__')) return 'A name cannot start with two underscores.';
+  if (!n) return t('Give the column a name.');
+  if (n.length > MAX_NAME) return t('Keep the name to {n} letters or fewer.', { n: MAX_NAME });
+  if (/[[\]]/.test(n)) return t('Leave the square brackets out of the name. Formulas use them to write names.');
+  if (n.startsWith('__')) return t('A name cannot start with two underscores.');
   const clash = table.columns.some((c) => c.name !== except && (same(c.name, n) || (c.label && same(c.label, n))));
-  if (clash) return `${table.label} has a column called ${n} already. Choose another name.`;
+  if (clash) return t('{table} has a column called {name} already. Choose another name.', { table: table.label, name: n });
   return null;
 }
 
@@ -319,53 +320,55 @@ export interface Use {
   kind: string;
 }
 
-const KIND_WORDS: Record<string, string> = {
-  kpi: 'number tile',
-  bar: 'bar chart',
-  line: 'line chart',
-  area: 'area chart',
-  share: 'share bar',
-  donut: 'donut chart',
-  pie: 'pie chart',
-  map: 'map',
-  table: 'table',
-  scatter: 'scatter chart',
-  histogram: 'histogram',
-  waterfall: 'waterfall chart',
-  pivot: 'pivot table',
-  filter: 'filter',
-  heatmap: 'heat map',
-  funnel: 'funnel',
-  box: 'box plot',
-  bullet: 'bullet chart',
-  compare: 'compare chart',
-  sankey: 'flow chart',
-  calendar: 'calendar',
-  cohort: 'cohort table',
-  gantt: 'Gantt chart',
-};
-
 /** A tile type in words. */
-export const kindWords = (type: string): string => KIND_WORDS[type] ?? 'tile';
+export function kindWords(type: string): string {
+  switch (type) {
+    case 'kpi': return t('number tile');
+    case 'bar': return t('bar chart');
+    case 'line': return t('line chart');
+    case 'area': return t('area chart');
+    case 'share': return t('share bar');
+    case 'donut': return t('donut chart');
+    case 'pie': return t('pie chart');
+    case 'map': return t('map');
+    case 'table': return t('table');
+    case 'scatter': return t('scatter chart');
+    case 'histogram': return t('histogram');
+    case 'waterfall': return t('waterfall chart');
+    case 'pivot': return t('pivot table');
+    case 'filter': return t('filter');
+    case 'heatmap': return t('heat map');
+    case 'funnel': return t('funnel');
+    case 'box': return t('box plot');
+    case 'bullet': return t('bullet chart');
+    case 'compare': return t('compare chart');
+    case 'sankey': return t('flow chart');
+    case 'calendar': return t('calendar');
+    case 'cohort': return t('cohort table');
+    case 'gantt': return t('Gantt chart');
+    default: return t('tile');
+  }
+}
 
 /** One line about a tile that uses a column: `Revenue by region (bar chart) on Overview`. */
-export const useWords = (u: Use): string => (u.tile.trim() ? `${u.tile.trim()} (${u.kind}) on ${u.dashboard}` : `A ${u.kind} on ${u.dashboard}`);
+export const useWords = (u: Use): string =>
+  u.tile.trim() ? t('{tile} ({kind}) on {page}', { tile: u.tile.trim(), kind: u.kind, page: u.dashboard }) : t('A {kind} on {page}', { kind: u.kind, page: u.dashboard });
 
 /** The tiles (and the saved filters) that use a column, for the question before it goes. */
 export function tilesUsing(dashboards: readonly Dashboard[], table: string, column: string, title: (t: Tile) => string): Use[] {
   const hit = (f?: { table: string; column?: string | null } | null) => !!f && f.table === table && f.column === column;
   const out: Use[] = [];
   for (const d of dashboards) {
-    for (const t of d.tiles ?? []) {
+    for (const tl of d.tiles ?? []) {
       const used =
-        t.measures?.some((m) => hit(m) || hit(m.per)) ||
-        t.dims?.some(hit) ||
-        hit(t.repeat) ||
-        hit(t.cols) ||
-        hit(t.spark);
-      if (used) out.push({ dashboard: d.title, tile: title(t), kind: kindWords(t.type) });
+        tl.measures?.some((m) => hit(m) || hit(m.per)) ||
+        tl.dims?.some(hit) ||
+        hit(tl.repeat) ||
+        hit(tl.cols) ||
+        hit(tl.spark);
+      if (used) out.push({ dashboard: d.title, tile: title(tl), kind: kindWords(tl.type) });
     }
-    if (d.filters?.some(hit)) out.push({ dashboard: d.title, tile: '', kind: 'saved filter' });
+    if (d.filters?.some(hit)) out.push({ dashboard: d.title, tile: '', kind: t('saved filter') });
   }
   return out;
 }
@@ -422,5 +425,5 @@ export function readersOf(
 /** "Revenue" and "Region" ... "and 3 more": a list of names in one line. */
 export function listWords(items: readonly string[], max = 5): string {
   if (items.length <= max) return items.join(', ');
-  return `${items.slice(0, max).join(', ')} and ${items.length - max} more`;
+  return t('{list} and {n} more', { list: items.slice(0, max).join(', '), n: items.length - max });
 }

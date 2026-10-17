@@ -8,6 +8,7 @@
   import type { Named } from '../../lib/format';
   import { buildPie, hiddenLabels, LIST_BELOW, LIST_TILE } from '../../lib/charts/pie';
   import { pctShare } from '../../lib/format';
+  import { t } from '../../lib/i18n';
   import ChartView from './ChartView.svelte';
 
   let {
@@ -56,7 +57,7 @@
       } : undefined} />
   </div>
   {#if listed || hidden}
-    <ul class="list" aria-label="Slices">
+    <ul class="list" aria-label={t('Slices')}>
       {#each built.slices as s, i (i)}
         <li>
           <span class="dot" style:background={s.slot === null ? colors.text2 : colors.series[s.slot % colors.series.length]}></span>

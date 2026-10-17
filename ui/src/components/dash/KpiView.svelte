@@ -7,6 +7,7 @@
   import { targetInfo, targetWords } from '../../lib/kpi';
   import { barBoxes, changeTone } from '../../lib/card';
   import { paceElapsed, whyNotAdded, type Parts } from '../../lib/measures';
+  import { t } from '../../lib/i18n';
   import Icon from '../Icon.svelte';
 
   let {
@@ -51,8 +52,12 @@
   // A value that does not add up has no pace: the period is not over, and the line says why there is none.
   const noPace = $derived(typeof kpi.elapsed === 'number' && kpi.elapsed > 0 && kpi.elapsed < 1 ? whyNotAdded(tile, 0, parts) : null);
   const goalWords = $derived(
-    target === null || !goal ? '' : `Target ${compact(target, fmt)} · ${pctOfTarget(goal.share)} of target${pace ? ` · ${pace}` : ''}${noPace ? ` · ${noPace}, so no pace` : ''}`,
+    target === null || !goal
+      ? ''
+      : `${t('Target {value} · {share} of target', { value: compact(target, fmt), share: pctOfTarget(goal.share) })}${pace ? ` · ${pace}` : ''}${noPace ? ` · ${t('{why}, so no pace', { why: noPace })}` : ''}`,
   );
+  const ends = (v: number) => t('At this pace the period ends near {value}', { value: tip(v, fmt) });
+  const soFar = $derived(kpi.partial ? ` · ${t('so far')}` : '');
 
   // Under half a percent is "about the same", not a trend.
   const tone = $derived(changeTone(kpi.delta, tile.better ?? 'up'));
@@ -70,27 +75,27 @@
       class="value"
       style:font-size="{size}px"
       style:color={kpi.value === null ? undefined : TONE_INK[toneFor(kpi.value, fmt) ?? '']}
-      title={kpi.value === null ? '' : `${tip(kpi.value, fmt)}${mini ? ` · ${kpi.period}${kpi.partial ? ' · so far' : ''}` : ''}`}>
+      title={kpi.value === null ? '' : `${tip(kpi.value, fmt)}${mini ? ` · ${kpi.period}${soFar}` : ''}`}>
       {kpi.value === null ? '–' : compact(kpi.value, fmt)}
     </span>
     {#if kpi.versus}
-      <span class="compare" title={mini ? `vs ${kpi.versus}` : undefined}>
+      <span class="compare" title={mini ? t('vs {what}', { what: kpi.versus }) : undefined}>
         {#if kpi.delta === null}
-          {#if !mini}<span class="muted">Nothing to compare in {kpi.versus}</span>{/if}
+          {#if !mini}<span class="muted">{t('Nothing to compare in {period}', { period: kpi.versus })}</span>{/if}
         {:else}
           {#if delta === 'inline' || mini}
             <span class="delta {tone}">
               {tone === 'flat' ? '≈' : kpi.delta > 0 ? '▲' : '▼'}
-              {tone === 'flat' ? 'Same' : pct}
+              {tone === 'flat' ? t('Same') : pct}
             </span>
           {/if}
-          {#if !mini}<span class="muted">vs {kpi.prev === null ? '' : `${compact(kpi.prev, fmt)} · `}{kpi.versus}</span>{/if}
+          {#if !mini}<span class="muted">{t('vs {what}', { what: `${kpi.prev === null ? '' : `${compact(kpi.prev, fmt)} · `}${kpi.versus}` })}</span>{/if}
         {/if}
       </span>
     {/if}
   </div>
   {#if goal && target !== null && !mini}
-    <div class="goal" title={narrow ? `${goalWords}${goal.projected === null ? '' : `. At this pace the period ends near ${tip(goal.projected, fmt)}`}.` : goal.projected === null ? '' : `At this pace the period ends near ${tip(goal.projected, fmt)}.`}>
+    <div class="goal" title={narrow ? `${goalWords}${goal.projected === null ? '' : `. ${ends(goal.projected)}`}.` : goal.projected === null ? '' : `${ends(goal.projected)}.`}>
       <span class="status {goal.onTrack ? 'good' : 'bad'}">
         <Icon name={goal.onTrack ? 'check' : 'warning'} size={12} />
         {words?.chip}
@@ -101,7 +106,7 @@
   {#if !mini}
     <div class="room" bind:clientHeight={room}>
       {#if showBars}
-        <svg class="bars" viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="The last {kpi.bars.length} periods">
+        <svg class="bars" viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label={t('The last {n} periods', { n: kpi.bars.length })}>
           {#each bars as b}
             <rect
               x={b.x}
@@ -119,8 +124,8 @@
   {/if}
   {#if !mini}
     <div class="foot">
-      {#if showBars && w >= 200}<span>Last {kpi.bars.length} periods</span>{/if}
-      <span class="period">{kpi.period}{kpi.partial ? ' · so far' : ''}</span>
+      {#if showBars && w >= 200}<span>{t('Last {n} periods', { n: kpi.bars.length })}</span>{/if}
+      <span class="period">{kpi.period}{soFar}</span>
     </div>
   {/if}
 </div>

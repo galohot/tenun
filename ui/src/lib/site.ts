@@ -5,6 +5,7 @@
 
 import type { Bins, Cell, Dashboard, DashFilter, GeoInfo, SiteSettings, Tile } from './api';
 import { markFilter } from './filters.ts';
+import { t } from './i18n.ts';
 
 /** A page as the navigation shows it. */
 export interface NavPage {
@@ -18,7 +19,7 @@ export interface Nav {
   groups: { name: string; pages: NavPage[] }[];
 }
 
-const titleOf = (d: Pick<Dashboard, 'title'>) => d.title.trim() || 'Untitled';
+const titleOf = (d: Pick<Dashboard, 'title'>) => d.title.trim() || t('Untitled');
 
 /** The pages the navigation lists: every dashboard not marked hidden. A hidden page is still reached by a link. */
 export const visiblePages = (dashboards: readonly Dashboard[]): Dashboard[] => dashboards.filter((d) => !d.hidden);
@@ -35,7 +36,7 @@ export function normaliseSite(site: Partial<SiteSettings> | null | undefined, da
   const ids = new Set(dashboards.map((d) => d.id));
   const seen = new Set<string>();
   const groups = (site?.groups ?? []).map((g) => ({
-    name: (g.name ?? '').trim() || 'Group',
+    name: (g.name ?? '').trim() || t('Group'),
     pages: (g.pages ?? []).filter((id) => ids.has(id) && !seen.has(id) && (seen.add(id), true)),
   }));
   const visible = visiblePages(dashboards);

@@ -19,6 +19,7 @@
   import { cardGround, changeTone, drawnTile } from '../../lib/card';
   import { pctChange } from '../../lib/format';
   import { paramValues, withParams } from '../../lib/params';
+  import { t } from '../../lib/i18n';
 
   let {
     tile,
@@ -234,7 +235,11 @@
     const k = res?.kpi;
     if (!kpiHead || tile.h <= 1 || !k?.versus || k.delta === null) return null;
     const tone = changeTone(k.delta, tile.better ?? 'up');
-    return { tone, text: tone === 'flat' ? '≈ Same' : `${k.delta > 0 ? '▲' : '▼'} ${pctChange(k.delta)}`, title: `${tone === 'flat' ? 'About the same as' : k.delta > 0 ? 'Up on' : 'Down on'} ${k.versus}` };
+    return {
+      tone,
+      text: tone === 'flat' ? `≈ ${t('Same')}` : `${k.delta > 0 ? '▲' : '▼'} ${pctChange(k.delta)}`,
+      title: tone === 'flat' ? t('About the same as {period}', { period: k.versus }) : k.delta > 0 ? t('Up on {period}', { period: k.versus }) : t('Down on {period}', { period: k.versus }),
+    };
   });
   // A note or a picture with no title has no header, so the whole tile drags. Nor has a card. A text with live numbers
   // asks the engine, but it is still a note (build 10).
@@ -265,44 +270,46 @@
   const menuItems = $derived.by(() => {
     if (menu?.mark) {
       const value = menu.mark.value;
-      return [{ label: 'Show rows', run: () => onrows(value, res?.otherOf, res?.bins, view) }];
+      return [{ label: t('Show rows'), run: () => onrows(value, res?.otherOf, res?.bins, view) }];
     }
     return [
-      ...(onclip ? [{ label: 'Copy', run: onclip }] : []),
+      ...(onclip ? [{ label: t('Copy'), run: onclip }] : []),
       ...(flow && onflow
         ? [
-            { label: 'Width', sub: (['full', 'half'] as const).map((w) => ({ label: `${w === 'full' ? 'Full' : 'Half'}${(flow.width ?? 'full') === w ? '  ✓' : ''}`, run: () => onflow({ width: w }) })) },
+            { label: t('Width'), sub: (['full', 'half'] as const).map((w) => ({ label: `${w === 'full' ? t('Full') : t('Half')}${(flow.width ?? 'full') === w ? '  ✓' : ''}`, run: () => onflow({ width: w }) })) },
             ...(tile.type === 'text'
               ? []
-              : [{ label: 'Height', sub: (['s', 'm', 'l'] as const).map((h) => ({ label: `${{ s: 'Small', m: 'Medium', l: 'Large' }[h]}${(flow.height ?? (tile.type === 'kpi' ? 's' : 'm')) === h ? '  ✓' : ''}`, run: () => onflow({ height: h }) })) }]),
+              : [{ label: t('Height'), sub: (['s', 'm', 'l'] as const).map((h) => ({ label: `${{ s: t('Small'), m: t('Medium'), l: t('Large') }[h]}${(flow.height ?? (tile.type === 'kpi' ? 's' : 'm')) === h ? '  ✓' : ''}`, run: () => onflow({ height: h }) })) }]),
           ]
         : []),
       ...(onaction && canPick && dashboards.length
         ? [
             {
-              label: tile.action ? `On click: opens ${dashboards.find((d) => d.id === tile.action?.page)?.title || 'a page'}` : 'On click: filters this page',
+              label: tile.action
+                ? t('On click: opens {page}', { page: dashboards.find((d) => d.id === tile.action?.page)?.title || t('a page') })
+                : t('On click: filters this page'),
               sub: [
-                { label: `Filter this page${tile.action ? '' : '  ✓'}`, run: () => onaction(null) },
-                ...dashboards.map((d) => ({ label: `Open ${d.title || 'Untitled'}, keeping only the clicked value${tile.action?.page === d.id ? '  ✓' : ''}`, run: () => onaction(d.id) })),
+                { label: `${t('Filter this page')}${tile.action ? '' : '  ✓'}`, run: () => onaction(null) },
+                ...dashboards.map((d) => ({ label: `${t('Open {page}, keeping only the clicked value', { page: d.title || t('Untitled') })}${tile.action?.page === d.id ? '  ✓' : ''}`, run: () => onaction(d.id) })),
               ],
             },
           ]
         : []),
       ...(onreach && (canPick || tile.type === 'filter')
-        ? [{ label: tile.reach === undefined ? 'Filters other tiles: all' : tile.reach === 'none' ? 'Filters other tiles: none' : `Filters other tiles: ${tile.reach.length}`, run: onreach }]
+        ? [{ label: tile.reach === undefined ? t('Filters other tiles: all') : tile.reach === 'none' ? t('Filters other tiles: none') : t('Filters other tiles: {n}', { n: tile.reach.length }), run: onreach }]
         : []),
-      ...(onalert ? [{ label: 'Alert me…', run: onalert }] : []),
-      { label: 'Duplicate', run: onduplicate },
-      { label: 'Copy to dashboard', sub: [...dashboards.map((d) => ({ label: d.title || 'Untitled', run: () => oncopy(d.id) })), { label: 'New dashboard', run: () => oncopy(null) }] },
-      { label: 'Download as PNG', run: png },
+      ...(onalert ? [{ label: t('Alert me…'), run: onalert }] : []),
+      { label: t('Duplicate'), run: onduplicate },
+      { label: t('Copy to dashboard'), sub: [...dashboards.map((d) => ({ label: d.title || t('Untitled'), run: () => oncopy(d.id) })), { label: t('New dashboard'), run: () => oncopy(null) }] },
+      { label: t('Download as PNG'), run: png },
       ...(hasData
         ? [
-            { label: 'Download data', sub: [{ label: 'CSV', run: csv }, { label: 'Excel', run: xlsx }] },
-            { label: 'Show rows', run: () => onrows() },
-            { label: 'Focus', run: onfocus },
+            { label: t('Download data'), sub: [{ label: 'CSV', run: csv }, { label: 'Excel', run: xlsx }] },
+            { label: t('Show rows'), run: () => onrows() },
+            { label: t('Focus'), run: onfocus },
           ]
         : []),
-      { label: 'Remove', run: onremove },
+      { label: t('Remove'), run: onremove },
     ];
   });
 
@@ -328,13 +335,13 @@
 
 <!-- A tile is a stop for the keyboard: arrows go to the next and the previous tile, Enter opens it. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-<article class="tile" class:active class:bare class:phone class:flow={!!flow} class:grounded={!!ground && ground !== 'surface'} class:onaccent={ground === 'accent'} style:background={ground ? `var(--${ground})` : undefined} bind:this={el} tabindex="0" data-tile={tile.id} aria-label={title || 'Tile'} onkeydown={onkey}>
-  <header role="group" class:kpihead={kpiHead} class:hair={!kpiHead && !bare && !flow} aria-label={phone ? undefined : 'Drag to move'} onpointerdown={phone ? undefined : ondragstart}>
+<article class="tile" class:active class:bare class:phone class:flow={!!flow} class:grounded={!!ground && ground !== 'surface'} class:onaccent={ground === 'accent'} style:background={ground ? `var(--${ground})` : undefined} bind:this={el} tabindex="0" data-tile={tile.id} aria-label={title || t('Tile')} onkeydown={onkey}>
+  <header role="group" class:kpihead={kpiHead} class:hair={!kpiHead && !bare && !flow} aria-label={phone ? undefined : t('Drag to move')} onpointerdown={phone ? undefined : ondragstart}>
     <div class="titles">
       <h3 title={title}>{title}</h3>
       {#if subtitle && !kpiHead && !bare}<span class="sub" title={subtitle}>{subtitle}</span>{/if}
     </div>
-    {#if loading}<span class="spin" aria-label="Loading"></span>{/if}
+    {#if loading}<span class="spin" aria-label={t('Loading')}></span>{/if}
     {#if pill}<span class="pill {pill.tone}" title={pill.title}>{pill.text}</span>{/if}
     <div class="actions" class:held={drillMode}>
       {#if res?.drill}
@@ -342,23 +349,23 @@
           class="btn plain icon keep drillsw"
           class:on={drillMode}
           aria-pressed={drillMode}
-          title={drillMode ? 'A click drills down. Click to make a click filter again.' : 'Drill down: make a click open the level below.'}
-          aria-label="Drill down"
+          title={drillMode ? t('A click drills down. Click to make a click filter again.') : t('Drill down: make a click open the level below.')}
+          aria-label={t('Drill down')}
           onpointerdown={(e) => e.stopPropagation()}
           onclick={() => (drillMode = !drillMode)}>
           <Icon name="drill" size={14} />
         </button>
       {/if}
       {#if hasData}
-        <button class="btn plain icon edit keep" title="Open large" aria-label="Open large" onpointerdown={(e) => e.stopPropagation()} onclick={onfocus}>
+        <button class="btn plain icon edit keep" title={t('Open large')} aria-label={t('Open large')} onpointerdown={(e) => e.stopPropagation()} onclick={onfocus}>
           <Icon name="expand" size={14} />
         </button>
       {/if}
       {#if !phone}
-        <button class="btn plain icon edit" title="Edit tile" aria-label="Edit tile" onpointerdown={(e) => e.stopPropagation()} onclick={onselect}>
+        <button class="btn plain icon edit" title={t('Edit tile')} aria-label={t('Edit tile')} onpointerdown={(e) => e.stopPropagation()} onclick={onselect}>
           <Icon name="pencil" size={14} />
         </button>
-        <button class="btn plain icon edit" title="More" aria-label="More" aria-haspopup="menu" onpointerdown={(e) => e.stopPropagation()} onclick={more}>
+        <button class="btn plain icon edit" title={t('More')} aria-label={t('More')} aria-haspopup="menu" onpointerdown={(e) => e.stopPropagation()} onclick={more}>
           <Icon name="more" size={14} />
         </button>
       {/if}
@@ -375,7 +382,7 @@
     {:else if !q}
       <button class="setup" onclick={onselect}>
         <Icon name="plus" />
-        Choose what to show
+        {t('Choose what to show')}
       </button>
     {:else if error}
       <p class="error"><Icon name="warning" size={14} /> {error}</p>
@@ -403,7 +410,7 @@
           onplaces={() => (places = true)}
           kpiDelta={pill ? 'none' : 'inline'} />
         {#snippet failed()}
-          <p class="error"><Icon name="warning" size={14} /> This tile could not be drawn. Check its fields.</p>
+          <p class="error"><Icon name="warning" size={14} /> {t('This tile could not be drawn. Check its fields.')}</p>
         {/snippet}
       </svelte:boundary>
     {/if}
@@ -416,8 +423,8 @@
       {/each}
       {#if note}<span>{note}</span>{/if}
       {#if ignored.length}
-        <span title="This tile's table is not related to the filtered field.">
-          <Icon name="info" size={12} /> Not filtered by {ignored.map((f) => f.column).join(', ')}
+        <span title={t("This tile's table is not related to the filtered field.")}>
+          <Icon name="info" size={12} /> {t('Not filtered by {fields}', { fields: ignored.map((f) => f.column).join(', ') })}
         </span>
       {/if}
     </footer>
@@ -426,7 +433,7 @@
     <Menu x={menu.x} y={menu.y} items={menuItems} onclose={() => (menu = null)} />
   {/if}
   {#if !phone && !flow}
-    <button class="resize" aria-label="Resize tile" onpointerdown={onresizestart}><Icon name="resize" size={14} /></button>
+    <button class="resize" aria-label={t('Resize tile')} onpointerdown={onresizestart}><Icon name="resize" size={14} /></button>
   {/if}
 </article>
 

@@ -6,6 +6,7 @@
   import { app } from '../../lib/state.svelte';
   import Modal from '../Modal.svelte';
   import Icon from '../Icon.svelte';
+  import { t, parts } from '../../lib/i18n';
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -27,7 +28,7 @@
   const first = () => fieldOf(fields[0]?.value ?? SEP);
 
   function add() {
-    list.push({ id: '', name: `Hierarchy ${list.length + 1}`, levels: [first(), first()] });
+    list.push({ id: '', name: t('Hierarchy {n}', { n: list.length + 1 }), levels: [first(), first()] });
   }
   function move(h: Hierarchy, from: number, to: number) {
     if (to < 0 || to >= h.levels.length) return;
@@ -42,49 +43,47 @@
     saving = false;
   }
   function close() {
-    if (changed && !confirm('Close without saving the hierarchies?')) return;
+    if (changed && !confirm(t('Close without saving the hierarchies?'))) return;
     onclose();
   }
 </script>
 
-<Modal title="Hierarchies" width={600} onclose={close}>
+<Modal title={t('Hierarchies')} width={600} onclose={close}>
   <p class="intro">
-    A hierarchy lists fields from the top down, such as Region › Store. A chart whose first field is in it can drill down
-    through it: choose it under <b>Drill down</b> in the tile's Advanced options. Dates drill by year, quarter, month and
-    day without a hierarchy.
+    {#each parts(t('A hierarchy lists fields from the top down, such as Region › Store. A chart whose first field is in it can drill down through it: choose it under {option} in the tile\'s Advanced options. Dates drill by year, quarter, month and day without a hierarchy.')) as p, i (i)}{#if p.slot === 'option'}<b>{t('Drill down')}</b>{:else}{p.text}{/if}{/each}
   </p>
 
   {#each list as h, hi (hi)}
     <section class="h">
       <div class="row">
-        <input class="field" aria-label="Name of the hierarchy" maxlength="60" bind:value={h.name} />
-        <button class="btn plain icon" aria-label="Remove {h.name}" onclick={() => list.splice(hi, 1)}><Icon name="trash" size={14} /></button>
+        <input class="field" aria-label={t('Name of the hierarchy')} maxlength="60" bind:value={h.name} />
+        <button class="btn plain icon" aria-label={t('Remove {name}', { name: h.name })} onclick={() => list.splice(hi, 1)}><Icon name="trash" size={14} /></button>
       </div>
       <ol>
         {#each h.levels as l, li (li)}
           <li>
             <span class="n">{li + 1}</span>
-            <select class="field" aria-label="Level {li + 1} of {h.name}" value={keyOf(l)} onchange={(e) => (h.levels[li] = fieldOf(e.currentTarget.value))}>
+            <select class="field" aria-label={t('Level {n} of {name}', { n: li + 1, name: h.name })} value={keyOf(l)} onchange={(e) => (h.levels[li] = fieldOf(e.currentTarget.value))}>
               {#each fields as f (f.value)}<option value={f.value}>{f.label}</option>{/each}
             </select>
-            <button class="btn plain icon" aria-label="Move level {li + 1} up" disabled={li === 0} onclick={() => move(h, li, li - 1)}><Icon name="chevronDown" size={12} class="flip" /></button>
-            <button class="btn plain icon" aria-label="Move level {li + 1} down" disabled={li === h.levels.length - 1} onclick={() => move(h, li, li + 1)}><Icon name="chevronDown" size={12} /></button>
-            <button class="btn plain icon" aria-label="Remove level {li + 1}" disabled={h.levels.length <= 2} onclick={() => h.levels.splice(li, 1)}><Icon name="x" size={12} /></button>
+            <button class="btn plain icon" aria-label={t('Move level {n} up', { n: li + 1 })} disabled={li === 0} onclick={() => move(h, li, li - 1)}><Icon name="chevronDown" size={12} class="flip" /></button>
+            <button class="btn plain icon" aria-label={t('Move level {n} down', { n: li + 1 })} disabled={li === h.levels.length - 1} onclick={() => move(h, li, li + 1)}><Icon name="chevronDown" size={12} /></button>
+            <button class="btn plain icon" aria-label={t('Remove level {n}', { n: li + 1 })} disabled={h.levels.length <= 2} onclick={() => h.levels.splice(li, 1)}><Icon name="x" size={12} /></button>
           </li>
         {/each}
       </ol>
       {#if h.levels.length < 6}
-        <button class="link" onclick={() => h.levels.push(first())}>Add a level</button>
+        <button class="link" onclick={() => h.levels.push(first())}>{t('Add a level')}</button>
       {/if}
     </section>
   {:else}
-    <p class="muted">No hierarchies yet.</p>
+    <p class="muted">{t('No hierarchies yet.')}</p>
   {/each}
-  <button class="btn" onclick={add} disabled={!fields.length}><Icon name="plus" size={14} /> New hierarchy</button>
+  <button class="btn" onclick={add} disabled={!fields.length}><Icon name="plus" size={14} /> {t('New hierarchy')}</button>
 
   {#snippet footer()}
-    <button class="btn plain" onclick={close}>Cancel</button>
-    <button class="btn primary" disabled={!changed || saving} onclick={save}>Save</button>
+    <button class="btn plain" onclick={close}>{t('Cancel')}</button>
+    <button class="btn primary" disabled={!changed || saving} onclick={save}>{t('Save')}</button>
   {/snippet}
 </Modal>
 

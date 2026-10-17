@@ -7,6 +7,8 @@ import { setDigits, setLocale } from '../lib/format';
 import { setColumnFormats } from '../lib/measures';
 import { setCalendar, type Calendar } from '../lib/locale';
 import { useCarried } from '../lib/geoassets';
+import { setLang, t } from '../lib/i18n';
+import { guessLocale } from '../lib/locale';
 
 // An exported file carries its data inline (window.TENUN). A dashboard hosted on
 // tenun.cloud names its snapshot and freshness in meta tags instead.
@@ -22,13 +24,16 @@ async function start() {
       if (!res.ok) throw new Error(String(res.status));
       data = (await res.json()) as ExportPayload;
     } catch {
-      target.textContent = 'This dashboard could not be loaded. Reload the page to try again.';
+      // No workspace to say its language yet: the reader's browser says it.
+      setLang(guessLocale(navigator.language));
+      target.textContent = t('This dashboard could not be loaded. Reload the page to try again.');
       return;
     }
   }
   if (!data) return;
-  // The numbers and dates read the way the author saw them.
+  // The numbers and dates read the way the author saw them, and so do the words: the readers chose nothing (AD-D10).
   setLocale(data.locale);
+  setLang(data.locale === 'id' ? 'id' : 'en');
   // Digits and column formats as the author set them (formats §2.2, §2.3).
   setDigits(data.digits);
   setColumnFormats(data.columnFormats);

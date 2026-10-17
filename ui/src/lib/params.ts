@@ -1,8 +1,9 @@
 // Parameters and what-if (v5 build 05, V5-D7): a number or a choice that a measure reads with PARAM("name"), and that a
 // Top N, a number tile's target or a chart's line can take. The engine reads the values for measures and Top N; the
-// screen reads them for targets and lines, here. Pure, with only type imports, so the node tests load it.
+// screen reads them for targets and lines, here. Pure, with type imports and t(), so the node tests load it.
 
 import type { Cell, Param, Tile } from './api';
+import { t } from './i18n.ts';
 
 /** A choice offers at most this many values; an export holds the steps of a parameter that has at most `MAX_STEPS`. */
 export const MAX_CHOICES = 50;
@@ -82,19 +83,19 @@ export function snap(p: Param, v: number): number {
 /** What is wrong with a parameter before it is saved, in words; null when nothing is. The engine checks again. */
 export function paramProblem(p: Param, all: readonly Param[]): string | null {
   const name = p.name.trim();
-  if (!name) return 'Give the parameter a name.';
-  if (name.includes('"')) return 'A name cannot hold a double quote.';
-  if (all.some((o) => o.id !== p.id && o.name.trim().toLowerCase() === name.toLowerCase())) return `Another parameter is called ${name}.`;
+  if (!name) return t('Give the parameter a name.');
+  if (name.includes('"')) return t('A name cannot hold a double quote.');
+  if (all.some((o) => o.id !== p.id && o.name.trim().toLowerCase() === name.toLowerCase())) return t('Another parameter is called {name}.', { name });
   if (p.kind === 'choice') {
     const n = (p.choices ?? []).length;
-    if (n === 0) return 'Add at least one value to choose from.';
-    if (n > MAX_CHOICES) return `A choice can offer at most ${MAX_CHOICES} values.`;
+    if (n === 0) return t('Add at least one value to choose from.');
+    if (n > MAX_CHOICES) return t('A choice can offer at most {n} values.', { n: MAX_CHOICES });
     return null;
   }
-  if (p.min === undefined || p.max === undefined || !Number.isFinite(p.min) || !Number.isFinite(p.max)) return 'Give the smallest and the largest value.';
-  if (p.max < p.min) return 'The largest value must not be below the smallest.';
-  if (!p.step || !(p.step > 0)) return 'The step must be above 0.';
-  if (stepCount(p) > 10_000) return 'That is more than 10,000 steps. Use a larger step.';
+  if (p.min === undefined || p.max === undefined || !Number.isFinite(p.min) || !Number.isFinite(p.max)) return t('Give the smallest and the largest value.');
+  if (p.max < p.min) return t('The largest value must not be below the smallest.');
+  if (!p.step || !(p.step > 0)) return t('The step must be above 0.');
+  if (stepCount(p) > 10_000) return t('That is more than 10,000 steps. Use a larger step.');
   return null;
 }
 
@@ -114,7 +115,7 @@ export function choicesFrom(text: string): Cell[] {
 /** A new parameter: a percent from 0 to 20 in steps of 1 %. */
 export const newParam = (n: number): Param => ({
   id: '',
-  name: `Parameter ${n}`,
+  name: t('Parameter {n}', { n }),
   kind: 'number',
   value: 0,
   min: 0,

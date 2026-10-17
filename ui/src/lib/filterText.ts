@@ -3,37 +3,40 @@
 import type { DashFilter, Table } from './api';
 import { cell, dimLabel, type Named } from './format';
 import { presetLabel } from './filters';
+import { t } from './i18n';
 
 type Tables = (Named & Pick<Table, 'columns'>)[];
 
 export function filterText(f: DashFilter, tables: Tables): string {
-  const dtype = tables.find((t) => t.id === f.table)?.columns?.find((c) => c.name === f.column)?.dtype ?? 'text';
+  const dtype = tables.find((x) => x.id === f.table)?.columns?.find((c) => c.name === f.column)?.dtype ?? 'text';
   const name = dimLabel({ table: f.table, column: f.column, grain: f.grain, via: f.via }, tables);
   const show = (v: unknown, short = false) => cell(v as never, dtype, f.grain, short);
   const list = () => f.values.map((v) => show(v)).join(', ');
+  // The "Other" group of a top N is labelled in English in the dashboard; it reads in the language of the screens.
+  const label = f.label === 'Other' ? t('Other') : f.label === 'Not Other' ? t('Not Other') : f.label;
   const body =
-    f.label ??
+    label ??
     (() => {
       switch (f.op) {
         case 'not_in':
-          return `not ${list()}`;
+          return t('not {values}', { values: list() });
         case 'range':
           // The end of a range is the start of the next day for dates: show the last day kept.
-          return `${show(f.values[0], true)} to ${show(f.values[1], true)}`;
+          return t('{from} to {to}', { from: show(f.values[0], true), to: show(f.values[1], true) });
         case 'between':
-          return `${show(f.values[0], true)} to ${show(f.values[1], true)}`;
+          return t('{from} to {to}', { from: show(f.values[0], true), to: show(f.values[1], true) });
         case 'gte':
-          return `${show(f.values[0], true)} or more`;
+          return t('{value} or more', { value: show(f.values[0], true) });
         case 'lte':
-          return `${show(f.values[0], true)} or less`;
+          return t('{value} or less', { value: show(f.values[0], true) });
         case 'contains':
-          return `contains ${list()}`;
+          return t('contains {values}', { values: list() });
         case 'starts_with':
-          return `starts with ${list()}`;
+          return t('starts with {values}', { values: list() });
         case 'blank':
-          return 'is blank';
+          return t('is blank');
         case 'not_blank':
-          return 'is not blank';
+          return t('is not blank');
         case 'relative':
           return presetLabel(String(f.values[0]));
         default:

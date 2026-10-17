@@ -5,6 +5,7 @@
   import { blankNote, isShown } from '../../lib/prep';
   import { behindFrom, fieldGroups, groupOf, labelOfLink, valueBehind } from '../../lib/links';
   import { nameOf } from '../../lib/measures';
+  import { t } from '../../lib/i18n';
   import Icon from '../Icon.svelte';
 
   let {
@@ -14,7 +15,7 @@
     via,
     base = null,
     roles = false,
-    placeholder = 'Choose a field',
+    placeholder = t('Choose a field'),
     reachable,
     numbersOnly = false,
     datesOnly = false,
@@ -62,7 +63,7 @@
     !table
       ? ''
       : column === null
-        ? `Number of ${(current?.label ?? 'rows').toLowerCase()}`
+        ? t('Number of {name}', { name: (current?.label ?? t('rows')).toLowerCase() })
         : (current?.columns.find((c) => c.name === column)?.label ?? column),
   );
 
@@ -131,7 +132,7 @@
 <div class="fp" bind:this={root}>
   <button class="trigger" class:empty={!table && !named} onclick={() => (open = !open)} aria-expanded={open}>
     {#if named}
-      <span class="tbl fxm" aria-label="Measure"><Icon name="fx" size={12} /></span>
+      <span class="tbl fxm" aria-label={t('Measure')}><Icon name="fx" size={12} /></span>
       <span class="col">{nameOf(named)}</span>
     {:else if table}
       <span class="tbl">{labelOfLink(via) ? `${labelOfLink(via)} ›` : current?.label}</span>
@@ -142,16 +143,16 @@
     <Icon name="chevronDown" size={12} />
   </button>
   {#if (table || named) && onclear}
-    <button class="clear" aria-label="Remove field" onclick={onclear}><Icon name="x" size={12} /></button>
+    <button class="clear" aria-label={t('Remove field')} onclick={onclear}><Icon name="x" size={12} /></button>
   {/if}
   {#if open}
     <div class="pop" role="listbox">
       <!-- svelte-ignore a11y_autofocus -->
-      <input class="field" placeholder="Search fields" bind:value={q} autofocus />
+      <input class="field" placeholder={t('Search fields')} bind:value={q} autofocus />
       <div class="list">
         {#if offered.length}
           <div class="group">
-            <div class="gh"><Icon name="fx" size={12} />Measures</div>
+            <div class="gh"><Icon name="fx" size={12} />{t('Measures')}</div>
             {#each offered as x (x.id)}
               {@const bad = info[x.id]?.error}
               <button class="opt" class:on={named === x.id} class:off={!!bad} disabled={!!bad} title={bad || x.description || x.formula} onclick={() => pickNamed(x.id)}>
@@ -169,24 +170,24 @@
             <div class="gh">
               <Icon name="table" size={12} />{g.title}
               {#if g.sub}<span class="sub">{g.sub}</span>{/if}
-              {#if far}<span class="note">not related</span>{:else if hidden}<span class="note" title="A value from here would be added up once for each row of the link table. Use it as a group or a filter.">behind a link table</span>{/if}
+              {#if far}<span class="note">{t('not related')}</span>{:else if hidden}<span class="note" title={t('A value from here would be added up once for each row of the link table. Use it as a group or a filter.')}>{t('behind a link table')}</span>{/if}
             </div>
             {#if mode === 'measure' && !q && !numbersOnly && !datesOnly}
               <button class="opt" class:off={hidden} disabled={hidden} onclick={() => pick(g.table.id, null, g.via)}>
-                <Icon name="hash" size={12} /> Number of {g.table.label.toLowerCase()}
+                <Icon name="hash" size={12} /> {t('Number of {name}', { name: g.table.label.toLowerCase() })}
               </button>
             {/if}
             {#each cols as c (c.name)}
-              <button class="opt" class:on={here?.key === g.key && column === c.name} class:off={hidden} disabled={hidden} title={[c.description, c.as_of ? `As of ${c.as_of}.` : ''].filter(Boolean).join(' ') || undefined} onclick={() => pick(g.table.id, c.name, g.via)}>
+              <button class="opt" class:on={here?.key === g.key && column === c.name} class:off={hidden} disabled={hidden} title={[c.description, c.as_of ? t('As of {date}.', { date: c.as_of }) : ''].filter(Boolean).join(' ') || undefined} onclick={() => pick(g.table.id, c.name, g.via)}>
                 <Icon name={typeIcon[dim(c.dtype)]} size={12} />
                 <span class="nm">{c.label ?? c.name}</span>
-                {#if c.calc}<span class="fx" title={c.error ? 'A calculated column that could not be computed' : 'A calculated column'}><Icon name="fx" size={11} /></span>{/if}
+                {#if c.calc}<span class="fx" title={c.error ? t('A calculated column that could not be computed') : t('A calculated column')}><Icon name="fx" size={11} /></span>{/if}
                 {#if blankNote(c)}<span class="blank">{blankNote(c)}</span>{/if}
               </button>
             {/each}
           </div>
         {:else}
-          {#if !offered.length}<p class="nothing">No field matches “{q}”.</p>{/if}
+          {#if !offered.length}<p class="nothing">{t('No field matches “{query}”.', { query: q })}</p>{/if}
         {/each}
       </div>
     </div>

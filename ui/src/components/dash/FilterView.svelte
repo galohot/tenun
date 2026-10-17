@@ -6,6 +6,7 @@
   import { cell, dimLabel, pretty, type Named } from '../../lib/format';
   import { DATE_PRESETS, keyOf } from '../../lib/filters';
   import { portal } from '../../lib/portal';
+  import { t, tn } from '../../lib/i18n';
   import Icon from '../Icon.svelte';
 
   let {
@@ -68,7 +69,7 @@
   }
 
   const summary = $derived(
-    all ? 'All' : chosen.length === 1 ? cell(chosen[0], dtype, null, false, null, null, d) : `${chosen.length} selected`,
+    all ? t('All') : chosen.length === 1 ? cell(chosen[0], dtype, null, false, null, null, d) : tn('{n} selected', '{n} selected', chosen.length),
   );
 
   function openPop() {
@@ -122,23 +123,23 @@
 </script>
 
 {#snippet picker()}
-  <input class="field search" placeholder="Search" aria-label="Search the values" bind:value={q} />
+  <input class="field search" placeholder={t('Search')} aria-label={t('Search the values')} bind:value={q} />
   <div class="rows">
     <label class="opt all">
       <input type="checkbox" checked={all} disabled={!editable && !onpick} onchange={() => (onpick ? selected?.length && onpick(selected[0]) : clear())} />
-      <span class="lab">Select all</span>
+      <span class="lab">{t('Select all')}</span>
       <span class="n">{options.reduce((s, o) => s + o.count, 0).toLocaleString()}</span>
     </label>
     {#each shown as o (keyOf(o.value))}
       <label class="opt">
         <input type={single ? 'radio' : 'checkbox'} checked={isOn(o.value) || (all && !single)} disabled={!editable && !onpick} onchange={() => toggle(o.value)} />
-        <span class="lab" class:blank={o.value === null || o.value === ''}>{o.value === '' ? '(blank)' : cell(o.value, dtype, null, false, null, null, d)}</span>
+        <span class="lab" class:blank={o.value === null || o.value === ''}>{o.value === '' ? t('(blank)') : cell(o.value, dtype, null, false, null, null, d)}</span>
         <span class="n">{o.count ? o.count.toLocaleString() : '–'}</span>
       </label>
     {:else}
-      <p class="none">Nothing matches.</p>
+      <p class="none">{t('Nothing matches.')}</p>
     {/each}
-    {#if capped && !q}<p class="none">Showing the 200 most common values.</p>{/if}
+    {#if capped && !q}<p class="none">{t('Showing the 200 most common values.')}</p>{/if}
   </div>
 {/snippet}
 
@@ -147,18 +148,18 @@
   onkeydown={(e) => open && e.key === 'Escape' && (open = false)} />
 
 {#if !d}
-  <div class="none center">Pick a field for this filter.</div>
+  <div class="none center">{t('Pick a field for this filter.')}</div>
 {:else if style === 'list'}
   <div class="list">
     <div class="head">
       <span class="name">{name}</span>
-      {#if !all && editable}<button class="link" onclick={clear}>Clear</button>{/if}
+      {#if !all && editable}<button class="link" onclick={clear}>{t('Clear')}</button>{/if}
     </div>
     {@render picker()}
   </div>
 {:else if style === 'dropdown'}
   <div class="dropwrap">
-  <button class="drop" bind:this={trigger} onclick={() => (open ? (open = false) : openPop())} aria-expanded={open} aria-label="Filter by {name}">
+  <button class="drop" bind:this={trigger} onclick={() => (open ? (open = false) : openPop())} aria-expanded={open} aria-label={t('Filter by {name}', { name })}>
     <span class="dn">{name}</span>
     <span class="dv" class:all>{summary}</span>
     <Icon name="chevronDown" size={12} />
@@ -173,10 +174,10 @@
   <div class="range">
     <div class="head">
       <span class="name">{name}</span>
-      {#if (saved[0] !== null || saved[1] !== null) && editable}<button class="link" onclick={clear}>Clear</button>{/if}
+      {#if (saved[0] !== null || saved[1] !== null) && editable}<button class="link" onclick={clear}>{t('Clear')}</button>{/if}
     </div>
     {#if !bins || !res.rows.length}
-      <div class="none">No numbers to filter.</div>
+      <div class="none">{t('No numbers to filter.')}</div>
     {:else}
       <div class="bars" aria-hidden="true">
         {#each res.rows as r}
@@ -193,7 +194,7 @@
           {step}
           value={from}
           disabled={!editable}
-          aria-label="Lowest {name}"
+          aria-label={t('Lowest {name}', { name })}
           oninput={(e) => (drag = [Math.min(+e.currentTarget.value, to), to])}
           onchange={(e) => setRange(Math.min(+e.currentTarget.value, to), saved[1])} />
         <input
@@ -203,7 +204,7 @@
           {step}
           value={to}
           disabled={!editable}
-          aria-label="Highest {name}"
+          aria-label={t('Highest {name}', { name })}
           oninput={(e) => (drag = [from, Math.max(+e.currentTarget.value, from)])}
           onchange={(e) => setRange(saved[0], Math.max(+e.currentTarget.value, from))} />
       </div>
@@ -213,17 +214,17 @@
           type="number"
           step="any"
           placeholder={num(lo)}
-          aria-label="From"
+          aria-label={t('From')}
           disabled={!editable}
           value={saved[0] ?? ''}
           onchange={(e) => setRange(typed(e.currentTarget.value), saved[1])} />
-        <span class="muted">to</span>
+        <span class="muted">{t('to')}</span>
         <input
           class="field"
           type="number"
           step="any"
           placeholder={num(hi)}
-          aria-label="To"
+          aria-label={t('To')}
           disabled={!editable}
           value={saved[1] ?? ''}
           onchange={(e) => setRange(saved[0], typed(e.currentTarget.value))} />
@@ -233,22 +234,22 @@
 {:else}
   <div class="dates">
     <div class="head"><span class="name">{name}</span></div>
-    <select class="field" aria-label="Dates to keep" value={preset} disabled={!editable} onchange={(e) => pickPreset(e.currentTarget.value)}>
-      <option value="">All dates</option>
+    <select class="field" aria-label={t('Dates to keep')} value={preset} disabled={!editable} onchange={(e) => pickPreset(e.currentTarget.value)}>
+      <option value="">{t('All dates')}</option>
       {#each DATE_PRESETS as p}<option value={p.id}>{p.label}</option>{/each}
-      <option value="custom">Custom between</option>
+      <option value="custom">{t('Custom between')}</option>
     </select>
     {#if preset === 'custom'}
       <label class="day">
-        <span class="muted">From</span>
-        <input class="field" type="date" aria-label="First day" min={first} max={last} disabled={!editable} value={day(tile.filter?.range?.[0])} onchange={(e) => setDays(e.currentTarget.value, day(tile.filter?.range?.[1]))} />
+        <span class="muted">{t('From')}</span>
+        <input class="field" type="date" aria-label={t('First day')} min={first} max={last} disabled={!editable} value={day(tile.filter?.range?.[0])} onchange={(e) => setDays(e.currentTarget.value, day(tile.filter?.range?.[1]))} />
       </label>
       <label class="day">
-        <span class="muted">To</span>
-        <input class="field" type="date" aria-label="Last day" min={first} max={last} disabled={!editable} value={day(tile.filter?.range?.[1])} onchange={(e) => setDays(day(tile.filter?.range?.[0]), e.currentTarget.value)} />
+        <span class="muted">{t('To')}</span>
+        <input class="field" type="date" aria-label={t('Last day')} min={first} max={last} disabled={!editable} value={day(tile.filter?.range?.[1])} onchange={(e) => setDays(day(tile.filter?.range?.[0]), e.currentTarget.value)} />
       </label>
     {/if}
-    {#if first && last}<p class="muted note">Data from {cell(first, 'date', null, true)} to {cell(last, 'date', null, true)}.</p>{/if}
+    {#if first && last}<p class="muted note">{t('Data from {first} to {last}.', { first: cell(first, 'date', null, true), last: cell(last, 'date', null, true) })}</p>{/if}
   </div>
 {/if}
 

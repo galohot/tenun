@@ -1,7 +1,8 @@
 // The look of the cells of a table or pivot (build 07): a data bar behind the number, or a number
-// coloured good or bad. Pure functions with no imports at run time, so the node tests can load them.
+// coloured good or bad. Pure functions; the only import at run time is t(), so the node tests can load them.
 
 import type { CondFormat, ShowAs } from './api';
+import { t } from './i18n.ts';
 
 /** The range the bars of one value are drawn against. Zero is always inside it. */
 export interface BarScale {
@@ -43,8 +44,8 @@ export interface Verdict {
   /** The glyph that always goes with the colour. */
   glyph: '▲' | '▼';
   tone: 'good' | 'bad';
-  /** For a tooltip and a screen reader: "Above 100" or "Below 100". */
-  word: 'Above' | 'Below';
+  /** For a tooltip and a screen reader: "Above 100" or "Below 100", in the language of the screens. */
+  word: string;
 }
 
 /** A change or a % change is compared with 0; any other value with the threshold (0 when none). */
@@ -72,5 +73,5 @@ export function goodBad(v: number | null | undefined, cond: CondFormat, how?: Sh
   if (shown !== undefined && lineShown !== undefined && readsAsLine(shown, line, lineShown)) return null;
   const up = v > line;
   const goodWhenUp = (cond.better ?? 'up') === 'up';
-  return { glyph: up ? '▲' : '▼', tone: up === goodWhenUp ? 'good' : 'bad', word: up ? 'Above' : 'Below' };
+  return { glyph: up ? '▲' : '▼', tone: up === goodWhenUp ? 'good' : 'bad', word: up ? t('Above') : t('Below') };
 }

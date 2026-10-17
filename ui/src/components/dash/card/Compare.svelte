@@ -3,6 +3,7 @@
   import type { KpiInfo } from '../../../lib/api';
   import { pctChange } from '../../../lib/format';
   import { changeTone } from '../../../lib/card';
+  import { t } from '../../../lib/i18n';
 
   let { kpi, better = 'up' }: { kpi: KpiInfo; better?: 'up' | 'down' } = $props();
 
@@ -11,10 +12,10 @@
 
 <div class="compare">
   {#if kpi.delta === null}
-    <span class="muted">Nothing to compare in {kpi.versus}</span>
+    <span class="muted">{t('Nothing to compare in {period}', { period: kpi.versus ?? '' })}</span>
   {:else}
-    <span class="delta {tone}">{tone === 'flat' ? '≈ Same' : `${kpi.delta > 0 ? '▲' : '▼'} ${pctChange(kpi.delta)}`}</span>
-    <span class="muted">vs {kpi.versus}</span>
+    <span class="delta {tone}">{tone === 'flat' ? `≈ ${t('Same')}` : `${kpi.delta > 0 ? '▲' : '▼'} ${pctChange(kpi.delta)}`}</span>
+    <span class="muted">{t('vs {period}', { period: kpi.versus ?? '' })}</span>
   {/if}
 </div>
 

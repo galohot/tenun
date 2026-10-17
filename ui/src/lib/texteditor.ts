@@ -3,6 +3,7 @@
 // so what is typed is what is saved. Pure, with only pure imports, so the node tests load it.
 
 import { inlineToMarkdown, parseMarkdown, type Block, type CalloutKind, type NumPart } from './markdown.ts';
+import { t } from './i18n.ts';
 
 export type EdKind = 'p' | 'h1' | 'h2' | 'h3' | 'ul' | 'ol' | 'quote' | 'note' | 'good' | 'warn' | 'hr';
 
@@ -16,17 +17,17 @@ export interface EdBlock {
 
 /** The names of the kinds, in the order the block menu lists them. */
 export const KINDS: { kind: EdKind; label: string }[] = [
-  { kind: 'p', label: 'Text' },
-  { kind: 'h1', label: 'Heading 1' },
-  { kind: 'h2', label: 'Heading 2' },
-  { kind: 'h3', label: 'Heading 3' },
-  { kind: 'ul', label: 'Bulleted list' },
-  { kind: 'ol', label: 'Numbered list' },
-  { kind: 'quote', label: 'Quote' },
-  { kind: 'note', label: 'Note' },
-  { kind: 'good', label: 'Good news' },
-  { kind: 'warn', label: 'Warning' },
-  { kind: 'hr', label: 'Line' },
+  { kind: 'p', get label() { return t('Text'); } },
+  { kind: 'h1', get label() { return t('Heading 1'); } },
+  { kind: 'h2', get label() { return t('Heading 2'); } },
+  { kind: 'h3', get label() { return t('Heading 3'); } },
+  { kind: 'ul', get label() { return t('Bulleted list'); } },
+  { kind: 'ol', get label() { return t('Numbered list'); } },
+  { kind: 'quote', get label() { return t('Quote'); } },
+  { kind: 'note', get label() { return t('Note'); } },
+  { kind: 'good', get label() { return t('Good news'); } },
+  { kind: 'warn', get label() { return t('Warning'); } },
+  { kind: 'hr', get label() { return t('Line'); } },
 ];
 
 /** Kinds that hold one line: Enter starts a new block. */

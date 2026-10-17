@@ -1,8 +1,9 @@
 // New tables from other tables (build 04, V4-D6): what the sheet needs before it asks the engine. Pure
-// functions with no imports at run time, so the node tests can load them. The engine makes the table
+// functions; the only import at run time is t(), so the node tests can load them. The engine makes the table
 // and has the last word (derived.rs).
 
 import type { Column, DerivedSpec, Source, Table } from './api';
+import { t } from './i18n.ts';
 
 export type DerivedOp = DerivedSpec['op'];
 
@@ -10,9 +11,36 @@ type Named = Pick<Table, 'id' | 'label'> & { columns: Pick<Column, 'name' | 'dty
 
 /** The three ways to make a new table, as the Add data sheet offers them. */
 export const OPS: { op: DerivedOp; title: string; icon: string; words: string }[] = [
-  { op: 'append', title: 'Append tables', icon: 'append', words: 'Stack the rows of tables with the same columns, like one file for each month.' },
-  { op: 'merge', title: 'Merge two tables', icon: 'merge', words: 'Put the columns of one table beside the rows of another, matched on a key.' },
-  { op: 'group', title: 'Group a table', icon: 'group', words: 'One row for each group, with totals you write as formulas.' },
+  {
+    op: 'append',
+    icon: 'append',
+    get title() {
+      return t('Append tables');
+    },
+    get words() {
+      return t('Stack the rows of tables with the same columns, like one file for each month.');
+    },
+  },
+  {
+    op: 'merge',
+    icon: 'merge',
+    get title() {
+      return t('Merge two tables');
+    },
+    get words() {
+      return t('Put the columns of one table beside the rows of another, matched on a key.');
+    },
+  },
+  {
+    op: 'group',
+    icon: 'group',
+    get title() {
+      return t('Group a table');
+    },
+    get words() {
+      return t('One row for each group, with totals you write as formulas.');
+    },
+  },
 ];
 
 /** The ids of the tables a new table reads. */
@@ -24,8 +52,8 @@ export function inputsOf(spec: DerivedSpec): string[] {
 
 /** "From: orders, stores", with the labels of the tables, or the name in the id of one that is gone. */
 export function fromWords(spec: DerivedSpec, tables: readonly Named[]): string {
-  const names = inputsOf(spec).map((id) => tables.find((t) => t.id === id)?.label ?? id.split('/').slice(1).join('/'));
-  return `From: ${[...new Set(names)].join(', ')}`;
+  const names = inputsOf(spec).map((id) => tables.find((x) => x.id === id)?.label ?? id.split('/').slice(1).join('/'));
+  return t('From: {names}', { names: [...new Set(names)].join(', ') });
 }
 
 /** The spec of a new table source, or null for any other source. */
@@ -59,27 +87,27 @@ export function appendColumns(tables: readonly Named[]): AppendColumn[] {
 /** What keeps a new table from being made, in words, before the engine is asked. `null` when it can be asked. */
 export function specProblem(spec: DerivedSpec): string | null {
   if (spec.op === 'append') {
-    if (spec.tables.length < 2) return 'Pick two or more tables to append.';
+    if (spec.tables.length < 2) return t('Pick two or more tables to append.');
     return null;
   }
   if (spec.op === 'merge') {
-    if (!spec.left || !spec.right) return 'Pick the two tables.';
-    if (spec.left === spec.right) return 'Pick two different tables to merge.';
-    if (!spec.on.length || spec.on.some(([a, b]) => !a || !b)) return 'Pick the columns that match: one from each table.';
+    if (!spec.left || !spec.right) return t('Pick the two tables.');
+    if (spec.left === spec.right) return t('Pick two different tables to merge.');
+    if (!spec.on.length || spec.on.some(([a, b]) => !a || !b)) return t('Pick the columns that match: one from each table.');
     return null;
   }
-  if (!spec.table) return 'Pick a table.';
-  if (!spec.by.length && !spec.values.length) return 'Pick a column to group by, or add a value.';
-  if (spec.values.some((v) => !v.name.trim() || !v.formula.trim())) return 'Give each value a name and a formula.';
+  if (!spec.table) return t('Pick a table.');
+  if (!spec.by.length && !spec.values.length) return t('Pick a column to group by, or add a value.');
+  if (spec.values.some((v) => !v.name.trim() || !v.formula.trim())) return t('Give each value a name and a formula.');
   return null;
 }
 
 /** What is wrong with the name of a new table. The engine says the same (derived.rs `name_problem`). */
 export function tableNameProblem(name: string): string | null {
   const n = name.trim();
-  if (!n) return 'Give the new table a name.';
-  if ([...n].length > 64) return `A name has 64 characters at most. This one has ${[...n].length}.`;
-  if (n.startsWith('__')) return 'A name cannot start with two underscores.';
+  if (!n) return t('Give the new table a name.');
+  if ([...n].length > 64) return t('A name has 64 characters at most. This one has {n}.', { n: [...n].length });
+  if (n.startsWith('__')) return t('A name cannot start with two underscores.');
   return null;
 }
 

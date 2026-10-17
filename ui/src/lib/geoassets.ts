@@ -4,6 +4,7 @@
 
 import type { MapLevel } from './api';
 import { echarts } from './echarts';
+import { t } from './i18n';
 import { features, type Feature, type FeatureCollection, type Topology } from './topo';
 
 /** Shapes an exported file carries: the TopoJSON of the bundled maps by file name, GeoJSON of downloaded ones. */
@@ -34,9 +35,9 @@ export function fileOf(level: MapLevel, country: string): string | null {
 /** The key under which an exported file carries a downloaded map. */
 export const downloadedKey = (country: string, level: MapLevel) => `${country.toUpperCase()}-${level}`;
 
-const NATURAL_EARTH = 'Boundaries: Natural Earth';
-const GEOBOUNDARIES_ID = 'Boundaries: geoBoundaries (CC BY 3.0 IGO), BPS; codes: Kemendagri';
-const GEOBOUNDARIES = 'Boundaries: geoBoundaries';
+const NATURAL_EARTH = () => t('Boundaries: {source}', { source: 'Natural Earth' });
+const GEOBOUNDARIES_ID = () => t('Boundaries: {source}; codes: {codes}', { source: 'geoBoundaries (CC BY 3.0 IGO), BPS', codes: 'Kemendagri' });
+const GEOBOUNDARIES = () => t('Boundaries: {source}', { source: 'geoBoundaries' });
 
 const loaded = new Map<string, Promise<Feature[]>>();
 
@@ -59,7 +60,7 @@ async function loadDownloaded(country: string, level: MapLevel): Promise<Feature
   const gj: FeatureCollection =
     fromFile ?? (await (async () => {
       const r = await fetch(`/api/geo/${encodeURIComponent(country)}/${level}`, { headers: { 'X-Tenun': '1' } });
-      if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? `The map of ${country} could not be downloaded.`);
+      if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? t('The map of {country} could not be downloaded.', { country }));
       return r.json();
     })());
   const out: Feature[] = [];
@@ -94,11 +95,11 @@ export async function shapesFor(level: MapLevel, country = 'ID'): Promise<Shapes
       await once('ID-1', () => loadTopo('ID-1'));
       borders = { mapName: 'tenun:ID-1' };
     }
-    return { mapName: `tenun:${file}`, shapes, borders, credit: file === 'world' ? NATURAL_EARTH : GEOBOUNDARIES_ID };
+    return { mapName: `tenun:${file}`, shapes, borders, credit: file === 'world' ? NATURAL_EARTH() : GEOBOUNDARIES_ID() };
   }
   const key = downloadedKey(country, level);
   const shapes = await once(key, () => loadDownloaded(country, level));
-  return { mapName: `tenun:${key}`, shapes, borders: null, credit: GEOBOUNDARIES };
+  return { mapName: `tenun:${key}`, shapes, borders: null, credit: GEOBOUNDARIES() };
 }
 
 /** The outline under a points map: the provinces of Indonesia, or the world. */

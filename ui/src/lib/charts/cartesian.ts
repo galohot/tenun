@@ -10,6 +10,7 @@ import {
   fold,
   FOLDED,
   key,
+  lastTwelve,
   makeLabel,
   OTHER,
   pivot,
@@ -25,11 +26,11 @@ import { addsUp as tileAddsUp, formatOf, whyNotAdded } from '../measures';
 import { isHigh, unusualWords, type UnusualPoint } from '../unusual';
 import { tipHtml, tipKey } from '../tips';
 import { measureLabel } from '../format';
-
-/** The name of the trend line in the legend and the tooltip. */
-const TREND = 'Trend';
+import { t } from '../i18n';
 
 export function buildCartesian({ res, tile, colors: c, selected, width, height, tables = [], noFold = false }: BuildArgs): Built {
+  /** The name of the trend line in the legend and the tooltip. */
+  const TREND = t('Trend');
   const dim0 = res.columns[0];
   const grain = tile.dims[0]?.grain;
   const isSel = (v: Cell) => !selected || selected.some((s) => key(s) === key(v));
@@ -104,7 +105,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     ...(indexed && tile.type === 'line' ? { scale: true } : {}),
     ...(indexed
       ? {
-          name: 'Index (first = 100)',
+          name: t('Index (first = 100)'),
           nameLocation: 'end' as const,
           nameGap: 10,
           nameTextStyle: { color: c.text2, fontSize: 11, align: horizontal ? ('right' as const) : ('left' as const) },
@@ -156,7 +157,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const order = series.map((_, i) => i);
   if (stacked && tile.type === 'area') {
     const total = (i: number) => series[i].values.reduce<number>((sum, v) => sum + Math.abs(v ?? 0), 0);
-    const rank = (i: number) => (series[i].name === OTHER ? -1 : total(i));
+    const rank = (i: number) => (series[i].raw === OTHER ? -1 : total(i));
     order.sort((a, b) => rank(b) - rank(a));
   }
   const forecasting = forecastRows.length > 0 && !stacked;
@@ -385,11 +386,11 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
         const i = categories.findIndex((k) => key(k) === key(r[0]));
         if (i >= 0) [est[i], lo[i], hi[i]] = [r[vi] as number, r[vi + 1] as number, r[vi + 2] as number];
       }
-      const name = multi ? `${s.name} estimate` : 'Estimate';
+      const name = multi ? t('{name} estimate', { name: s.name }) : t('Estimate');
       estimateNames.push(name);
       const fmt = fmtOf(si);
       const estimateText = (v: number | null, i: number) =>
-        v === null || i === lastDone ? '–' : `${fmt.short(v)}, likely between ${fmt.short(lo[i] as number)} and ${fmt.short(hi[i] as number)}`;
+        v === null || i === lastDone ? '–' : t('{value}, likely between {low} and {high}', { value: fmt.short(v), low: fmt.short(lo[i] as number), high: fmt.short(hi[i] as number) });
       tipText.set(name, estimateText);
       (built as object[]).push({
         type: 'line',
@@ -457,14 +458,14 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
       ? pointsOf(whole.series, whole.categories, isRest)
       : usableValues(shownSeries(whole.series, source === 'total'), whole.categories, isRest);
   // An indexed chart shows where it started: the line at 100.
-  const levels = guided ? [...resolveLevels(tile.lines, false, () => shown), ...(indexed ? [{ axis: 'y' as const, value: 100, name: 'Start' }] : [])] : [];
+  const levels = guided ? [...resolveLevels(tile.lines, false, () => shown), ...(indexed ? [{ axis: 'y' as const, value: 100, name: t('Start') }] : [])] : [];
   // The unfinished last period is left out of the fit, so a half month never bends the line.
   const rest = new Set<number>();
   categories.forEach((v, i) => {
     if (isRest(v) || (partialKey !== undefined && v === partialKey)) rest.add(i);
   });
   const fit = guided && source !== 'points' && wantsTrend(tile.lines) ? trendFit(aligned, undefined, rest) : null;
-  const trendTip = fit ? trendSentence(fit, fmtOf(0).short(Math.abs(fit.slope)), `per ${stepWord(temporal ? grain : null)}`) : '';
+  const trendTip = fit ? trendSentence(fit, fmtOf(0).short(Math.abs(fit.slope)), t('per {step}', { step: stepWord(temporal ? grain : null) })) : '';
   if (fit) tipText.set(TREND, () => trendTip);
   const lineKey = horizontal ? 'xAxis' : 'yAxis';
   // The plot is about as tall (or wide) as the chart less its margins and axis text.
@@ -612,7 +613,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
     // A relative change of a share or a rank would read oddly, so those show the two values only.
     const change =
       now !== null && before !== null && before !== 0 && !unitOf(0)
-        ? `<br/>Change <b>${now > before ? '+' : now < before ? '−' : ''}${pctChange((now - before) / Math.abs(before))}</b>`
+        ? `<br/>${esc(t('Change@@noun'))} <b>${now > before ? '+' : now < before ? '−' : ''}${pctChange((now - before) / Math.abs(before))}</b>`
         : '';
     const dot = `<span style="display:inline-block;margin-right:4px;border-radius:10px;width:10px;height:10px;background-color:${c.text2}"></span>`;
     return (
@@ -628,7 +629,7 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const tipNames = (tile.tooltip?.extra ?? []).map((m) => measureLabel(m, tables));
   // Each extra value in its own format: a named measure's, else as it comes.
   const tipFormats = (tile.tooltip?.extra ?? []).map((m) => numberFormatter(formatOf({ measures: [m] }, 0), loc).tip);
-  const trendCaption = tile.tooltip?.trend ? `Last 12 ${tile.tooltip.trend.grain === 'week' ? 'weeks' : tile.tooltip.trend.grain === 'quarter' ? 'quarters' : tile.tooltip.trend.grain === 'day' ? 'days' : 'months'}` : '';
+  const trendCaption = lastTwelve(tile.tooltip?.trend);
   const tipsTip = (all: { marker: string; seriesName: string; value: unknown; dataIndex: number; axisValueLabel: string }[]) =>
     `${esc(all[0]?.axisValueLabel ?? '')}` +
     all
@@ -718,10 +719,10 @@ export function buildCartesian({ res, tile, colors: c, selected, width, height, 
   const why = addsUp ? null : whyNotAdded(tile, 0, res.parts);
   const left: string[] = [];
   if (why && !temporal && !noFold && tile.type === 'bar' && !res.other && foldable({ addsUp: true, categories: whole.categories.length, max: Math.max(4, room), series: whole.series.length })) {
-    left.push(`${why}, so there is no Other bar.`);
+    left.push(t('{why}, so there is no Other bar.', { why }));
   }
-  if (why && !perValue && whole.series.length > MAX_SERIES) left.push(`${why}, so every group has its own series and there is no Other.`);
-  if (why && source === 'points' && wantsTrend(tile.lines)) left.push(`${why}, so a split chart has no trend line.`);
+  if (why && !perValue && whole.series.length > MAX_SERIES) left.push(t('{why}, so every group has its own series and there is no Other.', { why }));
+  if (why && source === 'points' && wantsTrend(tile.lines)) left.push(t('{why}, so a split chart has no trend line.', { why }));
   return {
     option,
     categories: categories.map((v) => (v === FOLDED && !res.other ? undefined : v)),
@@ -745,5 +746,5 @@ export function sizeNote(res: QueryResult): string | null {
     if (peak > 0) peaks.push(peak);
   }
   if (peaks.length < 2 || Math.max(...peaks) / Math.min(...peaks) <= 20) return null;
-  return 'These values have very different sizes, so the smaller ones look flat.';
+  return t('These values have very different sizes, so the smaller ones look flat.');
 }

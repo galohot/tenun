@@ -24,10 +24,10 @@
   });
   function placeOf(r: AlertRule) {
     const d = app.dashboards.find((x) => x.id === r.dashboard);
-    const t = d?.tiles.find((x) => x.id === r.tile);
-    const fmt = (n: number) => compact(n, t ? formatOf(t, r.measure ?? 0) : null);
-    const name = t && (r.measure ?? 0) === 0 && t.title ? t.title : r.name || (t ? tileTitle(t, app.tables) : 'A removed tile');
-    return { page: d?.title || 'Untitled', name, fmt };
+    const tl = d?.tiles.find((x) => x.id === r.tile);
+    const fmt = (n: number) => compact(n, tl ? formatOf(tl, r.measure ?? 0) : null);
+    const name = tl && (r.measure ?? 0) === 0 && tl.title ? tl.title : r.name || (tl ? tileTitle(tl, app.tables) : t('A removed tile'));
+    return { page: d?.title || t('Untitled'), name, fmt };
   }
   async function turn(r: AlertRule, on: boolean) {
     try {
@@ -42,9 +42,15 @@
     { id: 'en', label: 'English', sample: '1,234.5 · $1.2M' },
   ];
   const THEMES: { id: 'system' | 'light' | 'dark'; label: string }[] = [
-    { id: 'system', label: 'System' },
-    { id: 'light', label: 'Light' },
-    { id: 'dark', label: 'Dark' },
+    { id: 'system', label: t('System') },
+    { id: 'light', label: t('Light') },
+    { id: 'dark', label: t('Dark') },
+  ];
+  const MONTHS = [t('January'), t('February'), t('March'), t('April'), t('May'), t('June'), t('July'), t('August'), t('September'), t('October'), t('November'), t('December')];
+  /** The language of the screens (0.7 build 02): this computer's, like the appearance. Names read in their own language. */
+  const LANGS: { id: 'en' | 'id'; label: string }[] = [
+    { id: 'en', label: 'English' },
+    { id: 'id', label: 'Bahasa Indonesia' },
   ];
   /** "Check now" (0.7 build 01): the answer comes back on the bar. */
   let checking = $state(false);
@@ -60,19 +66,18 @@
       checking = false;
     }
   }
-  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 </script>
 
 {#if places}
   <PlaceNames onclose={() => (places = false)} />
 {:else}
-<Modal title="Settings" width={520} flush {onclose}>
+<Modal title={t('Settings')} width={520} flush {onclose}>
   <div class="rows">
     {#if SHOW_ADVANCED_SWITCH}
       <label class="row">
         <span class="text">
-          <span class="name">Advanced features <span class="badge">Free</span></span>
-          <span class="muted hint">Measures, calculated columns, drill-down, saved views, forecasts, alerts and {MORE_CHARTS.length} more chart types. Your dashboards look the same either way.</span>
+          <span class="name">{t('Advanced features')} <span class="badge">{t('Free')}</span></span>
+          <span class="muted hint">{t('Measures, calculated columns, drill-down, saved views, forecasts, alerts and {n} more chart types. Your dashboards look the same either way.', { n: MORE_CHARTS.length })}</span>
         </span>
         <input
           type="checkbox"
@@ -84,10 +89,10 @@
     {/if}
     <div class="row stack">
       <span class="text">
-        <span class="name">Number and date format <span class="where">· saved in this workspace</span></span>
-        <span class="muted hint">How numbers and dates read in this workspace. Exported and published dashboards use it too. The app stays in English.</span>
+        <span class="name">{t('Number and date format')} <span class="where">{t('· saved in this workspace')}</span></span>
+        <span class="muted hint">{t('How numbers and dates read in this workspace. Exported and published dashboards use it too, and read in its language. The language of the app is set under Language.')}</span>
       </span>
-      <div class="choices" role="radiogroup" aria-label="Number and date format">
+      <div class="choices" role="radiogroup" aria-label={t('Number and date format')}>
         {#each LOCALES as l (l.id)}
           <button type="button" role="radio" aria-checked={app.locale === l.id} class:on={app.locale === l.id} onclick={() => app.setLocale(l.id)}>
             <b>{l.label}</b>
@@ -96,9 +101,9 @@
         {/each}
       </div>
       <label class="sub digits">
-        <span class="muted">Digits</span>
+        <span class="muted">{t('Digits')}</span>
         <select class="field" value={app.digits ?? ''} onchange={(e) => app.setDigits((e.currentTarget.value || null) as Digits | null)}>
-          <option value="">As the language: {app.locale === 'id' ? '1.234.567,5' : '1,234,567.5'}</option>
+          <option value="">{t('As the language: {sample}', { sample: app.locale === 'id' ? '1.234.567,5' : '1,234,567.5' })}</option>
           {#each DIGITS as d (d.id)}<option value={d.id}>{d.example}</option>{/each}
         </select>
       </label>
@@ -106,22 +111,22 @@
     {#if app.settings?.advanced || (cal.yearStart ?? 1) !== 1 || (cal.weekStart ?? 1) !== 1}
       <div class="row stack">
         <span class="text">
-          <span class="name">Year and week</span>
-          <span class="muted hint">The month this workspace's year starts in, and the day its week starts on. Years, quarters, weeks, year to date and "this year" follow them. A year that starts in April 2026 is FY 2027.</span>
+          <span class="name">{t('Year and week')}</span>
+          <span class="muted hint">{t('The month this workspace\'s year starts in, and the day its week starts on. Years, quarters, weeks, year to date and "this year" follow them. A year that starts in April 2026 is FY 2027.')}</span>
         </span>
         <div class="pair">
           <label class="sub">
-            <span class="muted">Year starts in</span>
+            <span class="muted">{t('Year starts in')}</span>
             <select class="field" value={String(cal.yearStart ?? 1)} disabled={!app.settings?.advanced} onchange={(e) => app.setCalendar({ ...cal, yearStart: Number(e.currentTarget.value) })}>
               {#each MONTHS as m, i (m)}<option value={String(i + 1)}>{m}</option>{/each}
             </select>
           </label>
           <label class="sub">
-            <span class="muted">Week starts on</span>
+            <span class="muted">{t('Week starts on')}</span>
             <select class="field" value={String(cal.weekStart ?? 1)} disabled={!app.settings?.advanced} onchange={(e) => app.setCalendar({ ...cal, weekStart: Number(e.currentTarget.value) })}>
-              <option value="1">Monday</option>
-              <option value="6">Saturday</option>
-              <option value="7">Sunday</option>
+              <option value="1">{t('Monday')}</option>
+              <option value="6">{t('Saturday')}</option>
+              <option value="7">{t('Sunday')}</option>
             </select>
           </label>
         </div>
@@ -130,8 +135,8 @@
     {#if rules.length}
       <div class="row stack">
         <span class="text">
-          <span class="name">Alerts</span>
-          <span class="muted hint">Checked while Tenun is open on this computer, after each reload and once a minute. Edit one from its tile's menu.</span>
+          <span class="name">{t('Alerts')}</span>
+          <span class="muted hint">{t('Checked while Tenun is open on this computer, after each reload and once a minute. Edit one from its tile\'s menu.')}</span>
         </span>
         <ul class="alerts">
           {#each rules as r (r.id)}
@@ -143,7 +148,7 @@
                 <span class="muted hint">{p.page}</span>
                 <span class="hint state {line.tone}">{line.text}</span>
               </span>
-              <input type="checkbox" role="switch" class="switch" aria-label="On" checked={r.on} onchange={(e) => turn(r, e.currentTarget.checked)} />
+              <input type="checkbox" role="switch" class="switch" aria-label={t('On')} checked={r.on} onchange={(e) => turn(r, e.currentTarget.checked)} />
             </li>
           {/each}
         </ul>
@@ -161,21 +166,32 @@
     {/if}
     <div class="row center">
       <span class="text">
-        <span class="name">Appearance</span>
-        <span class="muted hint">Belongs to this computer.</span>
+        <span class="name">{t('Language')}</span>
+        <span class="muted hint">{t('The language of the menus and screens. Belongs to this computer.')}</span>
       </span>
-      <div class="seg" role="radiogroup" aria-label="Appearance">
-        {#each THEMES as t (t.id)}
-          <button type="button" role="radio" aria-checked={app.themePref === t.id} class:on={app.themePref === t.id} onclick={() => app.setTheme(t.id)}>{t.label}</button>
+      <div class="seg" role="radiogroup" aria-label={t('Language')}>
+        {#each LANGS as l (l.id)}
+          <button type="button" role="radio" lang={l.id} aria-checked={app.lang === l.id} class:on={app.lang === l.id} onclick={() => app.saveSettings({ language: l.id })}>{l.label}</button>
         {/each}
       </div>
     </div>
     <div class="row center">
       <span class="text">
-        <span class="name">Place names for maps</span>
-        <span class="muted hint">The standard names and codes of countries, provinces and kabupaten/kota that a map reads, with a CSV to start from.</span>
+        <span class="name">{t('Appearance')}</span>
+        <span class="muted hint">{t('Belongs to this computer.')}</span>
       </span>
-      <button type="button" class="btn" onclick={() => (places = true)}>Show</button>
+      <div class="seg" role="radiogroup" aria-label={t('Appearance')}>
+        {#each THEMES as th (th.id)}
+          <button type="button" role="radio" aria-checked={app.themePref === th.id} class:on={app.themePref === th.id} onclick={() => app.setTheme(th.id)}>{th.label}</button>
+        {/each}
+      </div>
+    </div>
+    <div class="row center">
+      <span class="text">
+        <span class="name">{t('Place names for maps')}</span>
+        <span class="muted hint">{t('The standard names and codes of countries, provinces and kabupaten/kota that a map reads, with a CSV to start from.')}</span>
+      </span>
+      <button type="button" class="btn" onclick={() => (places = true)}>{t('Show')}</button>
     </div>
     <div class="row center">
       <span class="text">
@@ -185,7 +201,7 @@
       <button type="button" class="btn" onclick={() => { onclose(); app.reportOpen = true; }}>{t('Report…')}</button>
     </div>
   </div>
-  <p class="muted note">The number and date format, the year and week, and the alerts are saved in your workspace file; an alert's address is not. The other settings belong to this computer.</p>
+  <p class="muted note">{t('The number and date format, the year and week, and the alerts are saved in your workspace file; an alert\'s address is not. The other settings, the language among them, belong to this computer.')}</p>
 </Modal>
 {/if}
 

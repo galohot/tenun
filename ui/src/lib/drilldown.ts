@@ -1,8 +1,9 @@
 // Drill-down inside a chart (v5 build 01, V5-D3): which tiles drill and how, the steps of a drill, and the words of
-// the drill bar. The engine does the drilling (`drill.rs`); this file only keeps the reader's place. Pure, with no
-// imports at run time, so the node tests load it.
+// the drill bar. The engine does the drilling (`drill.rs`); this file only keeps the reader's place. Pure; the only
+// import at run time is t(), so the node tests load it.
 
 import type { Cell, DrillInfo, DrillState, Grain, Hierarchy, Tile } from './api';
+import { t } from './i18n.ts';
 
 /** The tile types that drill. A map is left out: a place stands for several names in the data (V5-D36). */
 export const DRILL_TYPES: readonly Tile['type'][] = ['bar', 'line', 'area', 'table', 'pie', 'donut', 'pivot'];
@@ -15,10 +16,11 @@ const PERIODS: readonly Grain[] = ['year', 'quarter', 'month', 'week', 'day'];
 export function drillOptions(tile: Pick<Tile, 'type' | 'dims'>, hierarchies: readonly Hierarchy[]): { value: string; label: string }[] {
   const first = tile.dims[0];
   if (!DRILL_TYPES.includes(tile.type) || !first) return [];
-  const out = [{ value: '', label: 'Off' }];
+  const out = [{ value: '', label: t('Off') }];
   if (first.grain && PERIODS.includes(first.grain) && first.grain !== 'day') {
     const chain = first.grain === 'week' ? ['week', 'day'] : ['year', 'quarter', 'month', 'day'].slice(['year', 'quarter', 'month'].indexOf(first.grain));
-    out.push({ value: 'date', label: `By date: ${chain.join(' › ')}` });
+    const word = (g: string) => (g === 'year' ? t('year') : g === 'quarter' ? t('quarter') : g === 'month' ? t('month') : g === 'week' ? t('week') : t('day'));
+    out.push({ value: 'date', label: t('By date: {chain}', { chain: chain.map(word).join(' › ') }) });
   }
   for (const h of hierarchies) {
     const at = h.levels.findIndex((l) => l.table === first.table && l.column === first.column);
@@ -69,10 +71,23 @@ export const isTop = (s: DrillState): boolean => s.path.length === 0;
 export function crumbs(info: DrillInfo, fmt: (v: Cell, grain: Grain | null) => string): { parts: { label: string; depth: number }[]; showing: string } {
   const plural = (s: string) => (/(s|x|ch|sh)$/i.test(s) ? `${s}es` : /[^aeiou]y$/i.test(s) ? `${s.slice(0, -1)}ies` : `${s}s`);
   const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
-  const parts = [{ label: `All ${lower(plural(info.levels[0] ?? 'values'))}`, depth: 0 }];
+  // The engine names the levels of a date chain in English; a hierarchy's levels are the user's own names.
+  const word = (s: string) => {
+    switch (s) {
+      case 'Year': return t('Year');
+      case 'Quarter': return t('Quarter');
+      case 'Month': return t('Month');
+      case 'Week': return t('Week');
+      case 'Day': return t('Day');
+      default: return s;
+    }
+  };
+  // "All years": English writes the plural ({names}); a language with one form writes {name}.
+  const top = word(info.levels[0] ?? 'values');
+  const parts = [{ label: t('All {names}', { names: lower(plural(top)), name: lower(top) }), depth: 0 }];
   info.path.forEach((step, i) => {
-    const label = 'value' in step ? fmt(step.value ?? null, info.grains[i] ?? null) : `Every ${lower(info.levels[i] ?? 'value')}`;
+    const label = 'value' in step ? fmt(step.value ?? null, info.grains[i] ?? null) : t('Every {name}', { name: lower(word(info.levels[i] ?? 'value')) });
     parts.push({ label, depth: i + 1 });
   });
-  return { parts, showing: `by ${lower(info.levels[info.at] ?? '')}` };
+  return { parts, showing: t('by {name}', { name: lower(word(info.levels[info.at] ?? '')) }) };
 }

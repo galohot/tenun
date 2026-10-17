@@ -6,6 +6,7 @@
   // total show. Nothing is saved until the formula is good.
   import { api, MeasureRefused, type FormulaCheck, type FormulaError, type NamedMeasure, type NumFormat } from '../../lib/api';
   import { app } from '../../lib/state.svelte';
+  import { t, tn } from '../../lib/i18n';
   import { cell } from '../../lib/format';
   import { typeWords } from '../../lib/formula';
   import { measureScope } from '../../lib/formulaScope';
@@ -57,7 +58,7 @@
       JSON.stringify(fmt) !== JSON.stringify(old?.format ?? {}),
   );
   function close() {
-    if (dirty && !confirm('Close without saving what you typed?')) return;
+    if (dirty && !confirm(t('Close without saving what you typed?'))) return;
     onclose();
   }
   const used = $derived(editing ? tilesWith(app.dashboards, editing).length : 0);
@@ -99,7 +100,7 @@
   const total = $derived(check.reply?.preview?.[0]);
   const shown = $derived.by(() => {
     const v = total;
-    if (v === null || v === undefined || v === '') return 'blank';
+    if (v === null || v === undefined || v === '') return t('blank');
     if (check.reply?.dtype === 'number' && typeof v === 'number') return cell(v, 'number', null, false, hasFormat ? fmt : null);
     return String(v);
   });
@@ -114,7 +115,7 @@
     if (at < 0) list.push(m);
     else list[at] = m;
     saving = true;
-    app.busy = 'Saving';
+    app.busy = t('Saving');
     try {
       const r = await api.setMeasures(list);
       if ('saved' in r) {
@@ -131,7 +132,7 @@
   }
 </script>
 
-<Modal title={editing === undefined ? 'New measure' : `Measure ${old?.name ?? ''}`} width={600} onclose={close}>
+<Modal title={editing === undefined ? t('New measure') : t('Measure {name}', { name: old?.name ?? '' })} width={600} onclose={close}>
   <form
     id="measure-form"
     onsubmit={(e) => {
@@ -139,21 +140,21 @@
       save();
     }}>
     <label class="row">
-      <span class="label">Name</span>
-      <input class="field" bind:value={name} placeholder="Achievement" autocomplete="off" aria-invalid={!!nameBad} oninput={() => (refused = null)} />
+      <span class="label">{t('Name')}</span>
+      <input class="field" bind:value={name} placeholder={t('Achievement')} autocomplete="off" aria-invalid={!!nameBad} oninput={() => (refused = null)} />
     </label>
     {#if nameBad}<p class="bad">{nameBad}</p>{/if}
     {#if editing !== undefined && used}
-      <p class="note">{used === 1 ? 'A tile uses' : `${used} tiles use`} this measure. They keep using it when the name changes.</p>
+      <p class="note">{tn('A tile uses this measure. They keep using it when the name changes.', '{n} tiles use this measure. They keep using it when the name changes.', used)}</p>
     {/if}
 
     <div class="row">
-      <span class="label" id="measure-formula-label">Formula</span>
+      <span class="label" id="measure-formula-label">{t('Formula')}</span>
       <FormulaField
         bind:value={formula}
         {scope}
         {error}
-        label="Formula"
+        label={t('Formula')}
         placeholder={'SUM([Sales].[amount]) / SUM([Targets].[target])'}
         oninput={() => (refused = null)} />
       <div class="result" aria-live="polite">
@@ -161,41 +162,40 @@
           <p class="bad"><Icon name="warning" size={13} /> {formulaBad}</p>
         {:else if check.state === 'idle'}
           <p class="note">
-            Add up columns with SUM, AVERAGE, COUNT and the like, then use them in arithmetic. A column is in square brackets with its
-            table: [Sales].[amount]. Type [ to see the tables. The parts can come from different files and databases.
+            {t('Add up columns with SUM, AVERAGE, COUNT and the like, then use them in arithmetic. A column is in square brackets with its table: [Sales].[amount]. Type [ to see the tables. The parts can come from different files and databases.')}
           </p>
         {:else if check.state === 'checking'}
-          <p class="note">Checking…</p>
+          <p class="note">{t('Checking…')}</p>
         {:else if error}
           <p class="bad"><Icon name="warning" size={13} /> {error.message}</p>
         {:else if check.reply?.ok}
           <div class="ok">
             <span class="type"><Icon name="check" size={12} /> {check.reply.dtype ? typeWords(check.reply.dtype) : ''}</span>
             <span class="total">
-              <span class="cap">All data</span>
+              <span class="cap">{t('All data')}</span>
               <span class="v" class:blank={total === null || total === ''}>{shown}</span>
             </span>
           </div>
           {#if readsTables.length > 1}
-            <p class="note">Each of {readsTables.join(' and ')} is added up on its own, then the formula combines them.</p>
+            <p class="note">{t('Each of {tables} is added up on its own, then the formula combines them.', { tables: readsTables.join(` ${t('and')} `) })}</p>
           {/if}
         {/if}
       </div>
     </div>
 
     <div class="row">
-      <FormatEditor value={fmt} onchange={setFmt} advanced={!!app.settings?.advanced} label="Format (optional; a tile can use its own)" />
+      <FormatEditor value={fmt} onchange={setFmt} advanced={!!app.settings?.advanced} label={t('Format (optional; a tile can use its own)')} />
     </div>
 
     <label class="row">
-      <span class="label">Description <em>(optional)</em></span>
-      <input class="field" bind:value={description} placeholder="What does this measure tell?" autocomplete="off" oninput={() => (refused = null)} />
+      <span class="label">{t('Description')} <em>{t('(optional)')}</em></span>
+      <input class="field" bind:value={description} placeholder={t('What does this measure tell?')} autocomplete="off" oninput={() => (refused = null)} />
     </label>
   </form>
   {#snippet footer()}
     {#if refused?.field === 'list'}<p class="bad foot"><Icon name="warning" size={13} /> {refused.error.message}</p>{/if}
-    <button type="button" class="btn" onclick={onclose}>Cancel</button>
-    <button type="submit" form="measure-form" class="btn primary" disabled={!valid}>{editing === undefined ? 'Add measure' : 'Save measure'}</button>
+    <button type="button" class="btn" onclick={onclose}>{t('Cancel')}</button>
+    <button type="submit" form="measure-form" class="btn primary" disabled={!valid}>{editing === undefined ? t('Add measure') : t('Save measure')}</button>
   {/snippet}
 </Modal>
 

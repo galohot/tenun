@@ -16,6 +16,7 @@ import { pictureKind, pictureNote } from './picture';
 import { partialNote } from './run';
 import { fileName, tileTable, toCsv } from './tabular';
 import { withNamedFormats } from './measures';
+import { t } from './i18n';
 import type { DashFilter } from './tiles';
 import Capture from '../components/dash/Capture.svelte';
 
@@ -27,13 +28,13 @@ const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 const toBlob = (c: HTMLCanvasElement, type: string, quality?: number) =>
-  new Promise<Blob>((ok, fail) => c.toBlob((b) => (b ? ok(b) : fail(new Error('The picture could not be made.'))), type, quality));
+  new Promise<Blob>((ok, fail) => c.toBlob((b) => (b ? ok(b) : fail(new Error(t('The picture could not be made.')))), type, quality));
 
 const loadImage = (src: string) =>
   new Promise<HTMLImageElement>((ok, fail) => {
     const i = new Image();
     i.onload = () => ok(i);
-    i.onerror = () => fail(new Error('The picture could not be made.'));
+    i.onerror = () => fail(new Error(t('The picture could not be made.')));
     i.src = src;
   });
 
@@ -41,7 +42,7 @@ const loadImage = (src: string) =>
 function plainOf(tile: Tile, res: QueryResult, tables: Named[]) {
   const heads =
     tile.type === 'kpi'
-      ? ['Period', tile.measures[0] ? measureLabel(tile.measures[0], tables) : 'Value']
+      ? [t('Period'), tile.measures[0] ? measureLabel(tile.measures[0], tables) : t('Value')]
       : columnHeads(res, tile, tables);
   return tileTable(tile, res, heads);
 }

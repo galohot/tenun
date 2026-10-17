@@ -10,11 +10,12 @@
   import { safeUrl, type NumPart } from '../../lib/markdown';
   import { addLink, convert, fromBlocks, insert, insertAt, KINDS, merge, move, numberToken, ONE_LINE, opensMenu, remove, split, toBlocks, toggleMark, type EdBlock, type EdKind, type Edit } from '../../lib/texteditor';
   import Icon from '../Icon.svelte';
+  import { t } from '../../lib/i18n';
 
   let { tile, set }: { tile: Tile; set: (patch: Partial<Tile>) => void } = $props();
 
-  const SHORT: Record<EdKind, string> = { p: 'Text', h1: 'H1', h2: 'H2', h3: 'H3', ul: 'List', ol: '1. List', quote: 'Quote', note: 'Note', good: 'Good', warn: 'Warn', hr: 'Line' };
-  const HINT: Partial<Record<EdKind, string>> = { p: 'Write, or type / for a block', ul: 'One item on each line', ol: 'One item on each line', quote: 'A quote', note: 'A note', good: 'Good news', warn: 'A warning' };
+  const SHORT: Record<EdKind, string> = { p: t('Text'), h1: 'H1', h2: 'H2', h3: 'H3', ul: t('List'), ol: t('1. List'), quote: t('Quote'), note: t('Note'), good: t('Good'), warn: t('Warn'), hr: t('Line') };
+  const HINT: Partial<Record<EdKind, string>> = { p: t('Write, or type / for a block'), ul: t('One item on each line'), ol: t('One item on each line'), quote: t('A quote'), note: t('A note'), good: t('Good news'), warn: t('A warning') };
 
   let raw = $state(false);
   let blocks = $state<EdBlock[]>([]);
@@ -146,7 +147,7 @@
     const s = selection(i);
     linking = { i, ...s, url: 'https://', page: '' };
   }
-  const pages = $derived(app.dashboards.map((d) => ({ id: d.id, title: d.title || 'Untitled' })));
+  const pages = $derived(app.dashboards.map((d) => ({ id: d.id, title: d.title || t('Untitled') })));
   function addWeb() {
     if (!linking) return;
     const url = safeUrl(linking.url.trim());
@@ -159,7 +160,7 @@
     if (!linking || !linking.page) return;
     const l = linking;
     linking = null;
-    apply(l.i, addLink(blocks[l.i].text, l.start, l.end, `page:${l.page}`, pages.find((p) => p.id === l.page)?.title ?? 'Page'));
+    apply(l.i, addLink(blocks[l.i].text, l.start, l.end, `page:${l.page}`, pages.find((p) => p.id === l.page)?.title ?? t('Page')));
   }
 
   // A live number: a named measure's value, its change, or its period.
@@ -180,75 +181,74 @@
 
 <div class="sec ed">
   <div class="top">
-    <span class="label">Text</span>
-    <label class="check"><input type="checkbox" bind:checked={raw} /> Edit as text</label>
+    <span class="label">{t('Text')}</span>
+    <label class="check"><input type="checkbox" bind:checked={raw} /> {t('Edit as text')}</label>
   </div>
 
   {#if raw}
     <textarea
       class="field rawtext"
       rows="10"
-      aria-label="Text of this tile, in Markdown"
+      aria-label={t('Text of this tile, in Markdown')}
       value={tile.text ?? ''}
       oninput={(e) => set({ text: e.currentTarget.value })}></textarea>
     <p class="hint">
-      # ## ### headings, - and 1. lists, &gt; quotes, &gt; [!note], [!good] or [!warn] callouts, --- a line, **bold**,
-      *italic*, [a link](https://…), [a page](page:id), and a live number: {'{{measure:id}}'}, with |compare or |period.
+      {t('# ## ### headings, - and 1. lists, > quotes, > [!note], [!good] or [!warn] callouts, --- a line, **bold**, *italic*, [a link](https://…), [a page](page:id), and a live number: {{measure:id}}, with |compare or |period.')}
     </p>
   {:else}
-    <div class="tools" role="toolbar" aria-label="Words">
-      <button class="btn plain icon" title="Bold (Ctrl+B)" aria-label="Bold" onmousedown={(e) => e.preventDefault()} onclick={() => mark('**')}><b>B</b></button>
-      <button class="btn plain icon" title="Italic (Ctrl+I)" aria-label="Italic" onmousedown={(e) => e.preventDefault()} onclick={() => mark('*')}><i>I</i></button>
-      <button class="btn plain icon" title="Link (Ctrl+K)" aria-label="Link" onmousedown={(e) => e.preventDefault()} onclick={openLink}><Icon name="link" size={14} /></button>
-      <button class="btn plain small" onmousedown={(e) => e.preventDefault()} onclick={openNumber}><Icon name="hash" size={13} /> Insert number</button>
+    <div class="tools" role="toolbar" aria-label={t('Words')}>
+      <button class="btn plain icon" title={t('Bold (Ctrl+B)')} aria-label={t('Bold')} onmousedown={(e) => e.preventDefault()} onclick={() => mark('**')}><b>B</b></button>
+      <button class="btn plain icon" title={t('Italic (Ctrl+I)')} aria-label={t('Italic')} onmousedown={(e) => e.preventDefault()} onclick={() => mark('*')}><i>I</i></button>
+      <button class="btn plain icon" title={t('Link (Ctrl+K)')} aria-label={t('Link')} onmousedown={(e) => e.preventDefault()} onclick={openLink}><Icon name="link" size={14} /></button>
+      <button class="btn plain small" onmousedown={(e) => e.preventDefault()} onclick={openNumber}><Icon name="hash" size={13} /> {t('Insert number')}</button>
     </div>
 
     {#if linking}
-      <div class="pop" role="group" aria-label="Add a link">
-        <span class="label">Link to a web address</span>
+      <div class="pop" role="group" aria-label={t('Add a link')}>
+        <span class="label">{t('Link to a web address')}</span>
         <form class="row" onsubmit={(e) => { e.preventDefault(); addWeb(); }}>
-          <input class="field" aria-label="Web address" bind:value={linking.url} />
-          <button class="btn" type="submit" disabled={!safeUrl(linking.url.trim())}>Add</button>
+          <input class="field" aria-label={t('Web address')} bind:value={linking.url} />
+          <button class="btn" type="submit" disabled={!safeUrl(linking.url.trim())}>{t('Add')}</button>
         </form>
         {#if pages.length}
-          <span class="label">or to a page of this workspace</span>
+          <span class="label">{t('or to a page of this workspace')}</span>
           <div class="row">
-            <select class="field" aria-label="Page" bind:value={linking.page}>
-              <option value="">Pick a dashboard</option>
+            <select class="field" aria-label={t('Page')} bind:value={linking.page}>
+              <option value="">{t('Pick a dashboard')}</option>
               {#each pages as p (p.id)}<option value={p.id}>{p.title}</option>{/each}
             </select>
-            <button class="btn" disabled={!linking.page} onclick={addPage}>Add</button>
+            <button class="btn" disabled={!linking.page} onclick={addPage}>{t('Add')}</button>
           </div>
         {/if}
-        <button class="link" onclick={() => (linking = null)}>Cancel</button>
+        <button class="link" onclick={() => (linking = null)}>{t('Cancel')}</button>
       </div>
     {/if}
 
     {#if numbering}
-      <div class="pop" role="group" aria-label="Insert a number">
+      <div class="pop" role="group" aria-label={t('Insert a number')}>
         {#if measures.length}
-          <span class="label">Measure</span>
-          <select class="field" aria-label="Measure" bind:value={numbering.id}>
+          <span class="label">{t('Measure')}</span>
+          <select class="field" aria-label={t('Measure')} bind:value={numbering.id}>
             {#each measures as m (m.id)}<option value={m.id}>{m.name}</option>{/each}
           </select>
-          <div class="grains" role="radiogroup" aria-label="What to show">
-            {#each [['value', 'Value'], ['compare', 'Change'], ['period', 'Period']] as [id, label]}
+          <div class="grains" role="radiogroup" aria-label={t('What to show')}>
+            {#each [['value', t('Value')], ['compare', t('Change@@noun')], ['period', t('Period')]] as [id, label]}
               <button role="radio" aria-checked={numbering.part === id} class:on={numbering.part === id} onclick={() => numbering && (numbering.part = id as NumPart)}>{label}</button>
             {/each}
           </div>
-          <p class="hint">The number follows the dashboard's filters and its grain. A change is against the period before.</p>
+          <p class="hint">{t("The number follows the dashboard's filters and its grain. A change is against the period before.")}</p>
           <div class="row">
-            <button class="btn primary" onclick={addNumber}>Insert</button>
-            <button class="btn plain" onclick={() => (numbering = null)}>Cancel</button>
+            <button class="btn primary" onclick={addNumber}>{t('Insert')}</button>
+            <button class="btn plain" onclick={() => (numbering = null)}>{t('Cancel')}</button>
           </div>
         {:else}
-          <p class="hint">A live number shows a named measure. There are none yet: make one in Data, under Measures.</p>
-          <button class="link" onclick={() => (numbering = null)}>Close</button>
+          <p class="hint">{t('A live number shows a named measure. There are none yet: make one in Data, under Measures.')}</p>
+          <button class="link" onclick={() => (numbering = null)}>{t('Close')}</button>
         {/if}
       </div>
     {/if}
 
-    <ol class="blocks" aria-label="Blocks of the text">
+    <ol class="blocks" aria-label={t('Blocks of the text')}>
       {#each blocks as b, i (i)}
         <li
           class:over={dragFrom !== null && dragFrom !== i}
@@ -259,10 +259,10 @@
             dragFrom = null;
           }}>
           <div class="blk">
-            <span class="grip" draggable="true" role="button" tabindex="-1" aria-label="Drag to move" ondragstart={() => (dragFrom = i)} ondragend={() => (dragFrom = null)}>
+            <span class="grip" draggable="true" role="button" tabindex="-1" aria-label={t('Drag to move')} ondragstart={() => (dragFrom = i)} ondragend={() => (dragFrom = null)}>
               <Icon name="grip" size={14} />
             </span>
-            <button class="kind" title="Change the kind of this block" aria-haspopup="menu" onclick={() => (menu = menu?.at === i && menu.mode === 'convert' ? null : { at: i, mode: 'convert' })}>{SHORT[b.kind]}</button>
+            <button class="kind" title={t('Change the kind of this block')} aria-haspopup="menu" onclick={() => (menu = menu?.at === i && menu.mode === 'convert' ? null : { at: i, mode: 'convert' })}>{SHORT[b.kind]}</button>
             {#if b.kind === 'hr'}
               <hr />
             {:else}
@@ -271,25 +271,25 @@
                 rows="1"
                 bind:this={els[i]}
                 use:growing
-                aria-label="{SHORT[b.kind]} block"
+                aria-label={t('{kind} block', { kind: SHORT[b.kind] })}
                 placeholder={HINT[b.kind] ?? ''}
                 value={b.text}
                 onfocus={() => (current = i)}
                 oninput={(e) => typed(i, e.currentTarget.value, e.currentTarget)}
                 onkeydown={(e) => onkey(e, i)}></textarea>
             {/if}
-            <button class="btn plain icon x" aria-label="Remove this block" title="Remove" onclick={() => commit(remove(blocks, i))}><Icon name="x" size={12} /></button>
+            <button class="btn plain icon x" aria-label={t('Remove this block')} title={t('Remove')} onclick={() => commit(remove(blocks, i))}><Icon name="x" size={12} /></button>
           </div>
           {#if menu?.at === i}
-            <div class="menu" role="menu" aria-label={menu.mode === 'convert' ? 'Turn this block into' : 'Add a block'}>
+            <div class="menu" role="menu" aria-label={menu.mode === 'convert' ? t('Turn this block into') : t('Add a block')}>
               {#each KINDS as k (k.kind)}
                 <button role="menuitem" class:on={menu.mode === 'convert' && b.kind === k.kind} onclick={() => pick(k.kind)}>{k.label}</button>
               {/each}
             </div>
           {/if}
-          <button class="plus" title="Add a block here" aria-label="Add a block after this one" onclick={() => (menu = { at: i + 1, mode: 'insert' })}><Icon name="plus" size={11} /></button>
+          <button class="plus" title={t('Add a block here')} aria-label={t('Add a block after this one')} onclick={() => (menu = { at: i + 1, mode: 'insert' })}><Icon name="plus" size={11} /></button>
           {#if menu?.at === i + 1 && menu.mode === 'insert' && i + 1 === blocks.length}
-            <div class="menu" role="menu" aria-label="Add a block">
+            <div class="menu" role="menu" aria-label={t('Add a block')}>
               {#each KINDS as k (k.kind)}<button role="menuitem" onclick={() => pick(k.kind)}>{k.label}</button>{/each}
             </div>
           {/if}
@@ -298,14 +298,14 @@
     </ol>
   {/if}
 
-  <span class="label up">Style</span>
-  <div class="grains" role="radiogroup" aria-label="Style of the text">
-    {#each [['body', 'Body'], ['lead', 'Lead'], ['note', 'Note']] as [id, label]}
+  <span class="label up">{t('Style')}</span>
+  <div class="grains" role="radiogroup" aria-label={t('Style of the text')}>
+    {#each [['body', t('Body')], ['lead', t('Lead')], ['note', t('Note')]] as [id, label]}
       <button role="radio" aria-checked={(tile.textStyle ?? 'body') === id} class:on={(tile.textStyle ?? 'body') === id} onclick={() => set({ textStyle: id === 'body' ? undefined : (id as Tile['textStyle']) })}>{label}</button>
     {/each}
   </div>
-  <div class="grains" role="radiogroup" aria-label="Alignment of the text">
-    {#each [['start', 'Left'], ['center', 'Centre']] as [id, label]}
+  <div class="grains" role="radiogroup" aria-label={t('Alignment of the text')}>
+    {#each [['start', t('Left')], ['center', t('Centre')]] as [id, label]}
       <button role="radio" aria-checked={(tile.textAlign ?? 'start') === id} class:on={(tile.textAlign ?? 'start') === id} onclick={() => set({ textAlign: id === 'start' ? undefined : 'center' })}>{label}</button>
     {/each}
   </div>
