@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0 (2026-10-17)
+## 0.7.0 (2026-10-18)
 
 This release is about getting started: Tenun in Bahasa Indonesia, five starter dashboards, updates that install
 themselves, and a way to report a problem. **If you use 0.6.0, download this one by hand; after it, Tenun
@@ -33,6 +33,13 @@ updates itself.**
 - In Settings, in the command palette, and on every error message. It opens a new issue on GitHub with the
   version, the system and the last error filled in. You see all of it before you send it. Paths, links and
   values are taken out of the error first; your data never goes.
+
+### Fixes
+
+- A CSV file whose lines end in two ways (some the Windows way, some the Unix way) now loads. Before, it stopped
+  with a long DuckDB error. A CSV file that still cannot be read now gives one sentence.
+- In Bahasa Indonesia, the starter samples have Indonesian file and column names, and "Untitled" and "All data"
+  read "Tanpa judul" and "Semua data".
 
 ## 0.6.0 (2026-10-15)
 
